@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Tool Architecture &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Error Recovery" href="error-handling.html" />
+    <link rel="prev" title="Inter-Agent Communication" href="communication.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tool-architecture">
+<span id="tool-system"></span><h1>Tool Architecture<a class="headerlink" href="#tool-architecture" title="Link to this heading">¶</a></h1>
+<p>This document describes how tools are defined, registered, filtered,
+and adapted for different LLM providers in OpenClaw.  The primary
+source files are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.ts</span></code> – tool creation and assembly</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/tools/common.ts</span></code> – shared tool types and helpers</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/tool-catalog.ts</span></code> – built-in tool catalog</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/tool-policy-pipeline.ts</span></code> – layered policy filtering</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.schema.ts</span></code> – schema adaptation per provider</p></li>
+</ul>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#the-agenttool-interface" id="id5">The AgentTool Interface</a></p></li>
+<li><p><a class="reference internal" href="#common-tool-helpers" id="id6">Common Tool Helpers</a></p></li>
+<li><p><a class="reference internal" href="#built-in-tool-catalog" id="id7">Built-in Tool Catalog</a></p></li>
+<li><p><a class="reference internal" href="#tool-profiles" id="id8">Tool Profiles</a></p></li>
+<li><p><a class="reference internal" href="#tool-groups" id="id9">Tool Groups</a></p></li>
+<li><p><a class="reference internal" href="#plugin-tool-registration" id="id10">Plugin Tool Registration</a></p></li>
+<li><p><a class="reference internal" href="#tool-policy-pipeline" id="id11">Tool Policy Pipeline</a></p></li>
+<li><p><a class="reference internal" href="#schema-adaptation-per-provider" id="id12">Schema Adaptation per Provider</a></p></li>
+<li><p><a class="reference internal" href="#tool-wrappers" id="id13">Tool Wrappers</a></p></li>
+<li><p><a class="reference internal" href="#tool-assembly" id="id14">Tool Assembly</a></p></li>
+</ul>
+</nav>
+<section id="the-agenttool-interface">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">The AgentTool Interface</a><a class="headerlink" href="#the-agenttool-interface" title="Link to this heading">¶</a></h2>
+<p>Every tool in OpenClaw implements the <code class="docutils literal notranslate"><span class="pre">AgentTool</span></code> interface from
+the <code class="docutils literal notranslate"><span class="pre">&#64;mariozechner/pi-agent-core</span></code> library:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">interface</span><span class="w"> </span><span class="nx">AgentTool</span><span class="o">&lt;</span><span class="nx">TParams</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">unknown</span><span class="p">,</span><span class="w"> </span><span class="nx">TResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">description</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">parameters</span><span class="o">:</span><span class="w"> </span><span class="kt">JSONSchema</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">execute</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="kt">TParams</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">AgentToolResult</span><span class="o">&lt;</span><span class="nx">TResult</span><span class="o">&gt;&gt;</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>OpenClaw extends this with the <code class="docutils literal notranslate"><span class="pre">AnyAgentTool</span></code> type
+(<code class="docutils literal notranslate"><span class="pre">src/agents/tools/common.ts</span></code>:8-10):</p>
+<div class="literal-block-wrapper docutils container" id="id1">
+<div class="code-block-caption"><span class="caption-text">src/agents/tools/common.ts:8-10</span><a class="headerlink" href="#id1" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">export</span><span class="w"> </span><span class="kr">type</span><span class="w"> </span><span class="nx">AnyAgentTool</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">AgentTool</span><span class="o">&lt;</span><span class="nx">any</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">ownerOnly?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">ownerOnly</span></code> flag restricts the tool to authorized senders only.</p>
+</section>
+<section id="common-tool-helpers">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Common Tool Helpers</a><a class="headerlink" href="#common-tool-helpers" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">src/agents/tools/common.ts</span></code> provides shared utilities:</p>
+<p><strong>Parameter Reading</strong></p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="nx">readStringParam</span><span class="p">(</span><span class="nx">params</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;key&quot;</span><span class="p">)</span><span class="w">                </span><span class="c1">// optional string</span>
+<span class="nx">readStringParam</span><span class="p">(</span><span class="nx">params</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;key&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">required</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">})</span><span class="w">  </span><span class="c1">// required</span>
+<span class="nx">readParamRaw</span><span class="p">(</span><span class="nx">params</span><span class="p">,</span><span class="w"> </span><span class="nx">key</span><span class="p">)</span><span class="w">                     </span><span class="c1">// raw value</span>
+</pre></div>
+</div>
+<p>Parameters are read with automatic <code class="docutils literal notranslate"><span class="pre">camelCase</span></code> to <code class="docutils literal notranslate"><span class="pre">snake_case</span></code>
+fallback (<code class="docutils literal notranslate"><span class="pre">toSnakeCaseKey()</span></code>, line 56-61), so both
+<code class="docutils literal notranslate"><span class="pre">sessionKey</span></code> and <code class="docutils literal notranslate"><span class="pre">session_key</span></code> are accepted.</p>
+<p><strong>Error Types</strong></p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">class</span><span class="w"> </span><span class="nx">ToolInputError</span><span class="w"> </span><span class="k">extends</span><span class="w"> </span><span class="ne">Error</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w">     </span><span class="c1">// 400</span>
+<span class="kd">class</span><span class="w"> </span><span class="nx">ToolAuthorizationError</span><span class="w"> </span><span class="k">extends</span><span class="w"> </span><span class="nx">ToolInputError</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w">  </span><span class="c1">// 403</span>
+</pre></div>
+</div>
+<p><strong>Action Gating</strong></p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">gate</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">createActionGate</span><span class="p">(</span><span class="nx">config</span><span class="p">.</span><span class="nx">actions</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="nx">gate</span><span class="p">(</span><span class="s2">&quot;send&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* action disabled */</span><span class="w"> </span><span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="built-in-tool-catalog">
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">Built-in Tool Catalog</a><a class="headerlink" href="#built-in-tool-catalog" title="Link to this heading">¶</a></h2>
+<p>The tool catalog (<code class="docutils literal notranslate"><span class="pre">src/agents/tool-catalog.ts</span></code>) defines all
+built-in tools with their metadata:</p>
+<table class="docutils align-default" id="id2">
+<caption><span class="caption-text">Core Tool Catalog</span><a class="headerlink" href="#id2" title="Link to this table">¶</a></caption>
+<colgroup>
+<col style="width: 18.0%" />
+<col style="width: 12.0%" />
+<col style="width: 15.0%" />
+<col style="width: 55.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Tool ID</p></th>
+<th class="head"><p>Section</p></th>
+<th class="head"><p>Profiles</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">read</span></code></p></td>
+<td><p>Files</p></td>
+<td><p>coding</p></td>
+<td><p>Read file contents</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">write</span></code></p></td>
+<td><p>Files</p></td>
+<td><p>coding</p></td>
+<td><p>Create or overwrite files</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">edit</span></code></p></td>
+<td><p>Files</p></td>
+<td><p>coding</p></td>
+<td><p>Make precise edits</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">apply_patch</span></code></p></td>
+<td><p>Files</p></td>
+<td><p>coding</p></td>
+<td><p>Patch files (OpenAI format)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">exec</span></code></p></td>
+<td><p>Runtime</p></td>
+<td><p>coding</p></td>
+<td><p>Run shell commands</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">process</span></code></p></td>
+<td><p>Runtime</p></td>
+<td><p>coding</p></td>
+<td><p>Manage background processes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">web_search</span></code></p></td>
+<td><p>Web</p></td>
+<td><p>(all)</p></td>
+<td><p>Search the web</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">web_fetch</span></code></p></td>
+<td><p>Web</p></td>
+<td><p>(all)</p></td>
+<td><p>Fetch web content</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">memory_search</span></code></p></td>
+<td><p>Memory</p></td>
+<td><p>coding</p></td>
+<td><p>Semantic memory search</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">memory_get</span></code></p></td>
+<td><p>Memory</p></td>
+<td><p>coding</p></td>
+<td><p>Read memory files</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sessions_list</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>coding, messaging</p></td>
+<td><p>List sessions</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sessions_history</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>coding, messaging</p></td>
+<td><p>Fetch session history</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sessions_send</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>coding, messaging</p></td>
+<td><p>Send to another session</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sessions_spawn</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>coding</p></td>
+<td><p>Spawn a sub-agent</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">subagents</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>coding</p></td>
+<td><p>Manage sub-agent runs</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">session_status</span></code></p></td>
+<td><p>Sessions</p></td>
+<td><p>minimal, coding, messaging</p></td>
+<td><p>Show session status card</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">browser</span></code></p></td>
+<td><p>UI</p></td>
+<td><p>(all)</p></td>
+<td><p>Control web browser</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">canvas</span></code></p></td>
+<td><p>UI</p></td>
+<td><p>(all)</p></td>
+<td><p>Control canvases</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">message</span></code></p></td>
+<td><p>Messaging</p></td>
+<td><p>messaging</p></td>
+<td><p>Send messages and channel actions</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">cron</span></code></p></td>
+<td><p>Automation</p></td>
+<td><p>(all)</p></td>
+<td><p>Schedule tasks and reminders</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gateway</span></code></p></td>
+<td><p>Automation</p></td>
+<td><p>(all)</p></td>
+<td><p>Gateway control (restart, update)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">nodes</span></code></p></td>
+<td><p>Nodes</p></td>
+<td><p>(all)</p></td>
+<td><p>List/control paired devices</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">agents_list</span></code></p></td>
+<td><p>Agents</p></td>
+<td><p>(all)</p></td>
+<td><p>List configured agent IDs</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">image</span></code></p></td>
+<td><p>Media</p></td>
+<td><p>coding</p></td>
+<td><p>Image understanding</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tts</span></code></p></td>
+<td><p>Media</p></td>
+<td><p>(all)</p></td>
+<td><p>Text-to-speech conversion</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="tool-profiles">
+<h2><a class="toc-backref" href="#id8" role="doc-backlink">Tool Profiles</a><a class="headerlink" href="#tool-profiles" title="Link to this heading">¶</a></h2>
+<p>Tools are organized into four profiles that control which tools
+are available by default:</p>
+<table class="docutils align-default" id="id3">
+<caption><span class="caption-text">Tool Profiles</span><a class="headerlink" href="#id3" title="Link to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 85.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Profile</p></th>
+<th class="head"><p>Included Tools</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">minimal</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">session_status</span></code> only</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">coding</span></code></p></td>
+<td><p>File tools + runtime + memory + sessions + image</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">messaging</span></code></p></td>
+<td><p>Session tools + message</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">full</span></code></p></td>
+<td><p>All tools (no restrictions)</p></td>
+</tr>
+</tbody>
+</table>
+<p>Profiles are resolved by <code class="docutils literal notranslate"><span class="pre">resolveCoreToolProfilePolicy()</span></code>
+(line 287-302), which returns an allow/deny policy.</p>
+</section>
+<section id="tool-groups">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Tool Groups</a><a class="headerlink" href="#tool-groups" title="Link to this heading">¶</a></h2>
+<p>Tools can be referenced as groups in policy configurations:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">group:openclaw</span></code> – all tools marked <code class="docutils literal notranslate"><span class="pre">includeInOpenClawGroup</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:fs</span></code> – file tools (read, write, edit, apply_patch)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:runtime</span></code> – exec, process</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:web</span></code> – web_search, web_fetch</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:memory</span></code> – memory_search, memory_get</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:sessions</span></code> – sessions_list, sessions_history,
+sessions_send, sessions_spawn, subagents, session_status</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:ui</span></code> – browser, canvas</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:messaging</span></code> – message</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:automation</span></code> – cron, gateway</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:nodes</span></code> – nodes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:agents</span></code> – agents_list</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">group:media</span></code> – image, tts</p></li>
+</ul>
+</section>
+<section id="plugin-tool-registration">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">Plugin Tool Registration</a><a class="headerlink" href="#plugin-tool-registration" title="Link to this heading">¶</a></h2>
+<p>Plugins can register additional tools via the plugin SDK.  Plugin
+tools are integrated into the tool pipeline through
+<code class="docutils literal notranslate"><span class="pre">getPluginToolMeta()</span></code> (<code class="docutils literal notranslate"><span class="pre">src/plugins/tools.ts</span></code>), which returns
+metadata including the <code class="docutils literal notranslate"><span class="pre">pluginId</span></code> for each plugin-provided tool.</p>
+<p>Plugin tools go through the same policy pipeline as built-in tools
+and can be individually allowed or denied in configuration.</p>
+</section>
+<section id="tool-policy-pipeline">
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">Tool Policy Pipeline</a><a class="headerlink" href="#tool-policy-pipeline" title="Link to this heading">¶</a></h2>
+<p>The tool policy pipeline
+(<code class="docutils literal notranslate"><span class="pre">src/agents/tool-policy-pipeline.ts</span></code>) applies a series of
+allow/deny filters to determine which tools are available for a
+given run:</p>
+<div class="literal-block-wrapper docutils container" id="id4">
+<div class="code-block-caption"><span class="caption-text">src/agents/tool-policy-pipeline.ts:17-63</span><a class="headerlink" href="#id4" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">export</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">buildDefaultToolPolicyPipelineSteps</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">profilePolicy?</span><span class="o">:</span><span class="w"> </span><span class="kt">ToolPolicyLike</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">globalPolicy?</span><span class="o">:</span><span class="w"> </span><span class="kt">ToolPolicyLike</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">agentPolicy?</span><span class="o">:</span><span class="w"> </span><span class="kt">ToolPolicyLike</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">groupPolicy?</span><span class="o">:</span><span class="w"> </span><span class="kt">ToolPolicyLike</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// ...</span>
+<span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="nx">ToolPolicyPipelineStep</span><span class="p">[]</span>
+</pre></div>
+</div>
+</div>
+<p>The pipeline applies steps in order:</p>
+<ol class="arabic simple">
+<li><p><strong>Profile policy</strong> – <code class="docutils literal notranslate"><span class="pre">tools.profile</span></code> (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;coding&quot;</span></code>)</p></li>
+<li><p><strong>Provider profile policy</strong> – <code class="docutils literal notranslate"><span class="pre">tools.byProvider.profile</span></code></p></li>
+<li><p><strong>Global policy</strong> – <code class="docutils literal notranslate"><span class="pre">tools.allow</span></code> / <code class="docutils literal notranslate"><span class="pre">tools.deny</span></code></p></li>
+<li><p><strong>Global provider policy</strong> – <code class="docutils literal notranslate"><span class="pre">tools.byProvider.allow</span></code></p></li>
+<li><p><strong>Agent policy</strong> – <code class="docutils literal notranslate"><span class="pre">agents.&lt;id&gt;.tools.allow</span></code></p></li>
+<li><p><strong>Agent provider policy</strong> – <code class="docutils literal notranslate"><span class="pre">agents.&lt;id&gt;.tools.byProvider.allow</span></code></p></li>
+<li><p><strong>Group policy</strong> – group-specific tool restrictions</p></li>
+</ol>
+<p>Each step can:</p>
+<ul class="simple">
+<li><p><strong>Allow</strong> specific tools (whitelist).</p></li>
+<li><p><strong>Deny</strong> specific tools (blacklist).</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">tools.alsoAllow</span></code> for additive plugin tool enablement.</p></li>
+</ul>
+<p>The <code class="docutils literal notranslate"><span class="pre">applyToolPolicyPipeline()</span></code> function (line 65-) iterates
+through the steps, progressively filtering the tool list.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>If an allowlist contains only plugin tool names (not core tools),
+the pipeline strips it to avoid accidentally disabling all core
+tools.  A warning is logged to alert the operator.</p>
+</div>
+</section>
+<section id="schema-adaptation-per-provider">
+<h2><a class="toc-backref" href="#id12" role="doc-backlink">Schema Adaptation per Provider</a><a class="headerlink" href="#schema-adaptation-per-provider" title="Link to this heading">¶</a></h2>
+<p>Different LLM providers have different requirements for tool
+schemas.  OpenClaw adapts schemas automatically:</p>
+<p><strong>Anthropic / Claude</strong></p>
+<ul class="simple">
+<li><p>Supports the full JSON Schema specification.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">patchToolSchemaForClaudeCompatibility()</span></code> function
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.read.ts</span></code>) adds <code class="docutils literal notranslate"><span class="pre">claude_</span></code>-prefixed
+parameter aliases for tools that need backward-compatible
+parameter names.</p></li>
+</ul>
+<p><strong>Google / Gemini</strong></p>
+<ul class="simple">
+<li><p>Does not support <code class="docutils literal notranslate"><span class="pre">anyOf</span></code>, <code class="docutils literal notranslate"><span class="pre">oneOf</span></code>, <code class="docutils literal notranslate"><span class="pre">allOf</span></code> in tool schemas.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cleanToolSchemaForGemini()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.schema.ts</span></code>) removes unsupported constructs
+and flattens enum types.</p></li>
+</ul>
+<p><strong>OpenAI</strong></p>
+<ul class="simple">
+<li><p>Requires <code class="docutils literal notranslate"><span class="pre">type:</span> <span class="pre">&quot;object&quot;</span></code> at the top level.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">normalizeToolParameters()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.schema.ts</span></code>) ensures compliance.</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Tool schemas should avoid <code class="docutils literal notranslate"><span class="pre">Type.Union</span></code> in input schemas.
+Use <code class="docutils literal notranslate"><span class="pre">stringEnum</span></code> / <code class="docutils literal notranslate"><span class="pre">optionalStringEnum</span></code> for string lists and
+<code class="docutils literal notranslate"><span class="pre">Type.Optional(...)</span></code> instead of <code class="docutils literal notranslate"><span class="pre">|</span> <span class="pre">null</span></code>.  The <code class="docutils literal notranslate"><span class="pre">format</span></code>
+property name should also be avoided as some validators treat it
+as reserved.</p>
+</div>
+</section>
+<section id="tool-wrappers">
+<h2><a class="toc-backref" href="#id13" role="doc-backlink">Tool Wrappers</a><a class="headerlink" href="#tool-wrappers" title="Link to this heading">¶</a></h2>
+<p>Before tools are registered with the agent session, they pass
+through several wrapping layers:</p>
+<ol class="arabic simple">
+<li><p><strong>Workspace root guard</strong> – <code class="docutils literal notranslate"><span class="pre">wrapToolWorkspaceRootGuard()</span></code>
+restricts file operations to the configured workspace.</p></li>
+<li><p><strong>Abort signal</strong> – <code class="docutils literal notranslate"><span class="pre">wrapToolWithAbortSignal()</span></code> propagates
+the run’s abort signal to tool execution.</p></li>
+<li><p><strong>Before-tool-call hook</strong> – <code class="docutils literal notranslate"><span class="pre">wrapToolWithBeforeToolCallHook()</span></code>
+allows plugins to intercept tool calls.</p></li>
+<li><p><strong>Parameter normalization</strong> – <code class="docutils literal notranslate"><span class="pre">wrapToolParamNormalization()</span></code>
+handles camelCase/snake_case conversion.</p></li>
+<li><p><strong>Owner-only gating</strong> – <code class="docutils literal notranslate"><span class="pre">applyOwnerOnlyToolPolicy()</span></code>
+restricts tools marked <code class="docutils literal notranslate"><span class="pre">ownerOnly</span></code> to authorized senders.</p></li>
+<li><p><strong>Image sanitization</strong> – tool results containing images are
+sanitized via <code class="docutils literal notranslate"><span class="pre">sanitizeToolResultImages()</span></code>.</p></li>
+</ol>
+</section>
+<section id="tool-assembly">
+<h2><a class="toc-backref" href="#id14" role="doc-backlink">Tool Assembly</a><a class="headerlink" href="#tool-assembly" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">createOpenClawCodingTools()</span></code> function
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-tools.ts</span></code>:171-) assembles the complete tool set:</p>
+<ol class="arabic simple">
+<li><p>Start with pi-coding-agent’s <code class="docutils literal notranslate"><span class="pre">codingTools</span></code> (read, write, edit,
+grep, find, ls).</p></li>
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">exec</span></code> and <code class="docutils literal notranslate"><span class="pre">process</span></code> tools with configured defaults.</p></li>
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">apply_patch</span></code> if the model supports it.</p></li>
+<li><p>Add OpenClaw-specific tools (sessions, subagents, message, cron,
+etc.) via <code class="docutils literal notranslate"><span class="pre">createOpenClawTools()</span></code>.</p></li>
+<li><p>Add channel-specific tools via <code class="docutils literal notranslate"><span class="pre">listChannelAgentTools()</span></code>.</p></li>
+<li><p>Apply the tool policy pipeline to filter the final set.</p></li>
+<li><p>Wrap each tool with guards, hooks, and signal handling.</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Orchestration Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#document-map">Document Map</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Tool Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Orchestration Overview</a><ul>
+      <li>Previous: <a href="communication.html" title="previous chapter">Inter-Agent Communication</a></li>
+      <li>Next: <a href="error-handling.html" title="next chapter">Error Recovery</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/tool-system.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

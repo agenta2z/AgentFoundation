@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>System Prompt &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Knowledge System Overview" href="../knowledge/index.html" />
+    <link rel="prev" title="LLM Integration" href="llm-integration.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="system-prompt">
+<span id="orchestration-system-prompt"></span><h1>System Prompt<a class="headerlink" href="#system-prompt" title="Link to this heading">¶</a></h1>
+<p>The system prompt is the foundational instruction set that defines an agent’s
+behavior. OpenClaw assembles it dynamically from multiple sections based on the
+agent’s configuration, available tools, and runtime context.</p>
+<section id="assembly-function">
+<h2>Assembly Function<a class="headerlink" href="#assembly-function" title="Link to this heading">¶</a></h2>
+<p>The system prompt is built by <code class="docutils literal notranslate"><span class="pre">buildEmbeddedSystemPrompt()</span></code> in
+<code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/system-prompt.ts</span></code>, which delegates to
+<code class="docutils literal notranslate"><span class="pre">buildAgentSystemPrompt()</span></code> in <code class="docutils literal notranslate"><span class="pre">src/agents/system-prompt.ts</span></code>.</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">buildEmbeddedSystemPrompt</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">workspaceDir</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">tools</span><span class="o">:</span><span class="w"> </span><span class="kt">AgentTool</span><span class="p">[];</span>
+<span class="w">  </span><span class="nx">runtimeInfo</span><span class="o">:</span><span class="w"> </span><span class="kt">RuntimeInfo</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">skillsPrompt?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">extraSystemPrompt?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">workspaceNotes?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span>
+<span class="w">  </span><span class="nx">sandboxInfo?</span><span class="o">:</span><span class="w"> </span><span class="kt">EmbeddedSandboxInfo</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">contextFiles?</span><span class="o">:</span><span class="w"> </span><span class="kt">EmbeddedContextFile</span><span class="p">[];</span>
+<span class="w">  </span><span class="nx">memoryCitationsMode?</span><span class="o">:</span><span class="w"> </span><span class="kt">MemoryCitationsMode</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// ... many more parameters</span>
+<span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span>
+</pre></div>
+</div>
+</section>
+<section id="prompt-sections">
+<h2>Prompt Sections<a class="headerlink" href="#prompt-sections" title="Link to this heading">¶</a></h2>
+<p>The system prompt is assembled from these sections in order:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 25.0%" />
+<col style="width: 75.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Section</p></th>
+<th class="head"><p>Content</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Runtime Info</p></td>
+<td><p>Agent ID, hostname, OS, architecture, Node.js version, model name,
+provider, capabilities, channel name</p></td>
+</tr>
+<tr class="row-odd"><td><p>Tool Names</p></td>
+<td><p>List of available tool names</p></td>
+</tr>
+<tr class="row-even"><td><p>Tool Summaries</p></td>
+<td><p>Descriptions of each tool’s purpose and parameters (built via
+<code class="docutils literal notranslate"><span class="pre">buildToolSummaryMap()</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Workspace Directory</p></td>
+<td><p>The agent’s working directory path</p></td>
+</tr>
+<tr class="row-even"><td><p>Workspace Notes</p></td>
+<td><p>Project-specific notes from <code class="docutils literal notranslate"><span class="pre">AGENTS.md</span></code> or <code class="docutils literal notranslate"><span class="pre">CLAUDE.md</span></code> files in the
+workspace</p></td>
+</tr>
+<tr class="row-odd"><td><p>Skills Prompt</p></td>
+<td><p>Formatted content from all eligible skills (see
+<a class="reference internal" href="../skills/skill-composition.html"><span class="doc">Skill Composition</span></a>)</p></td>
+</tr>
+<tr class="row-even"><td><p>Extra System Prompt</p></td>
+<td><p>Custom additions from subagent context or user configuration</p></td>
+</tr>
+<tr class="row-odd"><td><p>Identity</p></td>
+<td><p>Owner/sender information (optionally hashed for privacy)</p></td>
+</tr>
+<tr class="row-even"><td><p>Thinking Hints</p></td>
+<td><p>Guidance for the default thinking level</p></td>
+</tr>
+<tr class="row-odd"><td><p>Heartbeat Prompt</p></td>
+<td><p>Instructions for periodic heartbeat messages</p></td>
+</tr>
+<tr class="row-even"><td><p>Docs Path</p></td>
+<td><p>Path to documentation files the agent can reference</p></td>
+</tr>
+<tr class="row-odd"><td><p>TTS Hints</p></td>
+<td><p>Text-to-speech formatting guidance</p></td>
+</tr>
+<tr class="row-even"><td><p>Reaction Guidance</p></td>
+<td><p>When and how to use emoji reactions (minimal or extensive)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Timezone &amp; Time</p></td>
+<td><p>User’s timezone and current time</p></td>
+</tr>
+<tr class="row-even"><td><p>Context Files</p></td>
+<td><p>Embedded file contents for additional context</p></td>
+</tr>
+<tr class="row-odd"><td><p>Memory Citations</p></td>
+<td><p>Citation mode guidance (auto/on/off)</p></td>
+</tr>
+<tr class="row-even"><td><p>Model Aliases</p></td>
+<td><p>Available model shorthand names and what they resolve to</p></td>
+</tr>
+<tr class="row-odd"><td><p>Sandbox Info</p></td>
+<td><p>Sandbox mode details (mounted paths, restrictions)</p></td>
+</tr>
+<tr class="row-even"><td><p>Channel Capabilities</p></td>
+<td><p>Channel-specific features (threading, reactions, media types, actions)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Message Tool Hints</p></td>
+<td><p>Hints for channel-specific messaging tools</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="parameters">
+<h2>Parameters<a class="headerlink" href="#parameters" title="Link to this heading">¶</a></h2>
+<p>Key parameters that shape the prompt:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">RuntimeInfo</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">agentId?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">       </span><span class="c1">// Current agent identifier</span>
+<span class="w">  </span><span class="nx">host</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// Hostname</span>
+<span class="w">  </span><span class="nx">os</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">             </span><span class="c1">// Operating system</span>
+<span class="w">  </span><span class="nx">arch</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// CPU architecture</span>
+<span class="w">  </span><span class="nx">node</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// Node.js version</span>
+<span class="w">  </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">          </span><span class="c1">// Active model name</span>
+<span class="w">  </span><span class="nx">provider?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// Provider name</span>
+<span class="w">  </span><span class="nx">capabilities?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="c1">// Model capabilities</span>
+<span class="w">  </span><span class="nx">channel?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">       </span><span class="c1">// Current channel name</span>
+<span class="w">  </span><span class="nx">channelActions?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w"> </span><span class="c1">// Available channel actions</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="token-budgeting">
+<h2>Token Budgeting<a class="headerlink" href="#token-budgeting" title="Link to this heading">¶</a></h2>
+<p>The system prompt competes for context window space with conversation history,
+tool results, and model output. Key budgeting mechanisms:</p>
+<ol class="arabic simple">
+<li><p><strong>Skills prompt limit</strong>: <code class="docutils literal notranslate"><span class="pre">maxSkillsPromptChars</span> <span class="pre">=</span> <span class="pre">30,000</span></code> caps the total
+skill content</p></li>
+<li><p><strong>Tool summary compaction</strong>: Tool descriptions are kept concise</p></li>
+<li><p><strong>Path compaction</strong>: Home directory paths replaced with <code class="docutils literal notranslate"><span class="pre">~</span></code></p></li>
+<li><p><strong>Context file limits</strong>: Embedded files are size-bounded</p></li>
+</ol>
+<p>The total system prompt size varies but is typically 2,000-10,000 tokens
+depending on the number of active tools and skills.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/system-prompt.ts</span></code>,
+<code class="docutils literal notranslate"><span class="pre">src/agents/system-prompt.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/agents/tool-summaries.ts</span></code></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Orchestration Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#document-map">Document Map</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Orchestration Overview</a><ul>
+      <li>Previous: <a href="llm-integration.html" title="previous chapter">LLM Integration</a></li>
+      <li>Next: <a href="../knowledge/index.html" title="next chapter">Knowledge System Overview</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/system-prompt.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

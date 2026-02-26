@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>System Architecture &#8212; OpenManus 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=12dfc556" />
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Agent System" href="agent_system.html" />
+    <link rel="prev" title="Getting Started" href="getting_started.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="system-architecture">
+<h1>System Architecture<a class="headerlink" href="#system-architecture" title="Link to this heading">¶</a></h1>
+<nav class="contents local" id="table-of-contents">
+<p class="topic-title">Table of Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id1">Overview</a></p>
+<ul>
+<li><p><a class="reference internal" href="#architecture-diagram" id="id2">Architecture Diagram</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#design-patterns" id="id3">Design Patterns</a></p>
+<ul>
+<li><p><a class="reference internal" href="#singleton-pattern" id="id4">Singleton Pattern</a></p></li>
+<li><p><a class="reference internal" href="#template-method-pattern" id="id5">Template Method Pattern</a></p></li>
+<li><p><a class="reference internal" href="#strategy-pattern" id="id6">Strategy Pattern</a></p></li>
+<li><p><a class="reference internal" href="#factory-pattern" id="id7">Factory Pattern</a></p></li>
+<li><p><a class="reference internal" href="#proxy-pattern" id="id8">Proxy Pattern</a></p></li>
+<li><p><a class="reference internal" href="#observer-pattern" id="id9">Observer Pattern</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#directory-structure" id="id10">Directory Structure</a></p></li>
+<li><p><a class="reference internal" href="#data-flow" id="id11">Data Flow</a></p>
+<ul>
+<li><p><a class="reference internal" href="#configuration-flow" id="id12">Configuration Flow</a></p></li>
+<li><p><a class="reference internal" href="#request-flow-single-agent" id="id13">Request Flow (Single Agent)</a></p></li>
+<li><p><a class="reference internal" href="#request-flow-multi-agent-planning" id="id14">Request Flow (Multi-Agent Planning)</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#technology-stack" id="id15">Technology Stack</a></p></li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>OpenManus follows a layered architecture with clear separation of concerns.
+The system is designed around a <strong>ReAct (Reason + Act) paradigm</strong> where
+LLM-powered agents iteratively reason about tasks and take actions using
+tools.</p>
+<section id="architecture-diagram">
+<h3><a class="toc-backref" href="#id2" role="doc-backlink">Architecture Diagram</a><a class="headerlink" href="#architecture-diagram" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>┌─────────────────────────────────────────────────────────────┐
+│                      Entry Points                          │
+│  main.py │ run_flow.py │ run_mcp.py │ sandbox_main.py      │
+└─────────────┬──────────────┬──────────────┬────────────────┘
+              │              │              │
+┌─────────────▼──────────────▼──────────────▼────────────────┐
+│                    Flow Layer                               │
+│  BaseFlow ──► PlanningFlow (multi-agent task decomposition) │
+│                       │                                     │
+│              FlowFactory (creates flows)                    │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                    Agent Layer                               │
+│                                                              │
+│  BaseAgent (abstract)                                        │
+│    └── ReActAgent (abstract: think + act)                    │
+│          └── ToolCallAgent (LLM function calling)            │
+│                ├── Manus (general-purpose + MCP)              │
+│                ├── BrowserAgent (browser automation)          │
+│                ├── SWEAgent (software engineering)            │
+│                ├── MCPAgent (MCP server tools)                │
+│                ├── DataAnalysis (data + visualization)        │
+│                └── SandboxManus (cloud sandbox)               │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                    Tool Layer                                │
+│                                                              │
+│  BaseTool (abstract) ─► ToolCollection (registry/dispatch)   │
+│    ├── PythonExecute     ├── BrowserUseTool                   │
+│    ├── Bash              ├── StrReplaceEditor                 │
+│    ├── WebSearch         ├── PlanningTool                     │
+│    ├── Terminate         ├── AskHuman                        │
+│    ├── ComputerUseTool   ├── Crawl4aiTool                    │
+│    ├── MCPClientTool     └── CreateChatCompletion             │
+│    └── Sandbox Tools (Browser, Files, Shell, Vision)         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                  Infrastructure Layer                        │
+│                                                              │
+│  LLM (OpenAI/Azure/Bedrock) │ Config (TOML)                  │
+│  Memory (Message history)   │ Logger (loguru)                │
+│  Sandbox (Docker/Daytona)   │ MCP (Client + Server)          │
+└─────────────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+</section>
+<section id="design-patterns">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Design Patterns</a><a class="headerlink" href="#design-patterns" title="Link to this heading">¶</a></h2>
+<section id="singleton-pattern">
+<h3><a class="toc-backref" href="#id4" role="doc-backlink">Singleton Pattern</a><a class="headerlink" href="#singleton-pattern" title="Link to this heading">¶</a></h3>
+<p>Several core components use the singleton pattern to ensure a single shared
+instance across the application:</p>
+<ul>
+<li><p><strong>Config</strong>: <code class="docutils literal notranslate"><span class="pre">Config()</span></code> returns the same instance on every call. Loads
+configuration from <code class="docutils literal notranslate"><span class="pre">config/config.toml</span></code> once.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># app/config.py</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Config</span><span class="p">:</span>
+    <span class="n">_instance</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span><span class="o">.</span><span class="n">_load_config</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>LLM</strong>: One instance per <code class="docutils literal notranslate"><span class="pre">config_name</span></code>, stored in <code class="docutils literal notranslate"><span class="pre">LLM._instances</span></code>.
+The default instance uses the <code class="docutils literal notranslate"><span class="pre">[llm]</span></code> section of the TOML config.</p></li>
+<li><p><strong>SANDBOX_CLIENT</strong>: A global <code class="docutils literal notranslate"><span class="pre">LocalSandboxClient</span></code> singleton created at
+module import time in <code class="docutils literal notranslate"><span class="pre">app/sandbox/client.py</span></code>.</p></li>
+</ul>
+</section>
+<section id="template-method-pattern">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">Template Method Pattern</a><a class="headerlink" href="#template-method-pattern" title="Link to this heading">¶</a></h3>
+<p>The agent execution loop uses the Template Method pattern:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BaseAgent.run()</span></code> defines the overall loop structure (initialize, step
+loop, finalize)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BaseAgent.step()</span></code> is abstract – subclasses define what happens in
+each step</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ReActAgent.step()</span></code> further decomposes into <code class="docutils literal notranslate"><span class="pre">think()</span></code> + <code class="docutils literal notranslate"><span class="pre">act()</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ToolCallAgent</span></code> provides concrete <code class="docutils literal notranslate"><span class="pre">think()</span></code> (LLM call) and <code class="docutils literal notranslate"><span class="pre">act()</span></code>
+(tool execution) implementations</p></li>
+</ul>
+</section>
+<section id="strategy-pattern">
+<h3><a class="toc-backref" href="#id6" role="doc-backlink">Strategy Pattern</a><a class="headerlink" href="#strategy-pattern" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>FileOperator</strong>: The <code class="docutils literal notranslate"><span class="pre">StrReplaceEditor</span></code> uses a <code class="docutils literal notranslate"><span class="pre">FileOperator</span></code>
+protocol with two implementations: <code class="docutils literal notranslate"><span class="pre">LocalFileOperator</span></code> (direct
+filesystem) and <code class="docutils literal notranslate"><span class="pre">SandboxFileOperator</span></code> (Docker container). The strategy
+is selected based on <code class="docutils literal notranslate"><span class="pre">config.sandbox.use_sandbox</span></code>.</p></li>
+<li><p><strong>Search Engine</strong>: <code class="docutils literal notranslate"><span class="pre">WebSearch</span></code> supports multiple search engines
+(Google, Baidu, DuckDuckGo, Bing) with automatic fallback.</p></li>
+</ul>
+</section>
+<section id="factory-pattern">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Factory Pattern</a><a class="headerlink" href="#factory-pattern" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>FlowFactory</strong>: Creates flow instances by type (currently only
+<code class="docutils literal notranslate"><span class="pre">PLANNING</span></code>).</p></li>
+<li><p><strong>Manus.create()</strong>: Async factory method for agent initialization
+(connects MCP servers, initializes browser contexts).</p></li>
+</ul>
+</section>
+<section id="proxy-pattern">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Proxy Pattern</a><a class="headerlink" href="#proxy-pattern" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>MCPClientTool</strong>: Acts as a proxy for remote MCP server tools. It
+stores a reference to the MCP session and forwards <code class="docutils literal notranslate"><span class="pre">execute()</span></code> calls
+to the remote server via <code class="docutils literal notranslate"><span class="pre">session.call_tool()</span></code>.</p></li>
+</ul>
+</section>
+<section id="observer-pattern">
+<h3><a class="toc-backref" href="#id9" role="doc-backlink">Observer Pattern</a><a class="headerlink" href="#observer-pattern" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>ReActAgent</strong>: Separates the observation of LLM output (<code class="docutils literal notranslate"><span class="pre">think()</span></code>)
+from action execution (<code class="docutils literal notranslate"><span class="pre">act()</span></code>), enabling agents to observe results
+and feed them back into the next thinking cycle.</p></li>
+</ul>
+</section>
+</section>
+<section id="directory-structure">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">Directory Structure</a><a class="headerlink" href="#directory-structure" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>OpenManus/
+├── app/                           # Main application package
+│   ├── __init__.py                # Python 3.11-3.13 version check
+│   ├── config.py                  # Configuration system (TOML-based)
+│   ├── llm.py                     # LLM client wrapper
+│   ├── bedrock.py                 # AWS Bedrock adapter
+│   ├── schema.py                  # Core data models
+│   ├── logger.py                  # Logging configuration
+│   ├── exceptions.py              # Custom exceptions
+│   ├── agent/                     # Agent implementations
+│   │   ├── __init__.py
+│   │   ├── base.py                # BaseAgent (abstract)
+│   │   ├── react.py               # ReActAgent (abstract)
+│   │   ├── toolcall.py            # ToolCallAgent (concrete)
+│   │   ├── manus.py               # Manus (flagship agent)
+│   │   ├── browser.py             # BrowserAgent
+│   │   ├── swe.py                 # SWEAgent
+│   │   ├── mcp.py                 # MCPAgent
+│   │   ├── data_analysis.py       # DataAnalysis agent
+│   │   └── sandbox_agent.py       # SandboxManus
+│   ├── flow/                      # Multi-agent orchestration
+│   │   ├── base.py                # BaseFlow (abstract)
+│   │   ├── planning.py            # PlanningFlow
+│   │   └── flow_factory.py        # FlowFactory
+│   ├── tool/                      # Tool implementations
+│   │   ├── base.py                # BaseTool, ToolResult
+│   │   ├── tool_collection.py     # ToolCollection
+│   │   ├── python_execute.py      # Python code execution
+│   │   ├── bash.py                # Bash shell tool
+│   │   ├── browser_use_tool.py    # Browser automation
+│   │   ├── str_replace_editor.py  # File editor
+│   │   ├── web_search.py          # Web search
+│   │   ├── terminate.py           # Task termination
+│   │   ├── ask_human.py           # Human-in-the-loop
+│   │   ├── planning.py            # Plan management
+│   │   ├── crawl4ai.py            # Web crawling
+│   │   ├── computer_use_tool.py   # Desktop automation
+│   │   ├── create_chat_completion.py # Structured output
+│   │   ├── file_operators.py      # File operation strategies
+│   │   ├── mcp.py                 # MCP client tools
+│   │   ├── search/                # Search engine backends
+│   │   ├── sandbox/               # Sandbox-specific tools
+│   │   └── chart_visualization/   # Data visualization
+│   ├── prompt/                    # Prompt templates
+│   │   ├── manus.py               # Manus agent prompts
+│   │   ├── toolcall.py            # ToolCallAgent prompts
+│   │   ├── browser.py             # BrowserAgent prompts
+│   │   ├── swe.py                 # SWEAgent prompts
+│   │   ├── planning.py            # Planning flow prompts
+│   │   ├── mcp.py                 # MCPAgent prompts
+│   │   └── visualization.py       # DataAnalysis prompts
+│   ├── mcp/                       # MCP server implementation
+│   │   └── server.py              # MCPServer (FastMCP-based)
+│   ├── sandbox/                   # Docker sandbox system
+│   │   ├── client.py              # Sandbox client
+│   │   └── core/                  # Sandbox internals
+│   ├── daytona/                   # Daytona cloud sandbox
+│   │   ├── sandbox.py             # Sandbox management
+│   │   └── tool_base.py           # Sandbox tool base
+│   └── utils/                     # Utility functions
+│       ├── files_utils.py         # File utilities
+│       └── logger.py              # Alternative logger
+├── config/                        # Configuration files
+│   ├── config.example.toml        # Main config template
+│   ├── config.example-*.toml      # Provider-specific configs
+│   └── mcp.example.json           # MCP server config
+├── protocol/                      # Protocol integrations
+│   └── a2a/                       # Agent-to-Agent protocol
+├── tests/                         # Test suite
+├── examples/                      # Usage examples
+├── workspace/                     # Agent workspace directory
+├── main.py                        # Single agent entry point
+├── run_flow.py                    # Multi-agent flow entry point
+├── run_mcp.py                     # MCP agent entry point
+├── run_mcp_server.py              # MCP server entry point
+└── sandbox_main.py                # Sandbox agent entry point
+</pre></div>
+</div>
+</section>
+<section id="data-flow">
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">Data Flow</a><a class="headerlink" href="#data-flow" title="Link to this heading">¶</a></h2>
+<section id="configuration-flow">
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">Configuration Flow</a><a class="headerlink" href="#configuration-flow" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>config/config.toml
+     │
+     ▼
+Config singleton (app/config.py)
+     │
+     ├──► AppConfig (Pydantic model)
+     │      ├── llm: Dict[str, LLMSettings]
+     │      ├── browser_config: BrowserSettings
+     │      ├── search_config: SearchSettings
+     │      ├── sandbox_config: SandboxSettings
+     │      └── mcp_config: MCPSettings
+     │
+     ├──► LLM instances (per config_name)
+     ├──► Agent configurations
+     └──► Tool configurations
+</pre></div>
+</div>
+</section>
+<section id="request-flow-single-agent">
+<h3><a class="toc-backref" href="#id13" role="doc-backlink">Request Flow (Single Agent)</a><a class="headerlink" href="#request-flow-single-agent" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>User Input (prompt string)
+     │
+     ▼
+Agent.run(prompt)
+     │
+     ├── Initialize: state = RUNNING, add prompt to memory
+     │
+     ▼
+┌── Step Loop (max_steps iterations) ──────────────────────┐
+│                                                           │
+│   think()                                                 │
+│     │  Append next_step_prompt to memory                  │
+│     │  Call LLM.ask_tool(messages, tools)                 │
+│     │  Parse tool_calls from response                     │
+│     │  Add assistant message to memory                    │
+│     ▼                                                     │
+│   act()                                                   │
+│     │  For each tool_call:                                │
+│     │    Parse JSON arguments                             │
+│     │    Call ToolCollection.execute(name, args)           │
+│     │    Handle special tools (terminate → FINISHED)       │
+│     │    Add tool result to memory                        │
+│     ▼                                                     │
+│   Check: state == FINISHED? → exit loop                   │
+│   Check: is_stuck()? → modify prompt                      │
+│   Check: step &gt;= max_steps? → exit loop                   │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+     │
+     ▼
+Return final result string
+</pre></div>
+</div>
+</section>
+<section id="request-flow-multi-agent-planning">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink">Request Flow (Multi-Agent Planning)</a><a class="headerlink" href="#request-flow-multi-agent-planning" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>User Input (prompt string)
+     │
+     ▼
+PlanningFlow.execute(prompt)
+     │
+     ├── Create initial plan via LLM + PlanningTool
+     │     (decompose task into numbered steps)
+     │
+     ▼
+┌── Plan Execution Loop ────────────────────────────────────┐
+│                                                           │
+│   Get current step from active plan                       │
+│     │                                                     │
+│     ▼                                                     │
+│   Select executor agent for step                          │
+│     │  (get_executor → agents dict lookup)                │
+│     │                                                     │
+│     ▼                                                     │
+│   Agent.run(step_prompt)                                  │
+│     │  (inner think-act loop)                              │
+│     │                                                     │
+│     ▼                                                     │
+│   Mark step completed via PlanningTool                    │
+│   Advance to next step                                    │
+│                                                           │
+│   Check: all steps completed? → exit loop                 │
+│   Check: max_steps exceeded? → exit loop                  │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+     │
+     ▼
+Return aggregated result
+</pre></div>
+</div>
+</section>
+</section>
+<section id="technology-stack">
+<h2><a class="toc-backref" href="#id15" role="doc-backlink">Technology Stack</a><a class="headerlink" href="#technology-stack" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 30.0%" />
+<col style="width: 50.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Category</p></th>
+<th class="head"><p>Technology</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Language</p></td>
+<td><p>Python 3.11-3.13</p></td>
+<td><p>Core implementation language</p></td>
+</tr>
+<tr class="row-odd"><td><p>LLM API</p></td>
+<td><p>OpenAI SDK (<code class="docutils literal notranslate"><span class="pre">openai</span></code>)</p></td>
+<td><p>LLM communication (supports OpenAI, Azure, compatible APIs)</p></td>
+</tr>
+<tr class="row-even"><td><p>Cloud LLM</p></td>
+<td><p>AWS Bedrock (<code class="docutils literal notranslate"><span class="pre">boto3</span></code>)</p></td>
+<td><p>Alternative LLM provider via Bedrock Converse API</p></td>
+</tr>
+<tr class="row-odd"><td><p>Data Validation</p></td>
+<td><p>Pydantic v2</p></td>
+<td><p>Configuration, schema, message validation</p></td>
+</tr>
+<tr class="row-even"><td><p>Browser</p></td>
+<td><p>Playwright + browser-use</p></td>
+<td><p>Browser automation and web interaction</p></td>
+</tr>
+<tr class="row-odd"><td><p>Web Crawling</p></td>
+<td><p>Crawl4AI</p></td>
+<td><p>AI-optimized web content extraction</p></td>
+</tr>
+<tr class="row-even"><td><p>Search</p></td>
+<td><p>googlesearch, duckduckgo_search, baidusearch</p></td>
+<td><p>Multi-engine web search</p></td>
+</tr>
+<tr class="row-odd"><td><p>Tokenization</p></td>
+<td><p>tiktoken</p></td>
+<td><p>Token counting for budget management</p></td>
+</tr>
+<tr class="row-even"><td><p>Retry Logic</p></td>
+<td><p>tenacity</p></td>
+<td><p>Exponential backoff for API calls</p></td>
+</tr>
+<tr class="row-odd"><td><p>Containerization</p></td>
+<td><p>Docker SDK</p></td>
+<td><p>Sandboxed code execution</p></td>
+</tr>
+<tr class="row-even"><td><p>Cloud Sandbox</p></td>
+<td><p>Daytona SDK</p></td>
+<td><p>Cloud-based sandboxed environments</p></td>
+</tr>
+<tr class="row-odd"><td><p>MCP</p></td>
+<td><p>mcp library</p></td>
+<td><p>Model Context Protocol client/server</p></td>
+</tr>
+<tr class="row-even"><td><p>API Server</p></td>
+<td><p>FastAPI + Uvicorn</p></td>
+<td><p>A2A protocol server</p></td>
+</tr>
+<tr class="row-odd"><td><p>Logging</p></td>
+<td><p>loguru</p></td>
+<td><p>Structured logging with rotation</p></td>
+</tr>
+<tr class="row-even"><td><p>Configuration</p></td>
+<td><p>TOML (tomli)</p></td>
+<td><p>Human-readable configuration files</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">OpenManus</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">System Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#design-patterns">Design Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#directory-structure">Directory Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#data-flow">Data Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#technology-stack">Technology Stack</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="agent_system.html">Agent System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="orchestration_flow.html">Orchestration Flow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tool_system.html">Tool System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge_and_skills.html">Knowledge and Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llm_integration.html">LLM Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mcp_integration.html">MCP Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sandbox_system.html">Sandbox System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="getting_started.html" title="previous chapter">Getting Started</a></li>
+      <li>Next: <a href="agent_system.html" title="next chapter">Agent System</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, FoundationAgents.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/architecture.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

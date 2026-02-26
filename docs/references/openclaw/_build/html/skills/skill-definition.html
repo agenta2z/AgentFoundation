@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Skill Definition &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Skill Discovery" href="skill-discovery.html" />
+    <link rel="prev" title="Skills System" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="skill-definition">
+<span id="id1"></span><h1>Skill Definition<a class="headerlink" href="#skill-definition" title="Link to this heading">¶</a></h1>
+<p>Each skill is a directory containing a <code class="docutils literal notranslate"><span class="pre">SKILL.md</span></code> file. The file uses YAML
+frontmatter (delimited by <code class="docutils literal notranslate"><span class="pre">---</span></code>) followed by the prompt content that gets
+injected into the agent’s system prompt.</p>
+<section id="skill-md-file-format">
+<h2>SKILL.md File Format<a class="headerlink" href="#skill-md-file-format" title="Link to this heading">¶</a></h2>
+<div class="highlight-markdown notranslate"><div class="highlight"><pre><span></span>---
+name: my-skill
+description: A brief description of what this skill does
+user-invocable: true
+command-dispatch: tool
+command-tool: exec
+command-arg-mode: raw
+metadata:
+  openclaw:
+    primaryEnv: MY_API_KEY
+    emoji: &quot;🔧&quot;
+    homepage: https://example.com
+    os:
+<span class="w">      </span><span class="k">-</span><span class="w"> </span>darwin
+<span class="w">      </span><span class="k">-</span><span class="w"> </span>linux
+    requires:
+      bins:
+<span class="w">        </span><span class="k">-</span><span class="w"> </span>my-binary
+      anyBins:
+<span class="w">        </span><span class="k">-</span><span class="w"> </span>alt-binary-a
+<span class="w">        </span><span class="k">-</span><span class="w"> </span>alt-binary-b
+      env:
+<span class="w">        </span><span class="k">-</span><span class="w"> </span>MY_API_KEY
+      config:
+<span class="w">        </span><span class="k">-</span><span class="w"> </span>browser.enabled
+    install:
+<span class="w">      </span><span class="k">-</span><span class="w"> </span>kind: brew
+        formula: my-tool
+        bins:
+<span class="w">          </span><span class="k">-</span><span class="w"> </span>my-binary
+<span class="w">      </span><span class="k">-</span><span class="w"> </span>kind: node
+        package: my-npm-package
+        bins:
+<span class="gu">          - my-binary</span>
+<span class="gu">---</span>
+
+<span class="gh"># My Skill</span>
+
+Instructions for the agent on how to use this skill...
+</pre></div>
+</div>
+</section>
+<section id="type-specifications">
+<h2>Type Specifications<a class="headerlink" href="#type-specifications" title="Link to this heading">¶</a></h2>
+<section id="skillentry">
+<h3>SkillEntry<a class="headerlink" href="#skillentry" title="Link to this heading">¶</a></h3>
+<p>The core type representing a loaded skill:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillEntry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">skill</span><span class="o">:</span><span class="w"> </span><span class="kt">Skill</span><span class="p">;</span><span class="w">                        </span><span class="c1">// from @mariozechner/pi-coding-agent</span>
+<span class="w">  </span><span class="nx">frontmatter</span><span class="o">:</span><span class="w"> </span><span class="kt">ParsedSkillFrontmatter</span><span class="p">;</span><span class="w"> </span><span class="c1">// YAML key-value pairs</span>
+<span class="w">  </span><span class="nx">metadata?</span><span class="o">:</span><span class="w"> </span><span class="kt">OpenClawSkillMetadata</span><span class="p">;</span><span class="w">    </span><span class="c1">// OpenClaw-specific metadata</span>
+<span class="w">  </span><span class="nx">invocation?</span><span class="o">:</span><span class="w"> </span><span class="kt">SkillInvocationPolicy</span><span class="p">;</span><span class="w">  </span><span class="c1">// user-invocable, disable-model-invocation</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/skills/types.ts</span></code></p>
+</section>
+<section id="openclawskillmetadata">
+<h3>OpenClawSkillMetadata<a class="headerlink" href="#openclawskillmetadata" title="Link to this heading">¶</a></h3>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">OpenClawSkillMetadata</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">always?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">       </span><span class="c1">// Always include regardless of eligibility</span>
+<span class="w">  </span><span class="nx">skillKey?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// Override key for config lookup</span>
+<span class="w">  </span><span class="nx">primaryEnv?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">    </span><span class="c1">// Primary environment variable for API key</span>
+<span class="w">  </span><span class="nx">emoji?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">         </span><span class="c1">// Display emoji</span>
+<span class="w">  </span><span class="nx">homepage?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// Skill homepage URL</span>
+<span class="w">  </span><span class="nx">os?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">          </span><span class="c1">// Supported OS platforms (darwin, linux, win32)</span>
+<span class="w">  </span><span class="nx">requires</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">bins?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">      </span><span class="c1">// ALL listed binaries must exist</span>
+<span class="w">    </span><span class="nx">anyBins?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">   </span><span class="c1">// At least ONE listed binary must exist</span>
+<span class="w">    </span><span class="nx">env?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">       </span><span class="c1">// Environment variables that must be set</span>
+<span class="w">    </span><span class="nx">config?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">    </span><span class="c1">// Config paths that must be truthy</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">install?</span><span class="o">:</span><span class="w"> </span><span class="kt">SkillInstallSpec</span><span class="p">[];</span><span class="w">  </span><span class="c1">// Auto-installation specifications</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="skillinstallspec">
+<h3>SkillInstallSpec<a class="headerlink" href="#skillinstallspec" title="Link to this heading">¶</a></h3>
+<p>Defines how a skill’s dependencies can be auto-installed:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillInstallSpec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">id?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">                    </span><span class="c1">// Installation identifier</span>
+<span class="w">  </span><span class="nx">kind</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;brew&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;node&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;go&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;uv&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;download&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">label?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">                 </span><span class="c1">// Display label</span>
+<span class="w">  </span><span class="nx">bins?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">                </span><span class="c1">// Binaries provided by this install</span>
+<span class="w">  </span><span class="nx">os?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">                  </span><span class="c1">// OS restriction for this install step</span>
+<span class="w">  </span><span class="nx">formula?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">               </span><span class="c1">// Homebrew formula name (kind: brew)</span>
+<span class="w">  </span><span class="nx">package?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">               </span><span class="c1">// npm/Go/uv package name</span>
+<span class="w">  </span><span class="kr">module</span><span class="nx">?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">                </span><span class="c1">// Go module path (kind: go)</span>
+<span class="w">  </span><span class="nx">url?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">                   </span><span class="c1">// Download URL (kind: download)</span>
+<span class="w">  </span><span class="nx">archive?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">               </span><span class="c1">// Archive type</span>
+<span class="w">  </span><span class="nx">extract?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">              </span><span class="c1">// Whether to extract archive</span>
+<span class="w">  </span><span class="nx">stripComponents?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">       </span><span class="c1">// tar --strip-components value</span>
+<span class="w">  </span><span class="nx">targetDir?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">             </span><span class="c1">// Installation target directory</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="skillinvocationpolicy">
+<h3>SkillInvocationPolicy<a class="headerlink" href="#skillinvocationpolicy" title="Link to this heading">¶</a></h3>
+<p>Controls how the skill can be invoked:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillInvocationPolicy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">userInvocable</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">          </span><span class="c1">// Can users invoke via /command?</span>
+<span class="w">  </span><span class="nx">disableModelInvocation</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w"> </span><span class="c1">// Exclude from model&#39;s system prompt?</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">user-invocable:</span> <span class="pre">true</span></code> — Registers the skill as a slash command</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">disable-model-invocation:</span> <span class="pre">true</span></code> — Prevents the model from seeing the
+skill in its system prompt; only invocable via explicit user commands</p></li>
+</ul>
+</section>
+<section id="skillcommanddispatchspec">
+<h3>SkillCommandDispatchSpec<a class="headerlink" href="#skillcommanddispatchspec" title="Link to this heading">¶</a></h3>
+<p>Enables deterministic tool dispatch for slash commands (bypassing the LLM):</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillCommandDispatchSpec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">kind</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;tool&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">toolName</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// Name of the tool to invoke</span>
+<span class="w">  </span><span class="nx">argMode</span><span class="o">?:</span><span class="w"> </span><span class="s2">&quot;raw&quot;</span><span class="p">;</span><span class="w">       </span><span class="c1">// Forward raw args string without parsing</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>When a skill has <code class="docutils literal notranslate"><span class="pre">command-dispatch:</span> <span class="pre">tool</span></code>, invoking the slash command
+directly calls the specified tool instead of going through an LLM turn. This
+is used for commands like <code class="docutils literal notranslate"><span class="pre">/exec</span></code> or <code class="docutils literal notranslate"><span class="pre">/web_search</span></code> where the user’s input
+maps directly to tool parameters.</p>
+</section>
+<section id="skillsnapshot">
+<h3>SkillSnapshot<a class="headerlink" href="#skillsnapshot" title="Link to this heading">¶</a></h3>
+<p>A frozen copy of resolved skills for a session:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillSnapshot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">prompt</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">         </span><span class="c1">// Formatted skills prompt text</span>
+<span class="w">  </span><span class="nx">skills</span><span class="o">:</span><span class="w"> </span><span class="kt">Array</span><span class="o">&lt;</span><span class="p">{</span>
+<span class="w">    </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">primaryEnv?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">requiredEnv?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span>
+<span class="w">  </span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">skillFilter?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">     </span><span class="c1">// Agent-level filter used</span>
+<span class="w">  </span><span class="nx">resolvedSkills?</span><span class="o">:</span><span class="w"> </span><span class="kt">Skill</span><span class="p">[];</span><span class="w">   </span><span class="c1">// Full resolved skill objects</span>
+<span class="w">  </span><span class="nx">version?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">           </span><span class="c1">// Snapshot version</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/skills/types.ts</span></code></p>
+</section>
+</section>
+<section id="example-weather-skill">
+<h2>Example: Weather Skill<a class="headerlink" href="#example-weather-skill" title="Link to this heading">¶</a></h2>
+<p>A minimal real-world skill from the bundled collection:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>skills/weather/
+└── SKILL.md
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">SKILL.md</span></code> contains instructions that teach the agent how to check
+weather using available tools (e.g., web search or a weather API), what
+formats to use for responses, and how to handle location ambiguity.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Skills System</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-skills-do">What Skills Do</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#how-skills-work">How Skills Work</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#bundled-skills-catalog">Bundled Skills Catalog</a><ul class="current">
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Skill Definition</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-discovery.html">Skill Discovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-execution.html">Skill Execution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-eligibility.html">Skill Eligibility</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-composition.html">Skill Composition</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Skills System</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Skills System</a></li>
+      <li>Next: <a href="skill-discovery.html" title="next chapter">Skill Discovery</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/skills/skill-definition.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

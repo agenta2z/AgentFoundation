@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Skill Eligibility &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Skill Composition" href="skill-composition.html" />
+    <link rel="prev" title="Skill Execution" href="skill-execution.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="skill-eligibility">
+<span id="id1"></span><h1>Skill Eligibility<a class="headerlink" href="#skill-eligibility" title="Link to this heading">¶</a></h1>
+<p>Not all skills are appropriate for every environment. The eligibility system
+gates skills based on the runtime platform, available binaries, environment
+variables, and configuration state.</p>
+<section id="evaluation-function">
+<h2>Evaluation Function<a class="headerlink" href="#evaluation-function" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">shouldIncludeSkill()</span></code> function in <code class="docutils literal notranslate"><span class="pre">src/agents/skills/config.ts</span></code>
+evaluates whether a skill should be included:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">shouldIncludeSkill</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">entry</span><span class="o">:</span><span class="w"> </span><span class="kt">SkillEntry</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">config?</span><span class="o">:</span><span class="w"> </span><span class="kt">OpenClawConfig</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">eligibility?</span><span class="o">:</span><span class="w"> </span><span class="kt">SkillEligibilityContext</span><span class="p">;</span>
+<span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span>
+</pre></div>
+</div>
+<p>The evaluation proceeds through these checks in order:</p>
+<ol class="arabic simple">
+<li><p><strong>Config disable</strong>: If <code class="docutils literal notranslate"><span class="pre">skills.entries.&lt;key&gt;.enabled</span> <span class="pre">===</span> <span class="pre">false</span></code>, exclude</p></li>
+<li><p><strong>Bundled allowlist</strong>: If <code class="docutils literal notranslate"><span class="pre">skills.allowBundled</span></code> is set and the skill is
+bundled, it must appear in the list</p></li>
+<li><p><strong>Runtime eligibility</strong>: Evaluated by <code class="docutils literal notranslate"><span class="pre">evaluateRuntimeEligibility()</span></code></p></li>
+</ol>
+</section>
+<section id="runtime-eligibility-checks">
+<h2>Runtime Eligibility Checks<a class="headerlink" href="#runtime-eligibility-checks" title="Link to this heading">¶</a></h2>
+<p>These checks run via <code class="docutils literal notranslate"><span class="pre">evaluateRuntimeEligibility()</span></code> from
+<code class="docutils literal notranslate"><span class="pre">src/shared/config-eval.ts</span></code>:</p>
+<section id="os-platform-check">
+<h3>OS Platform Check<a class="headerlink" href="#os-platform-check" title="Link to this heading">¶</a></h3>
+<p>If the skill specifies <code class="docutils literal notranslate"><span class="pre">metadata.openclaw.os</span></code>, the current platform
+(<code class="docutils literal notranslate"><span class="pre">process.platform</span></code>) must match one of the listed values:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openclaw</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">os</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">darwin</span><span class="w">        </span><span class="c1"># macOS only</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linux</span><span class="w">         </span><span class="c1"># Linux only</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">win32</span><span class="w">         </span><span class="c1"># Windows only</span>
+</pre></div>
+</div>
+<p>For remote agents (e.g., macOS node connected to a Linux gateway), the
+remote platform is checked via <code class="docutils literal notranslate"><span class="pre">eligibility.remote.platforms</span></code>.</p>
+</section>
+<section id="always-include-override">
+<h3>Always-Include Override<a class="headerlink" href="#always-include-override" title="Link to this heading">¶</a></h3>
+<p>If <code class="docutils literal notranslate"><span class="pre">metadata.openclaw.always</span></code> is <code class="docutils literal notranslate"><span class="pre">true</span></code>, the skill is included regardless
+of all other runtime checks (but config disable and bundled allowlist still
+apply).</p>
+</section>
+<section id="required-binaries-all">
+<h3>Required Binaries (all)<a class="headerlink" href="#required-binaries-all" title="Link to this heading">¶</a></h3>
+<p>All listed binaries must be found on the system:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openclaw</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">requires</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">bins</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ffmpeg</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ffprobe</span>
+</pre></div>
+</div>
+<p>Each binary is checked via <code class="docutils literal notranslate"><span class="pre">hasBinary()</span></code> which runs <code class="docutils literal notranslate"><span class="pre">which</span> <span class="pre">&lt;name&gt;</span></code> (or
+checks <code class="docutils literal notranslate"><span class="pre">eligibility.remote.hasBin</span></code> for remote platforms).</p>
+</section>
+<section id="required-binaries-any">
+<h3>Required Binaries (any)<a class="headerlink" href="#required-binaries-any" title="Link to this heading">¶</a></h3>
+<p>At least one of the listed binaries must be found:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openclaw</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">requires</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">anyBins</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">brave-browser</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">google-chrome</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">chromium</span>
+</pre></div>
+</div>
+</section>
+<section id="environment-variables">
+<h3>Environment Variables<a class="headerlink" href="#environment-variables" title="Link to this heading">¶</a></h3>
+<p>All listed environment variables must be set (non-empty):</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openclaw</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">requires</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">env</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENAI_API_KEY</span>
+</pre></div>
+</div>
+<p>The check considers three sources:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">process.env[envName]</span></code> — system environment</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">skillConfig.env[envName]</span></code> — per-skill config env block</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">skillConfig.apiKey</span></code> combined with <code class="docutils literal notranslate"><span class="pre">metadata.openclaw.primaryEnv</span></code> — if
+the skill has a <code class="docutils literal notranslate"><span class="pre">primaryEnv</span></code> and an <code class="docutils literal notranslate"><span class="pre">apiKey</span></code> is configured, the env
+requirement is satisfied</p></li>
+</ol>
+<p>This third source enables configuring API keys per-skill in <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>:</p>
+<div class="highlight-json5 notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nv">&quot;skills&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nv">&quot;entries&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nv">&quot;openai-image-gen&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nv">&quot;apiKey&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;sk-...&quot;</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="config-path-checks">
+<h3>Config Path Checks<a class="headerlink" href="#config-path-checks" title="Link to this heading">¶</a></h3>
+<p>All listed config paths must resolve to truthy values:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openclaw</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">requires</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">browser.enabled</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">isConfigPathTruthy()</span></code> function walks the config object using dot-
+separated paths and checks truthiness. Some paths have default values (e.g.,
+<code class="docutils literal notranslate"><span class="pre">browser.enabled</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">true</span></code>).</p>
+</section>
+</section>
+<section id="remote-platform-support">
+<h2>Remote Platform Support<a class="headerlink" href="#remote-platform-support" title="Link to this heading">¶</a></h2>
+<p>When an agent runs on a remote node (e.g., macOS companion app connected to a
+Linux server), eligibility checks are performed against the remote platform:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillEligibilityContext</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">remote</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">platforms</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span>
+<span class="w">    </span><span class="nx">hasBin</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="nx">bin</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">hasAnyBin</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="nx">bins</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[])</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">note?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>This enables macOS-specific skills (like <code class="docutils literal notranslate"><span class="pre">apple-notes</span></code> or <code class="docutils literal notranslate"><span class="pre">things-mac</span></code>)
+to be available when a macOS node is connected, even if the gateway runs on
+Linux.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/skills/config.ts:70-102</span></code></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Skills System</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-skills-do">What Skills Do</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#how-skills-work">How Skills Work</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#bundled-skills-catalog">Bundled Skills Catalog</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="skill-definition.html">Skill Definition</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-discovery.html">Skill Discovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-execution.html">Skill Execution</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Skill Eligibility</a></li>
+<li class="toctree-l3"><a class="reference internal" href="skill-composition.html">Skill Composition</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Skills System</a><ul>
+      <li>Previous: <a href="skill-execution.html" title="previous chapter">Skill Execution</a></li>
+      <li>Next: <a href="skill-composition.html" title="next chapter">Skill Composition</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/skills/skill-eligibility.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

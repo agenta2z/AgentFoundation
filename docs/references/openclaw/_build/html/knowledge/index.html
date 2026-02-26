@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Knowledge System Overview &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Architecture Deep-Dive" href="memory-architecture.html" />
+    <link rel="prev" title="System Prompt" href="../orchestration/system-prompt.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="knowledge-system-overview">
+<span id="knowledge-index"></span><h1>Knowledge System Overview<a class="headerlink" href="#knowledge-system-overview" title="Link to this heading">¶</a></h1>
+<p>How OpenClaw remembers and recalls – a deep-focus reference for the memory
+subsystem that gives agents persistent, searchable knowledge across sessions.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#big-picture" id="id1">Big Picture</a></p></li>
+<li><p><a class="reference internal" href="#knowledge-lifecycle" id="id2">Knowledge Lifecycle</a></p></li>
+<li><p><a class="reference internal" href="#dual-backend-architecture" id="id3">Dual-Backend Architecture</a></p></li>
+<li><p><a class="reference internal" href="#graceful-degradation-chain" id="id4">Graceful Degradation Chain</a></p></li>
+<li><p><a class="reference internal" href="#class-hierarchy" id="id5">Class Hierarchy</a></p></li>
+<li><p><a class="reference internal" href="#memory-v2-research-direction" id="id6">Memory v2 Research Direction</a></p></li>
+</ul>
+</nav>
+<section id="big-picture">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Big Picture</a><a class="headerlink" href="#big-picture" title="Link to this heading">¶</a></h2>
+<p>OpenClaw’s knowledge system answers a single question: <em>how does an agent
+remember things it learned yesterday and find them tomorrow?</em></p>
+<p>The answer involves two kinds of memory files, a SQLite index that turns those
+files into searchable chunks, and a retrieval pipeline that combines vector
+similarity with keyword matching to surface the most relevant snippets at
+query time.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>+------------------+     +------------------+     +------------------+
+|   MEMORY.md      |     | memory/          |     | session          |
+|  (evergreen)     |     | YYYY-MM-DD.md    |     | transcripts      |
+|                  |     | (episodic)       |     | (.jsonl)         |
++--------+---------+     +--------+---------+     +--------+---------+
+         |                        |                        |
+         +----------+-------------+------------+-----------+
+                    |                          |
+                    v                          v
+           +--------+---------+       +--------+---------+
+           | Builtin SQLite   |       | QMD External     |
+           | MemoryIndexMgr   |       | QmdMemoryManager |
+           +--------+---------+       +--------+---------+
+                    |                          |
+                    +----------+---------------+
+                               |
+                       +-------v--------+
+                       | FallbackMemory |
+                       | Manager        |
+                       +-------+--------+
+                               |
+                       +-------v--------+
+                       | memory_search  |
+                       | memory_get     |
+                       | (agent tools)  |
+                       +----------------+
+</pre></div>
+</div>
+</section>
+<section id="knowledge-lifecycle">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Knowledge Lifecycle</a><a class="headerlink" href="#knowledge-lifecycle" title="Link to this heading">¶</a></h2>
+<p>Every piece of knowledge follows a five-stage lifecycle:</p>
+<ol class="arabic simple">
+<li><p><strong>Create</strong> – The agent writes Markdown files (<code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code>,
+<code class="docutils literal notranslate"><span class="pre">memory/YYYY-MM-DD.md</span></code>) or session transcripts accumulate as <code class="docutils literal notranslate"><span class="pre">.jsonl</span></code>
+files.  A <em>memory flush</em> may trigger just before context compaction to
+capture durable facts.</p></li>
+<li><p><strong>Store</strong> – Files are chunked (default 400 tokens, 80-token overlap),
+embedded, and persisted into a SQLite database with five+one tables
+(<code class="docutils literal notranslate"><span class="pre">meta</span></code>, <code class="docutils literal notranslate"><span class="pre">files</span></code>, <code class="docutils literal notranslate"><span class="pre">chunks</span></code>, <code class="docutils literal notranslate"><span class="pre">chunks_fts</span></code>, <code class="docutils literal notranslate"><span class="pre">chunks_vec</span></code>,
+<code class="docutils literal notranslate"><span class="pre">embedding_cache</span></code>).</p></li>
+<li><p><strong>Index</strong> – Chunks are inserted into both an FTS5 full-text index and a
+<code class="docutils literal notranslate"><span class="pre">vec0</span></code> virtual table for vector search.  Chokidar file watchers and
+session-transcript listeners trigger incremental re-indexing with a
+configurable debounce.</p></li>
+<li><p><strong>Retrieve</strong> – When the agent calls <code class="docutils literal notranslate"><span class="pre">memory_search</span></code>, the query flows
+through a multi-stage pipeline: query expansion, parallel vector + keyword
+search, hybrid merge (0.7/0.3 weighting), optional temporal decay, optional
+MMR diversity re-ranking, score threshold, and top-K selection.</p></li>
+<li><p><strong>Use</strong> – The agent receives <code class="docutils literal notranslate"><span class="pre">MemorySearchResult[]</span></code> with paths, line
+ranges, scores, and snippets.  It can drill into specific lines with
+<code class="docutils literal notranslate"><span class="pre">memory_get</span></code>.  Citations are optionally appended depending on the chat
+context (direct vs. group).</p></li>
+</ol>
+</section>
+<section id="dual-backend-architecture">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Dual-Backend Architecture</a><a class="headerlink" href="#dual-backend-architecture" title="Link to this heading">¶</a></h2>
+<p>OpenClaw ships two memory backends, selectable via <code class="docutils literal notranslate"><span class="pre">memory.backend</span></code> in
+configuration:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 40.0%" />
+<col style="width: 40.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"></th>
+<th class="head"><p><strong>Builtin</strong> (default)</p></th>
+<th class="head"><p><strong>QMD</strong> (external)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Backend ID</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;builtin&quot;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;qmd&quot;</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Implementation</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MemoryIndexManager</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">QmdMemoryManager</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Storage</p></td>
+<td><p>Node SQLite (<code class="docutils literal notranslate"><span class="pre">node:sqlite</span></code>) with sqlite-vec</p></td>
+<td><p>QMD CLI + its own index.sqlite</p></td>
+</tr>
+<tr class="row-odd"><td><p>Embedding</p></td>
+<td><p>Local GGUF, OpenAI, Gemini, Voyage, Mistral</p></td>
+<td><p>QMD’s built-in models</p></td>
+</tr>
+<tr class="row-even"><td><p>Search</p></td>
+<td><p>Hybrid (vector + FTS5 BM25)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">search</span></code> / <code class="docutils literal notranslate"><span class="pre">vsearch</span></code> / <code class="docutils literal notranslate"><span class="pre">query</span></code> modes</p></td>
+</tr>
+<tr class="row-odd"><td><p>MCP Bridge</p></td>
+<td><p>N/A</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">mcporter</span></code> for MCP-based tool calls</p></td>
+</tr>
+</tbody>
+</table>
+<p>The <code class="docutils literal notranslate"><span class="pre">getMemorySearchManager()</span></code> factory in <code class="docutils literal notranslate"><span class="pre">src/memory/search-manager.ts</span></code>
+resolves the backend.  When QMD is selected, a <code class="docutils literal notranslate"><span class="pre">FallbackMemoryManager</span></code>
+wraps the QMD primary with a lazy builtin fallback – if QMD fails at
+runtime, the system transparently degrades to the builtin index.</p>
+</section>
+<section id="graceful-degradation-chain">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Graceful Degradation Chain</a><a class="headerlink" href="#graceful-degradation-chain" title="Link to this heading">¶</a></h2>
+<p>The knowledge system is designed to never hard-fail.  It degrades through four
+levels:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Level 1:  Full Hybrid        vector search + FTS5 keyword search
+               |              (vectorWeight=0.7, textWeight=0.3)
+               v
+Level 2:  Vector-Only        FTS disabled or unavailable
+               |              (pure cosine similarity ranking)
+               v
+Level 3:  FTS-Only           No embedding provider available
+               |              (query expansion + BM25 keyword search)
+               v
+Level 4:  Disabled           Neither provider nor FTS available
+                              (memory_search returns empty results)
+</pre></div>
+</div>
+<p><strong>How degradation is decided:</strong></p>
+<ul class="simple">
+<li><p>If no API key is found for any embedding provider and local embeddings
+cannot be loaded, <code class="docutils literal notranslate"><span class="pre">createEmbeddingProvider()</span></code> returns
+<code class="docutils literal notranslate"><span class="pre">provider:</span> <span class="pre">null</span></code>.  The manager enters FTS-only mode.</p></li>
+<li><p>If the FTS5 SQLite extension fails to load, keyword search is skipped
+and only vector search is used.</p></li>
+<li><p>If both are unavailable, <code class="docutils literal notranslate"><span class="pre">search()</span></code> returns <code class="docutils literal notranslate"><span class="pre">[]</span></code>.</p></li>
+</ul>
+<p>Within the QMD backend, the <code class="docutils literal notranslate"><span class="pre">FallbackMemoryManager</span></code> adds another layer:
+if the QMD CLI process fails, the system falls back to the builtin index.</p>
+</section>
+<section id="class-hierarchy">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Class Hierarchy</a><a class="headerlink" href="#class-hierarchy" title="Link to this heading">¶</a></h2>
+<p>The builtin backend uses a three-level inheritance chain:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>MemoryManagerSyncOps          (abstract)
+    |                         - File watching (chokidar)
+    |                         - Session transcript listeners
+    |                         - Sync orchestration (runSync, runSafeReindex)
+    |                         - Database open/schema/meta
+    |                         - Interval sync, watch debounce
+    v
+MemoryManagerEmbeddingOps     (abstract, extends SyncOps)
+    |                         - Batch embedding (buildEmbeddingBatches)
+    |                         - Embedding cache (load/upsert/prune)
+    |                         - Retry with exponential backoff
+    |                         - Batch failure tracking (auto-disable at 2)
+    |                         - Provider-specific batch runners (OpenAI, Gemini, Voyage)
+    |                         - File indexing (indexFile)
+    v
+MemoryIndexManager            (concrete, extends EmbeddingOps)
+                              - Implements MemorySearchManager interface
+                              - search(), readFile(), status(), sync(), close()
+                              - Vector + keyword search orchestration
+                              - Hybrid merge, temporal decay, MMR
+                              - Instance cache (INDEX_CACHE)
+                              - Factory: MemoryIndexManager.get()
+</pre></div>
+</div>
+<p>Each class is defined in its own file:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager-sync-ops.ts</span></code> – <code class="docutils literal notranslate"><span class="pre">MemoryManagerSyncOps</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager-embedding-ops.ts</span></code> – <code class="docutils literal notranslate"><span class="pre">MemoryManagerEmbeddingOps</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager.ts</span></code> – <code class="docutils literal notranslate"><span class="pre">MemoryIndexManager</span></code></p></li>
+</ul>
+</section>
+<section id="memory-v2-research-direction">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Memory v2 Research Direction</a><a class="headerlink" href="#memory-v2-research-direction" title="Link to this heading">¶</a></h2>
+<p>The file <code class="docutils literal notranslate"><span class="pre">docs/experiments/research/memory.md</span></code> outlines a research direction
+called <strong>Workspace Memory v2</strong> (offline-first).  Key concepts:</p>
+<p><strong>Retain / Recall / Reflect</strong></p>
+<ul class="simple">
+<li><p><strong>Retain</strong> – Normalize daily logs into narrative, self-contained facts.
+Each fact has a type prefix (<code class="docutils literal notranslate"><span class="pre">W</span></code> world, <code class="docutils literal notranslate"><span class="pre">B</span></code> experience, <code class="docutils literal notranslate"><span class="pre">O</span></code> opinion,
+<code class="docutils literal notranslate"><span class="pre">S</span></code> observation) and entity mentions (<code class="docutils literal notranslate"><span class="pre">&#64;Peter</span></code>, <code class="docutils literal notranslate"><span class="pre">&#64;warelay</span></code>).</p></li>
+<li><p><strong>Recall</strong> – Query the derived index for lexical, entity-centric, temporal,
+and opinion-aware retrieval.  Results carry <code class="docutils literal notranslate"><span class="pre">kind</span></code>, <code class="docutils literal notranslate"><span class="pre">timestamp</span></code>,
+<code class="docutils literal notranslate"><span class="pre">entities</span></code>, <code class="docutils literal notranslate"><span class="pre">content</span></code>, and <code class="docutils literal notranslate"><span class="pre">source</span></code> (file + line).</p></li>
+<li><p><strong>Reflect</strong> – A scheduled job that updates entity summary pages
+(<code class="docutils literal notranslate"><span class="pre">bank/entities/*.md</span></code>), evolves opinion confidence, and proposes edits to
+core memory files.</p></li>
+</ul>
+<p><strong>Proposed layout</strong> (not yet implemented):</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>~/.openclaw/workspace/
+  memory.md                    # durable facts + preferences (core)
+  memory/
+    YYYY-MM-DD.md              # daily log (append; narrative)
+  bank/                        # typed memory pages (stable)
+    world.md                   # objective facts
+    experience.md              # first-person experience
+    opinions.md                # subjective prefs + confidence
+    entities/
+      Peter.md
+      ...
+</pre></div>
+</div>
+<p>This is exploratory and not yet part of the production codebase.</p>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Knowledge System</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#memorysearchmanager-interface">MemorySearchManager Interface</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#memorysearchresult-type">MemorySearchResult Type</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#memoryproviderstatus-type">MemoryProviderStatus Type</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#fallbackmemorymanager">FallbackMemoryManager</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#instance-caching">Instance Caching</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-architecture.html#configuration-resolution">Configuration Resolution</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-creation.html#agent-written-memory-files">Agent-Written Memory Files</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-creation.html#memory-flush">Memory Flush</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-creation.html#session-transcript-indexing">Session Transcript Indexing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge-storage.html">SQLite Storage Schema</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-storage.html#database-location">Database Location</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-storage.html#schema-5-1-tables">Schema: 5+1 Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-storage.html#safe-reindex-temp-db-atomic-swap">Safe Reindex (Temp DB + Atomic Swap)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-storage.html#file-watching">File Watching</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge-retrieval.html">Retrieval Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#pipeline-overview">Pipeline Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-1-query-expansion">Stage 1: Query Expansion</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-2-vector-search">Stage 2: Vector Search</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-2-keyword-search-fts5-bm25">Stage 2: Keyword Search (FTS5 BM25)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-3-hybrid-merge">Stage 3: Hybrid Merge</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-4-temporal-decay">Stage 4: Temporal Decay</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-5-mmr-re-ranking">Stage 5: MMR Re-ranking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-6-score-threshold">Stage 6: Score Threshold</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#stage-7-top-k-selection">Stage 7: Top-K Selection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#fts-only-mode">FTS-Only Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="knowledge-retrieval.html#complete-search-flow-code-walkthrough">Complete Search Flow (Code Walkthrough)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#provider-table">Provider Table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#auto-selection-cascade">Auto-Selection Cascade</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#l2-normalization">L2 Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#chunking">Chunking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#batch-embedding">Batch Embedding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#batch-failure-tracking">Batch Failure Tracking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#embedding-cache">Embedding Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="embeddings.html#retry-and-timeout">Retry and Timeout</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="qmd-backend.html">External QMD Backend</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#qmd-cli-commands">QMD CLI Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#collection-storage">Collection Storage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#state-isolation">State Isolation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#update-lifecycle">Update Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#search-modes">Search Modes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#mcporter-mcp-bridge">mcporter MCP Bridge</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#session-export">Session Export</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#scope-control">Scope Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qmd-backend.html#limits">Limits</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory-tools.html">Memory Tools</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory-tools.html#memory-search">memory_search</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-tools.html#memory-get">memory_get</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory-tools.html#unavailability-handling">Unavailability Handling</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Knowledge System Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#big-picture">Big Picture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#knowledge-lifecycle">Knowledge Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dual-backend-architecture">Dual-Backend Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#graceful-degradation-chain">Graceful Degradation Chain</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#memory-v2-research-direction">Memory v2 Research Direction</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-storage.html">SQLite Storage Schema</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-retrieval.html">Retrieval Pipeline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="qmd-backend.html">External QMD Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory-tools.html">Memory Tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../orchestration/system-prompt.html" title="previous chapter">System Prompt</a></li>
+      <li>Next: <a href="memory-architecture.html" title="next chapter">Architecture Deep-Dive</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/knowledge/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

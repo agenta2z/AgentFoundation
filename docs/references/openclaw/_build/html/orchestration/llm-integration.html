@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>LLM Integration &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="System Prompt" href="system-prompt.html" />
+    <link rel="prev" title="State Management" href="state-management.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="llm-integration">
+<span id="orchestration-llm-integration"></span><h1>LLM Integration<a class="headerlink" href="#llm-integration" title="Link to this heading">¶</a></h1>
+<p>OpenClaw integrates with multiple LLM providers through a unified model
+resolution and API key management system.</p>
+<section id="supported-providers">
+<h2>Supported Providers<a class="headerlink" href="#supported-providers" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 30.0%" />
+<col style="width: 50.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Provider</p></th>
+<th class="head"><p>Provider ID</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Anthropic</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">anthropic</span></code></p></td>
+<td><p>Default provider; Claude models; OAuth + API key auth</p></td>
+</tr>
+<tr class="row-odd"><td><p>OpenAI</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">openai</span></code></p></td>
+<td><p>GPT models; Codex models (OAuth)</p></td>
+</tr>
+<tr class="row-even"><td><p>Google</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">google</span></code></p></td>
+<td><p>Gemini models (preview and stable)</p></td>
+</tr>
+<tr class="row-odd"><td><p>OpenRouter</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">openrouter</span></code></p></td>
+<td><p>Multi-model proxy service</p></td>
+</tr>
+<tr class="row-even"><td><p>Ollama</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ollama</span></code></p></td>
+<td><p>Local model hosting</p></td>
+</tr>
+<tr class="row-odd"><td><p>GitHub Copilot</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">github-copilot</span></code></p></td>
+<td><p>Via GitHub Copilot auth tokens</p></td>
+</tr>
+<tr class="row-even"><td><p>Qwen</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qwen-portal</span></code></p></td>
+<td><p>Alibaba Qwen models</p></td>
+</tr>
+<tr class="row-odd"><td><p>Xiaomi</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">xiaomi</span></code></p></td>
+<td><p>MiLM models</p></td>
+</tr>
+<tr class="row-even"><td><p>MiniMax</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">minimax</span></code></p></td>
+<td><p>MiniMax models</p></td>
+</tr>
+<tr class="row-odd"><td><p>Z.AI</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">zai</span></code></p></td>
+<td><p>Z.AI models</p></td>
+</tr>
+<tr class="row-even"><td><p>Volcengine</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">volcengine</span></code></p></td>
+<td><p>ByteDance/Doubao models</p></td>
+</tr>
+<tr class="row-odd"><td><p>Kimi</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">kimi-coding</span></code></p></td>
+<td><p>Moonshot Kimi models</p></td>
+</tr>
+</tbody>
+</table>
+<p>Provider IDs are normalized via <code class="docutils literal notranslate"><span class="pre">normalizeProviderId()</span></code> in
+<code class="docutils literal notranslate"><span class="pre">src/agents/model-selection.ts</span></code> (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;qwen&quot;</span></code> → <code class="docutils literal notranslate"><span class="pre">&quot;qwen-portal&quot;</span></code>,
+<code class="docutils literal notranslate"><span class="pre">&quot;bytedance&quot;</span></code> → <code class="docutils literal notranslate"><span class="pre">&quot;volcengine&quot;</span></code>).</p>
+</section>
+<section id="model-resolution-chain">
+<h2>Model Resolution Chain<a class="headerlink" href="#model-resolution-chain" title="Link to this heading">¶</a></h2>
+<p>Models are resolved through a precedence chain (first non-empty wins):</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>1. Agent-specific model   →  agents.list[].model
+2. Session override       →  sessions.patch / session directive
+3. Channel override       →  Per-channel model config
+4. Global default         →  agents.defaults.model
+5. Hardcoded default      →  &quot;claude-opus-4-6&quot;
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/defaults.ts:4</span></code></p>
+<section id="model-aliases">
+<h3>Model Aliases<a class="headerlink" href="#model-aliases" title="Link to this heading">¶</a></h3>
+<p>Shorthand aliases map to full model references:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 33.3%" />
+<col style="width: 66.7%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Alias</p></th>
+<th class="head"><p>Resolves To</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">opus</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">anthropic/claude-opus-4-6</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sonnet</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">anthropic/claude-sonnet-4-6</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gpt</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">openai/gpt-5.2</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gpt-mini</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">openai/gpt-5-mini</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gemini</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">google/gemini-3-pro-preview</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gemini-flash</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">google/gemini-3-flash-preview</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/config/defaults.ts:15-27</span></code></p>
+</section>
+</section>
+<section id="model-catalog">
+<h2>Model Catalog<a class="headerlink" href="#model-catalog" title="Link to this heading">¶</a></h2>
+<p>The model catalog (<code class="docutils literal notranslate"><span class="pre">src/agents/model-catalog.ts</span></code>) maintains definitions for
+known models including:</p>
+<ul class="simple">
+<li><p>Context window size</p></li>
+<li><p>Max output tokens</p></li>
+<li><p>Input modalities (text, image, audio)</p></li>
+<li><p>Cost per token (input/output/cache)</p></li>
+<li><p>API type (<code class="docutils literal notranslate"><span class="pre">anthropic-messages</span></code>, <code class="docutils literal notranslate"><span class="pre">openai-chat</span></code>, etc.)</p></li>
+<li><p>Reasoning capability flag</p></li>
+</ul>
+<p>Provider configuration (<code class="docutils literal notranslate"><span class="pre">src/agents/models-config.ts</span></code>) handles per-provider
+setup including API endpoints, authentication, and custom model registration.</p>
+</section>
+<section id="auth-profile-system">
+<h2>Auth Profile System<a class="headerlink" href="#auth-profile-system" title="Link to this heading">¶</a></h2>
+<p><strong>Source</strong>: <code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles.ts</span></code></p>
+<p>Multiple API keys can be configured per provider. The auth profile system:</p>
+<ol class="arabic simple">
+<li><p><strong>Selection</strong>: Picks the first non-cooled-down profile from the configured
+order (<code class="docutils literal notranslate"><span class="pre">auth.order.&lt;provider&gt;</span></code>)</p></li>
+<li><p><strong>Rotation</strong>: When a profile hits a rate limit, it’s marked in cooldown and
+the system advances to the next profile</p></li>
+<li><p><strong>Probe recovery</strong>: When all profiles are in cooldown, the system
+periodically probes (every 30s) to detect recovery</p></li>
+<li><p><strong>Persistence</strong>: Cooldown state persists across runs to avoid re-hitting
+the same rate limits</p></li>
+</ol>
+</section>
+<section id="extended-thinking">
+<h2>Extended Thinking<a class="headerlink" href="#extended-thinking" title="Link to this heading">¶</a></h2>
+<p>OpenClaw supports extended thinking (chain-of-thought reasoning) via the
+<code class="docutils literal notranslate"><span class="pre">thinkLevel</span></code> parameter:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 85.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Level</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">off</span></code></p></td>
+<td><p>No extended thinking</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">minimal</span></code></p></td>
+<td><p>Minimal reasoning</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">low</span></code></p></td>
+<td><p>Brief reasoning</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">medium</span></code></p></td>
+<td><p>Moderate reasoning</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">high</span></code></p></td>
+<td><p>Detailed reasoning</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">xhigh</span></code></p></td>
+<td><p>Maximum reasoning depth</p></td>
+</tr>
+</tbody>
+</table>
+<p>Think level can be set via:</p>
+<ul class="simple">
+<li><p>Agent config (<code class="docutils literal notranslate"><span class="pre">agents.defaults.thinkLevel</span></code>)</p></li>
+<li><p>Session override</p></li>
+<li><p>User directive (<code class="docutils literal notranslate"><span class="pre">/think</span> <span class="pre">high</span></code>)</p></li>
+</ul>
+<p>When a model fails at a high thinking level, the system falls back to lower
+levels automatically (see <a class="reference internal" href="error-handling.html"><span class="doc">Error Recovery</span></a>).</p>
+<p>Reasoning streaming is supported via the <code class="docutils literal notranslate"><span class="pre">onReasoningStream</span></code> callback, which
+pipes the model’s internal reasoning to the Control UI when available.</p>
+</section>
+<section id="usage-tracking">
+<h2>Usage Tracking<a class="headerlink" href="#usage-tracking" title="Link to this heading">¶</a></h2>
+<p>Token usage is tracked per-run and accumulated across tool-loop iterations:</p>
+<ul class="simple">
+<li><p><strong>Input tokens</strong>: Prompt tokens sent to the model</p></li>
+<li><p><strong>Output tokens</strong>: Completion tokens received</p></li>
+<li><p><strong>Cache tokens</strong>: Tokens served from provider-side cache (read/write)</p></li>
+</ul>
+<p>The system distinguishes “last call” metrics from accumulated totals to avoid
+inflating context-size calculations during the tool loop.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/agents/model-selection.ts</span></code></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Orchestration Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#document-map">Document Map</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">LLM Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Orchestration Overview</a><ul>
+      <li>Previous: <a href="state-management.html" title="previous chapter">State Management</a></li>
+      <li>Next: <a href="system-prompt.html" title="next chapter">System Prompt</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/llm-integration.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Error Recovery &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="State Management" href="state-management.html" />
+    <link rel="prev" title="Tool Architecture" href="tool-system.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="error-recovery">
+<span id="error-handling"></span><h1>Error Recovery<a class="headerlink" href="#error-recovery" title="Link to this heading">¶</a></h1>
+<p>This document covers OpenClaw’s error recovery mechanisms, including
+model fallback, auth profile rotation, thinking level adaptation,
+session auto-reset, and iteration guards.  The primary source files
+are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/model-fallback.ts</span></code> – model fallback chain execution</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code> – embedded runner with
+retry and compaction logic</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/failover-error.ts</span></code> – failover error classification</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-helpers.ts</span></code> – error classification
+helpers</p></li>
+</ul>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#model-fallback-chain" id="id9">Model Fallback Chain</a></p>
+<ul>
+<li><p><a class="reference internal" href="#candidate-resolution" id="id10">Candidate Resolution</a></p></li>
+<li><p><a class="reference internal" href="#run-with-fallback" id="id11">Run with Fallback</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#auth-profile-rotation" id="id12">Auth Profile Rotation</a></p></li>
+<li><p><a class="reference internal" href="#thinking-level-fallback" id="id13">Thinking Level Fallback</a></p></li>
+<li><p><a class="reference internal" href="#session-auto-reset" id="id14">Session Auto-Reset</a></p></li>
+<li><p><a class="reference internal" href="#iteration-guard" id="id15">Iteration Guard</a></p></li>
+<li><p><a class="reference internal" href="#tool-error-handling" id="id16">Tool Error Handling</a></p>
+<ul>
+<li><p><a class="reference internal" href="#oversized-tool-results" id="id17">Oversized Tool Results</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#image-model-fallback" id="id18">Image Model Fallback</a></p></li>
+<li><p><a class="reference internal" href="#error-summary-on-exhaustion" id="id19">Error Summary on Exhaustion</a></p></li>
+</ul>
+</nav>
+<section id="model-fallback-chain">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Model Fallback Chain</a><a class="headerlink" href="#model-fallback-chain" title="Link to this heading">¶</a></h2>
+<p>When the primary model fails with an eligible error, OpenClaw
+automatically tries alternative models from a configured fallback
+chain.</p>
+<section id="candidate-resolution">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Candidate Resolution</a><a class="headerlink" href="#candidate-resolution" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">resolveFallbackCandidates()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/model-fallback.ts</span></code>:173-234) builds the ordered
+candidate list:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>1. Primary model (user or agent-configured)
+2. Configured fallbacks (agents.defaults.model.fallbacks)
+3. Global default model (agents.defaults.model.primary)
+</pre></div>
+</div>
+<p>Each candidate is de-duplicated by <code class="docutils literal notranslate"><span class="pre">provider/model</span></code> key and
+optionally filtered against a configured allowlist:</p>
+<div class="literal-block-wrapper docutils container" id="id1">
+<div class="code-block-caption"><span class="caption-text">src/agents/model-fallback.ts:64-87</span><a class="headerlink" href="#id1" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">createModelCandidateCollector</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">allowlist</span><span class="o">:</span><span class="w"> </span><span class="kt">Set</span><span class="o">&lt;</span><span class="kt">string</span><span class="o">&gt;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">undefined</span>
+<span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">candidates</span><span class="o">:</span><span class="w"> </span><span class="kt">ModelCandidate</span><span class="p">[];</span>
+<span class="w">  </span><span class="nx">addCandidate</span><span class="o">:</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="nx">candidate</span><span class="o">:</span><span class="w"> </span><span class="kt">ModelCandidate</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">enforceAllowlist</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">,</span>
+<span class="w">  </span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="ow">void</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When the user is running a non-default model override (e.g., via
+<code class="docutils literal notranslate"><span class="pre">!model</span></code>), the configured fallback chain is skipped.  On failure,
+the system falls back directly to the configured global default
+(line 210-213).</p>
+</div>
+</section>
+<section id="run-with-fallback">
+<h3><a class="toc-backref" href="#id11" role="doc-backlink">Run with Fallback</a><a class="headerlink" href="#run-with-fallback" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">runWithModelFallback()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/model-fallback.ts</span></code>:280-410) executes the retry loop:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kd">let</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="nx">candidates</span><span class="p">.</span><span class="nx">length</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mf">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">candidate</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">candidates</span><span class="p">[</span><span class="nx">i</span><span class="p">];</span>
+<span class="w">  </span><span class="c1">// 1. Check auth profile cooldown</span>
+<span class="w">  </span><span class="c1">// 2. Attempt the run</span>
+<span class="w">  </span><span class="c1">// 3. On success: return result</span>
+<span class="w">  </span><span class="c1">// 4. On failover-eligible error: record attempt, continue</span>
+<span class="w">  </span><span class="c1">// 5. On abort or context overflow: rethrow immediately</span>
+<span class="p">}</span>
+<span class="c1">// All candidates exhausted: throw summary error</span>
+</pre></div>
+</div>
+<p><strong>Error classification</strong> determines whether to retry:</p>
+<ul class="simple">
+<li><p><strong>Failover-eligible</strong> (retry with next candidate):
+Rate-limit (429), server error (500, 502, 503), timeout,
+authentication error, billing error, overloaded.</p></li>
+<li><p><strong>Non-retriable</strong> (rethrow immediately):
+<code class="docutils literal notranslate"><span class="pre">AbortError</span></code> (user cancellation), context overflow
+(should be handled by compaction, not model switching).</p></li>
+</ul>
+<div class="literal-block-wrapper docutils container" id="id2">
+<div class="code-block-caption"><span class="caption-text">src/agents/model-fallback.ts:367-369</span><a class="headerlink" href="#id2" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isLikelyContextOverflowError</span><span class="p">(</span><span class="nx">errMessage</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">throw</span><span class="w"> </span><span class="nx">err</span><span class="p">;</span><span class="w">  </span><span class="c1">// Don&#39;t try a smaller-context model</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="auth-profile-rotation">
+<h2><a class="toc-backref" href="#id12" role="doc-backlink">Auth Profile Rotation</a><a class="headerlink" href="#auth-profile-rotation" title="Link to this heading">¶</a></h2>
+<p>When a model call fails with a rate-limit or auth error, the
+<strong>auth profile</strong> that was used is placed into cooldown.  Subsequent
+retries use a different profile:</p>
+<div class="literal-block-wrapper docutils container" id="id3">
+<div class="code-block-caption"><span class="caption-text">src/agents/model-fallback.ts:306-344</span><a class="headerlink" href="#id3" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">profileIds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">resolveAuthProfileOrder</span><span class="p">({</span>
+<span class="w">  </span><span class="nx">cfg</span><span class="p">,</span><span class="w"> </span><span class="nx">store</span><span class="o">:</span><span class="w"> </span><span class="kt">authStore</span><span class="p">,</span><span class="w"> </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="kt">candidate.provider</span><span class="p">,</span>
+<span class="p">});</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">isAnyProfileAvailable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">profileIds</span><span class="p">.</span><span class="nx">some</span><span class="p">(</span>
+<span class="w">  </span><span class="p">(</span><span class="nx">id</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="o">!</span><span class="nx">isProfileInCooldown</span><span class="p">(</span><span class="nx">authStore</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">)</span>
+<span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">profileIds</span><span class="p">.</span><span class="nx">length</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="nx">isAnyProfileAvailable</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// All profiles in cooldown for this provider</span>
+<span class="w">  </span><span class="c1">// Try probing if primary and near cooldown expiry</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<p>The cooldown system is managed by
+<code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles/usage.ts</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">markAuthProfileCooldown()</span></code> – set a cooldown timestamp.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">isProfileInCooldown()</span></code> – check if profile is in cooldown.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">calculateAuthProfileCooldownMs()</span></code> – exponential backoff.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clearAuthProfileCooldown()</span></code> – manual cooldown reset.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clearExpiredCooldowns()</span></code> – periodic cleanup.</p></li>
+</ul>
+<p><strong>Probing</strong>: For the primary model, even when all profiles are in
+cooldown, the system periodically probes to detect recovery:</p>
+<div class="literal-block-wrapper docutils container" id="id4">
+<div class="code-block-caption"><span class="caption-text">src/agents/model-fallback.ts:246-270</span><a class="headerlink" href="#id4" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">PROBE_MARGIN_MS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">60</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1000</span><span class="p">;</span><span class="w">  </span><span class="c1">// 2 minutes</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">MIN_PROBE_INTERVAL_MS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30</span><span class="nx">_000</span><span class="p">;</span><span class="w">    </span><span class="c1">// 30 seconds</span>
+
+<span class="kd">function</span><span class="w"> </span><span class="nx">shouldProbePrimaryDuringCooldown</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">isPrimary</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">hasFallbackCandidates</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">now</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// ...</span>
+<span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Probe when cooldown expiry is near or already past</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">params</span><span class="p">.</span><span class="nx">now</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nx">soonest</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nx">PROBE_MARGIN_MS</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="thinking-level-fallback">
+<h2><a class="toc-backref" href="#id13" role="doc-backlink">Thinking Level Fallback</a><a class="headerlink" href="#thinking-level-fallback" title="Link to this heading">¶</a></h2>
+<p>When a model fails with a rate-limit or capacity error and is
+using extended thinking (<code class="docutils literal notranslate"><span class="pre">high</span></code> or <code class="docutils literal notranslate"><span class="pre">xhigh</span></code>), the system
+automatically reduces the thinking level:</p>
+<div class="literal-block-wrapper docutils container" id="id5">
+<div class="code-block-caption"><span class="caption-text">src/agents/pi-embedded-helpers.ts (pickFallbackThinkingLevel)</span><a class="headerlink" href="#id5" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// xhigh -&gt; high -&gt; medium -&gt; low -&gt; off</span>
+<span class="k">export</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">pickFallbackThinkingLevel</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">currentLevel</span><span class="o">:</span><span class="w"> </span><span class="kt">ThinkLevel</span>
+<span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nx">ThinkLevel</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">undefined</span>
+</pre></div>
+</div>
+</div>
+<p>This is applied in the retry loop of
+<code class="docutils literal notranslate"><span class="pre">runEmbeddedPiAgent()</span></code> – if the error is a rate-limit and thinking
+is enabled, the system retries with a lower thinking level before
+falling back to a different model.</p>
+</section>
+<section id="session-auto-reset">
+<h2><a class="toc-backref" href="#id14" role="doc-backlink">Session Auto-Reset</a><a class="headerlink" href="#session-auto-reset" title="Link to this heading">¶</a></h2>
+<p>When the conversation context exceeds the model’s context window
+and auto-compaction fails, the session is automatically reset:</p>
+<div class="literal-block-wrapper docutils container" id="id6">
+<div class="code-block-caption"><span class="caption-text">src/agents/pi-embedded-runner/run.ts (approximate)</span><a class="headerlink" href="#id6" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isCompactionFailureError</span><span class="p">(</span><span class="nx">error</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Context still too large after compaction attempt.</span>
+<span class="w">  </span><span class="c1">// Reset the session to start fresh.</span>
+<span class="w">  </span><span class="k">await</span><span class="w"> </span><span class="nx">resetSession</span><span class="p">(</span><span class="nx">sessionFile</span><span class="p">);</span>
+<span class="w">  </span><span class="c1">// Retry with empty context.</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<p>The auto-reset flow:</p>
+<ol class="arabic simple">
+<li><p>Compaction is attempted first (summarize old messages).</p></li>
+<li><p>If compaction reduces context below the limit, the run resumes.</p></li>
+<li><p>If compaction fails (context still too large), the session
+transcript is archived and cleared.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">[System</span> <span class="pre">Message]</span></code> is injected to inform the agent that the
+session was auto-reset.</p></li>
+<li><p>The run restarts with an empty context.</p></li>
+</ol>
+</section>
+<section id="iteration-guard">
+<h2><a class="toc-backref" href="#id15" role="doc-backlink">Iteration Guard</a><a class="headerlink" href="#iteration-guard" title="Link to this heading">¶</a></h2>
+<p>To prevent infinite tool loops, the embedded runner enforces a
+maximum iteration count.  Each tool-call-and-result cycle counts as
+one iteration.</p>
+<p>The limit is typically derived from the agent configuration or a
+sensible default.  When the limit is reached:</p>
+<ol class="arabic simple">
+<li><p>The current run is terminated.</p></li>
+<li><p>A warning message is appended to the conversation.</p></li>
+<li><p>The model’s last partial output is returned as the response.</p></li>
+</ol>
+</section>
+<section id="tool-error-handling">
+<h2><a class="toc-backref" href="#id16" role="doc-backlink">Tool Error Handling</a><a class="headerlink" href="#tool-error-handling" title="Link to this heading">¶</a></h2>
+<p>When a tool call throws an error, the error is caught and
+converted into a tool result rather than crashing the run:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// Simplified flow in pi-agent-core</span>
+<span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">tool</span><span class="p">.</span><span class="nx">execute</span><span class="p">(</span><span class="nx">params</span><span class="p">);</span>
+<span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">isError</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">content</span><span class="o">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">text</span><span class="o">:</span><span class="w"> </span><span class="kt">err.message</span><span class="w"> </span><span class="p">}],</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The error result is appended to the conversation, allowing the
+model to see the error and decide how to recover (retry, skip, or
+inform the user).</p>
+<p><strong>Special error types</strong>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ToolInputError</span></code> (status 400) – invalid parameters.
+The model typically corrects its input and retries.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ToolAuthorizationError</span></code> (status 403) – sender not authorized.
+The model informs the user that the action is restricted.</p></li>
+</ul>
+<section id="oversized-tool-results">
+<h3><a class="toc-backref" href="#id17" role="doc-backlink">Oversized Tool Results</a><a class="headerlink" href="#oversized-tool-results" title="Link to this heading">¶</a></h3>
+<p>When a tool returns an excessively large result (e.g., reading a
+very large file), the runner truncates it to prevent context overflow:</p>
+<div class="literal-block-wrapper docutils container" id="id7">
+<div class="code-block-caption"><span class="caption-text">src/agents/pi-embedded-runner/tool-result-truncation.ts</span><a class="headerlink" href="#id7" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="nx">truncateOversizedToolResultsInSession</span><span class="p">(</span><span class="nx">session</span><span class="p">,</span><span class="w"> </span><span class="nx">maxTokens</span><span class="p">);</span>
+</pre></div>
+</div>
+</div>
+<p>The truncation:</p>
+<ul class="simple">
+<li><p>Detects tool results that exceed a configurable threshold.</p></li>
+<li><p>Replaces them with a truncation marker:
+<code class="docutils literal notranslate"><span class="pre">[truncated:</span> <span class="pre">output</span> <span class="pre">exceeded</span> <span class="pre">context</span> <span class="pre">limit]</span></code>.</p></li>
+<li><p>Preserves the first and last portions of the output when possible.</p></li>
+</ul>
+<p>The sub-agent system prompt instructs sub-agents to handle these
+markers gracefully:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>If you see `[compacted: tool output removed to free context]`
+or `[truncated: output exceeded context limit]`, assume prior
+output was reduced. Re-read only what you need using smaller
+chunks.
+</pre></div>
+</div>
+</section>
+</section>
+<section id="image-model-fallback">
+<h2><a class="toc-backref" href="#id18" role="doc-backlink">Image Model Fallback</a><a class="headerlink" href="#image-model-fallback" title="Link to this heading">¶</a></h2>
+<p>Image analysis has its own fallback chain via
+<code class="docutils literal notranslate"><span class="pre">runWithImageModelFallback()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/model-fallback.ts</span></code>:412-469):</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">candidates</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">resolveImageFallbackCandidates</span><span class="p">({</span>
+<span class="w">  </span><span class="nx">cfg</span><span class="p">,</span><span class="w"> </span><span class="nx">defaultProvider</span><span class="o">:</span><span class="w"> </span><span class="kt">DEFAULT_PROVIDER</span><span class="p">,</span><span class="w"> </span><span class="nx">modelOverride</span><span class="p">,</span>
+<span class="p">});</span>
+</pre></div>
+</div>
+<p>The image fallback chain is configured separately from the main
+model fallback via <code class="docutils literal notranslate"><span class="pre">agents.defaults.imageModel</span></code>:</p>
+<div class="literal-block-wrapper docutils container" id="id8">
+<div class="code-block-caption"><span class="caption-text">Example config</span><a class="headerlink" href="#id8" title="Link to this code">¶</a></div>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">agents</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">imageModel</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">primary</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;anthropic/claude-sonnet-4-5&quot;</span>
+<span class="w">      </span><span class="nt">fallbacks</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;openai/gpt-4o&quot;</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;google/gemini-2.5-pro&quot;</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="error-summary-on-exhaustion">
+<h2><a class="toc-backref" href="#id19" role="doc-backlink">Error Summary on Exhaustion</a><a class="headerlink" href="#error-summary-on-exhaustion" title="Link to this heading">¶</a></h2>
+<p>When all fallback candidates are exhausted, a summary error is
+thrown with details about each attempt:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>All models failed (3):
+  anthropic/claude-opus-4-6: 429 Too Many Requests (rate_limit)
+  | anthropic/claude-sonnet-4-5: 429 Too Many Requests (rate_limit)
+  | openai/gpt-4o: 500 Internal Server Error (server_error)
+</pre></div>
+</div>
+<p>This summary is surfaced to the user as an error message, giving
+visibility into what was tried and why it failed.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Orchestration Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#document-map">Document Map</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Orchestration Overview</a><ul>
+      <li>Previous: <a href="tool-system.html" title="previous chapter">Tool Architecture</a></li>
+      <li>Next: <a href="state-management.html" title="next chapter">State Management</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/error-handling.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

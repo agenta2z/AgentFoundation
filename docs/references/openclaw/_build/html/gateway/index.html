@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Gateway Server &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="RPC Protocol" href="rpc-protocol.html" />
+    <link rel="prev" title="Channel List" href="../channels/channel-list.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gateway-server">
+<span id="gateway-index"></span><h1>Gateway Server<a class="headerlink" href="#gateway-server" title="Link to this heading">¶</a></h1>
+<p>The gateway is the central hub of OpenClaw — an Express v5 + WebSocket server
+that handles all communication between channels, agents, and the Control UI.</p>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌──────────────────────────────────────────────────────────┐
+│                    Gateway Server                        │
+│                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │  Express v5  │  │  WebSocket   │  │  Static Files │  │
+│  │  HTTP API    │  │  (ws)        │  │  Control UI   │  │
+│  └──────┬──────┘  └──────┬───────┘  └───────────────┘  │
+│         │                │                              │
+│  ┌──────▼────────────────▼──────────────────────────┐   │
+│  │           JSON-RPC Protocol Layer                │   │
+│  │  agent, agent.wait, sessions.*, chat.*, ...     │   │
+│  └──────────────────────┬───────────────────────────┘   │
+│                         │                               │
+│  ┌──────────────────────▼───────────────────────────┐   │
+│  │              Agent Orchestration                 │   │
+│  │  Model resolution, tool loop, session mgmt      │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+<section id="server-startup">
+<h2>Server Startup<a class="headerlink" href="#server-startup" title="Link to this heading">¶</a></h2>
+<p>The gateway starts via <code class="docutils literal notranslate"><span class="pre">startGatewayServer()</span></code> in
+<code class="docutils literal notranslate"><span class="pre">src/gateway/server.impl.ts</span></code>:</p>
+<ol class="arabic simple">
+<li><p>Create Express app with middleware (auth, CORS, CSP, body parsing)</p></li>
+<li><p>Set up WebSocket server on the same HTTP server</p></li>
+<li><p>Register JSON-RPC method handlers</p></li>
+<li><p>Mount static file serving for the Control UI</p></li>
+<li><p>Start channel monitors (Telegram, Discord, Slack, WhatsApp, etc.)</p></li>
+<li><p>Begin listening on configured port (<code class="docutils literal notranslate"><span class="pre">gateway.port</span></code>)</p></li>
+</ol>
+</section>
+<section id="authentication">
+<h2>Authentication<a class="headerlink" href="#authentication" title="Link to this heading">¶</a></h2>
+<p>The gateway uses token-based authentication:</p>
+<ul class="simple">
+<li><p><strong>Gateway auth token</strong>: Configured via <code class="docutils literal notranslate"><span class="pre">gateway.authToken</span></code> in
+<code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> or the <code class="docutils literal notranslate"><span class="pre">OPENCLAW_GATEWAY_AUTH_TOKEN</span></code> env var</p></li>
+<li><p>All HTTP and WebSocket requests must include the token</p></li>
+<li><p>The Control UI authenticates via the same token mechanism</p></li>
+</ul>
+</section>
+<section id="binding-modes">
+<h2>Binding Modes<a class="headerlink" href="#binding-modes" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">loopback</span></code></p></td>
+<td><p>Bind to <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> only (default, most secure)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">lan</span></code></p></td>
+<td><p>Bind to <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> for LAN access</p></td>
+</tr>
+<tr class="row-even"><td><p>Custom</p></td>
+<td><p>Bind to a specific interface address</p></td>
+</tr>
+</tbody>
+</table>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/gateway/server.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/gateway/server.impl.ts</span></code></p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="rpc-protocol.html">RPC Protocol</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rpc-protocol.html#protocol-format">Protocol Format</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc-protocol.html#core-methods">Core Methods</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc-protocol.html#error-codes">Error Codes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="control-ui.html">Control UI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="control-ui.html#technology">Technology</a></li>
+<li class="toctree-l2"><a class="reference internal" href="control-ui.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="control-ui.html#authentication">Authentication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="control-ui.html#websocket-communication">WebSocket Communication</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Gateway Server</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#architecture">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#server-startup">Server Startup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#authentication">Authentication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#binding-modes">Binding Modes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rpc-protocol.html">RPC Protocol</a></li>
+<li class="toctree-l3"><a class="reference internal" href="control-ui.html">Control UI</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../channels/channel-list.html" title="previous chapter">Channel List</a></li>
+      <li>Next: <a href="rpc-protocol.html" title="next chapter">RPC Protocol</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/gateway/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

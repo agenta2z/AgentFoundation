@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>External QMD Backend &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Memory Tools" href="memory-tools.html" />
+    <link rel="prev" title="Embedding Providers &amp; Operations" href="embeddings.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="external-qmd-backend">
+<h1>External QMD Backend<a class="headerlink" href="#external-qmd-backend" title="Link to this heading">¶</a></h1>
+<p>QMD is an external CLI tool that provides an alternative memory backend with
+its own embedding models, vector index, and search capabilities.  When
+configured, it replaces the builtin SQLite-based index while retaining the
+same <code class="docutils literal notranslate"><span class="pre">MemorySearchManager</span></code> interface.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id1">Overview</a></p></li>
+<li><p><a class="reference internal" href="#qmd-cli-commands" id="id2">QMD CLI Commands</a></p></li>
+<li><p><a class="reference internal" href="#collection-storage" id="id3">Collection Storage</a></p></li>
+<li><p><a class="reference internal" href="#state-isolation" id="id4">State Isolation</a></p></li>
+<li><p><a class="reference internal" href="#update-lifecycle" id="id5">Update Lifecycle</a></p></li>
+<li><p><a class="reference internal" href="#search-modes" id="id6">Search Modes</a></p></li>
+<li><p><a class="reference internal" href="#mcporter-mcp-bridge" id="id7">mcporter MCP Bridge</a></p></li>
+<li><p><a class="reference internal" href="#session-export" id="id8">Session Export</a></p></li>
+<li><p><a class="reference internal" href="#scope-control" id="id9">Scope Control</a></p></li>
+<li><p><a class="reference internal" href="#limits" id="id10">Limits</a></p></li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/qmd-manager.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/memory/backend-config.ts</span></code></p>
+<p>The QMD backend is activated by setting <code class="docutils literal notranslate"><span class="pre">memory.backend:</span> <span class="pre">&quot;qmd&quot;</span></code> in
+configuration.  It delegates indexing and search to the <code class="docutils literal notranslate"><span class="pre">qmd</span></code> CLI binary,
+which maintains its own SQLite index with built-in ML models for embeddings
+and retrieval.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>OpenClaw Agent
+    |
+    v
+QmdMemoryManager
+    |
+    +-- qmd update          (index files)
+    +-- qmd embed           (compute embeddings)
+    +-- qmd search/vsearch/query  (search)
+    +-- qmd collection add  (manage collections)
+    |
+    v
+QMD CLI Binary
+    |
+    v
+$XDG_CACHE_HOME/qmd/index.sqlite
+</pre></div>
+</div>
+</section>
+<section id="qmd-cli-commands">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">QMD CLI Commands</a><a class="headerlink" href="#qmd-cli-commands" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">QmdMemoryManager</span></code> shells out to the QMD binary via Node’s <code class="docutils literal notranslate"><span class="pre">spawn()</span></code>:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">collection</span> <span class="pre">add</span> <span class="pre">&lt;path&gt;</span> <span class="pre">--name</span> <span class="pre">&lt;name&gt;</span> <span class="pre">--mask</span> <span class="pre">&lt;pattern&gt;</span></code></p></td>
+<td><p>Register a file collection for indexing</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">collection</span> <span class="pre">remove</span> <span class="pre">&lt;name&gt;</span></code></p></td>
+<td><p>Remove a collection</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">collection</span> <span class="pre">list</span> <span class="pre">--json</span></code></p></td>
+<td><p>List all registered collections with paths and patterns</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">update</span></code></p></td>
+<td><p>Scan collections and update the index</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">embed</span></code></p></td>
+<td><p>Compute embeddings for unembedded documents</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">search</span> <span class="pre">&lt;query&gt;</span> <span class="pre">--json</span> <span class="pre">-n</span> <span class="pre">&lt;limit&gt;</span></code></p></td>
+<td><p>BM25 keyword search</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">vsearch</span> <span class="pre">&lt;query&gt;</span> <span class="pre">--json</span> <span class="pre">-n</span> <span class="pre">&lt;limit&gt;</span></code></p></td>
+<td><p>Vector similarity search</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">query</span> <span class="pre">&lt;query&gt;</span> <span class="pre">--json</span> <span class="pre">-n</span> <span class="pre">&lt;limit&gt;</span></code></p></td>
+<td><p>Full query with expansion + reranking (slow on CPU)</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Timeouts:</strong></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 60.0%" />
+<col style="width: 40.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Operation</p></th>
+<th class="head"><p>Default Timeout</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Command (collection add/remove/list)</p></td>
+<td><p>30 seconds</p></td>
+</tr>
+<tr class="row-odd"><td><p>Update</p></td>
+<td><p>120 seconds</p></td>
+</tr>
+<tr class="row-even"><td><p>Embed</p></td>
+<td><p>120 seconds</p></td>
+</tr>
+<tr class="row-odd"><td><p>Search</p></td>
+<td><p>4 seconds</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="collection-storage">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Collection Storage</a><a class="headerlink" href="#collection-storage" title="Link to this heading">¶</a></h2>
+<p>QMD organizes indexed files into <em>collections</em>.  Each collection maps to a
+filesystem path with a glob pattern:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">ResolvedQmdCollection</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">    </span><span class="c1">// e.g. &quot;memory-root-myagent&quot;</span>
+<span class="w">  </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">    </span><span class="c1">// absolute filesystem path</span>
+<span class="w">  </span><span class="nx">pattern</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="c1">// glob pattern (e.g. &quot;MEMORY.md&quot;, &quot;**/*.md&quot;)</span>
+<span class="w">  </span><span class="nx">kind</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;memory&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;custom&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;sessions&quot;</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p><strong>Default collections</strong> (when <code class="docutils literal notranslate"><span class="pre">includeDefaultMemory</span></code> is true):</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 30.0%" />
+<col style="width: 20.0%" />
+<col style="width: 20.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Name Pattern</p></th>
+<th class="head"><p>Path</p></th>
+<th class="head"><p>Pattern</p></th>
+<th class="head"><p>Kind</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">memory-root-&lt;agentId&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&lt;workspaceDir&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code></p></td>
+<td><p>memory</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">memory-alt-&lt;agentId&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&lt;workspaceDir&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">memory.md</span></code></p></td>
+<td><p>memory</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">memory-dir-&lt;agentId&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&lt;workspaceDir&gt;/memory</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">**/*.md</span></code></p></td>
+<td><p>memory</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Custom collections</strong> can be added via <code class="docutils literal notranslate"><span class="pre">memory.qmd.paths</span></code>:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">memory</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qmd</span>
+<span class="w">  </span><span class="nt">qmd</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">paths</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/shared-knowledge</span>
+<span class="w">        </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.md&quot;</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared-kb</span>
+</pre></div>
+</div>
+<p>Collection names are scoped to the agent ID to prevent collisions when
+multiple agents share the same QMD instance.  Names are sanitized to
+lowercase alphanumeric with hyphens.</p>
+</section>
+<section id="state-isolation">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">State Isolation</a><a class="headerlink" href="#state-isolation" title="Link to this heading">¶</a></h2>
+<p>Each agent gets its own QMD state directory:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>~/.openclaw/state/agents/&lt;agentId&gt;/qmd/
+  xdg-config/        # QMD config (XDG_CONFIG_HOME override)
+  xdg-cache/          # QMD cache (XDG_CACHE_HOME override)
+    qmd/
+      index.sqlite    # the QMD index database
+      models/ -&gt; ~/.cache/qmd/models/  (symlink)
+  sessions/           # exported session transcripts (if enabled)
+</pre></div>
+</div>
+<p><strong>Model sharing:</strong> To avoid downloading ML models per agent, the manager
+symlinks <code class="docutils literal notranslate"><span class="pre">~/.cache/qmd/models/</span></code> into the per-agent cache directory.  On
+Windows, a directory junction is used if symlinks require elevated privileges.</p>
+</section>
+<section id="update-lifecycle">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Update Lifecycle</a><a class="headerlink" href="#update-lifecycle" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>runUpdate(reason, force?)
+    |
+    +-- Export sessions (if enabled)
+    |       |
+    |       +-- buildSessionEntry() for each .jsonl
+    |       +-- renderSessionMarkdown() -&gt; .md file
+    |       +-- Write to sessions/ directory
+    |       +-- Remove stale .md files
+    |
+    +-- qmd update (with retry for boot runs)
+    |       |
+    |       +-- Up to 3 attempts for boot
+    |       +-- 500ms base delay with exponential backoff
+    |       +-- Null-byte collection repair on ENOTDIR
+    |
+    +-- qmd embed (if searchMode != &quot;search&quot;)
+    |       |
+    |       +-- Runs under a global lock (qmdEmbedQueueTail)
+    |       +-- Exponential backoff on failure (60s base, 1h max)
+    |       +-- Failure count tracking
+    |
+    +-- Clear doc path cache
+    +-- Record lastUpdateAt
+</pre></div>
+</div>
+<p><strong>Update scheduling:</strong></p>
+<ul class="simple">
+<li><p><strong>On boot:</strong> <code class="docutils literal notranslate"><span class="pre">update.onBoot</span></code> (default: <code class="docutils literal notranslate"><span class="pre">true</span></code>).  Optionally wait for
+completion (<code class="docutils literal notranslate"><span class="pre">waitForBootSync</span></code>).</p></li>
+<li><p><strong>Periodic:</strong> <code class="docutils literal notranslate"><span class="pre">update.intervalMs</span></code> (default: 5 minutes).</p></li>
+<li><p><strong>Debounce:</strong> <code class="docutils literal notranslate"><span class="pre">update.debounceMs</span></code> (default: 15 seconds) prevents
+rapid-fire updates.</p></li>
+<li><p><strong>Forced:</strong> <code class="docutils literal notranslate"><span class="pre">sync()</span></code> with <code class="docutils literal notranslate"><span class="pre">force:</span> <span class="pre">true</span></code> bypasses debounce.</p></li>
+</ul>
+<p><strong>Queued forced updates:</strong> When <code class="docutils literal notranslate"><span class="pre">runUpdate</span></code> is called with <code class="docutils literal notranslate"><span class="pre">force</span></code> while
+another update is in progress, the request is queued.  A drain loop processes
+queued updates sequentially after the current update completes.</p>
+</section>
+<section id="search-modes">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Search Modes</a><a class="headerlink" href="#search-modes" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">searchMode</span></code> configuration controls which QMD command is used:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 20.0%" />
+<col style="width: 65.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">search</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">search</span></code></p></td>
+<td><p>BM25 keyword search.  Fast, no embedding required.
+<strong>Default</strong> (recommended for CPU-only systems).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">vsearch</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">vsearch</span></code></p></td>
+<td><p>Vector similarity search.  Requires <code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">embed</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">query</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">query</span></code></p></td>
+<td><p>Full query with expansion and reranking.  Slowest but highest recall.</p></td>
+</tr>
+</tbody>
+</table>
+<p>For Han-script (CJK) queries, <code class="docutils literal notranslate"><span class="pre">normalizeHanBm25Query()</span></code> extracts keywords
+(up to 12) to improve BM25 matching.</p>
+<p><strong>Multi-collection search:</strong> When multiple collections are configured, each
+is searched separately and results are merged by document ID, keeping the
+highest score for duplicates.</p>
+</section>
+<section id="mcporter-mcp-bridge">
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">mcporter MCP Bridge</a><a class="headerlink" href="#mcporter-mcp-bridge" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/qmd-manager.ts</span></code></p>
+<p>When <code class="docutils literal notranslate"><span class="pre">memory.qmd.mcporter.enabled</span></code> is <code class="docutils literal notranslate"><span class="pre">true</span></code>, search calls are routed
+through <code class="docutils literal notranslate"><span class="pre">mcporter</span></code> – an MCP (Model Context Protocol) bridge that wraps
+QMD as a persistent daemon:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>QmdMemoryManager
+    |
+    v
+mcporter call &lt;server&gt;.&lt;tool&gt; --args &lt;json&gt; --output json --timeout &lt;ms&gt;
+    |
+    v
+QMD MCP Server (persistent daemon)
+</pre></div>
+</div>
+<p><strong>Configuration:</strong></p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">ResolvedQmdMcporterConfig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">     </span><span class="c1">// default: false</span>
+<span class="w">  </span><span class="nx">serverName</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">   </span><span class="c1">// default: &quot;qmd&quot;</span>
+<span class="w">  </span><span class="nx">startDaemon</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w"> </span><span class="c1">// default: true (when enabled)</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p><strong>Tool mapping:</strong></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 40.0%" />
+<col style="width: 60.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Search Mode</p></th>
+<th class="head"><p>MCP Tool</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">search</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd.search</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">vsearch</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd.vector_search</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">query</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qmd.deep_search</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Daemon lifecycle:</strong> The daemon is started lazily on the first search call
+(<code class="docutils literal notranslate"><span class="pre">mcporter</span> <span class="pre">daemon</span> <span class="pre">start</span></code>).  A global flag prevents multiple starts.  If
+the start fails, the flag is cleared so the next search retries.</p>
+</section>
+<section id="session-export">
+<h2><a class="toc-backref" href="#id8" role="doc-backlink">Session Export</a><a class="headerlink" href="#session-export" title="Link to this heading">¶</a></h2>
+<p>When <code class="docutils literal notranslate"><span class="pre">memory.qmd.sessions.enabled</span></code> is <code class="docutils literal notranslate"><span class="pre">true</span></code>, session transcripts are
+exported as Markdown files into a dedicated collection:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">listSessionFilesForAgent()</span></code> finds all <code class="docutils literal notranslate"><span class="pre">.jsonl</span></code> transcripts.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">buildSessionEntry()</span></code> extracts user/assistant messages.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">renderSessionMarkdown()</span></code> formats them as a Markdown document with a
+header: <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Session</span> <span class="pre">&lt;session-id&gt;</span></code>.</p></li>
+<li><p>Files are written to the sessions export directory.</p></li>
+<li><p>Stale Markdown files (no matching .jsonl) are removed.</p></li>
+<li><p>Exported files are tracked via <code class="docutils literal notranslate"><span class="pre">exportedSessionState</span></code> to avoid
+re-rendering unchanged sessions.</p></li>
+</ol>
+<p><strong>Retention:</strong> If <code class="docutils literal notranslate"><span class="pre">sessions.retentionDays</span></code> is set, sessions older than
+the cutoff are skipped during export.</p>
+<p>The session collection is automatically added to the QMD collection list
+with the name <code class="docutils literal notranslate"><span class="pre">sessions-&lt;agentId&gt;</span></code> and pattern <code class="docutils literal notranslate"><span class="pre">**/*.md</span></code>.</p>
+</section>
+<section id="scope-control">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Scope Control</a><a class="headerlink" href="#scope-control" title="Link to this heading">¶</a></h2>
+<p>QMD search can be restricted by session context via the <code class="docutils literal notranslate"><span class="pre">scope</span></code>
+configuration:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// Default scope: allow direct chats only, deny groups/channels</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">DEFAULT_QMD_SCOPE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">default</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">rules</span><span class="o">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nx">action</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;allow&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">match</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">chatType</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">isScopeAllowed()</span></code> method extracts channel and chat type from the
+session key and evaluates them against the scope rules.  Denied searches
+return <code class="docutils literal notranslate"><span class="pre">[]</span></code> with a warning log.</p>
+</section>
+<section id="limits">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">Limits</a><a class="headerlink" href="#limits" title="Link to this heading">¶</a></h2>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">DEFAULT_QMD_LIMITS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">maxResults</span><span class="o">:</span><span class="w"> </span><span class="kt">6</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">maxSnippetChars</span><span class="o">:</span><span class="w"> </span><span class="kt">700</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">maxInjectedChars</span><span class="o">:</span><span class="w"> </span><span class="kt">4_000</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">timeoutMs</span><span class="o">:</span><span class="w"> </span><span class="kt">4_000</span><span class="p">,</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">maxResults</span></code> caps the number of returned results.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">maxSnippetChars</span></code> truncates individual snippet text.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">maxInjectedChars</span></code> is a total budget – results are clamped so the sum
+of snippet lengths does not exceed this value.</p></li>
+<li><p>Results are also diversified by source (interleaving memory and session
+results) via <code class="docutils literal notranslate"><span class="pre">diversifyResultsBySource()</span></code>.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Knowledge System Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#big-picture">Big Picture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#knowledge-lifecycle">Knowledge Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#dual-backend-architecture">Dual-Backend Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#graceful-degradation-chain">Graceful Degradation Chain</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#memory-v2-research-direction">Memory v2 Research Direction</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-storage.html">SQLite Storage Schema</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-retrieval.html">Retrieval Pipeline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">External QMD Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory-tools.html">Memory Tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Knowledge System Overview</a><ul>
+      <li>Previous: <a href="embeddings.html" title="previous chapter">Embedding Providers &amp; Operations</a></li>
+      <li>Next: <a href="memory-tools.html" title="next chapter">Memory Tools</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/knowledge/qmd-backend.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

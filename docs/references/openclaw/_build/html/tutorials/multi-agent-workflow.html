@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Multi-Agent Workflow &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Glossary" href="../glossary.html" />
+    <link rel="prev" title="Understanding Memory" href="understanding-memory.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="multi-agent-workflow">
+<span id="tutorial-multi-agent-workflow"></span><h1>Multi-Agent Workflow<a class="headerlink" href="#multi-agent-workflow" title="Link to this heading">¶</a></h1>
+<p>This tutorial walks through a multi-agent workflow where a parent agent
+spawns sub-agents, monitors their progress, steers one mid-task, and
+aggregates results.</p>
+<section id="scenario">
+<h2>Scenario<a class="headerlink" href="#scenario" title="Link to this heading">¶</a></h2>
+<p>A user asks: “Research the top 3 JavaScript frameworks and compare their
+performance benchmarks, then write a summary report.”</p>
+<p>The parent agent decides to parallelize by spawning sub-agents for each
+framework while it coordinates the overall task.</p>
+</section>
+<section id="step-1-parent-receives-the-request">
+<h2>Step 1: Parent Receives the Request<a class="headerlink" href="#step-1-parent-receives-the-request" title="Link to this heading">¶</a></h2>
+<p>The parent agent (the default agent) receives the user’s message through
+the normal request lifecycle. After analyzing the task, it decides to
+delegate research to sub-agents.</p>
+<p>The parent agent has access to the <code class="docutils literal notranslate"><span class="pre">subagents</span></code> tool, which provides
+sub-agent management capabilities.</p>
+</section>
+<section id="step-2-spawning-sub-agents">
+<h2>Step 2: Spawning Sub-Agents<a class="headerlink" href="#step-2-spawning-sub-agents" title="Link to this heading">¶</a></h2>
+<p>The parent calls <code class="docutils literal notranslate"><span class="pre">spawnSubagentDirect()</span></code> to create child agents. Each
+sub-agent gets its own session with a predictable key format:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Parent session:  whatsapp:+1234567890
+Child 1 session: agent:default:subagent:a1b2c3d4-...
+Child 2 session: agent:default:subagent:e5f6g7h8-...
+Child 3 session: agent:default:subagent:i9j0k1l2-...
+</pre></div>
+</div>
+<p>Two spawn modes are available:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 85.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Behavior</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run</span></code></p></td>
+<td><p>One-shot execution. The sub-agent processes the task and returns a
+result. The session is not reusable.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">session</span></code></p></td>
+<td><p>Persistent session. The sub-agent can receive follow-up messages
+and maintains conversation context.</p></td>
+</tr>
+</tbody>
+</table>
+<p>For our research task, the parent uses <code class="docutils literal notranslate"><span class="pre">run</span></code> mode since each sub-agent
+has a self-contained task:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Spawn 1: &quot;Research React&#39;s performance benchmarks, bundle size,
+          rendering speed, and real-world case studies&quot;
+
+Spawn 2: &quot;Research Vue.js&#39;s performance benchmarks, bundle size,
+          rendering speed, and real-world case studies&quot;
+
+Spawn 3: &quot;Research Svelte&#39;s performance benchmarks, bundle size,
+          rendering speed, and real-world case studies&quot;
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/subagent-spawn.ts</span></code></p>
+</section>
+<section id="step-3-depth-and-concurrency-limits">
+<h2>Step 3: Depth and Concurrency Limits<a class="headerlink" href="#step-3-depth-and-concurrency-limits" title="Link to this heading">¶</a></h2>
+<p>Before spawning, the system enforces safety limits:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 15.0%" />
+<col style="width: 55.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Limit</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">maxSpawnDepth</span></code></p></td>
+<td><p>1</p></td>
+<td><p>Maximum nesting depth. Sub-agents cannot spawn their own
+sub-agents by default.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">maxChildrenPerAgent</span></code></p></td>
+<td><p>5</p></td>
+<td><p>Maximum concurrent children per parent. Our 3 sub-agents
+are within this limit.</p></td>
+</tr>
+</tbody>
+</table>
+<p>The spawn depth is tracked via <code class="docutils literal notranslate"><span class="pre">getSpawnDepth()</span></code>, which counts the
+<code class="docutils literal notranslate"><span class="pre">subagent:</span></code> segments in the session key:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>agent:default:subagent:uuid1                     → depth 1 ✓
+agent:default:subagent:uuid1:subagent:uuid2      → depth 2 ✗ (blocked)
+</pre></div>
+</div>
+<p>Access control is enforced via the agent’s <code class="docutils literal notranslate"><span class="pre">subagents.allowAgents</span></code>
+configuration. A value of <code class="docutils literal notranslate"><span class="pre">[&quot;*&quot;]</span></code> allows spawning any agent.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/config/agent-limits.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/agents/subagent-depth.ts</span></code></p>
+</section>
+<section id="step-4-sub-agent-registration">
+<h2>Step 4: Sub-Agent Registration<a class="headerlink" href="#step-4-sub-agent-registration" title="Link to this heading">¶</a></h2>
+<p>Each spawned sub-agent is registered in the Subagent Registry — an
+in-memory <code class="docutils literal notranslate"><span class="pre">Map</span></code> that tracks all running children:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nx">runId</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;run-abc123&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">childSessionKey</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;agent:default:subagent:a1b2c3d4-...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">requesterSessionKey</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;whatsapp:+1234567890&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">task</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;Research React&#39;s performance benchmarks...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">status</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;running&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;claude-opus-4-6&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">startedAt</span><span class="o">:</span><span class="w"> </span><span class="kt">1708700000000</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The registry is queryable by the parent via the <code class="docutils literal notranslate"><span class="pre">subagents</span></code> tool:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;tool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;subagents&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;list&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>This returns a list of all children with their current status.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/subagent-registry.ts</span></code></p>
+</section>
+<section id="step-5-concurrent-execution">
+<h2>Step 5: Concurrent Execution<a class="headerlink" href="#step-5-concurrent-execution" title="Link to this heading">¶</a></h2>
+<p>All three sub-agents run concurrently in the <code class="docutils literal notranslate"><span class="pre">subagent</span></code> command lane:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Command Queue
+┌─────────────────────────────────────────────┐
+│ Lane &quot;main&quot;      [parent agent run]         │
+│ Lane &quot;subagent&quot;  [react] [vue] [svelte]     │
+└─────────────────────────────────────────────┘
+</pre></div>
+</div>
+<p>Each sub-agent independently:</p>
+<ol class="arabic simple">
+<li><p>Assembles its own system prompt</p></li>
+<li><p>Resolves its model (inherits from parent unless overridden)</p></li>
+<li><p>Selects an auth profile</p></li>
+<li><p>Runs the ReAct tool loop</p></li>
+<li><p>Uses tools (<code class="docutils literal notranslate"><span class="pre">web_search</span></code>, <code class="docutils literal notranslate"><span class="pre">web_fetch</span></code>, etc.) to research</p></li>
+</ol>
+<p>The parent agent continues running in the <code class="docutils literal notranslate"><span class="pre">main</span></code> lane. It can check
+on children, process other messages, or wait.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/process/command-queue.ts</span></code></p>
+</section>
+<section id="step-6-steering-a-sub-agent">
+<h2>Step 6: Steering a Sub-Agent<a class="headerlink" href="#step-6-steering-a-sub-agent" title="Link to this heading">¶</a></h2>
+<p>While the sub-agents are running, the user sends a follow-up message:
+“Also include Solid.js instead of Svelte.”</p>
+<p>The parent agent decides to steer the Svelte sub-agent:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;tool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;subagents&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;steer&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;runId&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;run-svelte-456&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Change focus: research Solid.js instead of Svelte&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Steering injects a new user message into the sub-agent’s active run via
+<code class="docutils literal notranslate"><span class="pre">queueEmbeddedPiMessage()</span></code>. The sub-agent sees this as a mid-conversation
+redirection and adjusts its work accordingly.</p>
+<p>Alternatively, the parent could kill the Svelte sub-agent and spawn a new
+one:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;tool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;subagents&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kill&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;runId&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;run-svelte-456&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/tools/subagents-tool.ts</span></code></p>
+</section>
+<section id="step-7-sub-agent-completion">
+<h2>Step 7: Sub-Agent Completion<a class="headerlink" href="#step-7-sub-agent-completion" title="Link to this heading">¶</a></h2>
+<p>As each sub-agent completes, the result flows back to the parent:</p>
+<ol class="arabic simple">
+<li><p>The sub-agent’s final response is captured as the <code class="docutils literal notranslate"><span class="pre">outcome</span></code></p></li>
+<li><p>The registry entry is updated to <code class="docutils literal notranslate"><span class="pre">status:</span> <span class="pre">&quot;completed&quot;</span></code></p></li>
+<li><p>A completion event is emitted on the Agent Events bus</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">subagent-announce</span></code> module notifies the parent</p></li>
+</ol>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Timeline:
+──────────────────────────────────────────────►
+t=0    Parent spawns 3 sub-agents
+t=5    User steers: &quot;Solid.js instead of Svelte&quot;
+t=8    React sub-agent completes → result announced
+t=10   Vue sub-agent completes → result announced
+t=12   Solid.js sub-agent completes → result announced
+t=13   Parent aggregates and responds
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/subagent-announce.ts</span></code></p>
+</section>
+<section id="step-8-result-aggregation">
+<h2>Step 8: Result Aggregation<a class="headerlink" href="#step-8-result-aggregation" title="Link to this heading">¶</a></h2>
+<p>The parent agent now has three research results. Since it’s an LLM-driven
+orchestrator, it doesn’t need explicit aggregation logic — it naturally
+synthesizes the results:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Parent&#39;s context now contains:
+├── Original user request
+├── React research result (from sub-agent 1)
+├── Vue.js research result (from sub-agent 2)
+├── Solid.js research result (from sub-agent 3)
+└── User&#39;s steering message (&quot;Solid.js instead of Svelte&quot;)
+</pre></div>
+</div>
+<p>The parent produces a comparative summary report and delivers it to the
+user through the channel.</p>
+</section>
+<section id="step-9-cleanup">
+<h2>Step 9: Cleanup<a class="headerlink" href="#step-9-cleanup" title="Link to this heading">¶</a></h2>
+<p>After the response is delivered:</p>
+<ol class="arabic simple">
+<li><p>Completed sub-agent entries remain in the registry for reference</p></li>
+<li><p>Sub-agent session transcripts are saved to
+<code class="docutils literal notranslate"><span class="pre">~/.openclaw/agents/&lt;agentId&gt;/sessions/</span></code></p></li>
+<li><p>Token usage from all sub-agents is tracked in the parent’s session</p></li>
+</ol>
+</section>
+<section id="event-flow-diagram">
+<h2>Event Flow Diagram<a class="headerlink" href="#event-flow-diagram" title="Link to this heading">¶</a></h2>
+<p>The complete event flow across all agents:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>User            Parent Agent         Sub-Agents        Events Bus
+ │                  │                    │                  │
+ │─── request ─────►│                    │                  │
+ │                  │                    │                  │
+ │                  │── spawn react ────►│                  │
+ │                  │── spawn vue ──────►│                  │
+ │                  │── spawn svelte ───►│    lifecycle:    │
+ │                  │                    │──── start ──────►│
+ │                  │                    │                  │
+ │                  │                    │    tool:         │
+ │                  │                    │──── web_search ─►│
+ │                  │                    │                  │
+ │─── &quot;use Solid&quot; ─►│                    │                  │
+ │                  │── steer svelte ───►│                  │
+ │                  │                    │                  │
+ │                  │◄── react result ──│    lifecycle:    │
+ │                  │◄── vue result ────│──── complete ───►│
+ │                  │◄── solid result ──│                  │
+ │                  │                    │                  │
+ │◄── summary ──────│                    │                  │
+</pre></div>
+</div>
+</section>
+<section id="key-concepts">
+<h2>Key Concepts<a class="headerlink" href="#key-concepts" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>No explicit planner</strong>: The LLM is the planner. It decides when to
+spawn sub-agents, how to distribute work, and how to aggregate results.</p></li>
+<li><p><strong>Session isolation</strong>: Each sub-agent has its own session with separate
+context, tools, and token tracking.</p></li>
+<li><p><strong>Depth limits prevent runaway</strong>: <code class="docutils literal notranslate"><span class="pre">DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</span> <span class="pre">=</span> <span class="pre">1</span></code>
+prevents sub-agents from spawning their own children by default.</p></li>
+<li><p><strong>Concurrent execution</strong>: Sub-agents run in parallel via the command
+lane queue, maximizing throughput.</p></li>
+<li><p><strong>Mid-flight steering</strong>: Running sub-agents can be redirected without
+killing and restarting them.</p></li>
+<li><p><strong>Graceful failure</strong>: If a sub-agent fails, the parent receives an error
+outcome and can retry or work with partial results.</p></li>
+</ol>
+</section>
+<section id="key-source-files">
+<h2>Key Source Files<a class="headerlink" href="#key-source-files" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/subagent-spawn.ts</span></code> — Spawning mechanics</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/subagent-registry.ts</span></code> — Running child tracking</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/subagent-announce.ts</span></code> — Result announcement</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/subagent-depth.ts</span></code> — Depth limit enforcement</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/tools/subagents-tool.ts</span></code> — Agent-facing management tool</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/config/agent-limits.ts</span></code> — Default limits</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/process/command-queue.ts</span></code> — Lane-based concurrency</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/infra/agent-events.ts</span></code> — Event distribution</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Tutorials</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="tracing-a-message.html">Tracing a Message</a></li>
+<li class="toctree-l2"><a class="reference internal" href="adding-a-skill.html">Adding a Skill</a></li>
+<li class="toctree-l2"><a class="reference internal" href="understanding-memory.html">Understanding Memory</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Multi-Agent Workflow</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scenario">Scenario</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-1-parent-receives-the-request">Step 1: Parent Receives the Request</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-2-spawning-sub-agents">Step 2: Spawning Sub-Agents</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-3-depth-and-concurrency-limits">Step 3: Depth and Concurrency Limits</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-4-sub-agent-registration">Step 4: Sub-Agent Registration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-5-concurrent-execution">Step 5: Concurrent Execution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-6-steering-a-sub-agent">Step 6: Steering a Sub-Agent</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-7-sub-agent-completion">Step 7: Sub-Agent Completion</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-8-result-aggregation">Step 8: Result Aggregation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-9-cleanup">Step 9: Cleanup</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#event-flow-diagram">Event Flow Diagram</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#key-concepts">Key Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#key-source-files">Key Source Files</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Tutorials</a><ul>
+      <li>Previous: <a href="understanding-memory.html" title="previous chapter">Understanding Memory</a></li>
+      <li>Next: <a href="../glossary.html" title="next chapter">Glossary</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/tutorials/multi-agent-workflow.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

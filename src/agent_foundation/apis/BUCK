@@ -1,0 +1,10 @@
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+oncall("fill in oncall here @nocommit")
+
+python_library(
+    name = "http_request_llm",
+    srcs = ["http_request_llm.py"],
+    labels = ["autodeps2_generated"],
+    deps = ["fbsource//third-party/pypi/requests:requests"],
+)

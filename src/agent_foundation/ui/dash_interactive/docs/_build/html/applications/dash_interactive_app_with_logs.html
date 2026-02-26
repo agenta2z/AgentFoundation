@@ -1,0 +1,1672 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DashInteractiveAppWithLogs &mdash; Dash Interactive 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../_static/graphviz.css?v=4ae1632d" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=ae12103d" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="QueueBasedDashInteractiveApp" href="queue_based_app.html" />
+    <link rel="prev" title="DashInteractiveApp" href="dash_interactive_app.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Dash Interactive
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick Start</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#basic-usage">Basic Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#simple-echo-chat">1. Simple Echo Chat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#chat-with-custom-logic">2. Chat with Custom Logic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#chat-with-log-debugging">3. Chat with Log Debugging</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#understanding-the-interface">Understanding the Interface</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#main-layout">Main Layout</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#keyboard-shortcuts">Keyboard Shortcuts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#session-management">Session Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#next-steps">Next Steps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../quickstart.html#common-issues">Common Issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#design-philosophy">Design Philosophy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#high-level-architecture">High-Level Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#directory-structure">Directory Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#component-hierarchy">Component Hierarchy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#class-inheritance">Class Inheritance</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#component-architecture">Component Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#basecomponent-pattern">BaseComponent Pattern</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#state-management">State Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#dash-store-components">Dash Store Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#session-management">Session Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#callback-architecture">Callback Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#callback-registration">Callback Registration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#callback-patterns">Callback Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#agent-integration">Agent Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#communication-patterns">Communication Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#log-collection-architecture">Log Collection Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#logcollector-design">LogCollector Design</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#graph-structure">Graph Structure</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#extension-points">Extension Points</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#creating-custom-components">Creating Custom Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#adding-custom-tabs">Adding Custom Tabs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#creating-custom-applications">Creating Custom Applications</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#optimization-strategies">Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../architecture.html#best-practices">Best Practices</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../styling.html">Styling</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#color-scheme">Color Scheme</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#primary-colors">Primary Colors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#text-colors">Text Colors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#accent-colors">Accent Colors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#log-level-colors">Log Level Colors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#typography">Typography</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#font-stack">Font Stack</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#font-sizes">Font Sizes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#component-styling">Component Styling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#sidebar-chathistorylist">Sidebar (ChatHistoryList)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#chat-window-chatwindow">Chat Window (ChatWindow)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#buttons">Buttons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#log-graph-loggraphvisualization">Log Graph (LogGraphVisualization)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#log-details-logdetailspanel">Log Details (LogDetailsPanel)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#monitor-panel">Monitor Panel</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#animations">Animations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#typing-indicator">Typing Indicator</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#transitions">Transitions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#customizing-styles">Customizing Styles</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#overriding-default-styles">Overriding Default Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#creating-theme-variants">Creating Theme Variants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#css-variables-future">CSS Variables (Future)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#responsive-design">Responsive Design</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#accessibility">Accessibility</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#color-contrast">Color Contrast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../styling.html#interactive-states">Interactive States</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../styling.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Components</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../components/index.html">Components</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#component-list">Component List</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#component-hierarchy">Component Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#component-patterns">Component Patterns</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/index.html#id-generation">ID Generation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/index.html#style-merging">Style Merging</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/index.html#callback-interface">Callback Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#contents">Contents</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html">BaseComponent</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#class-definition">Class Definition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#abstract-methods">Abstract Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#helper-methods">Helper Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#creating-custom-components">Creating Custom Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/base.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html">ChatHistoryList</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#class-definition">Class Definition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#session-data-structure">Session Data Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#methods">Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#styling">Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#usage-examples">Usage Examples</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#integration-with-application">Integration with Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_history.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html">ChatWindow</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#class-definition">Class Definition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#message-data-structure">Message Data Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#methods">Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#styling">Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#usage-examples">Usage Examples</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#typing-indicator">Typing Indicator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#welcome-screen">Welcome Screen</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#integration-with-application">Integration with Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/chat_window.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html">TabbedPanel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#class-definition">Class Definition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#custom-tab-structure">Custom Tab Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#child-components">Child Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#methods">Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#resizable-split-pane">Resizable Split Pane</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#floating-monitor-panel">Floating Monitor Panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#usage-examples">Usage Examples</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#styling">Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#integration">Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/tabbed_panel.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html">LogGraphVisualization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#class-definition">Class Definition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#graph-data-structure">Graph Data Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#methods">Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#rendering-modes">Rendering Modes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#node-types">Node Types</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#usage-examples">Usage Examples</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#cytoscape-stylesheet">Cytoscape Stylesheet</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_graph.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html">LogDetailsPanel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#class-reference">Class Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#log-entry-format">Log Entry Format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#log-level-styling">Log Level Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#pagination-system">Pagination System</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#caching-system">Caching System</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#expandable-content">Expandable Content</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#integration-with-loggraphvisualization">Integration with LogGraphVisualization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#component-ids">Component IDs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#styling-customization">Styling Customization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#complete-example">Complete Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/index.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/base.html">BaseComponent</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#class-definition">Class Definition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#constructor">Constructor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#attributes">Attributes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#abstract-methods">Abstract Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#get-default-style">_get_default_style</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#layout">layout</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#get-callback-inputs">get_callback_inputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#get-callback-outputs">get_callback_outputs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#helper-methods">Helper Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#get-id">get_id</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#creating-custom-components">Creating Custom Components</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/base.html#using-your-custom-component">Using Your Custom Component</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/base.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/chat_history.html">ChatHistoryList</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#class-definition">Class Definition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#constructor">Constructor</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#session-data-structure">Session Data Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#layout-structure">Layout Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#generated-element-ids">Generated Element IDs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#methods">Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#layout">layout()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#update-sessions">update_sessions()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#get-callback-inputs">get_callback_inputs()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#get-callback-outputs">get_callback_outputs()</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#styling">Styling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#default-styles">Default Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#session-item-styles">Session Item Styles</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#handling-session-selection">Handling Session Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#handling-new-chat">Handling New Chat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#custom-styling">Custom Styling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_history.html#without-settings-section">Without Settings Section</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#integration-with-application">Integration with Application</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_history.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/chat_window.html">ChatWindow</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#class-definition">Class Definition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#constructor">Constructor</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#message-data-structure">Message Data Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#layout-structure">Layout Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#generated-element-ids">Generated Element IDs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#methods">Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#layout">layout()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#update-messages">update_messages()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#add-message">add_message()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#get-callback-inputs">get_callback_inputs()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#get-callback-outputs">get_callback_outputs()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#get-callback-states">get_callback_states()</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#styling">Styling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#default-styles">Default Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#message-styles">Message Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#input-area-styles">Input Area Styles</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#with-initial-messages">With Initial Messages</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#handling-message-sending">Handling Message Sending</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#updating-display-from-store">Updating Display from Store</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/chat_window.html#showing-typing-indicator">Showing Typing Indicator</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#typing-indicator">Typing Indicator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#welcome-screen">Welcome Screen</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#integration-with-application">Integration with Application</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/chat_window.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/tabbed_panel.html">TabbedPanel</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#class-definition">Class Definition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#constructor">Constructor</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#custom-tab-structure">Custom Tab Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#layout-structure">Layout Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#generated-element-ids">Generated Element IDs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#child-components">Child Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#methods">Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#layout">layout()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#get-callback-inputs">get_callback_inputs()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#get-callback-outputs">get_callback_outputs()</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#resizable-split-pane">Resizable Split Pane</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#floating-monitor-panel">Floating Monitor Panel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#with-custom-monitor-tab">With Custom Monitor Tab</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#with-custom-main-tab">With Custom Main Tab</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#tab-switching-callback">Tab Switching Callback</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#accessing-child-components">Accessing Child Components</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#styling">Styling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#default-styles">Default Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#tab-button-styles">Tab Button Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/tabbed_panel.html#resize-divider-style">Resize Divider Style</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#integration">Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/tabbed_panel.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/log_graph.html">LogGraphVisualization</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#class-definition">Class Definition</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#constructor">Constructor</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#graph-data-structure">Graph Data Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#layout-structure">Layout Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#generated-element-ids">Generated Element IDs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#methods">Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#layout">layout()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#create-figure">create_figure()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#create-figure-from-graph">create_figure_from_graph()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#update-graph">update_graph()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#convert-to-cytoscape-elements">convert_to_cytoscape_elements()</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#static-methods">Static Methods</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#rendering-modes">Rendering Modes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#plotly-mode-default">Plotly Mode (Default)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#cytoscape-mode">Cytoscape Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#node-types">Node Types</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#normal-nodes">Normal Nodes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#exit-nodes">Exit Nodes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#from-log-collector">From Log Collector</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#updating-graph-via-callback">Updating Graph via Callback</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#handling-node-clicks">Handling Node Clicks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_graph.html#toggling-rendering-mode">Toggling Rendering Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#cytoscape-stylesheet">Cytoscape Stylesheet</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_graph.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../components/log_details.html">LogDetailsPanel</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#class-reference">Class Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#LogDetailsPanel"><code class="docutils literal notranslate"><span class="pre">LogDetailsPanel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#LogDetailsPanel.page_size"><code class="docutils literal notranslate"><span class="pre">LogDetailsPanel.page_size</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#LogDetailsPanel.current_page"><code class="docutils literal notranslate"><span class="pre">LogDetailsPanel.current_page</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#LogDetailsPanel.show_all"><code class="docutils literal notranslate"><span class="pre">LogDetailsPanel.show_all</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#basic-usage">Basic Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#creating-a-log-details-panel">Creating a Log Details Panel</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#updating-logs">Updating Logs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#log-entry-format">Log Entry Format</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#log-level-styling">Log Level Styling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#layout-structure">Layout Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#pagination-system">Pagination System</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#default-behavior">Default Behavior</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#pagination-methods">Pagination Methods</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#render_pagination_controls"><code class="docutils literal notranslate"><span class="pre">_render_pagination_controls()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#get_or_restore_pagination_state"><code class="docutils literal notranslate"><span class="pre">_get_or_restore_pagination_state()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/log_details.html#save_pagination_state"><code class="docutils literal notranslate"><span class="pre">_save_pagination_state()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#caching-system">Caching System</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#cache-key-structure">Cache Key Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#cache-management">Cache Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#expandable-content">Expandable Content</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#log-content-expansion">Log Content Expansion</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#metadata-expansion">Metadata Expansion</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#integration-with-loggraphvisualization">Integration with LogGraphVisualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#component-ids">Component IDs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#styling-customization">Styling Customization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#default-styles">Default Styles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../components/log_details.html#custom-styling">Custom Styling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#complete-example">Complete Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../components/log_details.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Applications</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Applications</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#choosing-an-application">Choosing an Application</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="index.html#dashinteractiveapp">DashInteractiveApp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="index.html#dashinteractiveappwithlogs">DashInteractiveAppWithLogs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="index.html#queuebaseddashinteractiveapp">QueueBasedDashInteractiveApp</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#application-class-hierarchy">Application Class Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#documentation">Documentation</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html">DashInteractiveApp</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#class-reference">Class Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#quick-start">Quick Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#message-handler-interface">Message Handler Interface</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#application-layout">Application Layout</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#session-management">Session Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#callbacks">Callbacks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#customization">Customization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#running-the-application">Running the Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#complete-example">Complete Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#methods-reference">Methods Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">DashInteractiveAppWithLogs</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#class-reference">Class Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#quick-start">Quick Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#application-layout">Application Layout</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#message-handler-signatures">Message Handler Signatures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#agent-integration">Agent Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#data-stores">Data Stores</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#interval-components">Interval Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#log-data-format">Log Data Format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#custom-tabs">Custom Tabs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#keyboard-shortcuts">Keyboard Shortcuts</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#split-pane-resizing">Split Pane Resizing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#callbacks-reference">Callbacks Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#methods-reference">Methods Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#complete-example">Complete Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html">QueueBasedDashInteractiveApp</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#class-reference">Class Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#quick-start">Quick Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#response-checker-function">Response Checker Function</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#waiting-message-behavior">Waiting Message Behavior</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#polling-behavior">Polling Behavior</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#architecture-integration">Architecture Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#complete-example">Complete Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#methods-reference">Methods Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="dash_interactive_app.html">DashInteractiveApp</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#class-reference">Class Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.app"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.app</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.chat_history"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.chat_history</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.chat_window"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.chat_window</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.sessions"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.sessions</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.current_session_id"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.current_session_id</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="dash_interactive_app.html#DashInteractiveApp.session_messages"><code class="docutils literal notranslate"><span class="pre">DashInteractiveApp.session_messages</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#quick-start">Quick Start</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#with-custom-handler">With Custom Handler</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#message-handler-interface">Message Handler Interface</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#simple-handler">Simple Handler</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#handler-with-external-api">Handler with External API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#handler-with-state">Handler with State</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#changing-handler-at-runtime">Changing Handler at Runtime</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#application-layout">Application Layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#session-management">Session Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#session-data-structure">Session Data Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#session-lifecycle">Session Lifecycle</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#data-stores">Data Stores</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#message-format">Message Format</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#callbacks">Callbacks</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#session-callbacks">Session Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#message-callbacks">Message Callbacks</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#customization">Customization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#custom-styling">Custom Styling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#extended-configuration">Extended Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#running-the-application">Running the Application</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#development-mode">Development Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#production-mode">Production Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#with-custom-host-port">With Custom Host/Port</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#complete-example">Complete Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#methods-reference">Methods Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#run"><code class="docutils literal notranslate"><span class="pre">run()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#set_message_handler"><code class="docutils literal notranslate"><span class="pre">set_message_handler()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#create_layout"><code class="docutils literal notranslate"><span class="pre">_create_layout()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#register_callbacks"><code class="docutils literal notranslate"><span class="pre">_register_callbacks()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#register_session_callbacks"><code class="docutils literal notranslate"><span class="pre">_register_session_callbacks()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#register_message_callbacks"><code class="docutils literal notranslate"><span class="pre">_register_message_callbacks()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="dash_interactive_app.html#default_message_handler"><code class="docutils literal notranslate"><span class="pre">_default_message_handler()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="dash_interactive_app.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">DashInteractiveAppWithLogs</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#class-reference">Class Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#DashInteractiveAppWithLogs"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.tabbed_panel"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.tabbed_panel</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.log_collector"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.log_collector</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.session_agents"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.session_agents</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.session_threads"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.session_threads</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.session_interactives"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.session_interactives</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#DashInteractiveAppWithLogs.agent_factory"><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs.agent_factory</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#quick-start">Quick Start</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#with-log-visualization">With Log Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#with-agent-factory">With Agent Factory</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#application-layout">Application Layout</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#log-debugging-tab-layout">Log Debugging Tab Layout</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#message-handler-signatures">Message Handler Signatures</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#single-parameter">Single Parameter</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#two-parameters">Two Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#three-parameters">Three Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#agent-integration">Agent Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#using-agent-factory">Using Agent Factory</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#web-agent-service">Web Agent Service</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#data-stores">Data Stores</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#interval-components">Interval Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#log-data-format">Log Data Format</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#custom-tabs">Custom Tabs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#monitor-panel-tabs">Monitor Panel Tabs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#main-panel-tabs">Main Panel Tabs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#keyboard-shortcuts">Keyboard Shortcuts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#split-pane-resizing">Split Pane Resizing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#callbacks-reference">Callbacks Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#session-callbacks">Session Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#message-callbacks">Message Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#tab-callbacks">Tab Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#log-visualization-callbacks">Log Visualization Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#pagination-callbacks">Pagination Callbacks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#monitor-panel-callbacks">Monitor Panel Callbacks</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#methods-reference">Methods Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#set_agent_factory"><code class="docutils literal notranslate"><span class="pre">set_agent_factory()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#add_monitor_tab"><code class="docutils literal notranslate"><span class="pre">add_monitor_tab()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#start_agent_for_session"><code class="docutils literal notranslate"><span class="pre">_start_agent_for_session()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#run_agent_in_background"><code class="docutils literal notranslate"><span class="pre">_run_agent_in_background()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#register_polling_callback"><code class="docutils literal notranslate"><span class="pre">_register_polling_callback()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#complete-example">Complete Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="queue_based_app.html">QueueBasedDashInteractiveApp</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#class-reference">Class Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#QueueBasedDashInteractiveApp"><code class="docutils literal notranslate"><span class="pre">QueueBasedDashInteractiveApp</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#QueueBasedDashInteractiveApp.response_checker"><code class="docutils literal notranslate"><span class="pre">QueueBasedDashInteractiveApp.response_checker</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="queue_based_app.html#QueueBasedDashInteractiveApp.special_waiting_message"><code class="docutils literal notranslate"><span class="pre">QueueBasedDashInteractiveApp.special_waiting_message</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#quick-start">Quick Start</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#basic-usage">Basic Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#response-checker-function">Response Checker Function</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#signature">Signature</a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#example-implementations">Example Implementations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#setting-response-checker-at-runtime">Setting Response Checker at Runtime</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#waiting-message-behavior">Waiting Message Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#how-it-works">How It Works</a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#custom-waiting-message">Custom Waiting Message</a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#message-handler-with-waiting-indicator">Message Handler with Waiting Indicator</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#polling-behavior">Polling Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#response-routing">Response Routing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#architecture-integration">Architecture Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#typical-distributed-setup">Typical Distributed Setup</a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#multi-process-example">Multi-Process Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#complete-example">Complete Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#methods-reference">Methods Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#set_response_checker"><code class="docutils literal notranslate"><span class="pre">set_response_checker()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="queue_based_app.html#register_polling_callback"><code class="docutils literal notranslate"><span class="pre">_register_polling_callback()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="queue_based_app.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Utilities</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../utilities/index.html">Utilities</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/index.html#documentation">Documentation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html">LogCollector</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#class-reference">Class Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#quick-start">Quick Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#log-entry-format">Log Entry Format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#graph-building">Graph Building</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#methods-reference">Methods Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#integration-examples">Integration Examples</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#graph-visualization-integration">Graph Visualization Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../utilities/log_collector.html">LogCollector</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#class-reference">Class Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#LogCollector"><code class="docutils literal notranslate"><span class="pre">LogCollector</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#LogCollector.logs"><code class="docutils literal notranslate"><span class="pre">LogCollector.logs</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#LogCollector.log_groups"><code class="docutils literal notranslate"><span class="pre">LogCollector.log_groups</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#LogCollector.graph_nodes"><code class="docutils literal notranslate"><span class="pre">LogCollector.graph_nodes</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#LogCollector.graph_edges"><code class="docutils literal notranslate"><span class="pre">LogCollector.graph_edges</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#quick-start">Quick Start</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#callable-interface">Callable Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#log-entry-format">Log Entry Format</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#required-fields">Required Fields</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#optional-fields">Optional Fields</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#example-log-entry">Example Log Entry</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#graph-building">Graph Building</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#how-graph-structure-is-built">How Graph Structure is Built</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#graph-structure-output">Graph Structure Output</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#node-types">Node Types</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#methods-reference">Methods Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#collecting-logs">Collecting Logs</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#call__"><code class="docutils literal notranslate"><span class="pre">__call__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#clear"><code class="docutils literal notranslate"><span class="pre">clear()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#querying-data">Querying Data</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#get_graph_structure"><code class="docutils literal notranslate"><span class="pre">get_graph_structure()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#get_logs_for_node"><code class="docutils literal notranslate"><span class="pre">get_logs_for_node()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#get_all_node_ids"><code class="docutils literal notranslate"><span class="pre">get_all_node_ids()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#get_log_graph_statistics"><code class="docutils literal notranslate"><span class="pre">get_log_graph_statistics()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#serialization">Serialization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#to_dict"><code class="docutils literal notranslate"><span class="pre">to_dict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#from_dict"><code class="docutils literal notranslate"><span class="pre">from_dict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/log_collector.html#from_json_logs"><code class="docutils literal notranslate"><span class="pre">from_json_logs()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#integration-examples">Integration Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#with-dashinteractiveappwithlogs">With DashInteractiveAppWithLogs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#loading-logs-from-files">Loading Logs from Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#saving-and-restoring">Saving and Restoring</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/log_collector.html#statistics-example">Statistics Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#graph-visualization-integration">Graph Visualization Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../utilities/log_collector.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples &amp; Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/index.html#getting-started">Getting Started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/index.html#documentation">Documentation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../examples/basic_chat.html">Basic Chat Example</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#simple-echo-bot">Simple Echo Bot</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#faq-bot">FAQ Bot</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#stateful-chat-bot">Stateful Chat Bot</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#external-api-integration">External API Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#calculator-bot">Calculator Bot</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#multiple-sessions-demo">Multiple Sessions Demo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#custom-configuration">Custom Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/basic_chat.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../examples/agent_integration.html">Agent Integration Example</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#agent-factory-pattern">Agent Factory Pattern</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#queue-based-agent-service">Queue-Based Agent Service</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#multi-step-agent-with-tool-use">Multi-Step Agent with Tool Use</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#streaming-responses">Streaming Responses</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#langchain-integration">LangChain Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/agent_integration.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../examples/log_debugging.html">Log Debugging Example</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#basic-log-visualization">Basic Log Visualization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#hierarchical-agent-logging">Hierarchical Agent Logging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#loading-logs-from-files">Loading Logs from Files</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#real-time-log-updates">Real-Time Log Updates</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#custom-log-styling">Custom Log Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/log_debugging.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../examples/custom_components.html">Custom Components Example</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#creating-a-custom-component">Creating a Custom Component</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#custom-monitor-tab">Custom Monitor Tab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#custom-main-tab">Custom Main Tab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#custom-chat-message-styling">Custom Chat Message Styling</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#extending-the-application">Extending the Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#custom-css-injection">Custom CSS Injection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/custom_components.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/basic_chat.html">Basic Chat Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#simple-echo-bot">Simple Echo Bot</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../examples/basic_chat.html#running-the-example">Running the Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#faq-bot">FAQ Bot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#stateful-chat-bot">Stateful Chat Bot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#external-api-integration">External API Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#calculator-bot">Calculator Bot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#multiple-sessions-demo">Multiple Sessions Demo</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#custom-configuration">Custom Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/basic_chat.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/agent_integration.html">Agent Integration Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#agent-factory-pattern">Agent Factory Pattern</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#queue-based-agent-service">Queue-Based Agent Service</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#multi-step-agent-with-tool-use">Multi-Step Agent with Tool Use</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#streaming-responses">Streaming Responses</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#langchain-integration">LangChain Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/agent_integration.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/log_debugging.html">Log Debugging Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#basic-log-visualization">Basic Log Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#hierarchical-agent-logging">Hierarchical Agent Logging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#loading-logs-from-files">Loading Logs from Files</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#real-time-log-updates">Real-Time Log Updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#custom-log-styling">Custom Log Styling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/log_debugging.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/custom_components.html">Custom Components Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#creating-a-custom-component">Creating a Custom Component</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#custom-monitor-tab">Custom Monitor Tab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#custom-main-tab">Custom Main Tab</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#custom-chat-message-styling">Custom Chat Message Styling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#extending-the-application">Extending the Application</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#custom-css-injection">Custom CSS Injection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/custom_components.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../api.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="../api.html#module-overview">Module Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#quick-reference">Quick Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#applications">Applications</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#components">Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#utilities">Utilities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#main-entry-points">Main Entry Points</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#importing">Importing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#application-classes">Application Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#dashinteractiveapp">DashInteractiveApp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#dashinteractiveappwithlogs">DashInteractiveAppWithLogs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#queuebaseddashinteractiveapp">QueueBasedDashInteractiveApp</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#component-classes">Component Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#basecomponent">BaseComponent</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#chathistorylist">ChatHistoryList</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#chatwindow">ChatWindow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#tabbedpanel">TabbedPanel</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#loggraphvisualization">LogGraphVisualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#logdetailspanel">LogDetailsPanel</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#utility-classes">Utility Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#logcollector">LogCollector</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#data-structures">Data Structures</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#session-object">Session Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#message-object">Message Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#log-entry-object">Log Entry Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#graph-structure-object">Graph Structure Object</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#custom-tab-object">Custom Tab Object</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api.html#constants">Constants</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#color-palette">Color Palette</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api.html#log-level-colors">Log Level Colors</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="reference internal" href="../api.html#detailed-documentation">Detailed Documentation</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="index.html">Applications</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="index.html#choosing-an-application">Choosing an Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="index.html#application-class-hierarchy">Application Class Hierarchy</a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="index.html#documentation">Documentation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../components/index.html">Components</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#component-list">Component List</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#component-hierarchy">Component Hierarchy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#component-patterns">Component Patterns</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#contents">Contents</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../components/index.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../utilities/index.html">Utilities</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/index.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../utilities/index.html#documentation">Documentation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../examples/index.html">Examples</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../examples/index.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/index.html#getting-started">Getting Started</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../examples/index.html#documentation">Documentation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Dash Interactive</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Applications</a></li>
+      <li class="breadcrumb-item active">DashInteractiveAppWithLogs</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/applications/dash_interactive_app_with_logs.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="dashinteractiveappwithlogs">
+<h1>DashInteractiveAppWithLogs<a class="headerlink" href="#dashinteractiveappwithlogs" title="Link to this heading"></a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs</span></code> extends the base application with log visualization
+and debugging capabilities, featuring a tabbed interface for chat and log debugging.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On This Page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id1">Overview</a></p></li>
+<li><p><a class="reference internal" href="#class-reference" id="id2">Class Reference</a></p></li>
+<li><p><a class="reference internal" href="#quick-start" id="id3">Quick Start</a></p>
+<ul>
+<li><p><a class="reference internal" href="#basic-usage" id="id4">Basic Usage</a></p></li>
+<li><p><a class="reference internal" href="#with-log-visualization" id="id5">With Log Visualization</a></p></li>
+<li><p><a class="reference internal" href="#with-agent-factory" id="id6">With Agent Factory</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#application-layout" id="id7">Application Layout</a></p>
+<ul>
+<li><p><a class="reference internal" href="#log-debugging-tab-layout" id="id8">Log Debugging Tab Layout</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#message-handler-signatures" id="id9">Message Handler Signatures</a></p>
+<ul>
+<li><p><a class="reference internal" href="#single-parameter" id="id10">Single Parameter</a></p></li>
+<li><p><a class="reference internal" href="#two-parameters" id="id11">Two Parameters</a></p></li>
+<li><p><a class="reference internal" href="#three-parameters" id="id12">Three Parameters</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#agent-integration" id="id13">Agent Integration</a></p>
+<ul>
+<li><p><a class="reference internal" href="#using-agent-factory" id="id14">Using Agent Factory</a></p></li>
+<li><p><a class="reference internal" href="#web-agent-service" id="id15">Web Agent Service</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#data-stores" id="id16">Data Stores</a></p></li>
+<li><p><a class="reference internal" href="#interval-components" id="id17">Interval Components</a></p></li>
+<li><p><a class="reference internal" href="#log-data-format" id="id18">Log Data Format</a></p></li>
+<li><p><a class="reference internal" href="#custom-tabs" id="id19">Custom Tabs</a></p>
+<ul>
+<li><p><a class="reference internal" href="#monitor-panel-tabs" id="id20">Monitor Panel Tabs</a></p></li>
+<li><p><a class="reference internal" href="#main-panel-tabs" id="id21">Main Panel Tabs</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#keyboard-shortcuts" id="id22">Keyboard Shortcuts</a></p></li>
+<li><p><a class="reference internal" href="#split-pane-resizing" id="id23">Split Pane Resizing</a></p></li>
+<li><p><a class="reference internal" href="#callbacks-reference" id="id24">Callbacks Reference</a></p>
+<ul>
+<li><p><a class="reference internal" href="#session-callbacks" id="id25">Session Callbacks</a></p></li>
+<li><p><a class="reference internal" href="#message-callbacks" id="id26">Message Callbacks</a></p></li>
+<li><p><a class="reference internal" href="#tab-callbacks" id="id27">Tab Callbacks</a></p></li>
+<li><p><a class="reference internal" href="#log-visualization-callbacks" id="id28">Log Visualization Callbacks</a></p></li>
+<li><p><a class="reference internal" href="#pagination-callbacks" id="id29">Pagination Callbacks</a></p></li>
+<li><p><a class="reference internal" href="#monitor-panel-callbacks" id="id30">Monitor Panel Callbacks</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#methods-reference" id="id31">Methods Reference</a></p></li>
+<li><p><a class="reference internal" href="#complete-example" id="id32">Complete Example</a></p></li>
+<li><p><a class="reference internal" href="#see-also" id="id33">See Also</a></p></li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">DashInteractiveAppWithLogs</span></code> provides:</p>
+<ul class="simple">
+<li><p>All features from <a class="reference internal" href="dash_interactive_app.html"><span class="doc">DashInteractiveApp</span></a></p></li>
+<li><p>Tabbed interface (Chat Interaction + Log Debugging)</p></li>
+<li><p>Real-time log graph visualization (Plotly and Cytoscape)</p></li>
+<li><p>Log details panel with pagination</p></li>
+<li><p>Response monitoring panel</p></li>
+<li><p>Agent thread management for background processing</p></li>
+<li><p>Web agent service integration via queue service</p></li>
+</ul>
+</section>
+<section id="class-reference">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Class Reference</a><a class="headerlink" href="#class-reference" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">DashInteractiveAppWithLogs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Interactive</span> <span class="pre">Debugger</span> <span class="pre">with</span> <span class="pre">Logs'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8050</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">message_handler</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">queue_service</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">custom_monitor_tabs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">custom_main_tabs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#DashInteractiveAppWithLogs" title="Link to this definition"></a></dt>
+<dd><p>Extended Dash application with chat interface and log debugging.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>title</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Application title</p></li>
+<li><p><strong>port</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Port number for the server</p></li>
+<li><p><strong>debug</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Enable debug mode with hot reloading</p></li>
+<li><p><strong>message_handler</strong> (<em>callable</em>) – Custom message handler function</p></li>
+<li><p><strong>queue_service</strong> – Optional <code class="docutils literal notranslate"><span class="pre">StorageBasedQueueService</span></code> for web agent integration</p></li>
+<li><p><strong>custom_monitor_tabs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a>) – Optional list of custom monitor tab dicts</p></li>
+<li><p><strong>custom_main_tabs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a>) – Optional list of custom main tab dicts</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Additional Attributes:</strong></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.tabbed_panel">
+<span class="sig-name descname"><span class="pre">tabbed_panel</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">TabbedPanel</span></em><a class="headerlink" href="#DashInteractiveAppWithLogs.tabbed_panel" title="Link to this definition"></a></dt>
+<dd><p>The main tabbed interface component.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.log_collector">
+<span class="sig-name descname"><span class="pre">log_collector</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="../utilities/log_collector.html#LogCollector" title="LogCollector"><span class="pre">LogCollector</span></a></em><a class="headerlink" href="#DashInteractiveAppWithLogs.log_collector" title="Link to this definition"></a></dt>
+<dd><p>Current log collector instance for capturing execution logs.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.session_agents">
+<span class="sig-name descname"><span class="pre">session_agents</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Agent</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#DashInteractiveAppWithLogs.session_agents" title="Link to this definition"></a></dt>
+<dd><p>Mapping of session IDs to Agent instances.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.session_threads">
+<span class="sig-name descname"><span class="pre">session_threads</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Thread</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#DashInteractiveAppWithLogs.session_threads" title="Link to this definition"></a></dt>
+<dd><p>Mapping of session IDs to background threads.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.session_interactives">
+<span class="sig-name descname"><span class="pre">session_interactives</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">QueueInteractive</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#DashInteractiveAppWithLogs.session_interactives" title="Link to this definition"></a></dt>
+<dd><p>Mapping of session IDs to QueueInteractive instances.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="DashInteractiveAppWithLogs.agent_factory">
+<span class="sig-name descname"><span class="pre">agent_factory</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Callable</span></em><a class="headerlink" href="#DashInteractiveAppWithLogs.agent_factory" title="Link to this definition"></a></dt>
+<dd><p>Factory function for creating new agent instances.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="quick-start">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Quick Start</a><a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<section id="basic-usage">
+<h3><a class="toc-backref" href="#id4" role="doc-backlink">Basic Usage</a><a class="headerlink" href="#basic-usage" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
+    <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Agent Debugger&quot;</span><span class="p">,</span>
+    <span class="n">port</span><span class="o">=</span><span class="mi">8050</span>
+<span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="with-log-visualization">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">With Log Visualization</a><a class="headerlink" href="#with-log-visualization" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">handler_with_logs</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">log_collector</span> <span class="o">=</span> <span class="n">LogCollector</span><span class="p">()</span>
+
+    <span class="c1"># Start a log group</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_start</span><span class="p">(</span><span class="s2">&quot;agent&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">})</span>
+
+    <span class="c1"># Add logs during execution</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s2">&quot;llm&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;prompt&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">},</span> <span class="s2">&quot;LLM Call&quot;</span><span class="p">)</span>
+
+    <span class="c1"># End the group</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_end</span><span class="p">(</span><span class="s2">&quot;agent&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="s2">&quot;Processed your message!&quot;</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
+    <span class="n">message_handler</span><span class="o">=</span><span class="n">handler_with_logs</span>
+<span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="with-agent-factory">
+<h3><a class="toc-backref" href="#id6" role="doc-backlink">With Agent Factory</a><a class="headerlink" href="#with-agent-factory" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">create_agent</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Factory function that creates a configured agent.&quot;&quot;&quot;</span>
+    <span class="n">agent</span> <span class="o">=</span> <span class="n">MyAgent</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">agent_config</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">agent</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;Agent Chat&quot;</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">set_agent_factory</span><span class="p">(</span><span class="n">create_agent</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="application-layout">
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">Application Layout</a><a class="headerlink" href="#application-layout" title="Link to this heading"></a></h2>
+<p>The application extends the base layout with a tabbed interface:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌────────────────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  ┌───────────────┐  ┌────────────────────────────────────────────────┐│
+│  │               │  │  [Chat Interaction]  [Log Debugging]           ││
+│  │ ChatHistoryList│  │  ┌────────────────────────────────────────────┐││
+│  │               │  │  │                                            │││
+│  │ [+ New Chat]  │  │  │         Tab Content Area                   │││
+│  │               │  │  │                                            │││
+│  │ Session 1     │  │  │   (ChatWindow or Log Debug Panels)         │││
+│  │ Session 2     │  │  │                                            │││
+│  │               │  │  └────────────────────────────────────────────┘││
+│  │               │  └────────────────────────────────────────────────┘│
+│  └───────────────┘                                                    │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+<section id="log-debugging-tab-layout">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Log Debugging Tab Layout</a><a class="headerlink" href="#log-debugging-tab-layout" title="Link to this heading"></a></h3>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌───────────────────────────────────────────────────────────────────────┐
+│  [Plotly ▾] [Label: name ▾]                                           │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │                                                                  │ │
+│  │              Log Graph Visualization                             │ │
+│  │                     (65%)                                        │ │
+│  │                                                                  │ │
+│  ├──────────────────────── Resize Handle ──────────────────────────┤ │
+│  │                                                                  │ │
+│  │              Log Details Panel                                   │ │
+│  │                     (35%)                                        │ │
+│  │  [Load More]  [Load All]                                        │ │
+│  │                                                                  │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+│                                                                       │
+│  ┌──────────────────────┐                                            │
+│  │   Monitor Panel      │ (Draggable)                                │
+│  │   [Responses]        │                                            │
+│  │   Response #1        │                                            │
+│  │   Response #2        │                                            │
+│  └──────────────────────┘                                            │
+└───────────────────────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+</section>
+<section id="message-handler-signatures">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Message Handler Signatures</a><a class="headerlink" href="#message-handler-signatures" title="Link to this heading"></a></h2>
+<p>The application supports multiple handler signatures:</p>
+<section id="single-parameter">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Single Parameter</a><a class="headerlink" href="#single-parameter" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Response to: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="two-parameters">
+<h3><a class="toc-backref" href="#id11" role="doc-backlink">Two Parameters</a><a class="headerlink" href="#two-parameters" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="three-parameters">
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">Three Parameters</a><a class="headerlink" href="#three-parameters" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">all_session_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">all_session_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> sessions&quot;</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="agent-integration">
+<h2><a class="toc-backref" href="#id13" role="doc-backlink">Agent Integration</a><a class="headerlink" href="#agent-integration" title="Link to this heading"></a></h2>
+<section id="using-agent-factory">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink">Using Agent Factory</a><a class="headerlink" href="#using-agent-factory" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">create_my_agent</span><span class="p">():</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">my_agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">Agent</span>
+    <span class="k">return</span> <span class="n">Agent</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4&quot;</span><span class="p">,</span>
+        <span class="n">interactive</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">()</span>
+<span class="n">app</span><span class="o">.</span><span class="n">set_agent_factory</span><span class="p">(</span><span class="n">create_my_agent</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Agent Lifecycle:</p>
+<ol class="arabic simple">
+<li><p>User sends first message in a session</p></li>
+<li><p>If no agent exists for session, <code class="docutils literal notranslate"><span class="pre">_start_agent_for_session()</span></code> is called</p></li>
+<li><p>Background thread created and <code class="docutils literal notranslate"><span class="pre">agent_factory()</span></code> invoked</p></li>
+<li><p>Agent runs in background, responses polled via <code class="docutils literal notranslate"><span class="pre">response_queue</span></code></p></li>
+</ol>
+</section>
+<section id="web-agent-service">
+<h3><a class="toc-backref" href="#id15" role="doc-backlink">Web Agent Service</a><a class="headerlink" href="#web-agent-service" title="Link to this heading"></a></h3>
+<p>For integration with external agent services:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">queue_service</span><span class="w"> </span><span class="kn">import</span> <span class="n">StorageBasedQueueService</span>
+
+<span class="n">queue_service</span> <span class="o">=</span> <span class="n">StorageBasedQueueService</span><span class="p">()</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
+    <span class="n">queue_service</span><span class="o">=</span><span class="n">queue_service</span><span class="p">,</span>
+    <span class="n">message_handler</span><span class="o">=</span><span class="n">my_handler</span>
+<span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>With <code class="docutils literal notranslate"><span class="pre">queue_service</span></code> set:</p>
+<ul class="simple">
+<li><p>Messages sent to <code class="docutils literal notranslate"><span class="pre">agent_response</span></code> queue are polled</p></li>
+<li><p>Responses include <code class="docutils literal notranslate"><span class="pre">session_id</span></code> for routing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">[AGENT_COMPLETED]</span></code> marker signals task completion</p></li>
+</ul>
+</section>
+</section>
+<section id="data-stores">
+<h2><a class="toc-backref" href="#id16" role="doc-backlink">Data Stores</a><a class="headerlink" href="#data-stores" title="Link to this heading"></a></h2>
+<p>Additional stores beyond the base application:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Store ID</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">log-data-store</span></code></p></td>
+<td><p>Hierarchical log structure and log groups</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">page-visibility-store</span></code></p></td>
+<td><p>Browser tab visibility state for polling optimization</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="interval-components">
+<h2><a class="toc-backref" href="#id17" role="doc-backlink">Interval Components</a><a class="headerlink" href="#interval-components" title="Link to this heading"></a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 20.0%" />
+<col style="width: 50.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Interval ID</p></th>
+<th class="head"><p>Period</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">response-poll-interval</span></code></p></td>
+<td><p>1 second</p></td>
+<td><p>Poll agent response queues</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">log-refresh-interval</span></code></p></td>
+<td><p>3 seconds</p></td>
+<td><p>Auto-refresh log visualization</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">visibility-check-interval</span></code></p></td>
+<td><p>2 seconds</p></td>
+<td><p>Check browser tab visibility</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">agent-status-poll-interval</span></code></p></td>
+<td><p>1 second</p></td>
+<td><p>Poll for agent status updates</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="log-data-format">
+<h2><a class="toc-backref" href="#id18" role="doc-backlink">Log Data Format</a><a class="headerlink" href="#log-data-format" title="Link to this heading"></a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">log-data-store</span></code> expects data in this format:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+    <span class="c1"># For tree hierarchy</span>
+    <span class="s1">&#39;hierarchy&#39;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="s1">&#39;agent-1&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Main Agent&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;agent&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;children&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="s1">&#39;tool-1&#39;</span><span class="p">,</span> <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Search&#39;</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;tool&#39;</span><span class="p">,</span> <span class="s1">&#39;children&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+            <span class="p">]</span>
+        <span class="p">}</span>
+    <span class="p">],</span>
+
+    <span class="c1"># OR for DAG graph</span>
+    <span class="s1">&#39;graph_data&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;nodes&#39;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span>
+        <span class="s1">&#39;edges&#39;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span>
+        <span class="s1">&#39;agent&#39;</span><span class="p">:</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>
+    <span class="p">},</span>
+
+    <span class="c1"># Log entries by group ID</span>
+    <span class="s1">&#39;log_groups&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;agent-1&#39;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="p">{</span><span class="s1">&#39;level&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;Agent Step&#39;</span><span class="p">,</span> <span class="s1">&#39;item&#39;</span><span class="p">:</span> <span class="s1">&#39;Processing...&#39;</span><span class="p">,</span> <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="s1">&#39;10:30:45&#39;</span><span class="p">}</span>
+        <span class="p">],</span>
+        <span class="s1">&#39;tool-1&#39;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="p">{</span><span class="s1">&#39;level&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;Tool Call&#39;</span><span class="p">,</span> <span class="s1">&#39;item&#39;</span><span class="p">:</span> <span class="s1">&#39;search(&quot;query&quot;)&#39;</span><span class="p">,</span> <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="s1">&#39;10:30:46&#39;</span><span class="p">}</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="custom-tabs">
+<h2><a class="toc-backref" href="#id19" role="doc-backlink">Custom Tabs</a><a class="headerlink" href="#custom-tabs" title="Link to this heading"></a></h2>
+<section id="monitor-panel-tabs">
+<h3><a class="toc-backref" href="#id20" role="doc-backlink">Monitor Panel Tabs</a><a class="headerlink" href="#monitor-panel-tabs" title="Link to this heading"></a></h3>
+<p>Add custom tabs to the monitor panel (before initialization):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">MyApp</span><span class="p">(</span><span class="n">DashInteractiveAppWithLogs</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># Prepare custom tabs</span>
+        <span class="n">custom_tabs</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">{</span>
+                <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="s1">&#39;settings&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;label&#39;</span><span class="p">:</span> <span class="s1">&#39;Settings&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;content&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_settings_content</span><span class="p">()</span>
+            <span class="p">}</span>
+        <span class="p">]</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">custom_monitor_tabs</span><span class="o">=</span><span class="n">custom_tabs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_create_settings_content</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">html</span><span class="o">.</span><span class="n">Div</span><span class="p">([</span>
+            <span class="n">html</span><span class="o">.</span><span class="n">Label</span><span class="p">(</span><span class="s2">&quot;Custom Setting&quot;</span><span class="p">),</span>
+            <span class="n">dcc</span><span class="o">.</span><span class="n">Input</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;setting-input&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;text&quot;</span><span class="p">)</span>
+        <span class="p">])</span>
+</pre></div>
+</div>
+</section>
+<section id="main-panel-tabs">
+<h3><a class="toc-backref" href="#id21" role="doc-backlink">Main Panel Tabs</a><a class="headerlink" href="#main-panel-tabs" title="Link to this heading"></a></h3>
+<p>Add custom tabs to the main tabbed panel:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">custom_main_tabs</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span>
+        <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="s1">&#39;metrics&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;label&#39;</span><span class="p">:</span> <span class="s1">&#39;Metrics&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;content&#39;</span><span class="p">:</span> <span class="n">html</span><span class="o">.</span><span class="n">Div</span><span class="p">(</span><span class="s2">&quot;Metrics dashboard content&quot;</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">]</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
+    <span class="n">custom_main_tabs</span><span class="o">=</span><span class="n">custom_main_tabs</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="keyboard-shortcuts">
+<h2><a class="toc-backref" href="#id22" role="doc-backlink">Keyboard Shortcuts</a><a class="headerlink" href="#keyboard-shortcuts" title="Link to this heading"></a></h2>
+<p>The application includes JavaScript for keyboard shortcuts:</p>
+<ul class="simple">
+<li><p><strong>Ctrl+Enter</strong> (or <strong>Cmd+Enter</strong> on Mac): Send message</p></li>
+</ul>
+</section>
+<section id="split-pane-resizing">
+<h2><a class="toc-backref" href="#id23" role="doc-backlink">Split Pane Resizing</a><a class="headerlink" href="#split-pane-resizing" title="Link to this heading"></a></h2>
+<p>The Log Debugging tab features a resizable split between the graph and details:</p>
+<ul class="simple">
+<li><p>Default split: 65% graph, 35% details</p></li>
+<li><p>Drag the green divider to resize</p></li>
+<li><p>Minimum height: 150px for each pane</p></li>
+<li><p>Position resets when switching tabs</p></li>
+</ul>
+</section>
+<section id="callbacks-reference">
+<h2><a class="toc-backref" href="#id24" role="doc-backlink">Callbacks Reference</a><a class="headerlink" href="#callbacks-reference" title="Link to this heading"></a></h2>
+<section id="session-callbacks">
+<h3><a class="toc-backref" href="#id25" role="doc-backlink">Session Callbacks</a><a class="headerlink" href="#session-callbacks" title="Link to this heading"></a></h3>
+<p>Inherited from base application.</p>
+</section>
+<section id="message-callbacks">
+<h3><a class="toc-backref" href="#id26" role="doc-backlink">Message Callbacks</a><a class="headerlink" href="#message-callbacks" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">send_message</span></code>: Handles message sending with agent/queue service integration</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">poll_agent_responses</span></code>: Polls response queues and updates UI</p></li>
+</ul>
+</section>
+<section id="tab-callbacks">
+<h3><a class="toc-backref" href="#id27" role="doc-backlink">Tab Callbacks</a><a class="headerlink" href="#tab-callbacks" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">switch_tabs</span></code>: Switches between Chat and Log Debugging tabs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">toggle_graph_rendering_mode</span></code>: Switches between Plotly and Cytoscape</p></li>
+</ul>
+</section>
+<section id="log-visualization-callbacks">
+<h3><a class="toc-backref" href="#id28" role="doc-backlink">Log Visualization Callbacks</a><a class="headerlink" href="#log-visualization-callbacks" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">update_log_graph</span></code>: Updates Plotly graph visualization</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">update_cytoscape_graph</span></code>: Updates Cytoscape graph elements</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">update_log_details</span></code>: Shows log details when node clicked (Plotly)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">update_log_details_from_cytoscape</span></code>: Shows log details when node clicked (Cytoscape)</p></li>
+</ul>
+</section>
+<section id="pagination-callbacks">
+<h3><a class="toc-backref" href="#id29" role="doc-backlink">Pagination Callbacks</a><a class="headerlink" href="#pagination-callbacks" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">handle_load_more</span></code>: Loads next page of logs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">handle_load_all</span></code>: Loads all logs at once</p></li>
+</ul>
+</section>
+<section id="monitor-panel-callbacks">
+<h3><a class="toc-backref" href="#id30" role="doc-backlink">Monitor Panel Callbacks</a><a class="headerlink" href="#monitor-panel-callbacks" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">update_response_list</span></code>: Populates response list</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">show_response_details</span></code>: Shows full response on click</p></li>
+</ul>
+</section>
+</section>
+<section id="methods-reference">
+<h2><a class="toc-backref" href="#id31" role="doc-backlink">Methods Reference</a><a class="headerlink" href="#methods-reference" title="Link to this heading"></a></h2>
+<dl class="py method">
+<dt class="sig sig-object py" id="set_agent_factory">
+<span class="sig-name descname"><span class="pre">set_agent_factory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">factory</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#set_agent_factory" title="Link to this definition"></a></dt>
+<dd><p>Set factory function that creates new agent instances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>factory</strong> (<em>callable</em>) – Function that returns a configured Agent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="add_monitor_tab">
+<span class="sig-name descname"><span class="pre">add_monitor_tab</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tab_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tab_label</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tab_content</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#add_monitor_tab" title="Link to this definition"></a></dt>
+<dd><p>Add a custom tab to the monitor panel. Must be called before layout creation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tab_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique identifier for the tab</p></li>
+<li><p><strong>tab_label</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Button label for the tab</p></li>
+<li><p><strong>tab_content</strong> – Dash component(s) for tab content</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="start_agent_for_session">
+<span class="sig-name descname"><span class="pre">_start_agent_for_session</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session_id</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#start_agent_for_session" title="Link to this definition"></a></dt>
+<dd><p>Start background agent thread for a session.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Session identifier</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="run_agent_in_background">
+<span class="sig-name descname"><span class="pre">_run_agent_in_background</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session_id</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#run_agent_in_background" title="Link to this definition"></a></dt>
+<dd><p>Create and run agent in background thread.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Session identifier</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="register_polling_callback">
+<span class="sig-name descname"><span class="pre">_register_polling_callback</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#register_polling_callback" title="Link to this definition"></a></dt>
+<dd><p>Register polling callback for agent responses. Override in subclasses.</p>
+</dd></dl>
+
+</section>
+<section id="complete-example">
+<h2><a class="toc-backref" href="#id32" role="doc-backlink">Complete Example</a><a class="headerlink" href="#complete-example" title="Link to this heading"></a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
+
+<span class="c1"># Global log collector for demonstration</span>
+<span class="n">log_collector</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">agent_handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">global</span> <span class="n">log_collector</span>
+    <span class="n">log_collector</span> <span class="o">=</span> <span class="n">LogCollector</span><span class="p">()</span>
+
+    <span class="c1"># Simulate agent execution with logging</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_start</span><span class="p">(</span><span class="s2">&quot;agent&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;agent&quot;</span><span class="p">,</span> <span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">})</span>
+
+    <span class="c1"># LLM call</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_start</span><span class="p">(</span><span class="s2">&quot;llm-1&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;llm_call&quot;</span><span class="p">})</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s2">&quot;llm&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="s2">&quot;gpt-4&quot;</span><span class="p">,</span> <span class="s2">&quot;prompt&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">},</span> <span class="s2">&quot;LLM Call&quot;</span><span class="p">)</span>
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_end</span><span class="p">(</span><span class="s2">&quot;llm-1&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Tool usage</span>
+    <span class="k">if</span> <span class="s2">&quot;search&quot;</span> <span class="ow">in</span> <span class="n">message</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+        <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_start</span><span class="p">(</span><span class="s2">&quot;tool-1&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;tool&quot;</span><span class="p">})</span>
+        <span class="n">log_collector</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s2">&quot;tool&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;search&quot;</span><span class="p">,</span> <span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">},</span> <span class="s2">&quot;Tool Call&quot;</span><span class="p">)</span>
+        <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_end</span><span class="p">(</span><span class="s2">&quot;tool-1&quot;</span><span class="p">)</span>
+
+    <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_end</span><span class="p">(</span><span class="s2">&quot;agent&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Processed: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
+        <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Agent Debugger&quot;</span><span class="p">,</span>
+        <span class="n">port</span><span class="o">=</span><span class="mi">8050</span><span class="p">,</span>
+        <span class="n">debug</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">message_handler</span><span class="o">=</span><span class="n">agent_handler</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Callback to update log data after each message</span>
+    <span class="nd">@app</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span>
+        <span class="n">Output</span><span class="p">(</span><span class="s1">&#39;log-data-store&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">),</span>
+        <span class="n">Input</span><span class="p">(</span><span class="s1">&#39;messages-store&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">),</span>
+        <span class="n">prevent_initial_call</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update_logs_after_message</span><span class="p">(</span><span class="n">messages</span><span class="p">):</span>
+        <span class="k">global</span> <span class="n">log_collector</span>
+        <span class="k">if</span> <span class="n">log_collector</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;hierarchy&#39;</span><span class="p">:</span> <span class="n">log_collector</span><span class="o">.</span><span class="n">get_hierarchy</span><span class="p">(),</span>
+                <span class="s1">&#39;log_groups&#39;</span><span class="p">:</span> <span class="n">log_collector</span><span class="o">.</span><span class="n">log_groups</span>
+            <span class="p">}</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="see-also">
+<h2><a class="toc-backref" href="#id33" role="doc-backlink">See Also</a><a class="headerlink" href="#see-also" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="dash_interactive_app.html"><span class="doc">DashInteractiveApp</span></a> - Base application class</p></li>
+<li><p><a class="reference internal" href="queue_based_app.html"><span class="doc">QueueBasedDashInteractiveApp</span></a> - Queue-based variant for async communication</p></li>
+<li><p><a class="reference internal" href="../components/tabbed_panel.html"><span class="doc">TabbedPanel</span></a> - TabbedPanel component</p></li>
+<li><p><a class="reference internal" href="../components/log_graph.html"><span class="doc">LogGraphVisualization</span></a> - LogGraphVisualization component</p></li>
+<li><p><a class="reference internal" href="../components/log_details.html"><span class="doc">LogDetailsPanel</span></a> - LogDetailsPanel component</p></li>
+<li><p><a class="reference internal" href="../utilities/log_collector.html"><span class="doc">LogCollector</span></a> - LogCollector utility</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="dash_interactive_app.html" class="btn btn-neutral float-left" title="DashInteractiveApp" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="queue_based_app.html" class="btn btn-neutral float-right" title="QueueBasedDashInteractiveApp" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, ScienceModelingTools.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

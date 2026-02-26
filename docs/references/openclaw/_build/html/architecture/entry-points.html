@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Entry Points &amp; Bootstrap Chain &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Configuration System" href="configuration.html" />
+    <link rel="prev" title="Technology Stack &amp; Dependencies" href="technology-stack.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="entry-points-bootstrap-chain">
+<h1>Entry Points &amp; Bootstrap Chain<a class="headerlink" href="#entry-points-bootstrap-chain" title="Link to this heading">¶</a></h1>
+<p>This page documents how the <code class="docutils literal notranslate"><span class="pre">openclaw</span></code> CLI boots, how the Commander.js
+program is built, and how the Gateway server starts.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#bootstrap-overview" id="id1">Bootstrap Overview</a></p></li>
+<li><p><a class="reference internal" href="#step-1-openclaw-mjs-node-js-entry-shim" id="id2">Step 1: <code class="docutils literal notranslate"><span class="pre">openclaw.mjs</span></code> – Node.js Entry Shim</a></p></li>
+<li><p><a class="reference internal" href="#step-2-src-entry-ts-process-bootstrap" id="id3">Step 2: <code class="docutils literal notranslate"><span class="pre">src/entry.ts</span></code> – Process Bootstrap</a></p></li>
+<li><p><a class="reference internal" href="#step-3-src-cli-run-main-ts-cli-initialization" id="id4">Step 3: <code class="docutils literal notranslate"><span class="pre">src/cli/run-main.ts</span></code> – CLI Initialization</a></p></li>
+<li><p><a class="reference internal" href="#program-construction" id="id5">Program Construction</a></p></li>
+<li><p><a class="reference internal" href="#cli-command-registry" id="id6">CLI Command Registry</a></p>
+<ul>
+<li><p><a class="reference internal" href="#core-commands" id="id7">Core Commands</a></p></li>
+<li><p><a class="reference internal" href="#sub-cli-commands" id="id8">Sub-CLI Commands</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#gateway-server-startup" id="id9">Gateway Server Startup</a></p></li>
+<li><p><a class="reference internal" href="#library-entry-point-src-index-ts" id="id10">Library Entry Point (<code class="docutils literal notranslate"><span class="pre">src/index.ts</span></code>)</a></p></li>
+</ul>
+</nav>
+<section id="bootstrap-overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Bootstrap Overview</a><a class="headerlink" href="#bootstrap-overview" title="Link to this heading">¶</a></h2>
+<p>The following diagram shows the full bootstrap chain from the shell command
+<code class="docutils literal notranslate"><span class="pre">openclaw</span></code> to a running CLI program or Gateway server.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Shell: $ openclaw &lt;command&gt; [options]
+       |
+       v
+openclaw.mjs                     (1) Node.js entry shim
+       |
+       +-- module.enableCompileCache()
+       +-- installProcessWarningFilter()
+       +-- import(&quot;./dist/entry.js&quot;)
+       |
+       v
+src/entry.ts                     (2) Process bootstrap
+       |
+       +-- process.title = &quot;openclaw&quot;
+       +-- installProcessWarningFilter()
+       +-- normalizeEnv()
+       +-- normalizeWindowsArgv()
+       +-- ensureExperimentalWarningSuppressed()
+       |     (may respawn with --disable-warning=ExperimentalWarning)
+       +-- parseCliProfileArgs()
+       +-- applyCliProfileEnv()
+       +-- import(&quot;./cli/run-main.js&quot;).runCli()
+       |
+       v
+src/cli/run-main.ts              (3) CLI initialization
+       |
+       +-- loadDotEnv()
+       +-- normalizeEnv()
+       +-- ensureOpenClawCliOnPath()
+       +-- assertSupportedRuntime()
+       +-- tryRouteCli()           (fast-path for special routes)
+       +-- enableConsoleCapture()
+       +-- buildProgram()
+       +-- installUnhandledRejectionHandler()
+       +-- registerCoreCliByName() (lazy primary command)
+       +-- registerSubCliByName()  (lazy sub-CLI)
+       +-- registerPluginCliCommands() (if needed)
+       +-- program.parseAsync()
+       |
+       v
+Commander.js dispatches to the matched command handler
+</pre></div>
+</div>
+</section>
+<section id="step-1-openclaw-mjs-node-js-entry-shim">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Step 1: <code class="docutils literal notranslate"><span class="pre">openclaw.mjs</span></code> – Node.js Entry Shim</a><a class="headerlink" href="#step-1-openclaw-mjs-node-js-entry-shim" title="Link to this heading">¶</a></h2>
+<p>The file <code class="docutils literal notranslate"><span class="pre">openclaw.mjs</span></code> is the npm <code class="docutils literal notranslate"><span class="pre">bin</span></code> entry point declared in
+<code class="docutils literal notranslate"><span class="pre">package.json</span></code>:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;bin&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;openclaw&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;openclaw.mjs&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Its responsibilities are minimal:</p>
+<ol class="arabic simple">
+<li><p><strong>Enable compile cache</strong> – Calls <code class="docutils literal notranslate"><span class="pre">module.enableCompileCache()</span></code> (Node 22+)
+to speed up subsequent starts.</p></li>
+<li><p><strong>Install warning filter</strong> – Suppresses noisy <code class="docutils literal notranslate"><span class="pre">ExperimentalWarning</span></code>
+messages from the Node.js runtime.</p></li>
+<li><p><strong>Load the build output</strong> – Tries <code class="docutils literal notranslate"><span class="pre">./dist/entry.js</span></code>, then
+<code class="docutils literal notranslate"><span class="pre">./dist/entry.mjs</span></code>.  If neither exists, it throws an error indicating
+the project has not been built.</p></li>
+</ol>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// openclaw.mjs (simplified)</span>
+<span class="k">import</span><span class="w"> </span><span class="kr">module</span><span class="w"> </span><span class="nx">from</span><span class="w"> </span><span class="s2">&quot;node:module&quot;</span><span class="p">;</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="kr">module</span><span class="nx">.enableCompileCache</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kr">module</span><span class="nx">.enableCompileCache</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="k">await</span><span class="w"> </span><span class="nx">installProcessWarningFilter</span><span class="p">();</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="nx">tryImport</span><span class="p">(</span><span class="s2">&quot;./dist/entry.js&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// OK</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="nx">tryImport</span><span class="p">(</span><span class="s2">&quot;./dist/entry.mjs&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// OK</span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">throw</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="ne">Error</span><span class="p">(</span><span class="s2">&quot;openclaw: missing dist/entry.(m)js&quot;</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="step-2-src-entry-ts-process-bootstrap">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Step 2: <code class="docutils literal notranslate"><span class="pre">src/entry.ts</span></code> – Process Bootstrap</a><a class="headerlink" href="#step-2-src-entry-ts-process-bootstrap" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">entry.ts</span></code> is the compiled TypeScript entry point.  It runs only when
+executed as the main module (guarded by <code class="docutils literal notranslate"><span class="pre">isMainModule()</span></code>).</p>
+<p>Key operations:</p>
+<ol class="arabic simple">
+<li><p><strong>Set process title</strong> to <code class="docutils literal notranslate"><span class="pre">&quot;openclaw&quot;</span></code> (visible in <code class="docutils literal notranslate"><span class="pre">ps</span></code>).</p></li>
+<li><p><strong>Suppress experimental warnings</strong> – If the
+<code class="docutils literal notranslate"><span class="pre">--disable-warning=ExperimentalWarning</span></code> flag is not present and
+respawning is allowed, it re-invokes <code class="docutils literal notranslate"><span class="pre">process.execPath</span></code> with the flag
+prepended.  The <code class="docutils literal notranslate"><span class="pre">OPENCLAW_NODE_OPTIONS_READY</span></code> env var prevents infinite
+recursion.</p></li>
+<li><p><strong>Parse CLI profile</strong> – The <code class="docutils literal notranslate"><span class="pre">--profile</span> <span class="pre">&lt;name&gt;</span></code> flag selects a config
+profile, which applies environment variable overrides before any other
+code runs.</p></li>
+<li><p><strong>Delegate to ``runCli``</strong> – Dynamically imports <code class="docutils literal notranslate"><span class="pre">./cli/run-main.js</span></code>
+and calls <code class="docutils literal notranslate"><span class="pre">runCli(process.argv)</span></code>.</p></li>
+</ol>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">isMainModule</span></code> guard prevents <code class="docutils literal notranslate"><span class="pre">entry.ts</span></code> from running its
+side-effects when imported as a dependency (e.g., when <code class="docutils literal notranslate"><span class="pre">dist/index.js</span></code>
+is the actual entry point for library consumers).</p>
+</div>
+<p>Environment variables that influence entry behavior:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 35.0%" />
+<col style="width: 65.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Variable</p></th>
+<th class="head"><p>Effect</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">OPENCLAW_NO_RESPAWN</span></code></p></td>
+<td><p>Skip the child-process respawn for warning suppression</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">OPENCLAW_NODE_OPTIONS_READY</span></code></p></td>
+<td><p>Guard against respawn recursion (set automatically)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NO_COLOR</span></code> / <code class="docutils literal notranslate"><span class="pre">FORCE_COLOR</span></code></p></td>
+<td><p>Disable/force ANSI color output</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="step-3-src-cli-run-main-ts-cli-initialization">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Step 3: <code class="docutils literal notranslate"><span class="pre">src/cli/run-main.ts</span></code> – CLI Initialization</a><a class="headerlink" href="#step-3-src-cli-run-main-ts-cli-initialization" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">runCli()</span></code> is the main CLI startup function.  It performs:</p>
+<ol class="arabic simple">
+<li><p><strong>Environment setup</strong> – Loads <code class="docutils literal notranslate"><span class="pre">.env</span></code> files, normalizes environment
+variables, ensures the <code class="docutils literal notranslate"><span class="pre">openclaw</span></code> binary is on <code class="docutils literal notranslate"><span class="pre">$PATH</span></code>.</p></li>
+<li><p><strong>Runtime guard</strong> – Asserts the Node.js version meets the minimum
+requirement (&gt;=22.12.0).</p></li>
+<li><p><strong>Fast-path routing</strong> – <code class="docutils literal notranslate"><span class="pre">tryRouteCli()</span></code> handles special argument
+patterns before the full Commander.js program is built.</p></li>
+<li><p><strong>Console capture</strong> – Redirects <code class="docutils literal notranslate"><span class="pre">console.log/warn/error</span></code> into the
+structured logging system.</p></li>
+<li><p><strong>Build program</strong> – Calls <code class="docutils literal notranslate"><span class="pre">buildProgram()</span></code> which constructs the
+Commander.js <code class="docutils literal notranslate"><span class="pre">Command</span></code> tree.</p></li>
+<li><p><strong>Error handlers</strong> – Installs global handlers for uncaught exceptions
+and unhandled promise rejections.</p></li>
+<li><p><strong>Command registration</strong> – Lazily registers only the primary command
+(identified from <code class="docutils literal notranslate"><span class="pre">argv</span></code>) to keep startup fast.  If the primary command
+is not a built-in, plugin CLI commands are registered too.</p></li>
+<li><p><strong>Parse</strong> – <code class="docutils literal notranslate"><span class="pre">program.parseAsync(parseArgv)</span></code> delegates to Commander.js.</p></li>
+</ol>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// src/cli/run-main.ts (simplified)</span>
+<span class="k">export</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">runCli</span><span class="p">(</span><span class="nx">argv</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[])</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">loadDotEnv</span><span class="p">({</span><span class="w"> </span><span class="nx">quiet</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">});</span>
+<span class="w">  </span><span class="nx">normalizeEnv</span><span class="p">();</span>
+<span class="w">  </span><span class="nx">ensureOpenClawCliOnPath</span><span class="p">();</span>
+<span class="w">  </span><span class="nx">assertSupportedRuntime</span><span class="p">();</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="nx">tryRouteCli</span><span class="p">(</span><span class="nx">normalizedArgv</span><span class="p">))</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+
+<span class="w">  </span><span class="nx">enableConsoleCapture</span><span class="p">();</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">program</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">buildProgram</span><span class="p">();</span>
+<span class="w">  </span><span class="nx">installUnhandledRejectionHandler</span><span class="p">();</span>
+
+<span class="w">  </span><span class="k">await</span><span class="w"> </span><span class="nx">program</span><span class="p">.</span><span class="nx">parseAsync</span><span class="p">(</span><span class="nx">parseArgv</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="program-construction">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Program Construction</a><a class="headerlink" href="#program-construction" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">buildProgram()</span></code> in <code class="docutils literal notranslate"><span class="pre">src/cli/program/build-program.ts</span></code>:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">export</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">buildProgram</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">program</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Command</span><span class="p">();</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">ctx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">createProgramContext</span><span class="p">();</span>
+
+<span class="w">  </span><span class="nx">setProgramContext</span><span class="p">(</span><span class="nx">program</span><span class="p">,</span><span class="w"> </span><span class="nx">ctx</span><span class="p">);</span>
+<span class="w">  </span><span class="nx">configureProgramHelp</span><span class="p">(</span><span class="nx">program</span><span class="p">,</span><span class="w"> </span><span class="nx">ctx</span><span class="p">);</span>
+<span class="w">  </span><span class="nx">registerPreActionHooks</span><span class="p">(</span><span class="nx">program</span><span class="p">,</span><span class="w"> </span><span class="nx">ctx</span><span class="p">.</span><span class="nx">programVersion</span><span class="p">);</span>
+<span class="w">  </span><span class="nx">registerProgramCommands</span><span class="p">(</span><span class="nx">program</span><span class="p">,</span><span class="w"> </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">argv</span><span class="p">);</span>
+
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">program</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">registerProgramCommands</span></code> calls two registrars:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">registerCoreCliCommands()</span></code> – Core commands (see table below)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">registerSubCliCommands()</span></code> – Sub-CLI commands (see table below)</p></li>
+</ul>
+<p>Both use <strong>lazy registration</strong>: a lightweight placeholder command is created
+with <code class="docutils literal notranslate"><span class="pre">allowUnknownOption(true)</span></code> and <code class="docutils literal notranslate"><span class="pre">allowExcessArguments(true)</span></code>.  When
+the placeholder’s action fires, it dynamically imports the real registrar,
+replaces itself, and re-parses the arguments.</p>
+</section>
+<section id="cli-command-registry">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">CLI Command Registry</a><a class="headerlink" href="#cli-command-registry" title="Link to this heading">¶</a></h2>
+<section id="core-commands">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Core Commands</a><a class="headerlink" href="#core-commands" title="Link to this heading">¶</a></h3>
+<p>These commands are registered by <code class="docutils literal notranslate"><span class="pre">src/cli/program/command-registry.ts</span></code>:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 18.0%" />
+<col style="width: 52.0%" />
+<col style="width: 30.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+<th class="head"><p>Subcommands?</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">setup</span></code></p></td>
+<td><p>Initialize local config and agent workspace</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">onboard</span></code></p></td>
+<td><p>Interactive onboarding wizard for gateway, workspace, and skills</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">configure</span></code></p></td>
+<td><p>Interactive setup wizard for credentials, channels, gateway, and
+agent defaults</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">config</span></code></p></td>
+<td><p>Non-interactive config helpers (get/set/unset)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">doctor</span></code></p></td>
+<td><p>Health checks + quick fixes for the gateway and channels</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">dashboard</span></code></p></td>
+<td><p>Open the Control UI with your current token</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">reset</span></code></p></td>
+<td><p>Reset local config/state (keeps the CLI installed)</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">uninstall</span></code></p></td>
+<td><p>Uninstall the gateway service + local data (CLI remains)</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">message</span></code></p></td>
+<td><p>Send, read, and manage messages</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">memory</span></code></p></td>
+<td><p>Search and reindex memory files</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">agent</span></code></p></td>
+<td><p>Run one agent turn via the Gateway</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">agents</span></code></p></td>
+<td><p>Manage isolated agents (workspaces, auth, routing)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">status</span></code></p></td>
+<td><p>Show channel health and recent session recipients</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">health</span></code></p></td>
+<td><p>Fetch health from the running gateway</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sessions</span></code></p></td>
+<td><p>List stored conversation sessions</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">browser</span></code></p></td>
+<td><p>Manage OpenClaw’s dedicated browser (Chrome/Chromium)</p></td>
+<td><p>Yes</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="sub-cli-commands">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Sub-CLI Commands</a><a class="headerlink" href="#sub-cli-commands" title="Link to this heading">¶</a></h3>
+<p>These commands are registered by <code class="docutils literal notranslate"><span class="pre">src/cli/program/register.subclis.ts</span></code>:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 18.0%" />
+<col style="width: 52.0%" />
+<col style="width: 30.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+<th class="head"><p>Subcommands?</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">acp</span></code></p></td>
+<td><p>Agent Control Protocol tools</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gateway</span></code></p></td>
+<td><p>Run, inspect, and query the WebSocket Gateway</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">daemon</span></code></p></td>
+<td><p>Gateway service (legacy alias)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">logs</span></code></p></td>
+<td><p>Tail gateway file logs via RPC</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">system</span></code></p></td>
+<td><p>System events, heartbeat, and presence</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">models</span></code></p></td>
+<td><p>Discover, scan, and configure models</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">approvals</span></code></p></td>
+<td><p>Manage exec approvals (gateway or node host)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">nodes</span></code></p></td>
+<td><p>Manage gateway-owned node pairing and node commands</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">devices</span></code></p></td>
+<td><p>Device pairing + token management</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">node</span></code></p></td>
+<td><p>Run and manage the headless node host service</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sandbox</span></code></p></td>
+<td><p>Manage sandbox containers for agent isolation</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tui</span></code></p></td>
+<td><p>Open a terminal UI connected to the Gateway</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">cron</span></code></p></td>
+<td><p>Manage cron jobs via the Gateway scheduler</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">dns</span></code></p></td>
+<td><p>DNS helpers for wide-area discovery (Tailscale + CoreDNS)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">docs</span></code></p></td>
+<td><p>Search the live OpenClaw docs</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hooks</span></code></p></td>
+<td><p>Manage internal agent hooks</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">webhooks</span></code></p></td>
+<td><p>Webhook helpers and integrations</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">qr</span></code></p></td>
+<td><p>Generate iOS pairing QR/setup code</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">clawbot</span></code></p></td>
+<td><p>Legacy clawbot command aliases</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">pairing</span></code></p></td>
+<td><p>Secure DM pairing (approve inbound requests)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">plugins</span></code></p></td>
+<td><p>Manage OpenClaw plugins and extensions</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">channels</span></code></p></td>
+<td><p>Manage connected chat channels (Telegram, Discord, etc.)</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">directory</span></code></p></td>
+<td><p>Lookup contact and group IDs for supported chat channels</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">security</span></code></p></td>
+<td><p>Security tools and local config audits</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">skills</span></code></p></td>
+<td><p>List and inspect available skills</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">update</span></code></p></td>
+<td><p>Update OpenClaw and inspect update channel status</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">completion</span></code></p></td>
+<td><p>Generate shell completion script</p></td>
+<td><p>No</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="gateway-server-startup">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Gateway Server Startup</a><a class="headerlink" href="#gateway-server-startup" title="Link to this heading">¶</a></h2>
+<p>The gateway starts when the user runs <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">gateway</span> <span class="pre">run</span></code>.  The startup
+sequence is:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>openclaw gateway run [--port N] [--bind MODE]
+       |
+       v
+src/cli/gateway-cli.ts
+       |
+       +-- loadConfig()
+       +-- resolveGatewayPort(config)
+       +-- resolveBindAddress(config)
+       |
+       v
+Gateway server lifecycle
+       |
+       +-- Create Express app
+       +-- Create HTTP(S) server (with optional TLS)
+       +-- Create WebSocket server (ws)
+       +-- Register RPC method handlers
+       +-- Register HTTP routes (Control UI, /v1/*, hooks, plugins)
+       +-- Start channel adapters (Telegram, Discord, Slack, ...)
+       +-- Start cron scheduler (if enabled)
+       +-- Start mDNS broadcast (if enabled)
+       +-- Start Tailscale serve/funnel (if configured)
+       +-- Begin accepting connections
+       +-- Acquire lock file (prevents duplicate instances)
+</pre></div>
+</div>
+<p>The gateway listens on a single multiplexed port (default <code class="docutils literal notranslate"><span class="pre">18789</span></code>) that
+serves both WebSocket and HTTP traffic.  The bind address is controlled by
+the <code class="docutils literal notranslate"><span class="pre">gateway.bind</span></code> config option:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 35.0%" />
+<col style="width: 50.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Bind Address</p></th>
+<th class="head"><p>Use Case</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">loopback</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code></p></td>
+<td><p>Local-only access (default)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">lan</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code></p></td>
+<td><p>Access from any network interface</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">auto</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> or <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code></p></td>
+<td><p>Loopback if available, else all interfaces</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tailnet</span></code></p></td>
+<td><p>Tailnet IPv4 (<code class="docutils literal notranslate"><span class="pre">100.64.0.0/10</span></code>)</p></td>
+<td><p>Tailscale network access</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">custom</span></code></p></td>
+<td><p>User-specified IP</p></td>
+<td><p>Custom bind address (<code class="docutils literal notranslate"><span class="pre">gateway.customBindHost</span></code>)</p></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The gateway lock file is stored at <code class="docutils literal notranslate"><span class="pre">$TMPDIR/openclaw-&lt;uid&gt;/</span></code> to prevent
+multiple gateway instances from running on the same port.</p>
+</div>
+</section>
+<section id="library-entry-point-src-index-ts">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">Library Entry Point (<code class="docutils literal notranslate"><span class="pre">src/index.ts</span></code>)</a><a class="headerlink" href="#library-entry-point-src-index-ts" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">src/index.ts</span></code> (compiled to <code class="docutils literal notranslate"><span class="pre">dist/index.js</span></code>) serves as the library entry
+point for programmatic use.  It:</p>
+<ol class="arabic simple">
+<li><p>Loads <code class="docutils literal notranslate"><span class="pre">.env</span></code> files and normalizes the environment.</p></li>
+<li><p>Ensures the <code class="docutils literal notranslate"><span class="pre">openclaw</span></code> CLI is on <code class="docutils literal notranslate"><span class="pre">$PATH</span></code>.</p></li>
+<li><p>Enables console capture for structured logging.</p></li>
+<li><p>Asserts the runtime version.</p></li>
+<li><p>Builds the Commander.js program.</p></li>
+<li><p>Exports public API functions for library consumers.</p></li>
+</ol>
+<p>The <code class="docutils literal notranslate"><span class="pre">exports</span></code> field in <code class="docutils literal notranslate"><span class="pre">package.json</span></code> exposes two entry points:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;exports&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;.&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;./dist/index.js&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;./plugin-sdk&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;types&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;./dist/plugin-sdk/index.d.ts&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;default&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;./dist/plugin-sdk/index.js&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">./plugin-sdk</span></code> export provides the public plugin SDK for extension
+authors (see <a class="reference internal" href="data-models.html"><span class="doc">Data Models</span></a>).</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Architecture Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#high-level-architecture">High-Level Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#message-flow">Message Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#design-principles">Design Principles</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#component-summary">Component Summary</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#sub-pages">Sub-pages</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="project-structure.html">Directory Layout &amp; Module Map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="technology-stack.html">Technology Stack &amp; Dependencies</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Entry Points &amp; Bootstrap Chain</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration.html">Configuration System</a></li>
+<li class="toctree-l3"><a class="reference internal" href="data-models.html">Data Models</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Architecture Overview</a><ul>
+      <li>Previous: <a href="technology-stack.html" title="previous chapter">Technology Stack &amp; Dependencies</a></li>
+      <li>Next: <a href="configuration.html" title="next chapter">Configuration System</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/architecture/entry-points.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

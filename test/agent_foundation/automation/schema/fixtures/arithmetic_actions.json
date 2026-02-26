@@ -1,0 +1,69 @@
+{
+  "version": "1.0",
+  "description": "Arithmetic action metadata for functional testing of ActionGraph. These actions operate on a numeric accumulator value.",
+  "actions": [
+    {
+      "name": "set",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Set accumulator to specified value"
+    },
+    {
+      "name": "add",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Add value to accumulator"
+    },
+    {
+      "name": "subtract",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Subtract value from accumulator"
+    },
+    {
+      "name": "multiply",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Multiply accumulator by value"
+    },
+    {
+      "name": "divide",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Divide accumulator by value"
+    },
+    {
+      "name": "power",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Raise accumulator to the power of value"
+    },
+    {
+      "name": "mod",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Compute accumulator modulo value"
+    },
+    {
+      "name": "negate",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Multiply accumulator by -1"
+    },
+    {
+      "name": "abs",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Set accumulator to its absolute value"
+    }
+  ]
+}

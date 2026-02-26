@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>SQLite Storage Schema &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Retrieval Pipeline" href="knowledge-retrieval.html" />
+    <link rel="prev" title="How Knowledge is Created" href="knowledge-creation.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="sqlite-storage-schema">
+<span id="knowledge-storage"></span><h1>SQLite Storage Schema<a class="headerlink" href="#sqlite-storage-schema" title="Link to this heading">¶</a></h1>
+<p>The builtin memory backend stores all indexed knowledge in a single SQLite
+database.  This page documents the schema, database lifecycle, and sync
+mechanisms.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#database-location" id="id1">Database Location</a></p></li>
+<li><p><a class="reference internal" href="#schema-5-1-tables" id="id2">Schema: 5+1 Tables</a></p>
+<ul>
+<li><p><a class="reference internal" href="#meta" id="id3">meta</a></p></li>
+<li><p><a class="reference internal" href="#files" id="id4">files</a></p></li>
+<li><p><a class="reference internal" href="#chunks" id="id5">chunks</a></p></li>
+<li><p><a class="reference internal" href="#chunks-fts-fts5-virtual-table" id="id6">chunks_fts (FTS5 Virtual Table)</a></p></li>
+<li><p><a class="reference internal" href="#chunks-vec-vec0-virtual-table" id="id7">chunks_vec (vec0 Virtual Table)</a></p></li>
+<li><p><a class="reference internal" href="#embedding-cache" id="id8">embedding_cache</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#safe-reindex-temp-db-atomic-swap" id="id9">Safe Reindex (Temp DB + Atomic Swap)</a></p></li>
+<li><p><a class="reference internal" href="#file-watching" id="id10">File Watching</a></p></li>
+</ul>
+</nav>
+<section id="database-location">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Database Location</a><a class="headerlink" href="#database-location" title="Link to this heading">¶</a></h2>
+<p>The database is stored at a path resolved from configuration, defaulting to:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/.</span><span class="n">openclaw</span><span class="o">/</span><span class="n">state</span><span class="o">/</span><span class="n">memory</span><span class="o">/&lt;</span><span class="n">agentId</span><span class="o">&gt;.</span><span class="n">sqlite</span>
+</pre></div>
+</div>
+<p>The path is resolved via <code class="docutils literal notranslate"><span class="pre">resolveUserPath(this.settings.store.path)</span></code> in
+<code class="docutils literal notranslate"><span class="pre">MemoryManagerSyncOps.openDatabase()</span></code>.  The parent directory is created
+automatically via <code class="docutils literal notranslate"><span class="pre">ensureDir()</span></code>.</p>
+<p>The database is opened with <code class="docutils literal notranslate"><span class="pre">node:sqlite</span></code>’s <code class="docutils literal notranslate"><span class="pre">DatabaseSync</span></code> in synchronous
+mode, with <code class="docutils literal notranslate"><span class="pre">allowExtension:</span> <span class="pre">true</span></code> when vector search is enabled (required
+for loading the sqlite-vec extension).</p>
+</section>
+<section id="schema-5-1-tables">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Schema: 5+1 Tables</a><a class="headerlink" href="#schema-5-1-tables" title="Link to this heading">¶</a></h2>
+<p>The schema is applied by <code class="docutils literal notranslate"><span class="pre">ensureMemoryIndexSchema()</span></code> in
+<code class="docutils literal notranslate"><span class="pre">src/memory/memory-schema.ts</span></code>.</p>
+<section id="meta">
+<h3><a class="toc-backref" href="#id3" role="doc-backlink">meta</a><a class="headerlink" href="#meta" title="Link to this heading">¶</a></h3>
+<p>Key-value store for index metadata (provider, model, chunk settings).</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">meta</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="k">key</span><span class="w">   </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">  </span><span class="n">value</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p>The single active key is <code class="docutils literal notranslate"><span class="pre">memory_index_meta_v1</span></code>, storing a JSON object:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">MemoryIndexMeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// embedding model name</span>
+<span class="w">  </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">        </span><span class="c1">// &quot;openai&quot;, &quot;local&quot;, &quot;gemini&quot;, etc.</span>
+<span class="w">  </span><span class="nx">providerKey?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">    </span><span class="c1">// hash of provider config (for cache keying)</span>
+<span class="w">  </span><span class="nx">sources?</span><span class="o">:</span><span class="w"> </span><span class="kt">MemorySource</span><span class="p">[];</span><span class="c1">// [&quot;memory&quot;] or [&quot;memory&quot;,&quot;sessions&quot;]</span>
+<span class="w">  </span><span class="nx">chunkTokens</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">     </span><span class="c1">// e.g. 400</span>
+<span class="w">  </span><span class="nx">chunkOverlap</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">    </span><span class="c1">// e.g. 80</span>
+<span class="w">  </span><span class="nx">vectorDims?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">     </span><span class="c1">// e.g. 256, 1536</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>When any of these fields change (e.g. switching embedding providers), a full
+reindex is triggered.</p>
+</section>
+<section id="files">
+<h3><a class="toc-backref" href="#id4" role="doc-backlink">files</a><a class="headerlink" href="#files" title="Link to this heading">¶</a></h3>
+<p>Tracks each indexed file and its hash for incremental sync.</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">files</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="n">path</span><span class="w">   </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">  </span><span class="k">source</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;memory&#39;</span><span class="p">,</span>
+<span class="w">  </span><span class="n">hash</span><span class="w">   </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">mtime</span><span class="w">  </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="k">size</span><span class="w">   </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">source</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;memory&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;sessions&quot;</span></code>.  On sync, files whose hash
+matches the stored hash are skipped.</p>
+</section>
+<section id="chunks">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">chunks</a><a class="headerlink" href="#chunks" title="Link to this heading">¶</a></h3>
+<p>Stores every text chunk with its embedding vector.</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">chunks</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="n">id</span><span class="w">         </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">  </span><span class="n">path</span><span class="w">       </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="k">source</span><span class="w">     </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;memory&#39;</span><span class="p">,</span>
+<span class="w">  </span><span class="n">start_line</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">end_line</span><span class="w">   </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">hash</span><span class="w">       </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">model</span><span class="w">      </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="nb">text</span><span class="w">       </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">embedding</span><span class="w">  </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">updated_at</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<span class="p">);</span>
+
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">idx_chunks_path</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">chunks</span><span class="p">(</span><span class="n">path</span><span class="p">);</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">idx_chunks_source</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">chunks</span><span class="p">(</span><span class="k">source</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">id</span></code> is a SHA-256 hash of <code class="docutils literal notranslate"><span class="pre">source:path:startLine:endLine:chunkHash:model</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">embedding</span></code> is a JSON array of floats (<code class="docutils literal notranslate"><span class="pre">JSON.stringify(embedding)</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">model</span></code> identifies the embedding model for multi-model coexistence.</p></li>
+</ul>
+</section>
+<section id="chunks-fts-fts5-virtual-table">
+<h3><a class="toc-backref" href="#id6" role="doc-backlink">chunks_fts (FTS5 Virtual Table)</a><a class="headerlink" href="#chunks-fts-fts5-virtual-table" title="Link to this heading">¶</a></h3>
+<p>Full-text search index over chunk text for keyword retrieval.</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="n">VIRTUAL</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">chunks_fts</span><span class="w"> </span><span class="k">USING</span><span class="w"> </span><span class="n">fts5</span><span class="p">(</span>
+<span class="w">  </span><span class="nb">text</span><span class="p">,</span>
+<span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">UNINDEXED</span><span class="p">,</span>
+<span class="w">  </span><span class="n">path</span><span class="w"> </span><span class="n">UNINDEXED</span><span class="p">,</span>
+<span class="w">  </span><span class="k">source</span><span class="w"> </span><span class="n">UNINDEXED</span><span class="p">,</span>
+<span class="w">  </span><span class="n">model</span><span class="w"> </span><span class="n">UNINDEXED</span><span class="p">,</span>
+<span class="w">  </span><span class="n">start_line</span><span class="w"> </span><span class="n">UNINDEXED</span><span class="p">,</span>
+<span class="w">  </span><span class="n">end_line</span><span class="w"> </span><span class="n">UNINDEXED</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p>Only the <code class="docutils literal notranslate"><span class="pre">text</span></code> column is indexed for FTS; all other columns are stored
+but <code class="docutils literal notranslate"><span class="pre">UNINDEXED</span></code> for efficient retrieval without inflating the index.</p>
+<p>If FTS5 is not available in the SQLite build, the table creation is caught
+and <code class="docutils literal notranslate"><span class="pre">fts.available</span></code> is set to <code class="docutils literal notranslate"><span class="pre">false</span></code>.</p>
+</section>
+<section id="chunks-vec-vec0-virtual-table">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">chunks_vec (vec0 Virtual Table)</a><a class="headerlink" href="#chunks-vec-vec0-virtual-table" title="Link to this heading">¶</a></h3>
+<p>Vector similarity search index, created dynamically when the first embedding
+is stored:</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="n">VIRTUAL</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">chunks_vec</span><span class="w"> </span><span class="k">USING</span><span class="w"> </span><span class="n">vec0</span><span class="p">(</span>
+<span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">  </span><span class="n">embedding</span><span class="w"> </span><span class="nb">FLOAT</span><span class="p">[</span><span class="o">&lt;</span><span class="n">dimensions</span><span class="o">&gt;</span><span class="p">]</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Dimensions are determined at runtime from the embedding provider (e.g. 256
+for local GemmaEmbedding, 1536 for OpenAI text-embedding-3-small).</p></li>
+<li><p>If the dimensions change (e.g. provider switch), the table is dropped and
+recreated.</p></li>
+<li><p>Embeddings are stored as <code class="docutils literal notranslate"><span class="pre">Float32Array</span></code> buffers for native <code class="docutils literal notranslate"><span class="pre">vec0</span></code>
+compatibility.</p></li>
+</ul>
+</section>
+<section id="embedding-cache">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">embedding_cache</a><a class="headerlink" href="#embedding-cache" title="Link to this heading">¶</a></h3>
+<p>Caches embeddings across reindexes to avoid redundant API calls.</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">embedding_cache</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="n">provider</span><span class="w">     </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">model</span><span class="w">        </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">provider_key</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">hash</span><span class="w">         </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">embedding</span><span class="w">    </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">dims</span><span class="w">         </span><span class="nb">INTEGER</span><span class="p">,</span>
+<span class="w">  </span><span class="n">updated_at</span><span class="w">   </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="p">(</span><span class="n">provider</span><span class="p">,</span><span class="w"> </span><span class="n">model</span><span class="p">,</span><span class="w"> </span><span class="n">provider_key</span><span class="p">,</span><span class="w"> </span><span class="n">hash</span><span class="p">)</span>
+<span class="p">);</span>
+
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">idx_embedding_cache_updated_at</span>
+<span class="w">  </span><span class="k">ON</span><span class="w"> </span><span class="n">embedding_cache</span><span class="p">(</span><span class="n">updated_at</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider_key</span></code> is a hash of the provider configuration (base URL, headers,
+model) to distinguish embeddings from different API endpoints.</p></li>
+<li><p>Cache is pruned by <code class="docutils literal notranslate"><span class="pre">pruneEmbeddingCacheIfNeeded()</span></code> when the entry count
+exceeds <code class="docutils literal notranslate"><span class="pre">maxEntries</span></code>.  Oldest entries (by <code class="docutils literal notranslate"><span class="pre">updated_at</span></code>) are evicted
+first.</p></li>
+</ul>
+</section>
+</section>
+<section id="safe-reindex-temp-db-atomic-swap">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Safe Reindex (Temp DB + Atomic Swap)</a><a class="headerlink" href="#safe-reindex-temp-db-atomic-swap" title="Link to this heading">¶</a></h2>
+<p>When a full reindex is required (model change, chunk settings change, source
+set change, forced sync), the builtin backend uses a safe reindex strategy
+to avoid corrupting the live index:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>1. Create a temporary database at &lt;dbPath&gt;.tmp-&lt;UUID&gt;
+2. Apply schema to temp DB
+3. Seed embedding cache from the original DB
+4. Swap this.db to point to temp DB
+5. Run full sync (memory files + session files)
+6. Write new meta record
+7. Prune embedding cache
+8. Close both databases
+9. Atomic swap:
+   a. Rename original -&gt; &lt;dbPath&gt;.backup-&lt;UUID&gt;
+   b. Rename temp -&gt; &lt;dbPath&gt;
+   c. If (b) fails, restore backup
+   d. Delete backup
+10. Reopen database at &lt;dbPath&gt;
+11. Reset vector state (will re-probe on next search)
+</pre></div>
+</div>
+<p>This ensures that a crash during reindex leaves the original database intact.
+For test environments (<code class="docutils literal notranslate"><span class="pre">OPENCLAW_TEST_FAST=1</span></code>), an unsafe in-place reindex
+is used to reduce filesystem churn.</p>
+</section>
+<section id="file-watching">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">File Watching</a><a class="headerlink" href="#file-watching" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ensureWatcher()</span></code> method sets up a Chokidar file watcher for
+incremental re-indexing:</p>
+<p><strong>Watched paths:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>&lt;workspaceDir&gt;/MEMORY.md
+&lt;workspaceDir&gt;/memory.md
+&lt;workspaceDir&gt;/memory/**/*.md
+&lt;extraPaths&gt;/**/*.md           (for each configured extra path)
+</pre></div>
+</div>
+<p><strong>Configuration:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ignoreInitial:</span> <span class="pre">true</span></code> – do not trigger on existing files at startup.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">awaitWriteFinish.stabilityThreshold</span></code> – configurable via
+<code class="docutils literal notranslate"><span class="pre">sync.watchDebounceMs</span></code> (default 1500ms).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">awaitWriteFinish.pollInterval</span></code> – 100ms.</p></li>
+<li><p>Ignored directories: <code class="docutils literal notranslate"><span class="pre">.git</span></code>, <code class="docutils literal notranslate"><span class="pre">node_modules</span></code>, <code class="docutils literal notranslate"><span class="pre">.pnpm-store</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.venv</span></code>, <code class="docutils literal notranslate"><span class="pre">venv</span></code>, <code class="docutils literal notranslate"><span class="pre">.tox</span></code>, <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code>.</p></li>
+</ul>
+<p><strong>Events:</strong> <code class="docutils literal notranslate"><span class="pre">add</span></code>, <code class="docutils literal notranslate"><span class="pre">change</span></code>, <code class="docutils literal notranslate"><span class="pre">unlink</span></code> all set <code class="docutils literal notranslate"><span class="pre">this.dirty</span> <span class="pre">=</span> <span class="pre">true</span></code>
+and schedule a debounced sync via <code class="docutils literal notranslate"><span class="pre">scheduleWatchSync()</span></code>.</p>
+<p><strong>Session listener:</strong> The <code class="docutils literal notranslate"><span class="pre">ensureSessionListener()</span></code> method subscribes to
+<code class="docutils literal notranslate"><span class="pre">onSessionTranscriptUpdate</span></code> events.  When a transcript file for the
+current agent is modified, a 5-second debounced delta check determines
+whether to trigger a session sync.</p>
+<p><strong>Interval sync:</strong> If <code class="docutils literal notranslate"><span class="pre">sync.intervalMinutes</span></code> is configured, a periodic
+<code class="docutils literal notranslate"><span class="pre">setInterval</span></code> triggers full syncs regardless of file changes.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Knowledge System Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#big-picture">Big Picture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#knowledge-lifecycle">Knowledge Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#dual-backend-architecture">Dual-Backend Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#graceful-degradation-chain">Graceful Degradation Chain</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#memory-v2-research-direction">Memory v2 Research Direction</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">SQLite Storage Schema</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-retrieval.html">Retrieval Pipeline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="qmd-backend.html">External QMD Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory-tools.html">Memory Tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Knowledge System Overview</a><ul>
+      <li>Previous: <a href="knowledge-creation.html" title="previous chapter">How Knowledge is Created</a></li>
+      <li>Next: <a href="knowledge-retrieval.html" title="next chapter">Retrieval Pipeline</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/knowledge/knowledge-storage.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

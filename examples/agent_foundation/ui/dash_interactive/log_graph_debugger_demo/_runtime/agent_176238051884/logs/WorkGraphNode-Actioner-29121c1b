@@ -1,0 +1,2 @@
+{"level": 20, "name": "WorkGraphNode", "id": "WorkGraphNode-Actioner-29121c1b", "type": "ParentChildDebuggableLink", "item": "Parent 'WorkGraph-ec36aa96' linked to child 'WorkGraphNode-Actioner-29121c1b'", "time": "2025-11-05 14:08:38", "parent_ids": ["WorkGraph-ec36aa96"]}
+{"level": 20, "name": "WorkGraphNode", "id": "WorkGraphNode-Actioner-29121c1b", "type": "SetAgentActiveLastNode", "item": "`WorkGraphNode-Actioner-29121c1b` is set as agent `ComplexAgent-c50b22d5`'s active last node", "time": "2025-11-05 14:08:38", "parent_ids": ["WorkGraph-ec36aa96"]}

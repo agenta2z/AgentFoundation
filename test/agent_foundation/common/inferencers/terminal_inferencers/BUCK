@@ -1,0 +1,96 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+python_library(
+    name = "resolve_path",
+    srcs = ["resolve_path.py"],
+    base_module = "",
+    typing = False,
+)
+
+python_library(
+    name = "test_terminal_inferencer_base_lib",
+    srcs = ["test_terminal_inferencer_base.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_binary(
+    name = "test_terminal_inferencer_base",
+    srcs = ["test_terminal_inferencer_base.py"],
+    base_module = "",
+    main_function = "test_terminal_inferencer_base.print_test_results",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_library(
+    name = "test_terminal_session_inferencer_base_lib",
+    srcs = ["test_terminal_session_inferencer_base.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_binary(
+    name = "test_terminal_session_inferencer_base",
+    srcs = ["test_terminal_session_inferencer_base.py"],
+    base_module = "",
+    main_function = "test_terminal_session_inferencer_base.print_test_results",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_library(
+    name = "test_devmate_inferencer_lib",
+    srcs = ["test_devmate_inferencer.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_binary(
+    name = "test_devmate_inferencer",
+    srcs = ["test_devmate_inferencer.py"],
+    base_module = "",
+    main_function = "test_devmate_inferencer.print_test_results",
+    typing = False,
+    deps = [
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)
+
+python_binary(
+    name = "test_devmate_inferencer_live",
+    srcs = ["test_devmate_inferencer_live.py"],
+    base_module = "",
+    main_function = "test_devmate_inferencer_live.main",
+    typing = False,
+    deps = [
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)

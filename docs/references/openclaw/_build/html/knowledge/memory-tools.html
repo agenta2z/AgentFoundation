@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Memory Tools &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Skills System" href="../skills/index.html" />
+    <link rel="prev" title="External QMD Backend" href="qmd-backend.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="memory-tools">
+<span id="knowledge-memory-tools"></span><h1>Memory Tools<a class="headerlink" href="#memory-tools" title="Link to this heading">¶</a></h1>
+<p>The memory system exposes tools to agents for searching, reading, and adding
+to the knowledge base during conversations.</p>
+<section id="memory-search">
+<h2>memory_search<a class="headerlink" href="#memory-search" title="Link to this heading">¶</a></h2>
+<p>The primary retrieval tool — performs semantic search across memory files.</p>
+<p><strong>Tool name</strong>: <code class="docutils literal notranslate"><span class="pre">memory_search</span></code></p>
+<p><strong>Description</strong>: <em>“Mandatory recall step: semantically search MEMORY.md +
+memory/*.md (and optional session transcripts) before answering questions
+about prior work, decisions, dates, people, preferences, or todos; returns top
+snippets with path + lines.”</em></p>
+<section id="parameters">
+<h3>Parameters<a class="headerlink" href="#parameters" title="Link to this heading">¶</a></h3>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">            </span><span class="c1">// Search query text (required)</span>
+<span class="w">  </span><span class="nx">maxResults?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">      </span><span class="c1">// Max results to return (default: 6)</span>
+<span class="w">  </span><span class="nx">minScore?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">        </span><span class="c1">// Min relevance score (default: 0.35)</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="return-value">
+<h3>Return Value<a class="headerlink" href="#return-value" title="Link to this heading">¶</a></h3>
+<p>Returns a JSON object with:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nx">results</span><span class="o">:</span><span class="w"> </span><span class="kt">Array</span><span class="o">&lt;</span><span class="p">{</span>
+<span class="w">    </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// e.g., &quot;memory/2026-02-23.md&quot;</span>
+<span class="w">    </span><span class="nx">startLine</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">      </span><span class="c1">// Chunk start line</span>
+<span class="w">    </span><span class="nx">endLine</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">        </span><span class="c1">// Chunk end line</span>
+<span class="w">    </span><span class="nx">score</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">          </span><span class="c1">// Relevance score (0-1)</span>
+<span class="w">    </span><span class="nx">snippet</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">        </span><span class="c1">// Matching text content</span>
+<span class="w">    </span><span class="nx">source</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;memory&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;sessions&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">citation?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// e.g., &quot;Source: memory/2026-02-23.md#L5-L8&quot;</span>
+<span class="w">  </span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">disabled?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">       </span><span class="c1">// true if memory is unavailable</span>
+<span class="w">  </span><span class="nx">error?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// Error message if search failed</span>
+<span class="w">  </span><span class="nx">backend</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;qmd&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">         </span><span class="c1">// Embedding provider used</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="citation-modes">
+<h3>Citation Modes<a class="headerlink" href="#citation-modes" title="Link to this heading">¶</a></h3>
+<p>Citations are controlled by <code class="docutils literal notranslate"><span class="pre">memory.citations</span></code> in <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 85.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Behavior</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">auto</span></code></p></td>
+<td><p>Include citations in direct chats, suppress in groups/channels (default)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">on</span></code></p></td>
+<td><p>Always include citations</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">off</span></code></p></td>
+<td><p>Never include citations</p></td>
+</tr>
+</tbody>
+</table>
+<p>Citation logic checks the session key to determine context: direct
+sessions get citations, group/channel sessions do not (in <code class="docutils literal notranslate"><span class="pre">auto</span></code> mode).</p>
+</section>
+<section id="result-budget">
+<h3>Result Budget<a class="headerlink" href="#result-budget" title="Link to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">maxInjectedChars</span></code> setting limits how much memory content is injected
+into the conversation to prevent overwhelming the context window.</p>
+</section>
+<section id="mandatory-recall-step">
+<h3>“Mandatory Recall Step”<a class="headerlink" href="#mandatory-recall-step" title="Link to this heading">¶</a></h3>
+<p>The tool description explicitly labels <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> as a “mandatory
+recall step.” This instruction in the system prompt encourages the LLM to
+call <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> proactively before answering questions about prior
+conversations, user preferences, or stored knowledge.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/tools/memory-tool.ts:40-53</span></code></p>
+</section>
+</section>
+<section id="memory-get">
+<h2>memory_get<a class="headerlink" href="#memory-get" title="Link to this heading">¶</a></h2>
+<p>Safe snippet reader for memory files with pagination.</p>
+<p><strong>Tool name</strong>: <code class="docutils literal notranslate"><span class="pre">memory_get</span></code></p>
+<section id="id1">
+<h3>Parameters<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">             </span><span class="c1">// Relative file path (required)</span>
+<span class="w">  </span><span class="nx">from?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">            </span><span class="c1">// Start line number (1-indexed)</span>
+<span class="w">  </span><span class="nx">lines?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">           </span><span class="c1">// Number of lines to read</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Returns the requested text content with the resolved absolute path. Files are
+read relative to the agent’s workspace directory.</p>
+<p>This tool is used by agents to read specific sections of memory files after
+<code class="docutils literal notranslate"><span class="pre">memory_search</span></code> returns a relevant snippet with line references.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/tools/memory-tool.ts</span></code></p>
+</section>
+</section>
+<section id="unavailability-handling">
+<h2>Unavailability Handling<a class="headerlink" href="#unavailability-handling" title="Link to this heading">¶</a></h2>
+<p>When the memory system is unavailable (no embedding provider, database
+corruption, etc.), <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> returns:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;disabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Memory search unavailable: no embedding provider configured&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The tool description instructs the agent to surface this to the user rather
+than silently ignoring it.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Knowledge System Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#big-picture">Big Picture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#knowledge-lifecycle">Knowledge Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#dual-backend-architecture">Dual-Backend Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#graceful-degradation-chain">Graceful Degradation Chain</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#memory-v2-research-direction">Memory v2 Research Direction</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-storage.html">SQLite Storage Schema</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-retrieval.html">Retrieval Pipeline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="qmd-backend.html">External QMD Backend</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Memory Tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Knowledge System Overview</a><ul>
+      <li>Previous: <a href="qmd-backend.html" title="previous chapter">External QMD Backend</a></li>
+      <li>Next: <a href="../skills/index.html" title="next chapter">Skills System</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/knowledge/memory-tools.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

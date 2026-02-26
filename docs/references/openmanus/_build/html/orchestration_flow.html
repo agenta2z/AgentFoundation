@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Orchestration Flow &#8212; OpenManus 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=12dfc556" />
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Tool System" href="tool_system.html" />
+    <link rel="prev" title="Agent System" href="agent_system.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="orchestration-flow">
+<h1>Orchestration Flow<a class="headerlink" href="#orchestration-flow" title="Link to this heading">¶</a></h1>
+<nav class="contents local" id="table-of-contents">
+<p class="topic-title">Table of Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id1">Overview</a></p></li>
+<li><p><a class="reference internal" href="#single-agent-execution" id="id2">Single-Agent Execution</a></p></li>
+<li><p><a class="reference internal" href="#multi-agent-planning-flow" id="id3">Multi-Agent Planning Flow</a></p>
+<ul>
+<li><p><a class="reference internal" href="#architecture" id="id4">Architecture</a></p></li>
+<li><p><a class="reference internal" href="#flow-factory" id="id5">Flow Factory</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#planningflow-detailed-walkthrough" id="id6">PlanningFlow Detailed Walkthrough</a></p>
+<ul>
+<li><p><a class="reference internal" href="#initialization" id="id7">Initialization</a></p></li>
+<li><p><a class="reference internal" href="#step-1-plan-creation" id="id8">Step 1: Plan Creation</a></p></li>
+<li><p><a class="reference internal" href="#step-2-step-execution-loop" id="id9">Step 2: Step Execution Loop</a></p></li>
+<li><p><a class="reference internal" href="#step-3-plan-updates" id="id10">Step 3: Plan Updates</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#planningtool-details" id="id11">PlanningTool Details</a></p>
+<ul>
+<li><p><a class="reference internal" href="#commands" id="id12">Commands</a></p></li>
+<li><p><a class="reference internal" href="#step-statuses" id="id13">Step Statuses</a></p></li>
+<li><p><a class="reference internal" href="#storage" id="id14">Storage</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#planning-system-prompt" id="id15">Planning System Prompt</a></p></li>
+<li><p><a class="reference internal" href="#agent-selection-in-planning-flow" id="id16">Agent Selection in Planning Flow</a></p>
+<ul>
+<li><p><a class="reference internal" href="#current-implementation-limitations" id="id17">Current Implementation Limitations</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#inter-agent-communication" id="id18">Inter-Agent Communication</a></p></li>
+<li><p><a class="reference internal" href="#error-handling-and-recovery" id="id19">Error Handling and Recovery</a></p>
+<ul>
+<li><p><a class="reference internal" href="#step-level-errors" id="id20">Step-Level Errors</a></p></li>
+<li><p><a class="reference internal" href="#agent-level-errors" id="id21">Agent-Level Errors</a></p></li>
+<li><p><a class="reference internal" href="#stuck-detection" id="id22">Stuck Detection</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#comparison-single-agent-vs-multi-agent" id="id23">Comparison: Single-Agent vs. Multi-Agent</a></p></li>
+<li><p><a class="reference internal" href="#a2a-protocol-integration" id="id24">A2A Protocol Integration</a></p>
+<ul>
+<li><p><a class="reference internal" href="#components" id="id25">Components</a></p></li>
+<li><p><a class="reference internal" href="#agent-card" id="id26">Agent Card</a></p></li>
+</ul>
+</li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>OpenManus supports two orchestration patterns:</p>
+<ol class="arabic simple">
+<li><p><strong>Single-Agent Mode</strong>: A single <code class="docutils literal notranslate"><span class="pre">Manus</span></code> agent handles the entire
+task through its think-act loop (<code class="docutils literal notranslate"><span class="pre">main.py</span></code>)</p></li>
+<li><p><strong>Multi-Agent Planning Mode</strong>: A <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> decomposes tasks
+into steps and delegates each step to specialized agents
+(<code class="docutils literal notranslate"><span class="pre">run_flow.py</span></code>)</p></li>
+</ol>
+<p>This document focuses on the multi-agent orchestration flow, which is
+the more architecturally interesting pattern.</p>
+</section>
+<section id="single-agent-execution">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Single-Agent Execution</a><a class="headerlink" href="#single-agent-execution" title="Link to this heading">¶</a></h2>
+<p>In single-agent mode, the flow is straightforward:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>User Input
+     │
+     ▼
+Manus.run(prompt)
+     │
+     ▼
+┌── Step 1 ──────────────────────┐
+│  think(): LLM decides actions  │
+│  act(): Execute tool calls     │
+└────────────┬───────────────────┘
+             │
+┌── Step 2 ──▼───────────────────┐
+│  think(): LLM reasons on       │
+│           previous results     │
+│  act(): Execute next tools     │
+└────────────┬───────────────────┘
+             │
+            ...
+             │
+┌── Step N ──▼───────────────────┐
+│  think(): LLM calls terminate  │
+│  act(): Terminate tool →       │
+│         state = FINISHED       │
+└────────────────────────────────┘
+</pre></div>
+</div>
+<p>The agent autonomously decides:</p>
+<ul class="simple">
+<li><p>Which tools to call and with what arguments</p></li>
+<li><p>When to terminate (by calling the <code class="docutils literal notranslate"><span class="pre">terminate</span></code> tool)</p></li>
+<li><p>How to handle errors and retry</p></li>
+</ul>
+</section>
+<section id="multi-agent-planning-flow">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Multi-Agent Planning Flow</a><a class="headerlink" href="#multi-agent-planning-flow" title="Link to this heading">¶</a></h2>
+<p><strong>Entry Point</strong>: <code class="docutils literal notranslate"><span class="pre">run_flow.py</span></code></p>
+<p><strong>Core Class</strong>: <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> (<code class="docutils literal notranslate"><span class="pre">app/flow/planning.py</span></code>)</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> implements a <strong>Plan-and-Execute</strong> orchestration
+pattern where:</p>
+<ol class="arabic simple">
+<li><p>An LLM creates a structured plan with numbered steps</p></li>
+<li><p>Each step is assigned to and executed by a specialized agent</p></li>
+<li><p>Progress is tracked through a <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code></p></li>
+<li><p>The plan can be dynamically updated based on execution results</p></li>
+</ol>
+<section id="architecture">
+<h3><a class="toc-backref" href="#id4" role="doc-backlink">Architecture</a><a class="headerlink" href="#architecture" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>PlanningFlow
+├── PlanningTool (plan CRUD operations)
+├── LLM (for plan creation/updates)
+└── Agents Dictionary
+    ├── &quot;manus&quot; → Manus (default/primary)
+    └── &quot;data_analysis&quot; → DataAnalysis (optional)
+</pre></div>
+</div>
+</section>
+<section id="flow-factory">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">Flow Factory</a><a class="headerlink" href="#flow-factory" title="Link to this heading">¶</a></h3>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/flow/flow_factory.py</span></code></p>
+<p>The <code class="docutils literal notranslate"><span class="pre">FlowFactory</span></code> creates flow instances:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">FlowType</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Enum</span><span class="p">):</span>
+    <span class="n">PLANNING</span> <span class="o">=</span> <span class="s2">&quot;planning&quot;</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">FlowFactory</span><span class="p">:</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">create_flow</span><span class="p">(</span>
+        <span class="n">flow_type</span><span class="p">:</span> <span class="n">FlowType</span> <span class="o">=</span> <span class="n">FlowType</span><span class="o">.</span><span class="n">PLANNING</span><span class="p">,</span>
+        <span class="n">agents</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BaseFlow</span><span class="p">:</span>
+        <span class="n">flows</span> <span class="o">=</span> <span class="p">{</span><span class="n">FlowType</span><span class="o">.</span><span class="n">PLANNING</span><span class="p">:</span> <span class="n">PlanningFlow</span><span class="p">}</span>
+        <span class="k">return</span> <span class="n">flows</span><span class="p">[</span><span class="n">flow_type</span><span class="p">](</span><span class="n">agents</span><span class="o">=</span><span class="n">agents</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="planningflow-detailed-walkthrough">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">PlanningFlow Detailed Walkthrough</a><a class="headerlink" href="#planningflow-detailed-walkthrough" title="Link to this heading">¶</a></h2>
+<section id="initialization">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Initialization</a><a class="headerlink" href="#initialization" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># From run_flow.py</span>
+<span class="n">agents</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;manus&quot;</span><span class="p">:</span> <span class="n">Manus</span><span class="p">}</span>
+
+<span class="c1"># Optional: Add DataAnalysis agent if configured</span>
+<span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">runflow</span><span class="o">.</span><span class="n">use_data_analysis_agent</span><span class="p">:</span>
+    <span class="n">agents</span><span class="p">[</span><span class="s2">&quot;data_analysis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">DataAnalysis</span>
+
+<span class="n">flow</span> <span class="o">=</span> <span class="n">FlowFactory</span><span class="o">.</span><span class="n">create_flow</span><span class="p">(</span>
+    <span class="n">flow_type</span><span class="o">=</span><span class="n">FlowType</span><span class="o">.</span><span class="n">PLANNING</span><span class="p">,</span>
+    <span class="n">agents</span><span class="o">=</span><span class="n">agents</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">await</span> <span class="n">flow</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="step-1-plan-creation">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Step 1: Plan Creation</a><a class="headerlink" href="#step-1-plan-creation" title="Link to this heading">¶</a></h3>
+<p>When <code class="docutils literal notranslate"><span class="pre">execute()</span></code> is called, the flow first creates a plan:</p>
+<ol class="arabic simple">
+<li><p>The user’s prompt is sent to the LLM along with the <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code></p></li>
+<li><p>The LLM creates a plan by calling <code class="docutils literal notranslate"><span class="pre">PlanningTool.execute(command=&quot;create&quot;,</span> <span class="pre">...)</span></code></p></li>
+<li><p>The plan contains:
+- A title
+- Numbered steps (e.g., “Step 1: Research the topic”)
+- Step statuses (all initially <code class="docutils literal notranslate"><span class="pre">not_started</span></code>)</p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># PlanningTool plan structure (in-memory dict)</span>
+<span class="n">plans</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;plan_001&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;Research and summarize AI trends&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;steps&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;Search for recent AI trends&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Extract key findings&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Write summary document&quot;</span>
+        <span class="p">],</span>
+        <span class="s2">&quot;step_statuses&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;not_started&quot;</span><span class="p">,</span>  <span class="c1"># Step 0</span>
+            <span class="s2">&quot;not_started&quot;</span><span class="p">,</span>  <span class="c1"># Step 1</span>
+            <span class="s2">&quot;not_started&quot;</span>   <span class="c1"># Step 2</span>
+        <span class="p">],</span>
+        <span class="s2">&quot;step_notes&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># Step 0</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># Step 1</span>
+            <span class="s2">&quot;&quot;</span>   <span class="c1"># Step 2</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="step-2-step-execution-loop">
+<h3><a class="toc-backref" href="#id9" role="doc-backlink">Step 2: Step Execution Loop</a><a class="headerlink" href="#step-2-step-execution-loop" title="Link to this heading">¶</a></h3>
+<p>The flow iterates through plan steps:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>┌── For each step in plan ──────────────────────────────────┐
+│                                                           │
+│   1. Get current step text and status                     │
+│   2. Select executor agent:                               │
+│      - PlanningFlow.get_executor(step_type)               │
+│      - Falls back to primary agent (Manus)                │
+│                                                           │
+│   3. Build step prompt:                                   │
+│      - Include overall plan context                       │
+│      - Include specific step instructions                 │
+│      - Include results from previous steps                │
+│                                                           │
+│   4. Execute: agent.run(step_prompt)                      │
+│      - Agent runs its own think-act loop                  │
+│      - Agent uses its own tools autonomously              │
+│                                                           │
+│   5. Capture result                                       │
+│   6. Mark step as &quot;completed&quot; via PlanningTool             │
+│   7. Record step notes for context                        │
+│                                                           │
+│   Check: All steps done? → exit loop                      │
+│   Check: Max steps exceeded? → exit loop                  │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+<section id="step-3-plan-updates">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Step 3: Plan Updates</a><a class="headerlink" href="#step-3-plan-updates" title="Link to this heading">¶</a></h3>
+<p>After each step execution, the LLM may update the plan:</p>
+<ul class="simple">
+<li><p>Add new steps based on discovered information</p></li>
+<li><p>Modify remaining steps based on results</p></li>
+<li><p>Mark steps as <code class="docutils literal notranslate"><span class="pre">blocked</span></code> if prerequisites aren’t met</p></li>
+<li><p>Add notes to steps for context</p></li>
+</ul>
+</section>
+</section>
+<section id="planningtool-details">
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">PlanningTool Details</a><a class="headerlink" href="#planningtool-details" title="Link to this heading">¶</a></h2>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/planning.py</span></code></p>
+<p>The <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code> provides CRUD operations for plan management:</p>
+<section id="commands">
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">Commands</a><a class="headerlink" href="#commands" title="Link to this heading">¶</a></h3>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 25.0%" />
+<col style="width: 60.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Parameters</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">create</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code>, <code class="docutils literal notranslate"><span class="pre">title</span></code>, <code class="docutils literal notranslate"><span class="pre">steps</span></code></p></td>
+<td><p>Create a new plan with numbered steps</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">update</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code>, <code class="docutils literal notranslate"><span class="pre">title</span></code>, <code class="docutils literal notranslate"><span class="pre">steps</span></code></p></td>
+<td><p>Replace plan title and/or steps</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">list</span></code></p></td>
+<td><p>(none)</p></td>
+<td><p>List all plans with their statuses</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">get</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code></p></td>
+<td><p>Get full details of a specific plan</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">set_active</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code></p></td>
+<td><p>Set which plan is currently active</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mark_step</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code>, <code class="docutils literal notranslate"><span class="pre">step_index</span></code>, <code class="docutils literal notranslate"><span class="pre">step_status</span></code>, <code class="docutils literal notranslate"><span class="pre">step_note</span></code></p></td>
+<td><p>Update a step’s status and notes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">delete</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">plan_id</span></code></p></td>
+<td><p>Delete a plan</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="step-statuses">
+<h3><a class="toc-backref" href="#id13" role="doc-backlink">Step Statuses</a><a class="headerlink" href="#step-statuses" title="Link to this heading">¶</a></h3>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Status</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">not_started</span></code></p></td>
+<td><p>Step has not been attempted yet</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">in_progress</span></code></p></td>
+<td><p>Step is currently being executed</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">completed</span></code></p></td>
+<td><p>Step finished successfully</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">blocked</span></code></p></td>
+<td><p>Step cannot proceed (dependency not met)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="storage">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink">Storage</a><a class="headerlink" href="#storage" title="Link to this heading">¶</a></h3>
+<p>Plans are stored in an <strong>in-memory Python dictionary</strong> (<code class="docutils literal notranslate"><span class="pre">self.plans</span></code>).
+This means:</p>
+<ul class="simple">
+<li><p>Plans are <strong>ephemeral</strong> – lost when the process exits</p></li>
+<li><p>There is <strong>no persistence</strong> across sessions</p></li>
+<li><p>Each <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> instance has its own <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code> with
+isolated plan storage</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This is a significant architectural limitation. The planning system
+has no mechanism to save plans for later resumption, share plans
+across processes, or learn from past plans.</p>
+</div>
+</section>
+</section>
+<section id="planning-system-prompt">
+<h2><a class="toc-backref" href="#id15" role="doc-backlink">Planning System Prompt</a><a class="headerlink" href="#planning-system-prompt" title="Link to this heading">¶</a></h2>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/prompt/planning.py</span></code></p>
+<p>The planning system uses a specialized prompt that instructs the LLM to:</p>
+<ol class="arabic simple">
+<li><p>Create structured, actionable plans</p></li>
+<li><p>Break complex tasks into manageable steps</p></li>
+<li><p>Consider dependencies between steps</p></li>
+<li><p>Track progress and adjust plans dynamically</p></li>
+</ol>
+<p>Key prompt excerpt (<code class="docutils literal notranslate"><span class="pre">PLANNING_SYSTEM_PROMPT</span></code>):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">You</span> <span class="n">are</span> <span class="n">an</span> <span class="n">expert</span> <span class="n">planning</span> <span class="n">agent</span><span class="o">.</span> <span class="n">Your</span> <span class="n">job</span> <span class="ow">is</span> <span class="n">to</span> <span class="n">create</span>
+<span class="ow">and</span> <span class="n">manage</span> <span class="n">plans</span> <span class="n">to</span> <span class="n">solve</span> <span class="nb">complex</span> <span class="n">tasks</span><span class="o">.</span>
+
+<span class="n">When</span> <span class="n">creating</span> <span class="n">a</span> <span class="n">plan</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">Break</span> <span class="n">the</span> <span class="n">task</span> <span class="n">into</span> <span class="n">clear</span><span class="p">,</span> <span class="n">actionable</span> <span class="n">steps</span>
+<span class="o">-</span> <span class="n">Order</span> <span class="n">steps</span> <span class="n">logically</span> <span class="p">(</span><span class="n">consider</span> <span class="n">dependencies</span><span class="p">)</span>
+<span class="o">-</span> <span class="n">Make</span> <span class="n">each</span> <span class="n">step</span> <span class="n">specific</span> <span class="n">enough</span> <span class="n">to</span> <span class="n">be</span> <span class="n">executable</span>
+<span class="o">-</span> <span class="n">Include</span> <span class="n">verification</span><span class="o">/</span><span class="n">validation</span> <span class="n">steps</span> <span class="n">when</span> <span class="n">appropriate</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">NEXT_STEP_PROMPT</span></code> emphasizes efficiency:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Focus</span> <span class="n">on</span> <span class="n">completing</span> <span class="n">the</span> <span class="n">current</span> <span class="n">step</span> <span class="n">efficiently</span><span class="o">.</span>
+<span class="n">Use</span> <span class="n">the</span> <span class="n">most</span> <span class="n">appropriate</span> <span class="n">tools</span> <span class="k">for</span> <span class="n">the</span> <span class="n">task</span><span class="o">.</span>
+<span class="n">Report</span> <span class="n">your</span> <span class="n">progress</span> <span class="n">clearly</span><span class="o">.</span>
+</pre></div>
+</div>
+</section>
+<section id="agent-selection-in-planning-flow">
+<h2><a class="toc-backref" href="#id16" role="doc-backlink">Agent Selection in Planning Flow</a><a class="headerlink" href="#agent-selection-in-planning-flow" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> maintains a dictionary of available agents:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">agents</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;manus&quot;</span><span class="p">:</span> <span class="n">Manus</span><span class="p">,</span>         <span class="c1"># General-purpose (primary)</span>
+    <span class="s2">&quot;data_analysis&quot;</span><span class="p">:</span> <span class="n">DataAnalysis</span>  <span class="c1"># Optional</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Agent selection is done by the <code class="docutils literal notranslate"><span class="pre">get_executor()</span></code> method, which can
+route steps to specialized agents based on step content or type. The
+primary agent (<code class="docutils literal notranslate"><span class="pre">Manus</span></code>) is used as the default fallback.</p>
+<section id="current-implementation-limitations">
+<h3><a class="toc-backref" href="#id17" role="doc-backlink">Current Implementation Limitations</a><a class="headerlink" href="#current-implementation-limitations" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The agent selection logic is relatively simple</p></li>
+<li><p>There is no automatic agent routing based on step content analysis</p></li>
+<li><p>The user must pre-register available agents at flow creation time</p></li>
+<li><p>Agents do not share memory or context between steps (only explicit
+step notes provide cross-step context)</p></li>
+</ul>
+</section>
+</section>
+<section id="inter-agent-communication">
+<h2><a class="toc-backref" href="#id18" role="doc-backlink">Inter-Agent Communication</a><a class="headerlink" href="#inter-agent-communication" title="Link to this heading">¶</a></h2>
+<p>Agents in a <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> communicate <strong>indirectly</strong> through:</p>
+<ol class="arabic simple">
+<li><p><strong>Plan State</strong>: The <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code> serves as a shared state store.
+Each agent can read the full plan, step statuses, and step notes.</p></li>
+<li><p><strong>Step Notes</strong>: After completing a step, the result is stored as a
+step note. Subsequent agents see these notes as context.</p></li>
+<li><p><strong>Step Prompts</strong>: The flow builds prompts for each step that include
+context from previous steps’ results.</p></li>
+</ol>
+<p>There is <strong>no direct agent-to-agent communication</strong> – all coordination
+flows through the <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> orchestrator and the <code class="docutils literal notranslate"><span class="pre">PlanningTool</span></code>.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Agent A                    PlanningFlow              Agent B
+  │                            │                        │
+  │  Execute Step 1            │                        │
+  │ ◄──────────────────────────│                        │
+  │                            │                        │
+  │  Return result             │                        │
+  │ ──────────────────────────►│                        │
+  │                            │                        │
+  │                            │  Update plan notes     │
+  │                            │  Select Agent B        │
+  │                            │  Build step 2 prompt   │
+  │                            │  (includes step 1      │
+  │                            │   results as context)  │
+  │                            │                        │
+  │                            │  Execute Step 2        │
+  │                            │ ──────────────────────►│
+  │                            │                        │
+  │                            │  Return result         │
+  │                            │ ◄──────────────────────│
+</pre></div>
+</div>
+</section>
+<section id="error-handling-and-recovery">
+<h2><a class="toc-backref" href="#id19" role="doc-backlink">Error Handling and Recovery</a><a class="headerlink" href="#error-handling-and-recovery" title="Link to this heading">¶</a></h2>
+<section id="step-level-errors">
+<h3><a class="toc-backref" href="#id20" role="doc-backlink">Step-Level Errors</a><a class="headerlink" href="#step-level-errors" title="Link to this heading">¶</a></h3>
+<p>If an agent encounters an error during step execution:</p>
+<ol class="arabic simple">
+<li><p>The step can be marked as <code class="docutils literal notranslate"><span class="pre">blocked</span></code></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> can ask the LLM to revise the plan</p></li>
+<li><p>Alternative steps can be created to work around the blockage</p></li>
+<li><p>The primary agent can be used as a fallback executor</p></li>
+</ol>
+</section>
+<section id="agent-level-errors">
+<h3><a class="toc-backref" href="#id21" role="doc-backlink">Agent-Level Errors</a><a class="headerlink" href="#agent-level-errors" title="Link to this heading">¶</a></h3>
+<p>If an agent’s entire <code class="docutils literal notranslate"><span class="pre">run()</span></code> fails:</p>
+<ol class="arabic simple">
+<li><p>The agent’s state transitions to <code class="docutils literal notranslate"><span class="pre">ERROR</span></code></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">PlanningFlow</span></code> catches the exception</p></li>
+<li><p>The flow can retry with the same or different agent</p></li>
+<li><p>The overall flow terminates if recovery fails</p></li>
+</ol>
+</section>
+<section id="stuck-detection">
+<h3><a class="toc-backref" href="#id22" role="doc-backlink">Stuck Detection</a><a class="headerlink" href="#stuck-detection" title="Link to this heading">¶</a></h3>
+<p>Each agent has built-in stuck detection (<code class="docutils literal notranslate"><span class="pre">is_stuck()</span></code>). If an agent
+produces identical responses repeatedly:</p>
+<ol class="arabic simple">
+<li><p>The <code class="docutils literal notranslate"><span class="pre">next_step_prompt</span></code> is modified to encourage different approaches</p></li>
+<li><p>After <code class="docutils literal notranslate"><span class="pre">duplicate_threshold</span></code> (default: 2) identical responses, the
+agent is pushed to try new strategies</p></li>
+</ol>
+</section>
+</section>
+<section id="comparison-single-agent-vs-multi-agent">
+<h2><a class="toc-backref" href="#id23" role="doc-backlink">Comparison: Single-Agent vs. Multi-Agent</a><a class="headerlink" href="#comparison-single-agent-vs-multi-agent" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 40.0%" />
+<col style="width: 40.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Aspect</p></th>
+<th class="head"><p>Single-Agent (main.py)</p></th>
+<th class="head"><p>Multi-Agent (run_flow.py)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Entry Point</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">main.py</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">run_flow.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Planning</p></td>
+<td><p>Implicit (LLM decides step by step)</p></td>
+<td><p>Explicit (structured plan with PlanningTool)</p></td>
+</tr>
+<tr class="row-even"><td><p>Agent Count</p></td>
+<td><p>1 (Manus)</p></td>
+<td><p>1+ (Manus + optional specialists)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Tool Access</p></td>
+<td><p>Single agent’s tool set</p></td>
+<td><p>Each agent has its own specialized tools</p></td>
+</tr>
+<tr class="row-even"><td><p>Coordination</p></td>
+<td><p>Self-directed</p></td>
+<td><p>Orchestrated by PlanningFlow</p></td>
+</tr>
+<tr class="row-odd"><td><p>Max Steps</p></td>
+<td><p>20 (Manus default)</p></td>
+<td><p>Configurable per flow + per agent</p></td>
+</tr>
+<tr class="row-even"><td><p>Complexity Handling</p></td>
+<td><p>Good for straightforward tasks</p></td>
+<td><p>Better for multi-faceted tasks</p></td>
+</tr>
+<tr class="row-odd"><td><p>Stability</p></td>
+<td><p>Stable (recommended)</p></td>
+<td><p>Unstable (as noted in README)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="a2a-protocol-integration">
+<h2><a class="toc-backref" href="#id24" role="doc-backlink">A2A Protocol Integration</a><a class="headerlink" href="#a2a-protocol-integration" title="Link to this heading">¶</a></h2>
+<p><strong>Directory</strong>: <code class="docutils literal notranslate"><span class="pre">protocol/a2a/</span></code></p>
+<p>OpenManus can be exposed as an <strong>Agent-to-Agent (A2A)</strong> service,
+allowing other agents or systems to invoke it:</p>
+<section id="components">
+<h3><a class="toc-backref" href="#id25" role="doc-backlink">Components</a><a class="headerlink" href="#components" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>A2AManus</strong> (<code class="docutils literal notranslate"><span class="pre">protocol/a2a/app/agent.py</span></code>): Extends <code class="docutils literal notranslate"><span class="pre">Manus</span></code> with
+<code class="docutils literal notranslate"><span class="pre">invoke()</span></code> and <code class="docutils literal notranslate"><span class="pre">stream()</span></code> methods for A2A compatibility</p></li>
+<li><p><strong>ManusExecutor</strong> (<code class="docutils literal notranslate"><span class="pre">protocol/a2a/app/agent_executor.py</span></code>): Implements
+the A2A <code class="docutils literal notranslate"><span class="pre">AgentExecutor</span></code> interface</p></li>
+<li><p><strong>Server</strong> (<code class="docutils literal notranslate"><span class="pre">protocol/a2a/app/main.py</span></code>): Starlette-based A2A server
+on port 10000</p></li>
+</ul>
+</section>
+<section id="agent-card">
+<h3><a class="toc-backref" href="#id26" role="doc-backlink">Agent Card</a><a class="headerlink" href="#agent-card" title="Link to this heading">¶</a></h3>
+<p>The A2A server advertises its capabilities via an <code class="docutils literal notranslate"><span class="pre">AgentCard</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">AgentCard</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Manus Agent&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;A versatile agent that can solve various tasks...&quot;</span><span class="p">,</span>
+    <span class="n">url</span><span class="o">=</span><span class="s2">&quot;http://localhost:10000/&quot;</span><span class="p">,</span>
+    <span class="n">version</span><span class="o">=</span><span class="s2">&quot;1.0.0&quot;</span><span class="p">,</span>
+    <span class="n">capabilities</span><span class="o">=</span><span class="n">AgentCapabilities</span><span class="p">(</span>
+        <span class="n">streaming</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">pushNotifications</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">),</span>
+    <span class="n">skills</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">AgentSkill</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;Python Execute&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+        <span class="n">AgentSkill</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;Browser use&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+        <span class="n">AgentSkill</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;Replace String&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+        <span class="n">AgentSkill</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;Ask human&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+        <span class="n">AgentSkill</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;terminate&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span>
+    <span class="p">]</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">OpenManus</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">System Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_system.html">Agent System</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Orchestration Flow</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#single-agent-execution">Single-Agent Execution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#multi-agent-planning-flow">Multi-Agent Planning Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#planningflow-detailed-walkthrough">PlanningFlow Detailed Walkthrough</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#planningtool-details">PlanningTool Details</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#planning-system-prompt">Planning System Prompt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#agent-selection-in-planning-flow">Agent Selection in Planning Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#inter-agent-communication">Inter-Agent Communication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#error-handling-and-recovery">Error Handling and Recovery</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#comparison-single-agent-vs-multi-agent">Comparison: Single-Agent vs. Multi-Agent</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#a2a-protocol-integration">A2A Protocol Integration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tool_system.html">Tool System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge_and_skills.html">Knowledge and Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llm_integration.html">LLM Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mcp_integration.html">MCP Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sandbox_system.html">Sandbox System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="agent_system.html" title="previous chapter">Agent System</a></li>
+      <li>Next: <a href="tool_system.html" title="next chapter">Tool System</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, FoundationAgents.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/orchestration_flow.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Understanding Memory &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Multi-Agent Workflow" href="multi-agent-workflow.html" />
+    <link rel="prev" title="Adding a Skill" href="adding-a-skill.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="understanding-memory">
+<span id="tutorial-understanding-memory"></span><h1>Understanding Memory<a class="headerlink" href="#understanding-memory" title="Link to this heading">¶</a></h1>
+<p>This tutorial walks through the complete memory lifecycle — from an agent
+writing knowledge to that knowledge being retrieved in a future conversation.</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>OpenClaw’s memory system gives agents persistent knowledge across sessions.
+The lifecycle has four stages:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Write → Index → Store → Retrieve
+  │        │       │        │
+  │        │       │        └─ Hybrid search (vector + keyword)
+  │        │       └─ SQLite database (chunks, FTS5, vec0)
+  │        └─ Chunk + embed markdown files
+  └─ Agent writes MEMORY.md or memory/YYYY-MM-DD.md
+</pre></div>
+</div>
+<p>Let’s trace each stage with a concrete example.</p>
+</section>
+<section id="stage-1-writing-memory">
+<h2>Stage 1: Writing Memory<a class="headerlink" href="#stage-1-writing-memory" title="Link to this heading">¶</a></h2>
+<p>Scenario: During a conversation, the user tells the agent their preferred
+programming language and project structure.</p>
+<section id="the-agent-s-perspective">
+<h3>The Agent’s Perspective<a class="headerlink" href="#the-agent-s-perspective" title="Link to this heading">¶</a></h3>
+<p>The agent has two memory files it can write to:</p>
+<ol class="arabic simple">
+<li><p><strong>MEMORY.md</strong> — Evergreen knowledge (preferences, facts, long-term context)</p></li>
+<li><p><strong>memory/YYYY-MM-DD.md</strong> — Episodic entries (what happened today)</p></li>
+</ol>
+<p>The agent decides to write:</p>
+<p><strong>MEMORY.md</strong>:</p>
+<div class="highlight-markdown notranslate"><div class="highlight"><pre><span></span><span class="gu">## User Preferences</span>
+
+<span class="k">-</span><span class="w"> </span>Preferred language: TypeScript
+<span class="k">-</span><span class="w"> </span>Style: functional, minimal dependencies
+<span class="k">-</span><span class="w"> </span>Testing: Vitest with &gt;80% coverage
+</pre></div>
+</div>
+<p><strong>memory/2026-02-23.md</strong>:</p>
+<div class="highlight-markdown notranslate"><div class="highlight"><pre><span></span><span class="gu">## Session Notes</span>
+
+<span class="k">-</span><span class="w"> </span>Discussed project architecture for the new API gateway
+<span class="k">-</span><span class="w"> </span>User prefers Express v5 over Fastify
+<span class="k">-</span><span class="w"> </span>Decided on a monorepo structure with pnpm workspaces
+</pre></div>
+</div>
+</section>
+<section id="automatic-memory-flush">
+<h3>Automatic Memory Flush<a class="headerlink" href="#automatic-memory-flush" title="Link to this heading">¶</a></h3>
+<p>Memory isn’t only written explicitly. When the conversation grows long (token
+usage exceeds <code class="docutils literal notranslate"><span class="pre">DEFAULT_MEMORY_FLUSH_SOFT_TOKENS</span> <span class="pre">=</span> <span class="pre">4000</span></code>), the system
+triggers an automatic memory flush:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">shouldRunMemoryFlush()</span></code> checks if enough new conversation has occurred
+since the last flush</p></li>
+<li><p>The agent receives a special prompt asking it to summarize important
+information</p></li>
+<li><p>The agent writes key facts to memory files</p></li>
+<li><p>The compaction counter is updated to prevent repeated flushes</p></li>
+</ol>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/memory-flush.ts</span></code></p>
+</section>
+</section>
+<section id="stage-2-indexing">
+<h2>Stage 2: Indexing<a class="headerlink" href="#stage-2-indexing" title="Link to this heading">¶</a></h2>
+<p>Once memory files are written (or modified), the indexing system processes
+them into searchable chunks.</p>
+<section id="file-watching">
+<h3>File Watching<a class="headerlink" href="#file-watching" title="Link to this heading">¶</a></h3>
+<p>The memory manager watches for file changes using chokidar with a 1500ms
+debounce. When a change is detected:</p>
+<ol class="arabic simple">
+<li><p>The file’s hash is compared against the stored hash in the <code class="docutils literal notranslate"><span class="pre">files</span></code> table</p></li>
+<li><p>If different, the file is re-chunked and re-embedded</p></li>
+<li><p>Old chunks for the file are replaced with new ones</p></li>
+</ol>
+</section>
+<section id="chunking">
+<h3>Chunking<a class="headerlink" href="#chunking" title="Link to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">chunkMarkdown()</span></code> function splits files into overlapping chunks:</p>
+<ul class="simple">
+<li><p><strong>Target size</strong>: ~400 tokens (~1600 characters)</p></li>
+<li><p><strong>Overlap</strong>: ~80 tokens between adjacent chunks</p></li>
+<li><p><strong>Boundaries</strong>: Chunks split at markdown heading boundaries when possible</p></li>
+</ul>
+<p>For our <code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code> file (small), the entire content becomes a single chunk.</p>
+<p>For <code class="docutils literal notranslate"><span class="pre">memory/2026-02-23.md</span></code>, it also becomes one chunk since it’s short.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>MEMORY.md
+├── Chunk 1: &quot;## User Preferences\n- Preferred language: TypeScript...&quot;
+│   (lines 1-5, 127 chars)
+└── (single chunk — file is small)
+
+memory/2026-02-23.md
+├── Chunk 1: &quot;## Session Notes\n- Discussed project architecture...&quot;
+│   (lines 1-5, 182 chars)
+└── (single chunk — file is small)
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/internal.ts</span></code></p>
+</section>
+<section id="embedding">
+<h3>Embedding<a class="headerlink" href="#embedding" title="Link to this heading">¶</a></h3>
+<p>Each chunk is converted to a vector embedding — a numerical representation
+that captures semantic meaning. The embedding provider is selected
+automatically:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Auto-selection cascade:
+1. Local (embeddinggemma-300m via node-llama-cpp)  ← preferred
+2. OpenAI (text-embedding-3-small)
+3. Gemini (gemini-embedding-001)
+4. Voyage (voyage-4-large)
+5. Mistral (mistral-embed)
+</pre></div>
+</div>
+<p>The local provider runs entirely on the user’s machine with no API calls.
+All embeddings are L2-normalized for consistent cosine similarity calculations.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/embeddings.ts</span></code></p>
+</section>
+</section>
+<section id="stage-3-storage">
+<h2>Stage 3: Storage<a class="headerlink" href="#stage-3-storage" title="Link to this heading">¶</a></h2>
+<p>Indexed chunks are stored in a SQLite database at
+<code class="docutils literal notranslate"><span class="pre">~/.openclaw/state/memory/&lt;agentId&gt;.sqlite</span></code>.</p>
+<section id="database-tables">
+<h3>Database Tables<a class="headerlink" href="#database-tables" title="Link to this heading">¶</a></h3>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌──────────────────────────────────────────────────────┐
+│                    SQLite Database                    │
+│                                                      │
+│  meta         │ key-value index metadata             │
+│  files        │ tracked files (path, hash, mtime)    │
+│  chunks       │ text chunks with embeddings          │
+│  chunks_fts   │ FTS5 virtual table (BM25 search)     │
+│  chunks_vec   │ vec0 virtual table (vector search)   │
+│  embedding_cache │ cached embeddings by content hash │
+└──────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+<p>Our two chunks are stored in the <code class="docutils literal notranslate"><span class="pre">chunks</span></code> table:</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">chunks</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">path</span><span class="p">,</span><span class="w"> </span><span class="k">source</span><span class="p">,</span><span class="w"> </span><span class="n">start_line</span><span class="p">,</span><span class="w"> </span><span class="n">end_line</span><span class="p">,</span><span class="w"> </span><span class="n">hash</span><span class="p">,</span><span class="w"> </span><span class="n">model</span><span class="p">,</span>
+<span class="w">                    </span><span class="nb">text</span><span class="p">,</span><span class="w"> </span><span class="n">embedding</span><span class="p">,</span><span class="w"> </span><span class="n">updated_at</span><span class="p">)</span>
+<span class="k">VALUES</span>
+<span class="w">  </span><span class="p">(</span><span class="s1">&#39;chunk-001&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;MEMORY.md&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;memory&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;abc123...&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;local&#39;</span><span class="p">,</span>
+<span class="w">   </span><span class="s1">&#39;## User Preferences...&#39;</span><span class="p">,</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">768</span><span class="o">-</span><span class="n">dim</span><span class="w"> </span><span class="n">vector</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">1708700000</span><span class="p">),</span>
+<span class="w">  </span><span class="p">(</span><span class="s1">&#39;chunk-002&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;memory/2026-02-23.md&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;memory&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;def456...&#39;</span><span class="p">,</span>
+<span class="w">   </span><span class="s1">&#39;local&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;## Session Notes...&#39;</span><span class="p">,</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">768</span><span class="o">-</span><span class="n">dim</span><span class="w"> </span><span class="n">vector</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">1708700000</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>Simultaneously, the text is indexed in the FTS5 table for keyword search,
+and the vector is indexed in the vec0 table for similarity search.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/memory-schema.ts</span></code></p>
+</section>
+<section id="safe-reindex">
+<h3>Safe Reindex<a class="headerlink" href="#safe-reindex" title="Link to this heading">¶</a></h3>
+<p>When a full reindex is needed (e.g., embedding model change), the system:</p>
+<ol class="arabic simple">
+<li><p>Creates a temporary database</p></li>
+<li><p>Indexes all files into the temp DB</p></li>
+<li><p>Atomically swaps the temp DB with the live DB</p></li>
+</ol>
+<p>This prevents data loss if the process crashes mid-reindex.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/manager-sync-ops.ts</span></code></p>
+</section>
+</section>
+<section id="stage-4-retrieval">
+<h2>Stage 4: Retrieval<a class="headerlink" href="#stage-4-retrieval" title="Link to this heading">¶</a></h2>
+<p>Days later, the user starts a new conversation and asks: “What testing
+framework do I prefer?”</p>
+<section id="the-memory-search-tool">
+<h3>The <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> Tool<a class="headerlink" href="#the-memory-search-tool" title="Link to this heading">¶</a></h3>
+<p>The agent’s system prompt includes <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> described as a
+“mandatory recall step.” When the agent encounters a question about prior
+preferences, it calls:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;tool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;memory_search&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;testing framework preference&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;maxResults&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;minScore&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.35</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="the-retrieval-pipeline">
+<h3>The Retrieval Pipeline<a class="headerlink" href="#the-retrieval-pipeline" title="Link to this heading">¶</a></h3>
+<p>The query flows through a multi-stage pipeline:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>&quot;testing framework preference&quot;
+  │
+  ├── Query Expansion
+  │   └── extractKeywords() → [&quot;testing&quot;, &quot;framework&quot;, &quot;preference&quot;]
+  │
+  ├── Vector Search (weight: 0.7)
+  │   ├── Embed query → 768-dim vector
+  │   ├── sqlite-vec cosine distance search
+  │   └── Returns: MEMORY.md chunk (score: 0.82)
+  │
+  ├── Keyword Search (weight: 0.3)
+  │   ├── FTS5 BM25 query: &quot;testing OR framework OR preference&quot;
+  │   └── Returns: MEMORY.md chunk (score: 0.71)
+  │
+  ├── Hybrid Merge
+  │   ├── Normalize scores to [0, 1]
+  │   ├── Combined = 0.7 × vector + 0.3 × keyword
+  │   └── MEMORY.md chunk: 0.7 × 0.82 + 0.3 × 0.71 = 0.787
+  │
+  ├── Temporal Decay
+  │   ├── MEMORY.md: no date → evergreen (no decay)
+  │   ├── memory/2026-02-23.md: 0 days old → decay factor ≈ 1.0
+  │   └── (30-day half-life: score × 0.5^(age/30))
+  │
+  ├── MMR Re-ranking
+  │   ├── Maximal Marginal Relevance (Jaccard-based diversity)
+  │   └── Prevents near-duplicate chunks from dominating results
+  │
+  ├── Threshold Filter
+  │   └── Remove results below minScore (0.35)
+  │
+  └── Top-K Selection
+      └── Return top 6 results
+</pre></div>
+</div>
+<p><strong>Result returned to the agent:</strong></p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;MEMORY.md&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;startLine&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;endLine&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.787</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;snippet&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;## User Preferences\n- Preferred language: TypeScript\n- Style: functional, minimal dependencies\n- Testing: Vitest with &gt;80% coverage&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;citation&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Source: MEMORY.md#L1-L5&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;backend&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;provider&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/manager-search.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/memory/hybrid.ts</span></code></p>
+</section>
+<section id="the-agent-responds">
+<h3>The Agent Responds<a class="headerlink" href="#the-agent-responds" title="Link to this heading">¶</a></h3>
+<p>With the memory search result, the agent can now answer confidently:</p>
+<blockquote>
+<div><p>“You prefer Vitest for testing, with a coverage threshold above 80%.”</p>
+</div></blockquote>
+<p>The citation (<code class="docutils literal notranslate"><span class="pre">Source:</span> <span class="pre">MEMORY.md#L1-L5</span></code>) may be included depending on the
+<code class="docutils literal notranslate"><span class="pre">memory.citations</span></code> setting (auto/on/off).</p>
+</section>
+</section>
+<section id="graceful-degradation">
+<h2>Graceful Degradation<a class="headerlink" href="#graceful-degradation" title="Link to this heading">¶</a></h2>
+<p>The memory system degrades gracefully when components are unavailable:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Full hybrid search (vector + keyword)
+  ↓ (no embedding provider)
+Vector-only search (pre-computed embeddings still work)
+  ↓ (no vectors at all)
+FTS-only search (keyword matching via BM25)
+  ↓ (FTS unavailable)
+Memory disabled (returns { disabled: true })
+</pre></div>
+</div>
+<p>Even without an embedding provider, previously computed embeddings remain
+usable. New content simply won’t get embeddings until a provider is
+configured.</p>
+</section>
+<section id="session-transcript-indexing">
+<h2>Session Transcript Indexing<a class="headerlink" href="#session-transcript-indexing" title="Link to this heading">¶</a></h2>
+<p>Beyond explicit memory files, the system can also index session transcripts
+(past conversations). The <code class="docutils literal notranslate"><span class="pre">buildSessionEntry()</span></code> function converts JSONL
+transcript files into Markdown-like content that can be chunked and embedded
+alongside memory files.</p>
+<p>This allows agents to search not just curated knowledge, but the full
+history of past conversations.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/session-files.ts</span></code></p>
+</section>
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Link to this heading">¶</a></h2>
+<p>The memory lifecycle:</p>
+<ol class="arabic simple">
+<li><p><strong>Write</strong>: Agent creates/updates <code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code> or <code class="docutils literal notranslate"><span class="pre">memory/YYYY-MM-DD.md</span></code>
+(manually or via automatic memory flush)</p></li>
+<li><p><strong>Index</strong>: Files are chunked (~400 tokens), embedded (768-dim vectors),
+and indexed in SQLite (chunks + FTS5 + vec0)</p></li>
+<li><p><strong>Store</strong>: SQLite database at <code class="docutils literal notranslate"><span class="pre">~/.openclaw/state/memory/&lt;agentId&gt;.sqlite</span></code>
+with safe reindex via atomic swap</p></li>
+<li><p><strong>Retrieve</strong>: Hybrid search (0.7 vector + 0.3 keyword) → temporal decay
+→ MMR diversity → threshold (0.35) → top-K (6)</p></li>
+</ol>
+<p>Key source files:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager.ts</span></code> — Main memory manager</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager-sync-ops.ts</span></code> — File sync and indexing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/manager-search.ts</span></code> — Search implementation</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/hybrid.ts</span></code> — Hybrid merge algorithm</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/temporal-decay.ts</span></code> — Time-based score decay</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/mmr.ts</span></code> — Diversity re-ranking</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/embeddings.ts</span></code> — Embedding providers</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/memory/memory-schema.ts</span></code> — Database schema</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/tools/memory-tool.ts</span></code> — Agent-facing tools</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Tutorials</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="tracing-a-message.html">Tracing a Message</a></li>
+<li class="toctree-l2"><a class="reference internal" href="adding-a-skill.html">Adding a Skill</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Understanding Memory</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#stage-1-writing-memory">Stage 1: Writing Memory</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#stage-2-indexing">Stage 2: Indexing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#stage-3-storage">Stage 3: Storage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#stage-4-retrieval">Stage 4: Retrieval</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#graceful-degradation">Graceful Degradation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#session-transcript-indexing">Session Transcript Indexing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="multi-agent-workflow.html">Multi-Agent Workflow</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Tutorials</a><ul>
+      <li>Previous: <a href="adding-a-skill.html" title="previous chapter">Adding a Skill</a></li>
+      <li>Next: <a href="multi-agent-workflow.html" title="next chapter">Multi-Agent Workflow</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/tutorials/understanding-memory.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

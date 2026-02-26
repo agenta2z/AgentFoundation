@@ -1,0 +1,15 @@
+DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT = 'user_input'
+DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE = 'user_profile'
+DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT = 'context'
+DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS = 'action_results'
+DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES = 'agent_states'
+DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION = 'trigger_action'
+DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS = 'attachments'
+
+DEFAULT_AGENT_TASK_INPUT_FIELD_TASK_LABEL = 'task_label'
+
+# Result pass-down field name for previous agent results
+DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS = 'previous_agent_results'
+
+# Max number of loops for single-iteration or limited-iteration runs
+DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS = 'max_num_loops'

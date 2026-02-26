@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Full 13-Step Request Flow &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Sub-agent Spawning &amp; Coordination" href="multi-agent.html" />
+    <link rel="prev" title="Agent Configuration" href="agent-definition.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="full-13-step-request-flow">
+<span id="request-lifecycle"></span><h1>Full 13-Step Request Flow<a class="headerlink" href="#full-13-step-request-flow" title="Link to this heading">¶</a></h1>
+<p>This tutorial-style document traces a single user message from the
+moment it arrives at a channel adapter to the moment the response
+is delivered back.  The primary source files are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/get-reply.ts</span></code> – top-level reply
+orchestration</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner.ts</span></code> – agent run setup and
+post-processing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner-execution.ts</span></code> – model
+fallback and the embedded run loop</p></li>
+</ul>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#flow-diagram" id="id4">Flow Diagram</a></p></li>
+<li><p><a class="reference internal" href="#step-by-step-walkthrough" id="id5">Step-by-Step Walkthrough</a></p>
+<ul>
+<li><p><a class="reference internal" href="#step-1-channel-inbound" id="id6">Step 1: Channel Inbound</a></p></li>
+<li><p><a class="reference internal" href="#step-2-routing" id="id7">Step 2: Routing</a></p></li>
+<li><p><a class="reference internal" href="#step-3-session-resolution" id="id8">Step 3: Session Resolution</a></p></li>
+<li><p><a class="reference internal" href="#step-4-authorization" id="id9">Step 4: Authorization</a></p></li>
+<li><p><a class="reference internal" href="#step-5-directive-parsing" id="id10">Step 5: Directive Parsing</a></p></li>
+<li><p><a class="reference internal" href="#step-6-queue-check" id="id11">Step 6: Queue Check</a></p></li>
+<li><p><a class="reference internal" href="#step-7-memory-flush" id="id12">Step 7: Memory Flush</a></p></li>
+<li><p><a class="reference internal" href="#step-8-model-resolution" id="id13">Step 8: Model Resolution</a></p></li>
+<li><p><a class="reference internal" href="#step-9-auth-profile-selection" id="id14">Step 9: Auth Profile Selection</a></p></li>
+<li><p><a class="reference internal" href="#step-10-agent-run" id="id15">Step 10: Agent Run</a></p></li>
+<li><p><a class="reference internal" href="#step-11-streaming" id="id16">Step 11: Streaming</a></p></li>
+<li><p><a class="reference internal" href="#step-12-compaction" id="id17">Step 12: Compaction</a></p></li>
+<li><p><a class="reference internal" href="#step-13-response-and-delivery" id="id18">Step 13: Response and Delivery</a></p></li>
+</ul>
+</li>
+</ul>
+</nav>
+<section id="flow-diagram">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Flow Diagram</a><a class="headerlink" href="#flow-diagram" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span> User sends &quot;Summarize this PR&quot; on Telegram
+      |
+      v
+[1] Channel Inbound   -- Telegram adapter receives update
+      |
+[2] Routing            -- map chat ID -&gt; session key
+      |
+[3] Session Resolution -- load / create session entry
+      |
+[4] Auth Check         -- is sender authorized?
+      |
+[5] Directive Parse    -- extract !model, !think, !verbose
+      |
+[6] Queue Check        -- steer into active run, or enqueue?
+      |
+[7] Memory Flush       -- persist pending memory before run
+      |
+[8] Model Resolution   -- pick provider + model
+      |
+[9] Auth Profile       -- select API key / OAuth token
+      |
+[10] Agent Run         -- ReAct tool loop (LLM + tools)
+      |
+[11] Streaming         -- typing indicators, block replies
+      |
+[12] Compaction        -- auto-compact if near context limit
+      |
+[13] Response/Delivery -- format and send back to Telegram
+</pre></div>
+</div>
+</section>
+<section id="step-by-step-walkthrough">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Step-by-Step Walkthrough</a><a class="headerlink" href="#step-by-step-walkthrough" title="Link to this heading">¶</a></h2>
+<section id="step-1-channel-inbound">
+<h3><a class="toc-backref" href="#id6" role="doc-backlink">Step 1: Channel Inbound</a><a class="headerlink" href="#step-1-channel-inbound" title="Link to this heading">¶</a></h3>
+<p>Each messaging channel (Telegram, Discord, Slack, Signal, iMessage,
+Web, WhatsApp, IRC, MS Teams, etc.) has an adapter that normalizes
+the incoming message into a <code class="docutils literal notranslate"><span class="pre">MsgContext</span></code> object.</p>
+<p>The context includes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Body</span></code> – the message text</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">From</span></code> / <code class="docutils literal notranslate"><span class="pre">To</span></code> – sender and recipient identifiers</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Provider</span></code> – channel identifier (<code class="docutils literal notranslate"><span class="pre">&quot;telegram&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;discord&quot;</span></code>, …)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SessionKey</span></code> – session routing key (may be pre-computed by the
+channel)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ThreadId</span></code> – thread/topic identifier for threaded channels</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MediaUrl</span></code> – attached media URLs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CommandSource</span></code> – <code class="docutils literal notranslate"><span class="pre">&quot;native&quot;</span></code> for slash commands, <code class="docutils literal notranslate"><span class="pre">&quot;text&quot;</span></code> for
+inline commands</p></li>
+</ul>
+<p>The <code class="docutils literal notranslate"><span class="pre">finalizeInboundContext()</span></code> function
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/inbound-context.ts</span></code>) normalizes and enriches
+the raw context before further processing.</p>
+</section>
+<section id="step-2-routing">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Step 2: Routing</a><a class="headerlink" href="#step-2-routing" title="Link to this heading">¶</a></h3>
+<p>The session key determines which agent and session handle the message.
+<code class="docutils literal notranslate"><span class="pre">resolveSessionAgentId()</span></code> (<code class="docutils literal notranslate"><span class="pre">src/agents/agent-scope.ts</span></code>:98-103)
+extracts the agent ID from the session key, falling back to the
+default agent.</p>
+<p>For session keys of the form <code class="docutils literal notranslate"><span class="pre">agent:&lt;id&gt;:subagent:&lt;uuid&gt;</span></code>, the
+embedded agent ID is extracted.  Otherwise, the default agent is used.</p>
+</section>
+<section id="step-3-session-resolution">
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Step 3: Session Resolution</a><a class="headerlink" href="#step-3-session-resolution" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">initSessionState()</span></code> (<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/session.ts</span></code>)
+loads or creates the session entry from the session store
+(<code class="docutils literal notranslate"><span class="pre">sessions.json</span></code>):</p>
+<ul class="simple">
+<li><p>Loads the session store from disk (per-agent path).</p></li>
+<li><p>Looks up or creates the <code class="docutils literal notranslate"><span class="pre">SessionEntry</span></code> for this session key.</p></li>
+<li><p>Assigns a new <code class="docutils literal notranslate"><span class="pre">sessionId</span></code> (UUID) for new sessions.</p></li>
+<li><p>Resolves the transcript file path (JSONL).</p></li>
+<li><p>Detects session resets (<code class="docutils literal notranslate"><span class="pre">/new</span></code> command).</p></li>
+<li><p>Determines group vs. DM context.</p></li>
+<li><p>Returns the <code class="docutils literal notranslate"><span class="pre">sessionKey</span></code>, <code class="docutils literal notranslate"><span class="pre">sessionId</span></code>, <code class="docutils literal notranslate"><span class="pre">sessionEntry</span></code>,
+<code class="docutils literal notranslate"><span class="pre">sessionStore</span></code>, <code class="docutils literal notranslate"><span class="pre">storePath</span></code>, and related state.</p></li>
+</ul>
+</section>
+<section id="step-4-authorization">
+<h3><a class="toc-backref" href="#id9" role="doc-backlink">Step 4: Authorization</a><a class="headerlink" href="#step-4-authorization" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">resolveCommandAuthorization()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/command-auth.ts</span></code>) checks whether the sender is
+authorized to use the agent:</p>
+<ul class="simple">
+<li><p>Owner-only commands are gated by the configured owner identifiers.</p></li>
+<li><p>DM policy and group activation rules are evaluated.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">commandAuthorized</span></code> flag is propagated to downstream steps.</p></li>
+</ul>
+</section>
+<section id="step-5-directive-parsing">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Step 5: Directive Parsing</a><a class="headerlink" href="#step-5-directive-parsing" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">resolveReplyDirectives()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/get-reply-directives.ts</span></code>) scans the message
+body for inline directives:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">!model</span> <span class="pre">&lt;name&gt;</span></code> – switch model for this session</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">!think</span> <span class="pre">&lt;level&gt;</span></code> – set thinking/reasoning level</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">!verbose</span></code> – toggle verbose output</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">!reset</span></code> – reset session</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">!elevated</span></code> – enable elevated bash execution</p></li>
+</ul>
+<p>Directives are stripped from the message body before it is passed to
+the agent.  Some directives produce an immediate reply (e.g.,
+<code class="docutils literal notranslate"><span class="pre">!status</span></code>) and short-circuit the pipeline.</p>
+</section>
+<section id="step-6-queue-check">
+<h3><a class="toc-backref" href="#id11" role="doc-backlink">Step 6: Queue Check</a><a class="headerlink" href="#step-6-queue-check" title="Link to this heading">¶</a></h3>
+<p>OpenClaw supports several queue modes for handling messages that arrive
+while an agent run is already in progress:</p>
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">Queue Modes</span><a class="headerlink" href="#id1" title="Link to this table">¶</a></caption>
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Behavior</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">steer</span></code></p></td>
+<td><p>Inject the new message into the active run’s context via
+<code class="docutils literal notranslate"><span class="pre">queueEmbeddedPiMessage()</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">followup</span></code></p></td>
+<td><p>Enqueue the message; run it after the current run completes.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">collect</span></code></p></td>
+<td><p>Batch multiple messages into a single follow-up run.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">steer-backlog</span></code></p></td>
+<td><p>Try steering first; if not possible, fall back to follow-up.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">interrupt</span></code></p></td>
+<td><p>Abort the current run and start a new one.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Queue settings are resolved per-channel via <code class="docutils literal notranslate"><span class="pre">resolveQueueSettings()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/queue/settings.ts</span></code>).</p>
+<p>If the message is steered or enqueued, the function returns early –
+no new agent run is started.</p>
+</section>
+<section id="step-7-memory-flush">
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">Step 7: Memory Flush</a><a class="headerlink" href="#step-7-memory-flush" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">runMemoryFlushIfNeeded()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner-memory.ts</span></code>) persists any
+pending memory writes before the agent run starts.  This ensures the
+agent sees the most recent memory state when it calls
+<code class="docutils literal notranslate"><span class="pre">memory_search</span></code> or <code class="docutils literal notranslate"><span class="pre">memory_get</span></code> during the run.</p>
+</section>
+<section id="step-8-model-resolution">
+<h3><a class="toc-backref" href="#id13" role="doc-backlink">Step 8: Model Resolution</a><a class="headerlink" href="#step-8-model-resolution" title="Link to this heading">¶</a></h3>
+<p>The model is resolved through a priority chain:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Per-agent explicit model (agents.list[].model)
+  |
+  v  (fallback)
+Session model override (sessionEntry.modelOverride)
+  |
+  v  (fallback)
+Channel model override (channels.&lt;channel&gt;.model)
+  |
+  v  (fallback)
+Global default (agents.defaults.model)
+  |
+  v  (fallback)
+Hardcoded default: anthropic/claude-opus-4-6
+</pre></div>
+</div>
+<p>This is implemented across <code class="docutils literal notranslate"><span class="pre">resolveDefaultModel()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/directive-handling.ts</span></code>) and
+<code class="docutils literal notranslate"><span class="pre">resolveAgentEffectiveModelPrimary()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/agent-scope.ts</span></code>:170-178).</p>
+<p>The default provider is <code class="docutils literal notranslate"><span class="pre">&quot;anthropic&quot;</span></code> and the default model is
+<code class="docutils literal notranslate"><span class="pre">&quot;claude-opus-4-6&quot;</span></code> (<code class="docutils literal notranslate"><span class="pre">src/agents/defaults.ts</span></code>:3-4).</p>
+</section>
+<section id="step-9-auth-profile-selection">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink">Step 9: Auth Profile Selection</a><a class="headerlink" href="#step-9-auth-profile-selection" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">getApiKeyForModel()</span></code> / <code class="docutils literal notranslate"><span class="pre">resolveAuthProfileOrder()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/model-auth.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles.ts</span></code>)
+select the appropriate API key or OAuth credential:</p>
+<ul class="simple">
+<li><p>Multiple auth profiles can be configured per provider.</p></li>
+<li><p>Profiles in cooldown (from rate-limit errors) are skipped.</p></li>
+<li><p>Round-robin ordering prevents any single profile from being
+over-utilized.</p></li>
+<li><p>The selected profile ID is recorded in <code class="docutils literal notranslate"><span class="pre">FollowupRun.run.authProfileId</span></code>.</p></li>
+</ul>
+<p>See <a class="reference internal" href="llm-integration.html"><span class="doc">LLM Integration</span></a> for details on the auth profile system.</p>
+</section>
+<section id="step-10-agent-run">
+<h3><a class="toc-backref" href="#id15" role="doc-backlink">Step 10: Agent Run</a><a class="headerlink" href="#step-10-agent-run" title="Link to this heading">¶</a></h3>
+<p>This is the core of the pipeline – the ReAct tool loop.</p>
+<p><code class="docutils literal notranslate"><span class="pre">runAgentTurnWithFallback()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner-execution.ts</span></code>:67-586) wraps
+the run in the model fallback chain:</p>
+<ol class="arabic simple">
+<li><p>Build the candidate list (primary + fallbacks) via
+<code class="docutils literal notranslate"><span class="pre">resolveFallbackCandidates()</span></code>.</p></li>
+<li><p>For each candidate, call <code class="docutils literal notranslate"><span class="pre">runEmbeddedPiAgent()</span></code> or
+<code class="docutils literal notranslate"><span class="pre">runCliAgent()</span></code>.</p></li>
+<li><p>If the run succeeds, break out of the loop.</p></li>
+<li><p>If the run fails with a failover-eligible error, record the
+attempt and try the next candidate.</p></li>
+<li><p>If all candidates fail, throw a summary error.</p></li>
+</ol>
+<p>Inside <code class="docutils literal notranslate"><span class="pre">runEmbeddedPiAgent()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code>), the actual tool loop runs:</p>
+<ul class="simple">
+<li><p>The system prompt is assembled (see <a class="reference internal" href="system-prompt.html"><span class="doc">System Prompt</span></a>).</p></li>
+<li><p>Tool definitions are registered (see <a class="reference internal" href="tool-system.html"><span class="doc">Tool Architecture</span></a>).</p></li>
+<li><p>The pi-agent-core <code class="docutils literal notranslate"><span class="pre">AgentSession</span></code> drives the ReAct loop.</p></li>
+<li><p>Tool calls are executed, results appended, and the model is called
+again.</p></li>
+<li><p>Streaming callbacks emit partial text and tool events.</p></li>
+</ul>
+<div class="literal-block-wrapper docutils container" id="id2">
+<div class="code-block-caption"><span class="caption-text">src/auto-reply/reply/agent-runner-execution.ts:172-174</span><a class="headerlink" href="#id2" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">const</span><span class="w"> </span><span class="nx">fallbackResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">runWithModelFallback</span><span class="p">({</span>
+<span class="w">  </span><span class="p">...</span><span class="nx">resolveModelFallbackOptions</span><span class="p">(</span><span class="nx">params</span><span class="p">.</span><span class="nx">followupRun</span><span class="p">.</span><span class="nx">run</span><span class="p">),</span>
+<span class="w">  </span><span class="nx">run</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="nx">provider</span><span class="p">,</span><span class="w"> </span><span class="nx">model</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">},</span>
+<span class="p">});</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="step-11-streaming">
+<h3><a class="toc-backref" href="#id16" role="doc-backlink">Step 11: Streaming</a><a class="headerlink" href="#step-11-streaming" title="Link to this heading">¶</a></h3>
+<p>During the agent run, several streaming mechanisms are active:</p>
+<ul class="simple">
+<li><p><strong>Typing indicators</strong>: <code class="docutils literal notranslate"><span class="pre">createTypingSignaler()</span></code> sends platform
+typing events at configured intervals.</p></li>
+<li><p><strong>Block replies</strong>: <code class="docutils literal notranslate"><span class="pre">createBlockReplyPipeline()</span></code> splits long
+responses into paragraph-sized chunks and delivers them
+incrementally.</p></li>
+<li><p><strong>Partial replies</strong>: <code class="docutils literal notranslate"><span class="pre">onPartialReply</span></code> callbacks emit text deltas
+as the model generates tokens.</p></li>
+<li><p><strong>Tool events</strong>: <code class="docutils literal notranslate"><span class="pre">onAgentEvent</span></code> emits structured events for tool
+start/end, compaction, and lifecycle phases.</p></li>
+</ul>
+</section>
+<section id="step-12-compaction">
+<h3><a class="toc-backref" href="#id17" role="doc-backlink">Step 12: Compaction</a><a class="headerlink" href="#step-12-compaction" title="Link to this heading">¶</a></h3>
+<p>If the conversation context approaches the model’s context window
+limit, auto-compaction is triggered:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">compactEmbeddedPiSessionDirect()</span></code> summarizes older messages to
+free tokens.</p></li>
+<li><p>The compaction result is tracked via <code class="docutils literal notranslate"><span class="pre">autoCompactionCompleted</span></code>.</p></li>
+<li><p>A post-compaction workspace context injection and read audit may
+follow.</p></li>
+<li><p>If compaction itself fails (context still too large), the session
+is auto-reset (line 347-352).</p></li>
+</ul>
+</section>
+<section id="step-13-response-and-delivery">
+<h3><a class="toc-backref" href="#id18" role="doc-backlink">Step 13: Response and Delivery</a><a class="headerlink" href="#step-13-response-and-delivery" title="Link to this heading">¶</a></h3>
+<p>After the agent run completes:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">buildReplyPayloads()</span></code> normalizes the raw payloads – stripping
+silent tokens, heartbeat markers, and applying reply-to-mode
+filters.</p></li>
+<li><p>Fallback state transitions are recorded (if the model fell back
+to an alternate).</p></li>
+<li><p>Usage statistics are persisted via <code class="docutils literal notranslate"><span class="pre">persistRunSessionUsage()</span></code>.</p></li>
+<li><p>Verbose notices (new session, compaction, fallback) are prepended
+if verbose mode is on.</p></li>
+<li><p>Response usage lines are appended if configured.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">finalizeWithFollowup()</span></code> checks for queued follow-up messages
+and schedules the next run if needed.</p></li>
+<li><p>The final <code class="docutils literal notranslate"><span class="pre">ReplyPayload</span></code> (or array of payloads) is returned to
+the channel adapter, which delivers it to the user.</p></li>
+</ol>
+<div class="literal-block-wrapper docutils container" id="id3">
+<div class="code-block-caption"><span class="caption-text">src/auto-reply/reply/agent-runner.ts:726-730</span><a class="headerlink" href="#id3" title="Link to this code">¶</a></div>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">return</span><span class="w"> </span><span class="nx">finalizeWithFollowup</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">finalPayloads</span><span class="p">.</span><span class="nx">length</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="mf">1</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="nx">finalPayloads</span><span class="p">[</span><span class="mf">0</span><span class="p">]</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="nx">finalPayloads</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">queueKey</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">runFollowupTurn</span><span class="p">,</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Streaming and partial replies are only sent to internal UIs
+(control channel, TUI, WebSocket).  External messaging surfaces
+(WhatsApp, Telegram, etc.) receive only the final consolidated
+reply to avoid message flooding.</p>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Orchestration Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#document-map">Document Map</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Orchestration Overview</a><ul>
+      <li>Previous: <a href="agent-definition.html" title="previous chapter">Agent Configuration</a></li>
+      <li>Next: <a href="multi-agent.html" title="next chapter">Sub-agent Spawning &amp; Coordination</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/request-lifecycle.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

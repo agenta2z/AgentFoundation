@@ -1,0 +1,98 @@
+/* Custom CSS for Dash Interactive Documentation */
+
+/* Code block styling */
+.highlight {
+    background-color: #2d2d2d !important;
+}
+
+/* Improve readability of inline code */
+code.literal {
+    background-color: #f4f4f4;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 85%;
+}
+
+/* Style for important notes */
+.admonition.important {
+    border-left-color: #19C37D;
+}
+
+/* Style for warning notes */
+.admonition.warning {
+    border-left-color: #FFA500;
+}
+
+/* Style for note boxes */
+.admonition.note {
+    border-left-color: #00BFFF;
+}
+
+/* Table styling */
+table.docutils {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+table.docutils td, table.docutils th {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+}
+
+table.docutils th {
+    background-color: #f5f5f5;
+}
+
+/* Component color reference styling */
+.color-box {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    vertical-align: middle;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+/* Architecture diagram styling */
+.architecture-diagram {
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+/* API reference styling */
+.sig-name {
+    font-weight: bold;
+    color: #333;
+}
+
+.sig-param {
+    font-style: italic;
+}
+
+/* Improve sidebar navigation */
+.wy-menu-vertical li.current > a {
+    border-left: 3px solid #19C37D;
+}
+
+/* Custom styling for example code blocks */
+div.highlight-python {
+    margin: 15px 0;
+}
+
+/* Styling for method signatures */
+dl.py.method dt {
+    background-color: #f8f8f8;
+    padding: 8px;
+    border-left: 3px solid #19C37D;
+}
+
+/* Styling for class definitions */
+dl.py.class > dt {
+    background-color: #e8f4e8;
+    padding: 10px;
+    border-left: 4px solid #19C37D;
+    font-size: 1.1em;
+}

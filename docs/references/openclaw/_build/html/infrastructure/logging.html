@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Logging &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Security" href="security.html" />
+    <link rel="prev" title="Build &amp; Deployment" href="build-deploy.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="logging">
+<span id="infrastructure-logging"></span><h1>Logging<a class="headerlink" href="#logging" title="Link to this heading">¶</a></h1>
+<p>OpenClaw uses a structured logging subsystem based on tslog, with support for
+log levels, subsystem tagging, sensitive data redaction, and file output.</p>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Subsystem   │ ──▶ │   Logger     │ ──▶ │  Transport   │
+│  Logger      │     │   Core       │     │  (console/   │
+│              │     │              │     │   file)       │
+└──────────────┘     └──────────────┘     └──────────────┘
+      │                     │
+      ▼                     ▼
+┌──────────────┐     ┌──────────────┐
+│  Redaction   │     │  Console     │
+│  Pipeline    │     │  Capture     │
+└──────────────┘     └──────────────┘
+</pre></div>
+</div>
+</section>
+<section id="key-files">
+<h2>Key Files<a class="headerlink" href="#key-files" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 40.0%" />
+<col style="width: 60.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/config.ts</span></code></p></td>
+<td><p>Logger configuration</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/levels.ts</span></code></p></td>
+<td><p>Log level definitions</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/subsystem.ts</span></code></p></td>
+<td><p>Subsystem-scoped loggers</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/redact.ts</span></code></p></td>
+<td><p>Sensitive data redaction</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/console.ts</span></code></p></td>
+<td><p>Console output capture and formatting</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/env-log-level.ts</span></code></p></td>
+<td><p>Environment-based log level resolution</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/logging/state.ts</span></code></p></td>
+<td><p>Logger state management</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/logger.ts</span></code></p></td>
+<td><p>Main logger instance and convenience exports</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="subsystem-loggers">
+<h2>Subsystem Loggers<a class="headerlink" href="#subsystem-loggers" title="Link to this heading">¶</a></h2>
+<p>Components create scoped loggers via <code class="docutils literal notranslate"><span class="pre">createSubsystemLogger()</span></code>:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">createSubsystemLogger</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s2">&quot;../logging/subsystem.js&quot;</span><span class="p">;</span>
+
+<span class="kd">const</span><span class="w"> </span><span class="nx">log</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">createSubsystemLogger</span><span class="p">(</span><span class="s2">&quot;skills&quot;</span><span class="p">);</span>
+<span class="nx">log</span><span class="p">.</span><span class="nx">debug</span><span class="p">(</span><span class="s2">&quot;Loading skills from workspace&quot;</span><span class="p">);</span>
+<span class="nx">log</span><span class="p">.</span><span class="nx">warn</span><span class="p">(</span><span class="s2">&quot;Skill file too large&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">path</span><span class="p">,</span><span class="w"> </span><span class="nx">size</span><span class="w"> </span><span class="p">});</span>
+</pre></div>
+</div>
+<p>Common subsystems: <code class="docutils literal notranslate"><span class="pre">skills</span></code>, <code class="docutils literal notranslate"><span class="pre">memory</span></code>, <code class="docutils literal notranslate"><span class="pre">gateway</span></code>, <code class="docutils literal notranslate"><span class="pre">agent</span></code>,
+<code class="docutils literal notranslate"><span class="pre">telegram</span></code>, <code class="docutils literal notranslate"><span class="pre">discord</span></code>, <code class="docutils literal notranslate"><span class="pre">slack</span></code>, <code class="docutils literal notranslate"><span class="pre">config</span></code>, <code class="docutils literal notranslate"><span class="pre">auth</span></code>, <code class="docutils literal notranslate"><span class="pre">browser</span></code>.</p>
+</section>
+<section id="log-levels">
+<h2>Log Levels<a class="headerlink" href="#log-levels" title="Link to this heading">¶</a></h2>
+<p>Levels from most to least verbose:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">silly</span></code> — Extremely verbose debug output</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">trace</span></code> — Detailed trace information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">debug</span></code> — Debug information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">info</span></code> — Informational messages</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">warn</span></code> — Warning conditions</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">error</span></code> — Error conditions</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fatal</span></code> — Fatal errors</p></li>
+</ol>
+<p>Set via environment: <code class="docutils literal notranslate"><span class="pre">LOG_LEVEL=debug</span></code> or <code class="docutils literal notranslate"><span class="pre">OPENCLAW_LOG_LEVEL=debug</span></code>.</p>
+</section>
+<section id="sensitive-data-redaction">
+<h2>Sensitive Data Redaction<a class="headerlink" href="#sensitive-data-redaction" title="Link to this heading">¶</a></h2>
+<p>The redaction pipeline (<code class="docutils literal notranslate"><span class="pre">src/logging/redact.ts</span></code>) scrubs sensitive values
+from log output:</p>
+<ul class="simple">
+<li><p>API keys and tokens</p></li>
+<li><p>Phone numbers</p></li>
+<li><p>Personal identifiers</p></li>
+</ul>
+<p>Configured via <code class="docutils literal notranslate"><span class="pre">logging.redactSensitive</span></code> in <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> (default:
+<code class="docutils literal notranslate"><span class="pre">&quot;tools&quot;</span></code> — redacts tool call arguments).</p>
+</section>
+<section id="console-capture">
+<h2>Console Capture<a class="headerlink" href="#console-capture" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">src/logging/console.ts</span></code> provides console output capture for intercepting
+<code class="docutils literal notranslate"><span class="pre">console.log</span></code>, <code class="docutils literal notranslate"><span class="pre">console.warn</span></code>, etc. from third-party libraries. This
+routes all console output through the structured logger with proper
+formatting and level mapping.</p>
+</section>
+<section id="file-size-capping">
+<h2>File Size Capping<a class="headerlink" href="#file-size-capping" title="Link to this heading">¶</a></h2>
+<p>Log files are automatically capped to prevent disk exhaustion. The capping
+mechanism is tested in <code class="docutils literal notranslate"><span class="pre">src/logging/log-file-size-cap.test.ts</span></code>.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/logging/</span></code></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Infrastructure</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build-deploy.html">Build &amp; Deployment</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Logging</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#architecture">Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#key-files">Key Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#subsystem-loggers">Subsystem Loggers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#log-levels">Log Levels</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#sensitive-data-redaction">Sensitive Data Redaction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#console-capture">Console Capture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#file-size-capping">File Size Capping</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="security.html">Security</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Infrastructure</a><ul>
+      <li>Previous: <a href="build-deploy.html" title="previous chapter">Build &amp; Deployment</a></li>
+      <li>Next: <a href="security.html" title="next chapter">Security</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/infrastructure/logging.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

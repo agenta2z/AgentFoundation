@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Glossary &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=12dfc556" />
+    <script src="_static/documentation_options.js?v=54c96c00"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Multi-Agent Workflow" href="tutorials/multi-agent-workflow.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="glossary">
+<span id="id1"></span><h1>Glossary<a class="headerlink" href="#glossary" title="Link to this heading">¶</a></h1>
+<dl class="simple glossary">
+<dt id="term-Agent">Agent<a class="headerlink" href="#term-Agent" title="Link to this term">¶</a></dt><dd><p>A configured AI entity within OpenClaw that processes messages and
+executes tasks. Agents are declaratively defined in the OpenClaw config
+(<code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>) with properties like model, skills, workspace, and
+tool access. Each agent has an ID (normalized to lowercase), its own
+workspace directory, and isolated session state. See
+<a class="reference internal" href="orchestration/agent-definition.html"><span class="doc">Agent Configuration</span></a>.</p>
+</dd>
+<dt id="term-AgentBinding">AgentBinding<a class="headerlink" href="#term-AgentBinding" title="Link to this term">¶</a></dt><dd><p>A routing rule that maps incoming messages to specific agents based on
+channel, account ID, peer ID, guild/server, team, or Discord role.
+Configured in the <code class="docutils literal notranslate"><span class="pre">agents.bindings</span></code> array of <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>.
+Defined as the <code class="docutils literal notranslate"><span class="pre">AgentBinding</span></code> type in
+<code class="docutils literal notranslate"><span class="pre">src/config/types.agents.ts</span></code>.</p>
+</dd>
+<dt id="term-Auth-Profile">Auth Profile<a class="headerlink" href="#term-Auth-Profile" title="Link to this term">¶</a></dt><dd><p>An API key or OAuth credential entry used to authenticate with an LLM
+provider. Multiple auth profiles can be configured per provider, enabling
+automatic rotation when one key hits rate limits. Profiles track cooldown
+state, usage counts, and failure reasons. Managed by
+<code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles.ts</span></code>.</p>
+</dd>
+<dt id="term-Batch-Embedding">Batch Embedding<a class="headerlink" href="#term-Batch-Embedding" title="Link to this term">¶</a></dt><dd><p>Asynchronous embedding operations for indexing large numbers of memory
+chunks. Supported by OpenAI, Gemini, and Voyage APIs. Includes failure
+tracking with auto-disable after 2 consecutive failures. Implemented
+across <code class="docutils literal notranslate"><span class="pre">src/memory/batch-*.ts</span></code> (14 files).</p>
+</dd>
+<dt id="term-Channel">Channel<a class="headerlink" href="#term-Channel" title="Link to this term">¶</a></dt><dd><p>A messaging platform integration (e.g., WhatsApp, Telegram, Discord,
+Slack, iMessage, Signal). Channels are implemented either as core modules
+(<code class="docutils literal notranslate"><span class="pre">src/telegram/</span></code>, <code class="docutils literal notranslate"><span class="pre">src/discord/</span></code>, etc.) or as extension plugins
+(<code class="docutils literal notranslate"><span class="pre">extensions/</span></code>). All channels implement the <code class="docutils literal notranslate"><span class="pre">ChannelMessagingAdapter</span></code>
+interface. See <a class="reference internal" href="channels/index.html"><span class="doc">Channel System</span></a>.</p>
+</dd>
+<dt id="term-Chunk">Chunk<a class="headerlink" href="#term-Chunk" title="Link to this term">¶</a></dt><dd><p>A segment of text extracted from a memory file during indexing. Created by
+<code class="docutils literal notranslate"><span class="pre">chunkMarkdown()</span></code> with configurable size (default: 400 tokens / ~1600
+chars) and overlap (default: 80 tokens). Each chunk is stored in the
+SQLite <code class="docutils literal notranslate"><span class="pre">chunks</span></code> table with its embedding vector and source location
+(path, start_line, end_line).</p>
+</dd>
+<dt id="term-Compaction">Compaction<a class="headerlink" href="#term-Compaction" title="Link to this term">¶</a></dt><dd><p>The process of summarizing older conversation history to free context
+window tokens. Triggered automatically when the session approaches the
+context limit. Compaction mode defaults to <code class="docutils literal notranslate"><span class="pre">&quot;safeguard&quot;</span></code>. A
+<a class="reference internal" href="#term-Memory-Flush"><span class="xref std std-term">Memory Flush</span></a> may fire before compaction to persist important
+knowledge.</p>
+</dd>
+<dt id="term-Directive">Directive<a class="headerlink" href="#term-Directive" title="Link to this term">¶</a></dt><dd><p>An inline command in a user message that modifies agent behavior for that
+session. Examples: <code class="docutils literal notranslate"><span class="pre">/think</span> <span class="pre">high</span></code> (set thinking level), <code class="docutils literal notranslate"><span class="pre">/model</span> <span class="pre">gpt</span></code>
+(switch model), <code class="docutils literal notranslate"><span class="pre">/verbose</span> <span class="pre">on</span></code> (enable verbose output). Directives are
+parsed during the request lifecycle before the agent run.</p>
+</dd>
+<dt id="term-Embedding">Embedding<a class="headerlink" href="#term-Embedding" title="Link to this term">¶</a></dt><dd><p>A dense vector representation of text, used for semantic similarity
+search. OpenClaw supports five embedding providers: Local
+(node-llama-cpp), OpenAI, Gemini, Voyage, and Mistral. All embeddings are
+L2-normalized. See <a class="reference internal" href="knowledge/embeddings.html"><span class="doc">Embedding Providers &amp; Operations</span></a>.</p>
+</dd>
+<dt id="term-Gateway">Gateway<a class="headerlink" href="#term-Gateway" title="Link to this term">¶</a></dt><dd><p>The Express v5 + WebSocket server that serves as the central hub for all
+OpenClaw operations. It handles HTTP API requests, WebSocket connections
+for the Control UI, channel authentication, agent prompt orchestration,
+and inter-agent communication. Default port is configurable. See
+<a class="reference internal" href="gateway/index.html"><span class="doc">Gateway Server</span></a>.</p>
+</dd>
+<dt id="term-Hook">Hook<a class="headerlink" href="#term-Hook" title="Link to this term">¶</a></dt><dd><p>An event-driven extension point that executes custom logic in response to
+system events. Hooks can be bundled (e.g., <code class="docutils literal notranslate"><span class="pre">boot-md</span></code>,
+<code class="docutils literal notranslate"><span class="pre">session-memory</span></code>, <code class="docutils literal notranslate"><span class="pre">command-logger</span></code>) or workspace-defined. Configured
+under the <code class="docutils literal notranslate"><span class="pre">hooks</span></code> section of <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>.</p>
+</dd>
+<dt id="term-Lane">Lane<a class="headerlink" href="#term-Lane" title="Link to this term">¶</a></dt><dd><p>A named execution queue in the command queue system
+(<code class="docutils literal notranslate"><span class="pre">src/process/command-queue.ts</span></code>). Lanes serialize task execution with
+configurable concurrency. Standard lanes: <code class="docutils literal notranslate"><span class="pre">main</span></code> (primary auto-reply),
+<code class="docutils literal notranslate"><span class="pre">cron</span></code> (scheduled tasks), <code class="docutils literal notranslate"><span class="pre">subagent</span></code> (sub-agent runs), <code class="docutils literal notranslate"><span class="pre">nested</span></code>
+(nested agent steps), and per-session lanes (<code class="docutils literal notranslate"><span class="pre">session:&lt;id&gt;</span></code>).</p>
+</dd>
+<dt id="term-Memory">Memory<a class="headerlink" href="#term-Memory" title="Link to this term">¶</a></dt><dd><p>The persistent knowledge store that agents read from and write to. Backed
+by Markdown files (<code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code>, <code class="docutils literal notranslate"><span class="pre">memory/*.md</span></code>) indexed into a SQLite
+database with vector embeddings for semantic search. See
+<a class="reference internal" href="knowledge/index.html"><span class="doc">Knowledge System Overview</span></a>.</p>
+</dd>
+<dt id="term-Memory-Flush">Memory Flush<a class="headerlink" href="#term-Memory-Flush" title="Link to this term">¶</a></dt><dd><p>An automatic mechanism that fires before context <a class="reference internal" href="#term-Compaction"><span class="xref std std-term">Compaction</span></a> to
+give the agent a chance to persist durable memories to
+<code class="docutils literal notranslate"><span class="pre">memory/YYYY-MM-DD.md</span></code>. Triggered when session tokens approach the
+context window limit. Implemented in
+<code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/memory-flush.ts</span></code>.</p>
+</dd>
+<dt id="term-Model-Catalog">Model Catalog<a class="headerlink" href="#term-Model-Catalog" title="Link to this term">¶</a></dt><dd><p>The system that resolves model definitions, capabilities, and provider
+configurations. Manages model aliases (e.g., <code class="docutils literal notranslate"><span class="pre">opus</span></code> →
+<code class="docutils literal notranslate"><span class="pre">anthropic/claude-opus-4-6</span></code>), default parameters, and cost metadata.
+Implemented in <code class="docutils literal notranslate"><span class="pre">src/agents/model-catalog.ts</span></code> and
+<code class="docutils literal notranslate"><span class="pre">src/agents/models-config.ts</span></code>.</p>
+</dd>
+<dt id="term-Model-Fallback">Model Fallback<a class="headerlink" href="#term-Model-Fallback" title="Link to this term">¶</a></dt><dd><p>A multi-level error recovery mechanism. When the primary model fails,
+the system tries: (1) alternative auth profiles, (2) fallback models,
+(3) lower thinking levels, (4) session reset. Implemented in
+<code class="docutils literal notranslate"><span class="pre">src/agents/model-fallback.ts</span></code>. See <a class="reference internal" href="orchestration/error-handling.html"><span class="doc">Error Recovery</span></a>.</p>
+</dd>
+<dt id="term-Pi-Agent-Core">Pi Agent Core<a class="headerlink" href="#term-Pi-Agent-Core" title="Link to this term">¶</a></dt><dd><p>The underlying agent runtime library (<code class="docutils literal notranslate"><span class="pre">&#64;mariozechner/pi-agent-core</span></code>)
+that manages the LLM tool loop. It handles sending messages to LLMs,
+parsing tool calls, executing tools, appending results, and repeating
+until the LLM produces a final text response (ReAct-style loop).</p>
+</dd>
+<dt id="term-Plugin">Plugin<a class="headerlink" href="#term-Plugin" title="Link to this term">¶</a></dt><dd><p>An extension package that adds channels, tools, or other capabilities to
+OpenClaw. Plugins live under <code class="docutils literal notranslate"><span class="pre">extensions/</span></code> with an
+<code class="docutils literal notranslate"><span class="pre">openclaw.plugin.json</span></code> manifest. They use the Plugin SDK
+(<code class="docutils literal notranslate"><span class="pre">src/plugin-sdk/</span></code>) to register tools and channel adapters. See
+<a class="reference internal" href="plugins/index.html"><span class="doc">Plugin System</span></a>.</p>
+</dd>
+<dt id="term-Provider">Provider<a class="headerlink" href="#term-Provider" title="Link to this term">¶</a></dt><dd><p>An LLM service that hosts AI models. Supported providers include
+Anthropic, OpenAI, Google (Gemini), OpenRouter, Ollama, GitHub Copilot,
+Qwen, Xiaomi, and MiniMax. Providers are configured via auth profiles
+and model definitions.</p>
+</dd>
+<dt id="term-Provider-Key">Provider Key<a class="headerlink" href="#term-Provider-Key" title="Link to this term">¶</a></dt><dd><p>An embedding model identifier used to partition the embedding cache
+(<code class="docutils literal notranslate"><span class="pre">embedding_cache</span></code> table). Composed of provider name, model ID, and
+API key hash. Ensures cached embeddings are not reused across different
+providers or API keys.</p>
+</dd>
+<dt id="term-QMD">QMD<a class="headerlink" href="#term-QMD" title="Link to this term">¶</a></dt><dd><p>An external local-first search engine used as an alternative memory
+backend. Invoked via CLI commands (<code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">update</span></code>, <code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">embed</span></code>,
+<code class="docutils literal notranslate"><span class="pre">qmd</span> <span class="pre">query</span></code>). Collections are stored in
+<code class="docutils literal notranslate"><span class="pre">~/.openclaw/state/agents/&lt;id&gt;/qmd/</span></code>. See <a class="reference internal" href="knowledge/qmd-backend.html"><span class="doc">External QMD Backend</span></a>.</p>
+</dd>
+<dt id="term-Session">Session<a class="headerlink" href="#term-Session" title="Link to this term">¶</a></dt><dd><p>A conversation context between a user (or system) and an agent. Each
+session has a unique key (e.g., <code class="docutils literal notranslate"><span class="pre">main</span></code>, <code class="docutils literal notranslate"><span class="pre">agent:ops:main</span></code>,
+<code class="docutils literal notranslate"><span class="pre">agent:ops:subagent:&lt;uuid&gt;</span></code>), persisted state in <code class="docutils literal notranslate"><span class="pre">sessions.json</span></code>,
+and a JSONL transcript file. See <a class="reference internal" href="orchestration/state-management.html"><span class="doc">State Management</span></a>.</p>
+</dd>
+<dt id="term-Session-Key">Session Key<a class="headerlink" href="#term-Session-Key" title="Link to this term">¶</a></dt><dd><p>A string identifier for a <a class="reference internal" href="#term-Session"><span class="xref std std-term">Session</span></a>. Format varies by context:
+<code class="docutils literal notranslate"><span class="pre">main</span></code> (default CLI session), <code class="docutils literal notranslate"><span class="pre">agent:&lt;id&gt;:main</span></code> (agent-scoped),
+<code class="docutils literal notranslate"><span class="pre">agent:&lt;id&gt;:subagent:&lt;uuid&gt;</span></code> (sub-agent session). Used for routing
+and state lookup.</p>
+</dd>
+<dt id="term-Skill">Skill<a class="headerlink" href="#term-Skill" title="Link to this term">¶</a></dt><dd><p>A markdown-defined agent capability module. Each skill is a directory
+containing a <code class="docutils literal notranslate"><span class="pre">SKILL.md</span></code> file with YAML frontmatter that specifies
+metadata, requirements, and the prompt content. Skills are loaded from
+6 precedence layers and composed into the agent’s system prompt. See
+<a class="reference internal" href="skills/index.html"><span class="doc">Skills System</span></a>.</p>
+</dd>
+<dt id="term-Spawn-Mode">Spawn Mode<a class="headerlink" href="#term-Spawn-Mode" title="Link to this term">¶</a></dt><dd><p>The execution mode for sub-agent creation. <code class="docutils literal notranslate"><span class="pre">run</span></code> mode creates a
+one-shot task that completes and announces results. <code class="docutils literal notranslate"><span class="pre">session</span></code> mode
+creates a persistent session that remains active for follow-up messages.
+See <a class="reference internal" href="orchestration/multi-agent.html"><span class="doc">Sub-agent Spawning &amp; Coordination</span></a>.</p>
+</dd>
+<dt id="term-Sub-agent">Sub-agent<a class="headerlink" href="#term-Sub-agent" title="Link to this term">¶</a></dt><dd><p>A child agent spawned by a parent agent to handle a delegated task.
+Sub-agents run in isolated sessions with their own system prompts and
+tool sets. Spawning is depth-limited (default:
+<code class="docutils literal notranslate"><span class="pre">DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</span> <span class="pre">=</span> <span class="pre">1</span></code>) and concurrency-limited
+(default: <code class="docutils literal notranslate"><span class="pre">maxChildrenPerAgent</span> <span class="pre">=</span> <span class="pre">5</span></code>).</p>
+</dd>
+<dt id="term-Think-Level">Think Level<a class="headerlink" href="#term-Think-Level" title="Link to this term">¶</a></dt><dd><p>The extended thinking capability level passed to supporting LLMs.
+Values: <code class="docutils literal notranslate"><span class="pre">off</span></code>, <code class="docutils literal notranslate"><span class="pre">minimal</span></code>, <code class="docutils literal notranslate"><span class="pre">low</span></code>, <code class="docutils literal notranslate"><span class="pre">medium</span></code>, <code class="docutils literal notranslate"><span class="pre">high</span></code>, <code class="docutils literal notranslate"><span class="pre">xhigh</span></code>.
+Can be set via config, session override, or the <code class="docutils literal notranslate"><span class="pre">/think</span></code> directive.
+Used for chain-of-thought reasoning in models that support it.</p>
+</dd>
+<dt id="term-Tool">Tool<a class="headerlink" href="#term-Tool" title="Link to this term">¶</a></dt><dd><p>An executable capability exposed to an agent during its LLM tool loop.
+Tools implement the <code class="docutils literal notranslate"><span class="pre">AgentTool</span></code> interface with name, description,
+TypeBox parameter schema, and <code class="docutils literal notranslate"><span class="pre">execute()</span></code> method. Built-in tools
+include file I/O, bash execution, web fetch, browser automation, memory
+search, and inter-session messaging. See <a class="reference internal" href="orchestration/tool-system.html"><span class="doc">Tool Architecture</span></a>.</p>
+</dd>
+<dt id="term-Workspace">Workspace<a class="headerlink" href="#term-Workspace" title="Link to this term">¶</a></dt><dd><p>The working directory for an agent, where it can read/write files,
+execute commands, and store project-level data. Defaults to
+<code class="docutils literal notranslate"><span class="pre">~/.openclaw/workspace</span></code> for the default agent, or
+<code class="docutils literal notranslate"><span class="pre">~/.openclaw/workspace-&lt;id&gt;</span></code> for named agents. Configurable per-agent.</p>
+</dd>
+</dl>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="tutorials/multi-agent-workflow.html" title="previous chapter">Multi-Agent Workflow</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/glossary.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

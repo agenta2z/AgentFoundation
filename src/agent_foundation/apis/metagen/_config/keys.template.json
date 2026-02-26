@@ -1,0 +1,33 @@
+{
+    "_comment": "MetaGen API keys configuration template. Copy to keys.json and fill in your keys.",
+    "model_to_key_map": {
+        "llama3.1-405b-instruct": [
+            "YOUR_LLAMA_KEY_HERE"
+        ],
+        "llama3.3-70b-instruct": [
+            "YOUR_LLAMA_KEY_HERE"
+        ],
+        "llama3-70b-instruct": [
+            "YOUR_LLAMA_KEY_HERE"
+        ],
+        "claude-4-sonnet-genai": [
+            "YOUR_CLAUDE_KEY_HERE"
+        ],
+        "claude-3-7-sonnet-20250219-us": [
+            "YOUR_CLAUDE_KEY_HERE"
+        ],
+        "gpt-4o": [
+            "YOUR_GPT_KEY_HERE"
+        ],
+        "gpt-4-1-genai": [
+            "YOUR_GPT_KEY_HERE"
+        ],
+        "gpt-5-genai": [
+            "YOUR_GPT_KEY_HERE"
+        ],
+        "gemini-2-5-pro": [
+            "YOUR_GEMINI_KEY_HERE"
+        ]
+    },
+    "default_key": "YOUR_DEFAULT_KEY_HERE"
+}

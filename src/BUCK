@@ -1,0 +1,27 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+# @nocommit - base_module="" is required for simple relative imports
+
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+python_library(
+    name = "science_modeling_tools",
+    srcs = glob([
+        "science_modeling_tools/**/*.py",
+    ]),
+    base_module = "",
+    typing = False,
+    visibility = ["PUBLIC"],
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/boto3:boto3",
+        "fbsource//third-party/pypi/botocore:botocore",
+        "fbsource//third-party/pypi/dash:dash",
+        "fbsource//third-party/pypi/dash-bootstrap-components:dash-bootstrap-components",
+        "fbsource//third-party/pypi/dash-cytoscape:dash-cytoscape",
+        "fbsource//third-party/pypi/plotly:plotly",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/requests:requests",
+        "//_tony_dev/SciencePythonUtils/src:science_python_utils",
+        "//gen_ai/metagen/pymetagen/lib:metagen",
+    ],
+)

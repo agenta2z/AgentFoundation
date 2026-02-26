@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Data Models &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Orchestration Overview" href="../orchestration/index.html" />
+    <link rel="prev" title="Configuration System" href="configuration.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="data-models">
+<span id="architecture-data-models"></span><h1>Data Models<a class="headerlink" href="#data-models" title="Link to this heading">¶</a></h1>
+<p>This section documents the core TypeScript types and schemas that define
+OpenClaw’s data structures.</p>
+<section id="agent-configuration-types">
+<h2>Agent Configuration Types<a class="headerlink" href="#agent-configuration-types" title="Link to this heading">¶</a></h2>
+<section id="agententry">
+<h3>AgentEntry<a class="headerlink" href="#agententry" title="Link to this heading">¶</a></h3>
+<p>Defines a single agent in the configuration (<code class="docutils literal notranslate"><span class="pre">agents.list[]</span></code>):</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">AgentEntry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">id</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">              </span><span class="c1">// Unique identifier (normalized to lowercase)</span>
+<span class="w">  </span><span class="nx">name?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// Display name</span>
+<span class="w">  </span><span class="nx">default?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">       </span><span class="c1">// Whether this is the default agent</span>
+<span class="w">  </span><span class="nx">workspace?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">      </span><span class="c1">// Working directory</span>
+<span class="w">  </span><span class="nx">agentDir?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">       </span><span class="c1">// Persistent agent state directory</span>
+<span class="w">  </span><span class="nx">model?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w">       </span><span class="c1">// Model selection</span>
+<span class="w">    </span><span class="nx">primary</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">fallbacks?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">skills?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">       </span><span class="c1">// Skill filter list</span>
+<span class="w">  </span><span class="nx">memorySearch?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">  </span><span class="c1">// Memory integration config</span>
+<span class="w">  </span><span class="nx">humanDelay?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">    </span><span class="c1">// Simulated typing delay</span>
+<span class="w">  </span><span class="nx">heartbeat?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">     </span><span class="c1">// Periodic heartbeat config</span>
+<span class="w">  </span><span class="nx">identity?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">      </span><span class="c1">// Name/avatar overrides</span>
+<span class="w">  </span><span class="nx">groupChat?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">     </span><span class="c1">// Group chat behavior</span>
+<span class="w">  </span><span class="nx">subagents</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">allowAgents?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span><span class="w">  </span><span class="c1">// Sub-agent spawning ACLs (&quot;*&quot; = all)</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">sandbox?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">       </span><span class="c1">// Sandbox mode config</span>
+<span class="w">  </span><span class="nx">tools?</span><span class="o">:</span><span class="w"> </span><span class="kt">unknown</span><span class="p">;</span><span class="w">         </span><span class="c1">// Tool allow/deny lists</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/agent-scope.ts</span></code></p>
+</section>
+</section>
+<section id="session-types">
+<h2>Session Types<a class="headerlink" href="#session-types" title="Link to this heading">¶</a></h2>
+<section id="sessionentry">
+<h3>SessionEntry<a class="headerlink" href="#sessionentry" title="Link to this heading">¶</a></h3>
+<p>Persisted per-session state in <code class="docutils literal notranslate"><span class="pre">sessions.json</span></code>:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SessionEntry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">sessionId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">totalTokens?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">totalTokensFresh?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">compactionCount?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">memoryFlushCompactionCount?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">model?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">thinkLevel?</span><span class="o">:</span><span class="w"> </span><span class="kt">ThinkLevel</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// ... additional fields for delivery context, skill snapshots,</span>
+<span class="w">  </span><span class="c1">//     auth profile state, usage stats, group metadata</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/config/sessions.ts</span></code></p>
+</section>
+</section>
+<section id="memory-types">
+<h2>Memory Types<a class="headerlink" href="#memory-types" title="Link to this heading">¶</a></h2>
+<section id="memorysearchresult">
+<h3>MemorySearchResult<a class="headerlink" href="#memorysearchresult" title="Link to this heading">¶</a></h3>
+<p>Returned by the <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> tool:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">MemorySearchResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">        </span><span class="c1">// File path relative to workspace</span>
+<span class="w">  </span><span class="nx">startLine</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">   </span><span class="c1">// Start line of the matching chunk</span>
+<span class="w">  </span><span class="nx">endLine</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">     </span><span class="c1">// End line of the matching chunk</span>
+<span class="w">  </span><span class="nx">score</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w">       </span><span class="c1">// Relevance score (0-1)</span>
+<span class="w">  </span><span class="nx">snippet</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">     </span><span class="c1">// Matching text content</span>
+<span class="w">  </span><span class="nx">source</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;memory&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;sessions&quot;</span><span class="p">;</span><span class="w">  </span><span class="c1">// Source type</span>
+<span class="w">  </span><span class="nx">citation?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">   </span><span class="c1">// Formatted citation string</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="memorysearchmanager">
+<h3>MemorySearchManager<a class="headerlink" href="#memorysearchmanager" title="Link to this heading">¶</a></h3>
+<p>The interface implemented by both builtin and QMD backends:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">interface</span><span class="w"> </span><span class="nx">MemorySearchManager</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">search</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">opts</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">maxResults?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w"> </span><span class="nx">minScore?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w"> </span><span class="nx">sessionKey?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">MemorySearchResult</span><span class="p">[]</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">  </span><span class="nx">readFile</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">relPath</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">from?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">lines?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="p">{</span><span class="w"> </span><span class="nx">text</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">  </span><span class="nx">status</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">MemoryProviderStatus</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">sync</span><span class="o">?</span><span class="p">(</span><span class="nx">params</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">reason?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">force?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="ow">void</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">probeEmbeddingAvailability</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">MemoryEmbeddingProbeResult</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">probeVectorAvailability</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="kt">boolean</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">close</span><span class="o">?</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="ow">void</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="memoryproviderstatus">
+<h3>MemoryProviderStatus<a class="headerlink" href="#memoryproviderstatus" title="Link to this heading">¶</a></h3>
+<p>Status information about the memory subsystem:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">MemoryProviderStatus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">backend</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;builtin&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;qmd&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">model?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">files?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">chunks?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">dirty?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">workspaceDir?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">dbPath?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">vector</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">available?</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">dims?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">batch</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">failures</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">limit</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">fts</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w"> </span><span class="nx">available</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="w"> </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">cache</span><span class="o">?:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w"> </span><span class="nx">entries?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w"> </span><span class="nx">maxEntries?</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="w"> </span><span class="p">};</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/types.ts</span></code></p>
+</section>
+</section>
+<section id="skill-types">
+<h2>Skill Types<a class="headerlink" href="#skill-types" title="Link to this heading">¶</a></h2>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kr">type</span><span class="w"> </span><span class="nx">SkillEntry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">skill</span><span class="o">:</span><span class="w"> </span><span class="kt">Skill</span><span class="p">;</span><span class="w">                        </span><span class="c1">// from @mariozechner/pi-coding-agent</span>
+<span class="w">  </span><span class="nx">frontmatter</span><span class="o">:</span><span class="w"> </span><span class="kt">ParsedSkillFrontmatter</span><span class="p">;</span><span class="w"> </span><span class="c1">// YAML key-value pairs</span>
+<span class="w">  </span><span class="nx">metadata?</span><span class="o">:</span><span class="w"> </span><span class="kt">OpenClawSkillMetadata</span><span class="p">;</span><span class="w">    </span><span class="c1">// OpenClaw-specific metadata</span>
+<span class="w">  </span><span class="nx">invocation?</span><span class="o">:</span><span class="w"> </span><span class="kt">SkillInvocationPolicy</span><span class="p">;</span><span class="w">  </span><span class="c1">// Invocation control</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>See <a class="reference internal" href="../skills/skill-definition.html"><span class="doc">Skill Definition</span></a> for the full type specifications.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/skills/types.ts</span></code></p>
+</section>
+<section id="gateway-protocol-schemas">
+<h2>Gateway Protocol Schemas<a class="headerlink" href="#gateway-protocol-schemas" title="Link to this heading">¶</a></h2>
+<p>Protocol schemas are defined in <code class="docutils literal notranslate"><span class="pre">src/gateway/protocol/schema/</span></code> using
+TypeBox:</p>
+<ul class="simple">
+<li><p><strong>Primitives</strong>: Base types for messages, sessions, and errors</p></li>
+<li><p><strong>Nodes</strong>: Schema for node (companion app) connections</p></li>
+<li><p><strong>Logs/Chat</strong>: Chat log entries</p></li>
+<li><p><strong>Error codes</strong>: Structured error code definitions</p></li>
+</ul>
+<p>See <a class="reference internal" href="../gateway/rpc-protocol.html"><span class="doc">RPC Protocol</span></a> for the full protocol documentation.</p>
+</section>
+<section id="plugin-sdk-types">
+<h2>Plugin SDK Types<a class="headerlink" href="#plugin-sdk-types" title="Link to this heading">¶</a></h2>
+<p>The Plugin SDK (<code class="docutils literal notranslate"><span class="pre">src/plugin-sdk/index.ts</span></code>) exports typed interfaces for
+plugin development:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ChannelMessagingAdapter</span></code> — Message send/receive</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ChannelConfigAdapter</span></code> — Configuration UI</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ChannelPairingAdapter</span></code> — Authentication/pairing</p></li>
+</ul>
+<p>See <a class="reference internal" href="../plugins/extension-development.html"><span class="doc">Extension Development</span></a> for details.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Architecture Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#high-level-architecture">High-Level Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#message-flow">Message Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#design-principles">Design Principles</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#component-summary">Component Summary</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#sub-pages">Sub-pages</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="project-structure.html">Directory Layout &amp; Module Map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="technology-stack.html">Technology Stack &amp; Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="entry-points.html">Entry Points &amp; Bootstrap Chain</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration.html">Configuration System</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Data Models</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Architecture Overview</a><ul>
+      <li>Previous: <a href="configuration.html" title="previous chapter">Configuration System</a></li>
+      <li>Next: <a href="../orchestration/index.html" title="next chapter">Orchestration Overview</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/architecture/data-models.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

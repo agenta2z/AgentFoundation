@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "description": "String action metadata for functional testing of ActionGraph. These actions operate on a string buffer value.",
+  "actions": [
+    {
+      "name": "str_set",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Set buffer to specified string value"
+    },
+    {
+      "name": "str_concat",
+      "requires_target": false,
+      "supported_args": ["value"],
+      "required_args": ["value"],
+      "description": "Append value to buffer"
+    },
+    {
+      "name": "str_substring",
+      "requires_target": false,
+      "supported_args": ["start", "end"],
+      "required_args": ["start", "end"],
+      "description": "Extract substring from buffer using start and end indices"
+    },
+    {
+      "name": "str_replace",
+      "requires_target": false,
+      "supported_args": ["old", "new"],
+      "required_args": ["old", "new"],
+      "description": "Replace all occurrences of old with new in buffer"
+    },
+    {
+      "name": "str_reverse",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Reverse the buffer string"
+    },
+    {
+      "name": "str_upper",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Convert buffer to uppercase"
+    },
+    {
+      "name": "str_lower",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Convert buffer to lowercase"
+    },
+    {
+      "name": "str_trim",
+      "requires_target": false,
+      "supported_args": [],
+      "required_args": [],
+      "description": "Remove leading and trailing whitespace from buffer"
+    }
+  ]
+}

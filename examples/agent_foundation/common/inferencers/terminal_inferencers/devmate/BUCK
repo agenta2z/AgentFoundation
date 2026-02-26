@@ -1,0 +1,23 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+python_library(
+    name = "resolve_path",
+    srcs = ["resolve_path.py"],
+    base_module = "",
+    typing = False,
+)
+
+python_binary(
+    name = "devmate_example",
+    srcs = ["devmate_example.py"],
+    base_module = "",
+    main_module = "devmate_example",
+    typing = False,
+    deps = [
+        ":resolve_path",
+        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+    ],
+)

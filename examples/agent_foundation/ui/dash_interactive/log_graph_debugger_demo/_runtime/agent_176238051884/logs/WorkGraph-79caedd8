@@ -1,0 +1,1 @@
+{"level": 20, "name": "WorkGraph", "id": "WorkGraph-79caedd8", "type": "ParentChildDebuggableLink", "item": "Parent 'WorkGraphNode-Summarizer-422fa28d' linked to child 'WorkGraph-79caedd8'", "time": "2025-11-05 14:08:38", "parent_ids": ["WorkGraphNode-Summarizer-422fa28d"]}

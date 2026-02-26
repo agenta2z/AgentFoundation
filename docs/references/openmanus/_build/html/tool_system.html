@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Tool System &#8212; OpenManus 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=12dfc556" />
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Knowledge and Skills System" href="knowledge_and_skills.html" />
+    <link rel="prev" title="Orchestration Flow" href="orchestration_flow.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tool-system">
+<h1>Tool System<a class="headerlink" href="#tool-system" title="Link to this heading">¶</a></h1>
+<nav class="contents local" id="table-of-contents">
+<p class="topic-title">Table of Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id1">Overview</a></p></li>
+<li><p><a class="reference internal" href="#architecture" id="id2">Architecture</a></p>
+<ul>
+<li><p><a class="reference internal" href="#basetool" id="id3">BaseTool</a></p></li>
+<li><p><a class="reference internal" href="#toolresult" id="id4">ToolResult</a></p></li>
+<li><p><a class="reference internal" href="#toolcollection" id="id5">ToolCollection</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#complete-tool-catalog" id="id6">Complete Tool Catalog</a></p>
+<ul>
+<li><p><a class="reference internal" href="#shell-and-code-execution" id="id7">Shell and Code Execution</a></p>
+<ul>
+<li><p><a class="reference internal" href="#pythonexecute" id="id8">PythonExecute</a></p></li>
+<li><p><a class="reference internal" href="#bash" id="id9">Bash</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#browser-and-web-tools" id="id10">Browser and Web Tools</a></p>
+<ul>
+<li><p><a class="reference internal" href="#browserusetool" id="id11">BrowserUseTool</a></p></li>
+<li><p><a class="reference internal" href="#websearch" id="id12">WebSearch</a></p></li>
+<li><p><a class="reference internal" href="#crawl4aitool" id="id13">Crawl4aiTool</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#file-editing" id="id14">File Editing</a></p>
+<ul>
+<li><p><a class="reference internal" href="#strreplaceeditor" id="id15">StrReplaceEditor</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#planning-and-control" id="id16">Planning and Control</a></p>
+<ul>
+<li><p><a class="reference internal" href="#planningtool" id="id17">PlanningTool</a></p></li>
+<li><p><a class="reference internal" href="#terminate" id="id18">Terminate</a></p></li>
+<li><p><a class="reference internal" href="#askhuman" id="id19">AskHuman</a></p></li>
+<li><p><a class="reference internal" href="#createchatcompletion" id="id20">CreateChatCompletion</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#desktop-automation" id="id21">Desktop Automation</a></p>
+<ul>
+<li><p><a class="reference internal" href="#computerusetool" id="id22">ComputerUseTool</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#data-visualization" id="id23">Data Visualization</a></p>
+<ul>
+<li><p><a class="reference internal" href="#datavisualization" id="id24">DataVisualization</a></p></li>
+<li><p><a class="reference internal" href="#visualizationprepare" id="id25">VisualizationPrepare</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#sandbox-tools" id="id26">Sandbox Tools</a></p></li>
+<li><p><a class="reference internal" href="#mcp-tools" id="id27">MCP Tools</a></p>
+<ul>
+<li><p><a class="reference internal" href="#mcpclienttool" id="id28">MCPClientTool</a></p></li>
+<li><p><a class="reference internal" href="#mcpclients" id="id29">MCPClients</a></p></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#search-engine-backends" id="id30">Search Engine Backends</a></p></li>
+<li><p><a class="reference internal" href="#tool-integration-with-agents" id="id31">Tool Integration with Agents</a></p>
+<ul>
+<li><p><a class="reference internal" href="#adding-custom-tools" id="id32">Adding Custom Tools</a></p></li>
+</ul>
+</li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>The OpenManus tool system provides a unified abstraction for agent
+capabilities. Tools are the bridge between LLM reasoning and real-world
+actions – they allow agents to execute code, browse the web, edit files,
+search the internet, and more.</p>
+</section>
+<section id="architecture">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Architecture</a><a class="headerlink" href="#architecture" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>BaseTool (abstract, Pydantic BaseModel)
+│   name, description, parameters, execute()
+│
+├── ToolResult (return type)
+│     output, error, base64_image, system
+│
+└── ToolCollection (registry + dispatcher)
+      tool_map, to_params(), execute(), add_tool()
+</pre></div>
+</div>
+<section id="basetool">
+<h3><a class="toc-backref" href="#id3" role="doc-backlink">BaseTool</a><a class="headerlink" href="#basetool" title="Link to this heading">¶</a></h3>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/base.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">BaseTool</span><span class="p">(</span><span class="n">ABC</span><span class="p">,</span> <span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute the tool with given arguments.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_param</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert to OpenAI function-calling format.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;function&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;function&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">description</span><span class="p">,</span>
+                <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="toolresult">
+<h3><a class="toc-backref" href="#id4" role="doc-backlink">ToolResult</a><a class="headerlink" href="#toolresult" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">ToolResult</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">output</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># Success output</span>
+    <span class="n">error</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span> <span class="c1"># Error message</span>
+    <span class="n">base64_image</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># Screenshot/image</span>
+    <span class="n">system</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># System message</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CLIResult</span><span class="p">(</span><span class="n">ToolResult</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Result from CLI operations.&quot;&quot;&quot;</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ToolFailure</span><span class="p">(</span><span class="n">ToolResult</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Marker for tool execution failures.&quot;&quot;&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="toolcollection">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">ToolCollection</a><a class="headerlink" href="#toolcollection" title="Link to this heading">¶</a></h3>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/tool_collection.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">ToolCollection</span><span class="p">:</span>
+    <span class="n">tools</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">()</span>
+    <span class="n">tool_map</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BaseTool</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">tools</span><span class="p">:</span> <span class="n">BaseTool</span><span class="p">):</span>
+        <span class="c1"># Build tool_map from tools</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tool_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tools</span><span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_params</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;All tools in OpenAI function-calling format.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">t</span><span class="o">.</span><span class="n">to_param</span><span class="p">()</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">tool_map</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">tool_input</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
+        <span class="n">tool</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tool_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tool</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span><span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Tool &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; not found&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="k">await</span> <span class="n">tool</span><span class="p">(</span><span class="o">**</span><span class="n">tool_input</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_tool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tool</span><span class="p">:</span> <span class="n">BaseTool</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tool_map</span><span class="p">[</span><span class="n">tool</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">tool</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tools</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tool_map</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="complete-tool-catalog">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Complete Tool Catalog</a><a class="headerlink" href="#complete-tool-catalog" title="Link to this heading">¶</a></h2>
+<section id="shell-and-code-execution">
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Shell and Code Execution</a><a class="headerlink" href="#shell-and-code-execution" title="Link to this heading">¶</a></h3>
+<section id="pythonexecute">
+<h4><a class="toc-backref" href="#id8" role="doc-backlink">PythonExecute</a><a class="headerlink" href="#pythonexecute" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/python_execute.py</span></code></p>
+<p>Executes Python code in a separate process with timeout protection.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">python_execute</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">code</span></code> (str, required): Python code to execute</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Timeout</strong></p></td>
+<td><p>5 seconds (configurable)</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Isolation</strong></p></td>
+<td><p>Runs in <code class="docutils literal notranslate"><span class="pre">multiprocessing.Process</span></code> with <code class="docutils literal notranslate"><span class="pre">exec()</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Output</strong></p></td>
+<td><p>Only captures <code class="docutils literal notranslate"><span class="pre">print()</span></code> output; return values are not captured</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Safety</strong></p></td>
+<td><p>Weak – full <code class="docutils literal notranslate"><span class="pre">__builtins__</span></code> available; arbitrary code execution
+possible</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="bash">
+<h4><a class="toc-backref" href="#id9" role="doc-backlink">Bash</a><a class="headerlink" href="#bash" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/bash.py</span></code></p>
+<p>Persistent bash shell session with interactive support.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">bash</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">command</span></code> (str): Shell command; <code class="docutils literal notranslate"><span class="pre">restart</span></code> (bool): Reset session</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Timeout</strong></p></td>
+<td><p>120 seconds</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Features</strong></p></td>
+<td><p>Persistent session, sentinel-based output detection, stdin support,
+Ctrl+C handling</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Used By</strong></p></td>
+<td><p>SWEAgent, MCP Server</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="browser-and-web-tools">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Browser and Web Tools</a><a class="headerlink" href="#browser-and-web-tools" title="Link to this heading">¶</a></h3>
+<section id="browserusetool">
+<h4><a class="toc-backref" href="#id11" role="doc-backlink">BrowserUseTool</a><a class="headerlink" href="#browserusetool" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/browser_use_tool.py</span></code></p>
+<p>Full browser automation using the <code class="docutils literal notranslate"><span class="pre">browser-use</span></code> library (Playwright).</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">browser_use</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Actions</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">go_to_url</span></code>, <code class="docutils literal notranslate"><span class="pre">click_element</span></code>, <code class="docutils literal notranslate"><span class="pre">input_text</span></code>, <code class="docutils literal notranslate"><span class="pre">scroll_down</span></code>,
+<code class="docutils literal notranslate"><span class="pre">scroll_up</span></code>, <code class="docutils literal notranslate"><span class="pre">scroll_to_text</span></code>, <code class="docutils literal notranslate"><span class="pre">send_keys</span></code>,
+<code class="docutils literal notranslate"><span class="pre">get_dropdown_options</span></code>, <code class="docutils literal notranslate"><span class="pre">select_dropdown_option</span></code>, <code class="docutils literal notranslate"><span class="pre">go_back</span></code>,
+<code class="docutils literal notranslate"><span class="pre">web_search</span></code>, <code class="docutils literal notranslate"><span class="pre">wait</span></code>, <code class="docutils literal notranslate"><span class="pre">extract_content</span></code>, <code class="docutils literal notranslate"><span class="pre">switch_tab</span></code>,
+<code class="docutils literal notranslate"><span class="pre">open_tab</span></code>, <code class="docutils literal notranslate"><span class="pre">close_tab</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Features</strong></p></td>
+<td><p>Screenshot capture, thread-safe (asyncio Lock), LLM-powered
+content extraction, embedded WebSearch</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Used By</strong></p></td>
+<td><p>Manus, BrowserAgent</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="websearch">
+<h4><a class="toc-backref" href="#id12" role="doc-backlink">WebSearch</a><a class="headerlink" href="#websearch" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/web_search.py</span></code></p>
+<p>Multi-engine web search with automatic fallback.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">web_search</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">query</span></code> (str), <code class="docutils literal notranslate"><span class="pre">num_results</span></code> (int, default 10),
+<code class="docutils literal notranslate"><span class="pre">fetch_content</span></code> (bool, default False)</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Engines</strong></p></td>
+<td><p>Google → DuckDuckGo → Baidu → Bing (configurable fallback order)</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Features</strong></p></td>
+<td><p>Per-engine retry logic (tenacity), content fetching with HTML
+parsing, language/country filtering</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="crawl4aitool">
+<h4><a class="toc-backref" href="#id13" role="doc-backlink">Crawl4aiTool</a><a class="headerlink" href="#crawl4aitool" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/crawl4ai.py</span></code></p>
+<p>Web crawler for AI-optimized content extraction.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">crawl4ai</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">url</span></code> (str): URL to crawl</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Features</strong></p></td>
+<td><p>Clean markdown extraction, caching, word count thresholds,
+multiple URL support</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="file-editing">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink">File Editing</a><a class="headerlink" href="#file-editing" title="Link to this heading">¶</a></h3>
+<section id="strreplaceeditor">
+<h4><a class="toc-backref" href="#id15" role="doc-backlink">StrReplaceEditor</a><a class="headerlink" href="#strreplaceeditor" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/str_replace_editor.py</span></code></p>
+<p>File editor with view, create, edit, and undo capabilities.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">str_replace_editor</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Commands</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">view</span></code> (read file/directory), <code class="docutils literal notranslate"><span class="pre">create</span></code> (new file),
+<code class="docutils literal notranslate"><span class="pre">str_replace</span></code> (find-and-replace), <code class="docutils literal notranslate"><span class="pre">insert</span></code> (add line),
+<code class="docutils literal notranslate"><span class="pre">undo_edit</span></code> (revert last change)</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Features</strong></p></td>
+<td><p>Edit history per file, line number display, directory listing,
+supports local and sandbox file operations</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>File Operators</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">LocalFileOperator</span></code> (direct filesystem),
+<code class="docutils literal notranslate"><span class="pre">SandboxFileOperator</span></code> (Docker container)</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Limits</strong></p></td>
+<td><p>Output truncated at 16KB</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="planning-and-control">
+<h3><a class="toc-backref" href="#id16" role="doc-backlink">Planning and Control</a><a class="headerlink" href="#planning-and-control" title="Link to this heading">¶</a></h3>
+<section id="planningtool">
+<h4><a class="toc-backref" href="#id17" role="doc-backlink">PlanningTool</a><a class="headerlink" href="#planningtool" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/planning.py</span></code></p>
+<p>Plan CRUD operations for multi-step task management.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">planning</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Commands</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">create</span></code>, <code class="docutils literal notranslate"><span class="pre">update</span></code>, <code class="docutils literal notranslate"><span class="pre">list</span></code>, <code class="docutils literal notranslate"><span class="pre">get</span></code>, <code class="docutils literal notranslate"><span class="pre">set_active</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mark_step</span></code>, <code class="docutils literal notranslate"><span class="pre">delete</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Step Statuses</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">not_started</span></code>, <code class="docutils literal notranslate"><span class="pre">in_progress</span></code>, <code class="docutils literal notranslate"><span class="pre">completed</span></code>, <code class="docutils literal notranslate"><span class="pre">blocked</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Storage</strong></p></td>
+<td><p>In-memory dictionary (ephemeral)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="terminate">
+<h4><a class="toc-backref" href="#id18" role="doc-backlink">Terminate</a><a class="headerlink" href="#terminate" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/terminate.py</span></code></p>
+<p>Signals task completion.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">terminate</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">status</span></code> (str): <code class="docutils literal notranslate"><span class="pre">&quot;success&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;failure&quot;</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Behavior</strong></p></td>
+<td><p>Triggers <code class="docutils literal notranslate"><span class="pre">AgentState.FINISHED</span></code> as a “special tool”</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="askhuman">
+<h4><a class="toc-backref" href="#id19" role="doc-backlink">AskHuman</a><a class="headerlink" href="#askhuman" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/ask_human.py</span></code></p>
+<p>Human-in-the-loop interaction.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ask_human</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Parameters</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">inquire</span></code> (str): Question to ask</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Mechanism</strong></p></td>
+<td><p>Python <code class="docutils literal notranslate"><span class="pre">input()</span></code> call (blocking, terminal-based)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="createchatcompletion">
+<h4><a class="toc-backref" href="#id20" role="doc-backlink">CreateChatCompletion</a><a class="headerlink" href="#createchatcompletion" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/create_chat_completion.py</span></code></p>
+<p>Structured LLM output formatting.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">create_chat_completion</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Features</strong></p></td>
+<td><p>Dynamic JSON schema from Python types, Pydantic model support,
+Union/List/Dict type handling</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="desktop-automation">
+<h3><a class="toc-backref" href="#id21" role="doc-backlink">Desktop Automation</a><a class="headerlink" href="#desktop-automation" title="Link to this heading">¶</a></h3>
+<section id="computerusetool">
+<h4><a class="toc-backref" href="#id22" role="doc-backlink">ComputerUseTool</a><a class="headerlink" href="#computerusetool" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/computer_use_tool.py</span></code></p>
+<p>Desktop GUI automation via API.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computer_use</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Actions</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">move_to</span></code>, <code class="docutils literal notranslate"><span class="pre">click</span></code>, <code class="docutils literal notranslate"><span class="pre">scroll</span></code>, <code class="docutils literal notranslate"><span class="pre">typing</span></code>, <code class="docutils literal notranslate"><span class="pre">press</span></code>,
+<code class="docutils literal notranslate"><span class="pre">wait</span></code>, <code class="docutils literal notranslate"><span class="pre">mouse_down</span></code>, <code class="docutils literal notranslate"><span class="pre">mouse_up</span></code>, <code class="docutils literal notranslate"><span class="pre">drag_to</span></code>, <code class="docutils literal notranslate"><span class="pre">hotkey</span></code>,
+<code class="docutils literal notranslate"><span class="pre">screenshot</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Requirements</strong></p></td>
+<td><p>Daytona sandbox with automation service on port 8000</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="data-visualization">
+<h3><a class="toc-backref" href="#id23" role="doc-backlink">Data Visualization</a><a class="headerlink" href="#data-visualization" title="Link to this heading">¶</a></h3>
+<section id="datavisualization">
+<h4><a class="toc-backref" href="#id24" role="doc-backlink">DataVisualization</a><a class="headerlink" href="#datavisualization" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/chart_visualization/data_visualization.py</span></code></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">data_visualization</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Features</strong></p></td>
+<td><p>Creates charts from CSV via VMind (TypeScript), outputs PNG/HTML,
+supports insights overlay</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="visualizationprepare">
+<h4><a class="toc-backref" href="#id25" role="doc-backlink">VisualizationPrepare</a><a class="headerlink" href="#visualizationprepare" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/chart_visualization/chart_prepare.py</span></code></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">visualization_preparation</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Purpose</strong></p></td>
+<td><p>Prepares metadata JSON for DataVisualization tool</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="sandbox-tools">
+<h3><a class="toc-backref" href="#id26" role="doc-backlink">Sandbox Tools</a><a class="headerlink" href="#sandbox-tools" title="Link to this heading">¶</a></h3>
+<p>These tools operate inside Daytona cloud sandboxes:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 20.0%" />
+<col style="width: 60.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Tool</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>SandboxBrowserTool</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">sandbox_browser</span></code></p></td>
+<td><p>Browser automation via curl to localhost:8003; 15 actions
+including navigate, click, drag_drop</p></td>
+</tr>
+<tr class="row-odd"><td><p>SandboxFilesTool</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">sandbox_files</span></code></p></td>
+<td><p>File CRUD in /workspace; create, str_replace, full rewrite,
+delete; auto-detects index.html</p></td>
+</tr>
+<tr class="row-even"><td><p>SandboxShellTool</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">sandbox_shell</span></code></p></td>
+<td><p>Shell via tmux sessions; blocking/non-blocking execution;
+configurable timeout</p></td>
+</tr>
+<tr class="row-odd"><td><p>SandboxVisionTool</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">sandbox_vision</span></code></p></td>
+<td><p>Read and compress images from sandbox; max 1920x1080; returns
+base64</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="mcp-tools">
+<h3><a class="toc-backref" href="#id27" role="doc-backlink">MCP Tools</a><a class="headerlink" href="#mcp-tools" title="Link to this heading">¶</a></h3>
+<section id="mcpclienttool">
+<h4><a class="toc-backref" href="#id28" role="doc-backlink">MCPClientTool</a><a class="headerlink" href="#mcpclienttool" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/mcp.py</span></code></p>
+<p>Proxy for remote MCP server tools.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Name</strong></p></td>
+<td><p>Dynamic: <code class="docutils literal notranslate"><span class="pre">mcp_{server_id}_{original_name}</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Mechanism</strong></p></td>
+<td><p>Forwards <code class="docutils literal notranslate"><span class="pre">execute()</span></code> calls to remote MCP server via session</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Features</strong></p></td>
+<td><p>Server identification, name sanitization (max 64 chars)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="mcpclients">
+<h4><a class="toc-backref" href="#id29" role="doc-backlink">MCPClients</a><a class="headerlink" href="#mcpclients" title="Link to this heading">¶</a></h4>
+<p>Manager for multiple MCP server connections. Extends <code class="docutils literal notranslate"><span class="pre">ToolCollection</span></code>.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><strong>Transports</strong></p></td>
+<td><p>SSE (<code class="docutils literal notranslate"><span class="pre">connect_sse</span></code>) and stdio (<code class="docutils literal notranslate"><span class="pre">connect_stdio</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Discovery</strong></p></td>
+<td><p>Auto-discovers tools from servers via <code class="docutils literal notranslate"><span class="pre">session.list_tools()</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Lifecycle</strong></p></td>
+<td><p>Connect, initialize, list tools, disconnect with cleanup</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+</section>
+<section id="search-engine-backends">
+<h2><a class="toc-backref" href="#id30" role="doc-backlink">Search Engine Backends</a><a class="headerlink" href="#search-engine-backends" title="Link to this heading">¶</a></h2>
+<p><strong>Directory</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/search/</span></code></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 20.0%" />
+<col style="width: 60.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Engine</p></th>
+<th class="head"><p>File</p></th>
+<th class="head"><p>Library</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Google</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">google_search.py</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">googlesearch-python</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>DuckDuckGo</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">duckduckgo_search.py</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">duckduckgo_search</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Baidu</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">baidu_search.py</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">baidusearch</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Bing</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">bing_search.py</span></code></p></td>
+<td><p>Custom implementation</p></td>
+</tr>
+</tbody>
+</table>
+<p>All implement the <code class="docutils literal notranslate"><span class="pre">WebSearchEngine</span></code> base class:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">WebSearchEngine</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">perform_search</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">num_results</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">SearchItem</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute search and return results.&quot;&quot;&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="tool-integration-with-agents">
+<h2><a class="toc-backref" href="#id31" role="doc-backlink">Tool Integration with Agents</a><a class="headerlink" href="#tool-integration-with-agents" title="Link to this heading">¶</a></h2>
+<p>Tools are bound to agents through the <code class="docutils literal notranslate"><span class="pre">available_tools</span></code> attribute:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Manus</span><span class="p">(</span><span class="n">ToolCallAgent</span><span class="p">):</span>
+    <span class="n">available_tools</span><span class="p">:</span> <span class="n">ToolCollection</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">ToolCollection</span><span class="p">(</span>
+            <span class="n">PythonExecute</span><span class="p">(),</span>
+            <span class="n">BrowserUseTool</span><span class="p">(),</span>
+            <span class="n">StrReplaceEditor</span><span class="p">(),</span>
+            <span class="n">AskHuman</span><span class="p">(),</span>
+            <span class="n">Terminate</span><span class="p">(),</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">ToolCallAgent.think()</span></code> method passes <code class="docutils literal notranslate"><span class="pre">available_tools.to_params()</span></code>
+to the LLM, which returns tool calls referencing tools by name. The
+<code class="docutils literal notranslate"><span class="pre">ToolCallAgent.act()</span></code> method dispatches calls through
+<code class="docutils literal notranslate"><span class="pre">available_tools.execute(name,</span> <span class="pre">args)</span></code>.</p>
+<section id="adding-custom-tools">
+<h3><a class="toc-backref" href="#id32" role="doc-backlink">Adding Custom Tools</a><a class="headerlink" href="#adding-custom-tools" title="Link to this heading">¶</a></h3>
+<p>To add a custom tool:</p>
+<ol class="arabic simple">
+<li><p>Create a subclass of <code class="docutils literal notranslate"><span class="pre">BaseTool</span></code></p></li>
+<li><p>Define <code class="docutils literal notranslate"><span class="pre">name</span></code>, <code class="docutils literal notranslate"><span class="pre">description</span></code>, and <code class="docutils literal notranslate"><span class="pre">parameters</span></code></p></li>
+<li><p>Implement <code class="docutils literal notranslate"><span class="pre">execute()</span></code></p></li>
+<li><p>Add to an agent’s <code class="docutils literal notranslate"><span class="pre">ToolCollection</span></code></p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">app.tool.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseTool</span><span class="p">,</span> <span class="n">ToolResult</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;my_tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Does something useful&quot;</span>
+    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;object&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;properties&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;input&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;string&quot;</span><span class="p">,</span> <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;Input data&quot;</span><span class="p">}</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;required&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">process</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span><span class="n">output</span><span class="o">=</span><span class="n">result</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">OpenManus</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">System Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_system.html">Agent System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="orchestration_flow.html">Orchestration Flow</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Tool System</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#architecture">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#complete-tool-catalog">Complete Tool Catalog</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#search-engine-backends">Search Engine Backends</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tool-integration-with-agents">Tool Integration with Agents</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge_and_skills.html">Knowledge and Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llm_integration.html">LLM Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mcp_integration.html">MCP Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sandbox_system.html">Sandbox System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="orchestration_flow.html" title="previous chapter">Orchestration Flow</a></li>
+      <li>Next: <a href="knowledge_and_skills.html" title="next chapter">Knowledge and Skills System</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, FoundationAgents.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/tool_system.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

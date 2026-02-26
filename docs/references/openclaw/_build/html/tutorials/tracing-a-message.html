@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Tracing a Message &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Adding a Skill" href="adding-a-skill.html" />
+    <link rel="prev" title="Tutorials" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tracing-a-message">
+<span id="tutorial-tracing-a-message"></span><h1>Tracing a Message<a class="headerlink" href="#tracing-a-message" title="Link to this heading">¶</a></h1>
+<p>This tutorial traces a single inbound message through OpenClaw’s entire
+processing pipeline — from channel arrival to response delivery. Follow along
+to understand how every layer interacts.</p>
+<section id="scenario">
+<h2>Scenario<a class="headerlink" href="#scenario" title="Link to this heading">¶</a></h2>
+<p>A user sends “What’s the weather in Tokyo?” via WhatsApp. The default agent
+processes it using the <code class="docutils literal notranslate"><span class="pre">web_search</span></code> tool and responds with current weather
+data.</p>
+</section>
+<section id="step-1-channel-receives-the-message">
+<h2>Step 1: Channel Receives the Message<a class="headerlink" href="#step-1-channel-receives-the-message" title="Link to this heading">¶</a></h2>
+<p>The WhatsApp channel plugin receives an inbound webhook from the WhatsApp
+Business API. The plugin’s <code class="docutils literal notranslate"><span class="pre">ChannelMessagingAdapter</span></code> normalizes the raw
+payload into OpenClaw’s internal message format:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nx">text</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;What&#39;s the weather in Tokyo?&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">sender</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">id</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;whatsapp:+1234567890&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;Alice&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nx">channel</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;whatsapp&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">sessionKey</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;whatsapp:+1234567890&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">timestamp</span><span class="o">:</span><span class="w"> </span><span class="kt">1708700000000</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The adapter calls the gateway’s <code class="docutils literal notranslate"><span class="pre">agent</span></code> RPC method to submit the message.</p>
+<p>Source: Channel-specific adapter in <code class="docutils literal notranslate"><span class="pre">src/channels/</span></code> or <code class="docutils literal notranslate"><span class="pre">extensions/</span></code></p>
+</section>
+<section id="step-2-gateway-routing">
+<h2>Step 2: Gateway Routing<a class="headerlink" href="#step-2-gateway-routing" title="Link to this heading">¶</a></h2>
+<p>The gateway server (<code class="docutils literal notranslate"><span class="pre">src/gateway/server.impl.ts</span></code>) receives the JSON-RPC
+<code class="docutils literal notranslate"><span class="pre">agent</span></code> call. It determines which agent should handle the message based on
+the session key pattern.</p>
+<p>For a direct WhatsApp message, the default agent is selected — resolved by
+scanning <code class="docutils literal notranslate"><span class="pre">agents.list[]</span></code> for the entry with <code class="docutils literal notranslate"><span class="pre">default:</span> <span class="pre">true</span></code>, or falling
+back to the first entry.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/agent-scope.ts</span></code></p>
+</section>
+<section id="step-3-session-resolution">
+<h2>Step 3: Session Resolution<a class="headerlink" href="#step-3-session-resolution" title="Link to this heading">¶</a></h2>
+<p>The system loads or creates a session entry from <code class="docutils literal notranslate"><span class="pre">~/.openclaw/sessions.json</span></code>.
+The session is keyed by the normalized session key (e.g.,
+<code class="docutils literal notranslate"><span class="pre">whatsapp:+1234567890</span></code>).</p>
+<p>If a session already exists, it carries forward:</p>
+<ul class="simple">
+<li><p>Previous model and thinking level overrides</p></li>
+<li><p>Token usage counters</p></li>
+<li><p>Compaction count</p></li>
+<li><p>Skill snapshot reference</p></li>
+</ul>
+<p>If this is a new conversation, a fresh session entry is created with defaults.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/config/sessions.ts</span></code></p>
+</section>
+<section id="step-4-authorization-check">
+<h2>Step 4: Authorization Check<a class="headerlink" href="#step-4-authorization-check" title="Link to this heading">¶</a></h2>
+<p>The system checks send policies to determine if the sender is authorized to
+interact with this agent. Policies can restrict access by:</p>
+<ul class="simple">
+<li><p>Sender identity (allowlist/blocklist)</p></li>
+<li><p>Channel type</p></li>
+<li><p>Time-of-day rules</p></li>
+</ul>
+<p>If the sender is unauthorized, the message is rejected with an appropriate
+error response.</p>
+</section>
+<section id="step-5-directive-parsing">
+<h2>Step 5: Directive Parsing<a class="headerlink" href="#step-5-directive-parsing" title="Link to this heading">¶</a></h2>
+<p>The message text is scanned for directives — special prefixes that modify
+agent behavior:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Directive</p></th>
+<th class="head"><p>Effect</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">/think</span> <span class="pre">high</span></code></p></td>
+<td><p>Sets extended thinking to high for this run</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">/model</span> <span class="pre">opus</span></code></p></td>
+<td><p>Overrides the model for this session</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">/verbose</span></code></p></td>
+<td><p>Enables verbose output mode</p></td>
+</tr>
+</tbody>
+</table>
+<p>In our example, “What’s the weather in Tokyo?” contains no directives, so
+defaults are used.</p>
+</section>
+<section id="step-6-queue-check">
+<h2>Step 6: Queue Check<a class="headerlink" href="#step-6-queue-check" title="Link to this heading">¶</a></h2>
+<p>The system checks whether an agent run is already active for this session.</p>
+<ul class="simple">
+<li><p><strong>No active run</strong>: The message proceeds directly to processing.</p></li>
+<li><p><strong>Active run, steer mode</strong>: The message is injected into the running
+conversation via <code class="docutils literal notranslate"><span class="pre">queueEmbeddedPiMessage()</span></code>, redirecting the agent’s
+current work.</p></li>
+<li><p><strong>Active run, queue mode</strong>: The message waits in the follow-up queue until
+the current run completes.</p></li>
+</ul>
+<p>Our message is the first in this session, so it proceeds immediately.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/queue.ts</span></code></p>
+</section>
+<section id="step-7-memory-flush-check">
+<h2>Step 7: Memory Flush Check<a class="headerlink" href="#step-7-memory-flush-check" title="Link to this heading">¶</a></h2>
+<p>Before starting a new run, the system checks if a memory flush is needed.
+This happens when:</p>
+<ol class="arabic simple">
+<li><p>The session’s total token usage exceeds a soft threshold
+(<code class="docutils literal notranslate"><span class="pre">DEFAULT_MEMORY_FLUSH_SOFT_TOKENS</span> <span class="pre">=</span> <span class="pre">4000</span></code>)</p></li>
+<li><p>Enough new conversation has occurred since the last flush</p></li>
+</ol>
+<p>If triggered, the agent is given a special prompt asking it to summarize
+important information from the conversation into memory files
+(<code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code> or <code class="docutils literal notranslate"><span class="pre">memory/YYYY-MM-DD.md</span></code>).</p>
+<p>For our fresh session, no flush is needed.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/memory-flush.ts</span></code></p>
+</section>
+<section id="step-8-model-resolution">
+<h2>Step 8: Model Resolution<a class="headerlink" href="#step-8-model-resolution" title="Link to this heading">¶</a></h2>
+<p>The model is resolved through a precedence chain:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>1. Agent-specific model   →  agents.list[].model      (not set)
+2. Session override       →  from /model directive     (not set)
+3. Channel override       →  per-channel config        (not set)
+4. Global default         →  agents.defaults.model     (not set)
+5. Hardcoded default      →  &quot;claude-opus-4-6&quot;         ← selected
+</pre></div>
+</div>
+<p>Result: The agent will use <code class="docutils literal notranslate"><span class="pre">claude-opus-4-6</span></code> via the <code class="docutils literal notranslate"><span class="pre">anthropic</span></code> provider.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/model-selection.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/agents/defaults.ts:4</span></code></p>
+</section>
+<section id="step-9-auth-profile-selection">
+<h2>Step 9: Auth Profile Selection<a class="headerlink" href="#step-9-auth-profile-selection" title="Link to this heading">¶</a></h2>
+<p>The auth profile system selects an API key for the chosen provider:</p>
+<ol class="arabic simple">
+<li><p>Load all configured profiles for <code class="docutils literal notranslate"><span class="pre">anthropic</span></code></p></li>
+<li><p>Filter out profiles currently in cooldown (rate-limited)</p></li>
+<li><p>Select the first available profile from the configured order</p></li>
+</ol>
+<p>If all profiles are in cooldown, the system enters probe mode — retrying
+every 30 seconds until a profile recovers.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles.ts</span></code></p>
+</section>
+<section id="step-10-system-prompt-assembly">
+<h2>Step 10: System Prompt Assembly<a class="headerlink" href="#step-10-system-prompt-assembly" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">buildEmbeddedSystemPrompt()</span></code> constructs the system prompt from multiple
+sections:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌─────────────────────────────────────┐
+│ Runtime Info (agent ID, OS, model)  │
+│ Available Tool Names                │
+│ Tool Summaries (descriptions)       │
+│ Workspace Directory                 │
+│ Workspace Notes (AGENTS.md)         │
+│ Skills Prompt (eligible skills)     │
+│ Identity (owner/sender info)        │
+│ Thinking Hints                      │
+│ Timezone &amp; Current Time             │
+│ Memory Citations Mode               │
+│ Channel Capabilities                │
+└─────────────────────────────────────┘
+</pre></div>
+</div>
+<p>The total prompt is typically 2,000–10,000 tokens depending on active tools
+and skills.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/system-prompt.ts</span></code></p>
+</section>
+<section id="step-11-agent-run-tool-loop">
+<h2>Step 11: Agent Run (Tool Loop)<a class="headerlink" href="#step-11-agent-run-tool-loop" title="Link to this heading">¶</a></h2>
+<p>The core agent loop from <code class="docutils literal notranslate"><span class="pre">pi-agent-core</span></code> begins. This is a ReAct-style
+loop where the LLM alternates between reasoning and acting:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Iteration 1:
+├── LLM receives: system prompt + user message
+├── LLM responds: &quot;I&#39;ll search for current weather in Tokyo&quot;
+├── LLM calls: web_search({ query: &quot;current weather Tokyo&quot; })
+├── Tool executes: fetches search results
+└── Tool result injected into conversation
+
+Iteration 2:
+├── LLM receives: previous context + tool results
+├── LLM responds: &quot;The current weather in Tokyo is...&quot;
+└── No tool calls → loop ends
+</pre></div>
+</div>
+<p>The loop continues until:</p>
+<ul class="simple">
+<li><p>The LLM produces a response with no tool calls (natural completion)</p></li>
+<li><p>Maximum iterations reached (32–160, scaled by profile count)</p></li>
+<li><p>An unrecoverable error occurs</p></li>
+</ul>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code></p>
+</section>
+<section id="step-12-streaming">
+<h2>Step 12: Streaming<a class="headerlink" href="#step-12-streaming" title="Link to this heading">¶</a></h2>
+<p>During the agent run, partial results stream to the user in real-time:</p>
+<ol class="arabic simple">
+<li><p><strong>Text chunks</strong>: Partial assistant text streams to the channel as typing
+indicators or incremental messages</p></li>
+<li><p><strong>Tool events</strong>: Tool call start/result events stream to the Control UI
+via WebSocket</p></li>
+<li><p><strong>Reasoning</strong>: If extended thinking is enabled, reasoning tokens stream
+via the <code class="docutils literal notranslate"><span class="pre">onReasoningStream</span></code> callback</p></li>
+</ol>
+<p>The Agent Events bus (<code class="docutils literal notranslate"><span class="pre">src/infra/agent-events.ts</span></code>) distributes these events
+to all subscribers.</p>
+</section>
+<section id="step-13-response-delivery">
+<h2>Step 13: Response Delivery<a class="headerlink" href="#step-13-response-delivery" title="Link to this heading">¶</a></h2>
+<p>Once the agent run completes:</p>
+<ol class="arabic simple">
+<li><p>The final response text is sent back through the channel adapter to
+WhatsApp</p></li>
+<li><p>Token usage is recorded in the session entry</p></li>
+<li><p>The conversation transcript is appended to the session’s JSONL file</p></li>
+<li><p>If compaction is needed (context approaching limits), older turns are
+summarized</p></li>
+<li><p>The follow-up queue drains any messages that arrived during the run</p></li>
+</ol>
+<p>The user sees: “The current weather in Tokyo is 12°C with partly cloudy
+skies…”</p>
+</section>
+<section id="error-scenarios">
+<h2>Error Scenarios<a class="headerlink" href="#error-scenarios" title="Link to this heading">¶</a></h2>
+<p>What if something goes wrong at various stages?</p>
+<p><strong>Model API error (429 rate limit)</strong>:</p>
+<ol class="arabic simple">
+<li><p>Current auth profile enters cooldown</p></li>
+<li><p>System selects next available profile</p></li>
+<li><p>Request retries with new API key</p></li>
+<li><p>If all profiles exhausted, enters probe mode</p></li>
+</ol>
+<p><strong>Model API error (overloaded)</strong>:</p>
+<ol class="arabic simple">
+<li><p>If thinking level is high, falls back: high → medium → low → minimal → off</p></li>
+<li><p>Retries with reduced thinking</p></li>
+</ol>
+<p><strong>Context overflow</strong>:</p>
+<ol class="arabic simple">
+<li><p>Session auto-resets</p></li>
+<li><p>Previous context is compacted (summarized)</p></li>
+<li><p>Run retries with fresh context</p></li>
+</ol>
+<p><strong>Tool execution error</strong>:</p>
+<ol class="arabic simple">
+<li><p>Error is formatted as a <code class="docutils literal notranslate"><span class="pre">ToolInputError</span></code></p></li>
+<li><p>Error result is injected back to the LLM</p></li>
+<li><p>LLM can retry with corrected parameters</p></li>
+</ol>
+</section>
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Link to this heading">¶</a></h2>
+<p>The complete path for our message:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>WhatsApp webhook
+  → Channel adapter normalizes
+    → Gateway routes to default agent
+      → Session loaded/created
+        → Authorization passes
+          → No directives found
+            → No active run (proceeds)
+              → No memory flush needed
+                → Model: claude-opus-4-6
+                  → Auth profile selected
+                    → System prompt assembled
+                      → Agent tool loop (2 iterations)
+                        → web_search called
+                          → Response streamed
+                            → Delivered to WhatsApp
+                              → Session updated
+</pre></div>
+</div>
+<p>Key source files in the path:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">src/gateway/server.impl.ts</span></code> — Gateway entry point</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/get-reply.ts</span></code> — Reply orchestration</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner.ts</span></code> — Agent runner setup</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/auto-reply/reply/agent-runner-execution.ts</span></code> — Execution with fallbacks</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code> — Core tool loop</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/model-selection.ts</span></code> — Model resolution</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">src/agents/auth-profiles.ts</span></code> — API key management</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Tutorials</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Tracing a Message</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scenario">Scenario</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-1-channel-receives-the-message">Step 1: Channel Receives the Message</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-2-gateway-routing">Step 2: Gateway Routing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-3-session-resolution">Step 3: Session Resolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-4-authorization-check">Step 4: Authorization Check</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-5-directive-parsing">Step 5: Directive Parsing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-6-queue-check">Step 6: Queue Check</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-7-memory-flush-check">Step 7: Memory Flush Check</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-8-model-resolution">Step 8: Model Resolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-9-auth-profile-selection">Step 9: Auth Profile Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-10-system-prompt-assembly">Step 10: System Prompt Assembly</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-11-agent-run-tool-loop">Step 11: Agent Run (Tool Loop)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-12-streaming">Step 12: Streaming</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-13-response-delivery">Step 13: Response Delivery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#error-scenarios">Error Scenarios</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="adding-a-skill.html">Adding a Skill</a></li>
+<li class="toctree-l2"><a class="reference internal" href="understanding-memory.html">Understanding Memory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multi-agent-workflow.html">Multi-Agent Workflow</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Tutorials</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Tutorials</a></li>
+      <li>Next: <a href="adding-a-skill.html" title="next chapter">Adding a Skill</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/tutorials/tracing-a-message.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

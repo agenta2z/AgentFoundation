@@ -1,0 +1,1 @@
+{"level": 20, "name": "WorkGraphNode", "id": "WorkGraphNode-Agent-b9c267e0", "type": "ParentChildDebuggableLink", "item": "Parent 'WorkGraphNode-Actioner-b210477e' linked to child 'WorkGraphNode-Agent-b9c267e0'", "time": "2025-11-05 14:03:10", "parent_ids": ["WorkGraphNode-Actioner-b210477e"]}

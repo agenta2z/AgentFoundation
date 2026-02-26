@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "description": "Reference artifact showing the JSON format for action type metadata. The authoritative source of truth for default actions is in action_metadata.py (_load_defaults method). This file demonstrates the expected format for custom action configurations loaded via ActionMetadataRegistry.load_from_file().",
+  "actions": [
+    {
+      "name": "click",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "description": "Click on a UI element",
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none"
+    },
+    {
+      "name": "input_text",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "supported_args": ["text", "clear_content"],
+      "required_args": ["text"],
+      "description": "Input text into a field",
+      "allow_attachments": true,
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none"
+    },
+    {
+      "name": "append_text",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "supported_args": ["text"],
+      "required_args": ["text"],
+      "description": "Append text to existing field content",
+      "allow_attachments": true,
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none"
+    },
+    {
+      "name": "visit_url",
+      "default_strategy": "literal",
+      "requires_target": true,
+      "description": "Navigate to a URL",
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none"
+    },
+    {
+      "name": "scroll",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "supported_args": ["direction", "amount"],
+      "description": "Scroll an element or page",
+      "allow_follow_up": true,
+      "base_memory_mode": "target",
+      "incremental_change_mode": "target"
+    },
+    {
+      "name": "scroll_up_to_element",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "description": "Scroll page until element is visible",
+      "allow_follow_up": true,
+      "base_memory_mode": "target",
+      "incremental_change_mode": "target"
+    },
+    {
+      "name": "wait",
+      "default_strategy": null,
+      "requires_target": false,
+      "supported_args": ["seconds"],
+      "required_args": ["seconds"],
+      "description": "Wait for a specified duration",
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none"
+    },
+    {
+      "name": "input_and_submit",
+      "default_strategy": "__id__",
+      "requires_target": true,
+      "supported_args": ["text", "clear_content"],
+      "required_args": ["text"],
+      "description": "Input text and click submit button (composite action)",
+      "allow_attachments": true,
+      "base_memory_mode": "none",
+      "incremental_change_mode": "none",
+      "composite_action": {
+        "mode": "sequential",
+        "steps": [
+          {
+            "action": "input_text",
+            "element_index": 0,
+            "arg_prefix": "input_text_"
+          },
+          {
+            "action": "click",
+            "element_index": 1,
+            "arg_prefix": "click_"
+          }
+        ]
+      }
+    }
+  ]
+}

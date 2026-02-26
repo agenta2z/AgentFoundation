@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Sandbox System &#8212; OpenManus 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=12dfc556" />
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="api_reference.html" />
+    <link rel="prev" title="MCP Integration" href="mcp_integration.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="sandbox-system">
+<h1>Sandbox System<a class="headerlink" href="#sandbox-system" title="Link to this heading">¶</a></h1>
+<nav class="contents local" id="table-of-contents">
+<p class="topic-title">Table of Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#overview" id="id3">Overview</a></p></li>
+<li><p><a class="reference internal" href="#docker-sandbox" id="id4">Docker Sandbox</a></p>
+<ul>
+<li><p><a class="reference internal" href="#architecture" id="id5">Architecture</a></p></li>
+<li><p><a class="reference internal" href="#components" id="id6">Components</a></p>
+<ul>
+<li><p><a class="reference internal" href="#basesandboxclient" id="id7">BaseSandboxClient</a></p></li>
+<li><p><a class="reference internal" href="#localsandboxclient" id="id8">LocalSandboxClient</a></p></li>
+<li><p><a class="reference internal" href="#dockersandbox" id="id9">DockerSandbox</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#safety-mechanisms" id="id10">Safety Mechanisms</a></p>
+<ul>
+<li><p><a class="reference internal" href="#path-safety" id="id11">Path Safety</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#file-operations" id="id12">File Operations</a></p></li>
+<li><p><a class="reference internal" href="#integration-with-tools" id="id13">Integration with Tools</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#daytona-sandbox" id="id14">Daytona Sandbox</a></p>
+<ul>
+<li><p><a class="reference internal" href="#id1" id="id15">Architecture</a></p></li>
+<li><p><a class="reference internal" href="#id2" id="id16">Components</a></p>
+<ul>
+<li><p><a class="reference internal" href="#sandbox-management" id="id17">Sandbox Management</a></p></li>
+<li><p><a class="reference internal" href="#sandboxtoolsbase" id="id18">SandboxToolsBase</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#sandbox-tools" id="id19">Sandbox Tools</a></p></li>
+<li><p><a class="reference internal" href="#sandboxmanus-agent" id="id20">SandboxManus Agent</a></p></li>
+<li><p><a class="reference internal" href="#daytona-configuration" id="id21">Daytona Configuration</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#python-execution-safety" id="id22">Python Execution Safety</a></p></li>
+<li><p><a class="reference internal" href="#comparison" id="id23">Comparison</a></p></li>
+</ul>
+</nav>
+<section id="overview">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Overview</a><a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>OpenManus provides <strong>two independent sandboxing systems</strong> for isolated
+code execution:</p>
+<ol class="arabic simple">
+<li><p><strong>Docker Sandbox (Local)</strong>: Docker container-based isolation for
+local development and testing</p></li>
+<li><p><strong>Daytona Sandbox (Cloud)</strong>: Cloud-based sandboxed environments
+with VNC, browser, and desktop automation support</p></li>
+</ol>
+</section>
+<section id="docker-sandbox">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Docker Sandbox</a><a class="headerlink" href="#docker-sandbox" title="Link to this heading">¶</a></h2>
+<section id="architecture">
+<h3><a class="toc-backref" href="#id5" role="doc-backlink">Architecture</a><a class="headerlink" href="#architecture" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>┌──────────────────────────────────────────────┐
+│                Host System                    │
+│                                              │
+│  LocalSandboxClient (SANDBOX_CLIENT singleton)│
+│       │                                       │
+│       ▼                                       │
+│  DockerSandbox                                │
+│       │                                       │
+│       ├── Docker Container (python:3.12-slim) │
+│       │     ├── /workspace (working dir)      │
+│       │     └── Terminal session               │
+│       │                                       │
+│       ├── Volume bindings (host ↔ container)  │
+│       └── Resource limits (CPU, memory)       │
+│                                              │
+└──────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+<section id="components">
+<h3><a class="toc-backref" href="#id6" role="doc-backlink">Components</a><a class="headerlink" href="#components" title="Link to this heading">¶</a></h3>
+<section id="basesandboxclient">
+<h4><a class="toc-backref" href="#id7" role="doc-backlink">BaseSandboxClient</a><a class="headerlink" href="#basesandboxclient" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/sandbox/client.py</span></code></p>
+<p>Abstract interface for sandbox operations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">BaseSandboxClient</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">volume_bindings</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">timeout</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">copy_from</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">container_path</span><span class="p">,</span> <span class="n">local_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">copy_to</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">local_path</span><span class="p">,</span> <span class="n">container_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">read_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">write_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="localsandboxclient">
+<h4><a class="toc-backref" href="#id8" role="doc-backlink">LocalSandboxClient</a><a class="headerlink" href="#localsandboxclient" title="Link to this heading">¶</a></h4>
+<p>Concrete implementation using <code class="docutils literal notranslate"><span class="pre">DockerSandbox</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">LocalSandboxClient</span><span class="p">(</span><span class="n">BaseSandboxClient</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sandbox</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">DockerSandbox</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">volume_bindings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sandbox</span> <span class="o">=</span> <span class="n">DockerSandbox</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">volume_bindings</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">sandbox</span><span class="o">.</span><span class="n">create</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Global singleton:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">SANDBOX_CLIENT</span> <span class="o">=</span> <span class="n">create_sandbox_client</span><span class="p">()</span>  <span class="c1"># Module-level singleton</span>
+</pre></div>
+</div>
+</section>
+<section id="dockersandbox">
+<h4><a class="toc-backref" href="#id9" role="doc-backlink">DockerSandbox</a><a class="headerlink" href="#dockersandbox" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/sandbox/core/sandbox.py</span></code></p>
+<p>Manages Docker container lifecycle:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">DockerSandbox</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">volume_bindings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="n">config</span> <span class="ow">or</span> <span class="n">SandboxSettings</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">container</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">terminal</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create and start a Docker container.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">container</span> <span class="o">=</span> <span class="n">docker_client</span><span class="o">.</span><span class="n">containers</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+            <span class="n">image</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">image</span><span class="p">,</span>
+            <span class="n">working_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">work_dir</span><span class="p">,</span>
+            <span class="n">mem_limit</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">memory_limit</span><span class="p">,</span>
+            <span class="n">cpu_quota</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">cpu_limit</span> <span class="o">*</span> <span class="mi">100000</span><span class="p">),</span>
+            <span class="n">network_mode</span><span class="o">=</span><span class="s2">&quot;none&quot;</span> <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">network_enabled</span>
+                <span class="k">else</span> <span class="s2">&quot;bridge&quot;</span><span class="p">,</span>
+            <span class="n">detach</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">tty</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="safety-mechanisms">
+<h3><a class="toc-backref" href="#id10" role="doc-backlink">Safety Mechanisms</a><a class="headerlink" href="#safety-mechanisms" title="Link to this heading">¶</a></h3>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Mechanism</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Resource Limits</p></td>
+<td><p>Memory limit and CPU quota via Docker cgroups</p></td>
+</tr>
+<tr class="row-odd"><td><p>Network Isolation</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">network_mode=&quot;none&quot;</span></code> when <code class="docutils literal notranslate"><span class="pre">network_enabled=False</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Path Traversal Prevention</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">_safe_resolve_path()</span></code> rejects <code class="docutils literal notranslate"><span class="pre">..</span></code> in paths</p></td>
+</tr>
+<tr class="row-odd"><td><p>Timeout Enforcement</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SandboxTimeoutError</span></code> for long-running commands</p></td>
+</tr>
+<tr class="row-even"><td><p>Isolated Working Directory</p></td>
+<td><p>Temp dir on host mapped to container’s <code class="docutils literal notranslate"><span class="pre">/workspace</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<section id="path-safety">
+<h4><a class="toc-backref" href="#id11" role="doc-backlink">Path Safety</a><a class="headerlink" href="#path-safety" title="Link to this heading">¶</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">_safe_resolve_path</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Prevent path traversal attacks.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;..&quot;</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Path contains potentially unsafe patterns&quot;</span><span class="p">)</span>
+    <span class="n">resolved</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">work_dir</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="k">else</span> <span class="n">path</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">resolved</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="file-operations">
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">File Operations</a><a class="headerlink" href="#file-operations" title="Link to this heading">¶</a></h3>
+<p>The sandbox supports full file operations:</p>
+<ul class="simple">
+<li><p><strong>read_file</strong>: Read file content from container</p></li>
+<li><p><strong>write_file</strong>: Write content to container file</p></li>
+<li><p><strong>copy_from</strong>: Copy file from container to host</p></li>
+<li><p><strong>copy_to</strong>: Copy file from host to container</p></li>
+</ul>
+<p>All file operations use tar archives for data transfer with the
+Docker API.</p>
+</section>
+<section id="integration-with-tools">
+<h3><a class="toc-backref" href="#id13" role="doc-backlink">Integration with Tools</a><a class="headerlink" href="#integration-with-tools" title="Link to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">StrReplaceEditor</span></code> uses the sandbox through <code class="docutils literal notranslate"><span class="pre">SandboxFileOperator</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SandboxFileOperator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;File operations through Docker sandbox.&quot;&quot;&quot;</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">read_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="k">await</span> <span class="n">SANDBOX_CLIENT</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">write_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">content</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">await</span> <span class="n">SANDBOX_CLIENT</span><span class="o">.</span><span class="n">write_file</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Selection is based on configuration:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">sandbox</span><span class="o">.</span><span class="n">use_sandbox</span><span class="p">:</span>
+    <span class="n">file_operator</span> <span class="o">=</span> <span class="n">SandboxFileOperator</span><span class="p">()</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">file_operator</span> <span class="o">=</span> <span class="n">LocalFileOperator</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="daytona-sandbox">
+<h2><a class="toc-backref" href="#id14" role="doc-backlink">Daytona Sandbox</a><a class="headerlink" href="#daytona-sandbox" title="Link to this heading">¶</a></h2>
+<section id="id1">
+<h3><a class="toc-backref" href="#id15" role="doc-backlink">Architecture</a><a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>┌──────────────────────────────────────────────────────┐
+│              Daytona Cloud Platform                    │
+│                                                       │
+│  ┌───────────────────────────────────────────────┐    │
+│  │           Sandbox Instance                     │    │
+│  │                                               │    │
+│  │  ┌─────────────────────────────────────────┐  │    │
+│  │  │  /workspace                             │  │    │
+│  │  │    Agent working directory               │  │    │
+│  │  └─────────────────────────────────────────┘  │    │
+│  │                                               │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌────────────┐  │    │
+│  │  │ Browser  │  │  Shell   │  │ Automation │  │    │
+│  │  │ :8003    │  │  (tmux)  │  │   :8000    │  │    │
+│  │  └──────────┘  └──────────┘  └────────────┘  │    │
+│  │                                               │    │
+│  │  ┌──────────────────────────────────────────┐ │    │
+│  │  │  VNC / Desktop Environment               │ │    │
+│  │  └──────────────────────────────────────────┘ │    │
+│  └───────────────────────────────────────────────┘    │
+│                                                       │
+└──────────────────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h3><a class="toc-backref" href="#id16" role="doc-backlink">Components</a><a class="headerlink" href="#id2" title="Link to this heading">¶</a></h3>
+<section id="sandbox-management">
+<h4><a class="toc-backref" href="#id17" role="doc-backlink">Sandbox Management</a><a class="headerlink" href="#sandbox-management" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/daytona/sandbox.py</span></code></p>
+<p>Creates and manages Daytona cloud sandboxes:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configuration</span>
+<span class="n">resources</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;cpu&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+    <span class="s2">&quot;memory&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>      <span class="c1"># GB</span>
+    <span class="s2">&quot;disk&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>         <span class="c1"># GB</span>
+<span class="p">}</span>
+<span class="n">auto_stop_interval</span> <span class="o">=</span> <span class="mi">15</span>   <span class="c1"># minutes</span>
+<span class="n">auto_archive_interval</span> <span class="o">=</span> <span class="mi">24</span> <span class="o">*</span> <span class="mi">60</span>  <span class="c1"># minutes (24 hours)</span>
+</pre></div>
+</div>
+</section>
+<section id="sandboxtoolsbase">
+<h4><a class="toc-backref" href="#id18" role="doc-backlink">SandboxToolsBase</a><a class="headerlink" href="#sandboxtoolsbase" title="Link to this heading">¶</a></h4>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/daytona/tool_base.py</span></code></p>
+<p>Base class for all Daytona sandbox tools. Uses lazy sandbox creation
+with automatic state management:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SandboxToolsBase</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base class for all sandbox tools that provides</span>
+<span class="sd">    project-based sandbox access.&quot;&quot;&quot;</span>
+
+    <span class="n">_sandbox</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Sandbox</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">workspace_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;/workspace&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_sandbox</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sandbox</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Ensure we have a valid sandbox instance,</span>
+<span class="sd">        creating one if needed.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span> <span class="o">=</span> <span class="n">create_sandbox</span><span class="p">(</span>
+                <span class="n">password</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">daytona</span><span class="o">.</span><span class="n">VNC_password</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span><span class="o">.</span><span class="n">state</span> <span class="ow">in</span> <span class="p">(</span>
+            <span class="n">SandboxState</span><span class="o">.</span><span class="n">ARCHIVED</span><span class="p">,</span> <span class="n">SandboxState</span><span class="o">.</span><span class="n">STOPPED</span>
+        <span class="p">):</span>
+            <span class="n">daytona</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span><span class="p">)</span>
+            <span class="n">start_supervisord_session</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sandbox</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="sandbox-tools">
+<h3><a class="toc-backref" href="#id19" role="doc-backlink">Sandbox Tools</a><a class="headerlink" href="#sandbox-tools" title="Link to this heading">¶</a></h3>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 25.0%" />
+<col style="width: 75.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Tool</p></th>
+<th class="head"><p>Capabilities</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>SandboxBrowserTool</strong></p></td>
+<td><p>Browser automation via HTTP API on port 8003. 15 actions:
+<code class="docutils literal notranslate"><span class="pre">navigate_to</span></code>, <code class="docutils literal notranslate"><span class="pre">click_element</span></code>, <code class="docutils literal notranslate"><span class="pre">input_text</span></code>, <code class="docutils literal notranslate"><span class="pre">scroll</span></code>,
+<code class="docutils literal notranslate"><span class="pre">drag_drop</span></code>, <code class="docutils literal notranslate"><span class="pre">click_coordinates</span></code>, etc. Screenshot validation
+(base64 format check).</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>SandboxFilesTool</strong></p></td>
+<td><p>File operations in <code class="docutils literal notranslate"><span class="pre">/workspace</span></code>: <code class="docutils literal notranslate"><span class="pre">create_file</span></code>,
+<code class="docutils literal notranslate"><span class="pre">str_replace</span></code>, <code class="docutils literal notranslate"><span class="pre">full_file_rewrite</span></code>, <code class="docutils literal notranslate"><span class="pre">delete_file</span></code>.
+Auto-detects <code class="docutils literal notranslate"><span class="pre">index.html</span></code> and provides HTTP server URL.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>SandboxShellTool</strong></p></td>
+<td><p>Shell execution via tmux sessions: <code class="docutils literal notranslate"><span class="pre">execute_command</span></code>,
+<code class="docutils literal notranslate"><span class="pre">check_command_output</span></code>, <code class="docutils literal notranslate"><span class="pre">terminate_command</span></code>,
+<code class="docutils literal notranslate"><span class="pre">list_commands</span></code>. Supports blocking/non-blocking with timeout.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>SandboxVisionTool</strong></p></td>
+<td><p>Image reading from sandbox with compression (max 1920x1080,
+quality 85). Action: <code class="docutils literal notranslate"><span class="pre">see_image</span></code>. Returns base64 data.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="sandboxmanus-agent">
+<h3><a class="toc-backref" href="#id20" role="doc-backlink">SandboxManus Agent</a><a class="headerlink" href="#sandboxmanus-agent" title="Link to this heading">¶</a></h3>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/agent/sandbox_agent.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SandboxManus</span><span class="p">(</span><span class="n">ToolCallAgent</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cloud sandbox variant of Manus.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Starts with only AskHuman + Terminate;</span>
+    <span class="c1"># sandbox tools are added during initialization</span>
+    <span class="n">available_tools</span><span class="p">:</span> <span class="n">ToolCollection</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">ToolCollection</span><span class="p">(</span>
+            <span class="n">AskHuman</span><span class="p">(),</span>
+            <span class="n">Terminate</span><span class="p">(),</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">instance</span><span class="o">.</span><span class="n">initialize_mcp_servers</span><span class="p">()</span>
+        <span class="k">await</span> <span class="n">instance</span><span class="o">.</span><span class="n">initialize_sandbox_tools</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">instance</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">initialize_sandbox_tools</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">password</span><span class="o">=...</span><span class="p">):</span>
+        <span class="n">sandbox</span> <span class="o">=</span> <span class="n">create_sandbox</span><span class="p">(</span><span class="n">password</span><span class="o">=</span><span class="n">password</span><span class="p">)</span>
+        <span class="n">sb_tools</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">SandboxBrowserTool</span><span class="p">(</span><span class="n">sandbox</span><span class="p">),</span>
+            <span class="n">SandboxFilesTool</span><span class="p">(</span><span class="n">sandbox</span><span class="p">),</span>
+            <span class="n">SandboxShellTool</span><span class="p">(</span><span class="n">sandbox</span><span class="p">),</span>
+            <span class="n">SandboxVisionTool</span><span class="p">(</span><span class="n">sandbox</span><span class="p">),</span>
+        <span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">available_tools</span><span class="o">.</span><span class="n">add_tools</span><span class="p">(</span><span class="o">*</span><span class="n">sb_tools</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Sandbox tools are passed the <code class="docutils literal notranslate"><span class="pre">Sandbox</span></code> instance at construction
+time (not via a <code class="docutils literal notranslate"><span class="pre">setup()</span></code> method), and are added to the agent’s
+<code class="docutils literal notranslate"><span class="pre">ToolCollection</span></code> dynamically after sandbox creation.</p>
+</section>
+<section id="daytona-configuration">
+<h3><a class="toc-backref" href="#id21" role="doc-backlink">Daytona Configuration</a><a class="headerlink" href="#daytona-configuration" title="Link to this heading">¶</a></h3>
+<p>All Daytona settings are defined in <code class="docutils literal notranslate"><span class="pre">config/config.toml</span></code>:</p>
+<div class="highlight-toml notranslate"><div class="highlight"><pre><span></span><span class="k">[daytona]</span>
+<span class="n">daytona_api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;your-api-key&quot;</span>
+<span class="n">daytona_server_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://app.daytona.io/api&quot;</span>
+<span class="n">daytona_target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;us&quot;</span><span class="w">              </span><span class="c1"># &quot;eu&quot; or &quot;us&quot;</span>
+<span class="n">sandbox_image_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;whitezxj/sandbox:0.1.0&quot;</span>
+<span class="n">VNC_password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;123456&quot;</span>
+</pre></div>
+</div>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Setting</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">daytona_api_key</span></code></p></td>
+<td><p>API key for Daytona cloud platform (required)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">daytona_server_url</span></code></p></td>
+<td><p>Server URL (default: <code class="docutils literal notranslate"><span class="pre">https://app.daytona.io/api</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">daytona_target</span></code></p></td>
+<td><p>Target region: <code class="docutils literal notranslate"><span class="pre">&quot;eu&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;us&quot;</span></code> (default: <code class="docutils literal notranslate"><span class="pre">&quot;us&quot;</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sandbox_image_name</span></code></p></td>
+<td><p>Docker image for sandbox (default: <code class="docutils literal notranslate"><span class="pre">whitezxj/sandbox:0.1.0</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">VNC_password</span></code></p></td>
+<td><p>Password for VNC access to sandbox desktop (default: <code class="docutils literal notranslate"><span class="pre">&quot;123456&quot;</span></code>)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="python-execution-safety">
+<h2><a class="toc-backref" href="#id22" role="doc-backlink">Python Execution Safety</a><a class="headerlink" href="#python-execution-safety" title="Link to this heading">¶</a></h2>
+<p><strong>File</strong>: <code class="docutils literal notranslate"><span class="pre">app/tool/python_execute.py</span></code></p>
+<p>The <code class="docutils literal notranslate"><span class="pre">PythonExecute</span></code> tool provides a lighter-weight isolation than
+full containerization:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">PythonExecute</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">5</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="c1"># Run in separate process</span>
+        <span class="n">process</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span>
+            <span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_run_code</span><span class="p">,</span>
+            <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">result_queue</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">process</span><span class="o">.</span><span class="n">is_alive</span><span class="p">():</span>
+            <span class="n">process</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+            <span class="k">return</span> <span class="s2">&quot;Execution timed out&quot;</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><code class="docutils literal notranslate"><span class="pre">PythonExecute</span></code> uses <code class="docutils literal notranslate"><span class="pre">exec()</span></code> with full <code class="docutils literal notranslate"><span class="pre">__builtins__</span></code>. This
+is <strong>not a security boundary</strong> – it prevents only accidental
+infinite loops (via timeout), not malicious code execution. For
+production use, the Docker or Daytona sandboxes should be used
+instead.</p>
+</div>
+</section>
+<section id="comparison">
+<h2><a class="toc-backref" href="#id23" role="doc-backlink">Comparison</a><a class="headerlink" href="#comparison" title="Link to this heading">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 40.0%" />
+<col style="width: 40.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Feature</p></th>
+<th class="head"><p>Docker Sandbox</p></th>
+<th class="head"><p>Daytona Sandbox</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Isolation Level</p></td>
+<td><p>Container-level</p></td>
+<td><p>Cloud VM-level</p></td>
+</tr>
+<tr class="row-odd"><td><p>Setup</p></td>
+<td><p>Local Docker required</p></td>
+<td><p>API key + cloud account</p></td>
+</tr>
+<tr class="row-even"><td><p>Resource Control</p></td>
+<td><p>Memory + CPU limits</p></td>
+<td><p>CPU + Memory + Disk</p></td>
+</tr>
+<tr class="row-odd"><td><p>Network</p></td>
+<td><p>Optional isolation</p></td>
+<td><p>Cloud networking</p></td>
+</tr>
+<tr class="row-even"><td><p>Browser</p></td>
+<td><p>Not built-in</p></td>
+<td><p>Built-in on port 8003</p></td>
+</tr>
+<tr class="row-odd"><td><p>Desktop/VNC</p></td>
+<td><p>No</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p>File Operations</p></td>
+<td><p>Via Docker API (tar)</p></td>
+<td><p>Via Daytona SDK</p></td>
+</tr>
+<tr class="row-odd"><td><p>Auto-cleanup</p></td>
+<td><p>Manual</p></td>
+<td><p>Auto-stop (15min) + auto-archive (24h)</p></td>
+</tr>
+<tr class="row-even"><td><p>Use Case</p></td>
+<td><p>Development, testing</p></td>
+<td><p>Production, complex tasks</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">OpenManus</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">System Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_system.html">Agent System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="orchestration_flow.html">Orchestration Flow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tool_system.html">Tool System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="knowledge_and_skills.html">Knowledge and Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llm_integration.html">LLM Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mcp_integration.html">MCP Integration</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Sandbox System</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#docker-sandbox">Docker Sandbox</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#daytona-sandbox">Daytona Sandbox</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#python-execution-safety">Python Execution Safety</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#comparison">Comparison</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="mcp_integration.html" title="previous chapter">MCP Integration</a></li>
+      <li>Next: <a href="api_reference.html" title="next chapter">API Reference</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, FoundationAgents.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/sandbox_system.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

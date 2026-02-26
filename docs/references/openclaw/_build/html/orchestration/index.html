@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Orchestration Overview &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Agent Configuration" href="agent-definition.html" />
+    <link rel="prev" title="Data Models" href="../architecture/data-models.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="orchestration-overview">
+<span id="id1"></span><h1>Orchestration Overview<a class="headerlink" href="#orchestration-overview" title="Link to this heading">¶</a></h1>
+<section id="what-orchestration-means-in-openclaw">
+<h2>What “Orchestration” Means in OpenClaw<a class="headerlink" href="#what-orchestration-means-in-openclaw" title="Link to this heading">¶</a></h2>
+<p>In OpenClaw, <strong>orchestration</strong> is the entire machinery that transforms an
+inbound user message into an agent-produced response – spanning channel
+ingestion, session resolution, model selection, tool execution, sub-agent
+coordination, and final delivery back to the user.</p>
+<p>Unlike traditional agent frameworks that rely on an explicit planner
+component, OpenClaw’s architecture embodies a single key insight:</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><strong>The LLM *is* the planner.</strong>  There is no separate planning module,
+DAG scheduler, or state machine that decides which tools to call.
+The language model itself decides what to do next by emitting tool
+calls in a ReAct-style loop until it produces a final text response.</p>
+</div>
+<p>This means the orchestration layer is primarily concerned with
+<em>infrastructure</em>: routing messages, managing sessions, resolving models,
+enforcing limits, and shuttling tool calls between the model and the
+runtime environment.</p>
+</section>
+<section id="the-react-style-tool-loop">
+<h2>The ReAct-Style Tool Loop<a class="headerlink" href="#the-react-style-tool-loop" title="Link to this heading">¶</a></h2>
+<p>OpenClaw uses the <code class="docutils literal notranslate"><span class="pre">pi-agent-core</span></code> library to drive a ReAct (Reason +
+Act) loop.  Each iteration:</p>
+<ol class="arabic simple">
+<li><p>The model receives the conversation history plus available tool
+definitions.</p></li>
+<li><p>The model either produces a final text response (terminating the
+loop) or emits one or more <strong>tool calls</strong>.</p></li>
+<li><p>The runtime executes each tool call and appends the results back
+into the conversation.</p></li>
+<li><p>The model is called again with the updated history.</p></li>
+</ol>
+<p>This loop continues until the model emits a final assistant message
+(with no tool calls), or until a guard condition fires (timeout,
+iteration limit, context overflow, or abort signal).</p>
+<p>The loop is executed inside <code class="docutils literal notranslate"><span class="pre">runEmbeddedPiAgent()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/pi-embedded-runner/run.ts</span></code>) for the embedded provider
+path, or delegated to an external CLI backend via <code class="docutils literal notranslate"><span class="pre">runCliAgent()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/agents/cli-runner.ts</span></code>) for CLI providers like <code class="docutils literal notranslate"><span class="pre">claude-cli</span></code>
+or <code class="docutils literal notranslate"><span class="pre">codex-cli</span></code>.</p>
+</section>
+<section id="full-agent-pipeline">
+<h2>Full Agent Pipeline<a class="headerlink" href="#full-agent-pipeline" title="Link to this heading">¶</a></h2>
+<p>The following diagram shows the full path a message takes from channel
+arrival to response delivery.  Each numbered step is detailed in
+<a class="reference internal" href="request-lifecycle.html"><span class="doc">Full 13-Step Request Flow</span></a>.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>User Message
+     |
+     v
++--------------------+
+| 1. Channel Inbound |  (Telegram / Discord / Slack / Signal / Web / ...)
++--------------------+
+     |
+     v
++--------------------+
+| 2. Routing          |  Determine target session &amp; agent
++--------------------+
+     |
+     v
++--------------------+
+| 3. Session          |  Resolve / create session entry (sessions.json)
+|    Resolution       |
++--------------------+
+     |
+     v
++--------------------+
+| 4. Auth Check       |  Command authorization, owner gating
++--------------------+
+     |
+     v
++--------------------+
+| 5. Directive Parse  |  Inline directives (/model, /think, /verbose ...)
++--------------------+
+     |
+     v
++--------------------+
+| 6. Queue Check      |  steer / followup / collect / interrupt
++--------------------+
+     |
+     v
++--------------------+
+| 7. Memory Flush     |  Persist pending memory writes before run
++--------------------+
+     |
+     v
++--------------------+
+| 8. Model Resolution |  agent -&gt; session -&gt; channel -&gt; global -&gt; default
+|    (claude-opus-4-6)|  (see: model-selection.ts, model-catalog.ts)
++--------------------+
+     |
+     v
++--------------------+
+| 9. Auth Profile     |  API key / OAuth token selection &amp; rotation
++--------------------+
+     |
+     v
++======================+
+| 10. Agent Run        |  &lt;--- ReAct tool loop lives here
+|     (pi-agent-core)  |
+|                      |
+|  System Prompt       |
+|  + User Message      |
+|  + Tool Definitions  |
+|       |              |
+|       v              |
+|  [LLM Call] &lt;-----+  |
+|       |            |  |
+|   tool_use?        |  |
+|    yes -&gt; execute --+ |
+|    no  -&gt; final text  |
++======================+
+     |
+     v
++--------------------+
+| 11. Streaming       |  Block replies, partial text, typing indicators
++--------------------+
+     |
+     v
++--------------------+
+| 12. Compaction      |  Auto-compact if context nears window limit
++--------------------+
+     |
+     v
++--------------------+
+| 13. Response /      |  Format payloads, deliver to originating channel
+|     Delivery        |
++--------------------+
+     |
+     v
+User receives reply
+</pre></div>
+</div>
+</section>
+<section id="key-architectural-properties">
+<h2>Key Architectural Properties<a class="headerlink" href="#key-architectural-properties" title="Link to this heading">¶</a></h2>
+<dl class="simple">
+<dt><strong>Stateless model calls, stateful sessions.</strong></dt><dd><p>Each LLM API call is stateless.  Conversation history is reconstructed
+from JSONL transcript files on disk before every call.</p>
+</dd>
+<dt><strong>Session-scoped isolation.</strong></dt><dd><p>Each session has its own transcript, model override, thinking level,
+and workspace.  Sub-agents get their own sessions (see <a class="reference internal" href="multi-agent.html"><span class="doc">Sub-agent Spawning &amp; Coordination</span></a>).</p>
+</dd>
+<dt><strong>Provider-agnostic model layer.</strong></dt><dd><p>The model selection chain (see <a class="reference internal" href="llm-integration.html"><span class="doc">LLM Integration</span></a>) supports
+Anthropic, OpenAI, Google, and many other providers through a
+unified interface.</p>
+</dd>
+<dt><strong>Fail-safe fallback.</strong></dt><dd><p>When the primary model fails (rate-limit, auth error, timeout),
+the fallback chain (see <a class="reference internal" href="error-handling.html"><span class="doc">Error Recovery</span></a>) tries alternative
+models before surfacing an error.</p>
+</dd>
+<dt><strong>Plugin-extensible tools.</strong></dt><dd><p>The tool catalog (see <a class="reference internal" href="tool-system.html"><span class="doc">Tool Architecture</span></a>) includes built-in tools
+and supports runtime registration of plugin tools with a layered
+policy pipeline.</p>
+</dd>
+</dl>
+</section>
+<section id="document-map">
+<h2>Document Map<a class="headerlink" href="#document-map" title="Link to this heading">¶</a></h2>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Orchestration Topics</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l1"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l1"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l1"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Orchestration Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#what-orchestration-means-in-openclaw">What “Orchestration” Means in OpenClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#the-react-style-tool-loop">The ReAct-Style Tool Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#full-agent-pipeline">Full Agent Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#key-architectural-properties">Key Architectural Properties</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#document-map">Document Map</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="agent-definition.html">Agent Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="request-lifecycle.html">Full 13-Step Request Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="multi-agent.html">Sub-agent Spawning &amp; Coordination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="communication.html">Inter-Agent Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="tool-system.html">Tool Architecture</a></li>
+<li class="toctree-l3"><a class="reference internal" href="error-handling.html">Error Recovery</a></li>
+<li class="toctree-l3"><a class="reference internal" href="state-management.html">State Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="llm-integration.html">LLM Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="system-prompt.html">System Prompt</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../architecture/data-models.html" title="previous chapter">Data Models</a></li>
+      <li>Next: <a href="agent-definition.html" title="next chapter">Agent Configuration</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/orchestration/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Retrieval Pipeline &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Embedding Providers &amp; Operations" href="embeddings.html" />
+    <link rel="prev" title="SQLite Storage Schema" href="knowledge-storage.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="retrieval-pipeline">
+<h1>Retrieval Pipeline<a class="headerlink" href="#retrieval-pipeline" title="Link to this heading">¶</a></h1>
+<p>This page walks through the full retrieval pipeline, from the moment the
+agent calls <code class="docutils literal notranslate"><span class="pre">memory_search</span></code> to the final ranked results.  Each stage is
+explained with its algorithm, configuration, and source file reference.</p>
+<nav class="contents local" id="on-this-page">
+<p class="topic-title">On this page</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#pipeline-overview" id="id1">Pipeline Overview</a></p></li>
+<li><p><a class="reference internal" href="#stage-1-query-expansion" id="id2">Stage 1: Query Expansion</a></p></li>
+<li><p><a class="reference internal" href="#stage-2-vector-search" id="id3">Stage 2: Vector Search</a></p></li>
+<li><p><a class="reference internal" href="#stage-2-keyword-search-fts5-bm25" id="id4">Stage 2: Keyword Search (FTS5 BM25)</a></p></li>
+<li><p><a class="reference internal" href="#stage-3-hybrid-merge" id="id5">Stage 3: Hybrid Merge</a></p></li>
+<li><p><a class="reference internal" href="#stage-4-temporal-decay" id="id6">Stage 4: Temporal Decay</a></p></li>
+<li><p><a class="reference internal" href="#stage-5-mmr-re-ranking" id="id7">Stage 5: MMR Re-ranking</a></p></li>
+<li><p><a class="reference internal" href="#stage-6-score-threshold" id="id8">Stage 6: Score Threshold</a></p></li>
+<li><p><a class="reference internal" href="#stage-7-top-k-selection" id="id9">Stage 7: Top-K Selection</a></p></li>
+<li><p><a class="reference internal" href="#fts-only-mode" id="id10">FTS-Only Mode</a></p></li>
+<li><p><a class="reference internal" href="#complete-search-flow-code-walkthrough" id="id11">Complete Search Flow (Code Walkthrough)</a></p></li>
+</ul>
+</nav>
+<section id="pipeline-overview">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Pipeline Overview</a><a class="headerlink" href="#pipeline-overview" title="Link to this heading">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>User Query
+    |
+    v
+[1] Query Expansion     -- extract keywords for FTS-only mode
+    |
+    v
+[2] Parallel Search     -- vector search + keyword search (concurrent)
+    |           |
+    v           v
+[3] Hybrid Merge        -- weighted combination (0.7 vector + 0.3 text)
+    |
+    v
+[4] Temporal Decay      -- recency scoring (30-day half-life, optional)
+    |
+    v
+[5] MMR Re-ranking      -- diversity via Jaccard similarity (optional)
+    |
+    v
+[6] Score Threshold     -- filter by minScore (default 0.35)
+    |
+    v
+[7] Top-K Selection     -- return maxResults (default 6)
+    |
+    v
+MemorySearchResult[]
+</pre></div>
+</div>
+<p><strong>Default configuration values:</strong></p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 35.0%" />
+<col style="width: 15.0%" />
+<col style="width: 50.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Source constant</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Chunk tokens</p></td>
+<td><p>400</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_CHUNK_TOKENS</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Chunk overlap</p></td>
+<td><p>80</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_CHUNK_OVERLAP</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Max results (top-K)</p></td>
+<td><p>6</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_MAX_RESULTS</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Min score threshold</p></td>
+<td><p>0.35</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_MIN_SCORE</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Hybrid enabled</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">true</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_HYBRID_ENABLED</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Vector weight</p></td>
+<td><p>0.7</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_HYBRID_VECTOR_WEIGHT</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Text weight</p></td>
+<td><p>0.3</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_HYBRID_TEXT_WEIGHT</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Candidate multiplier</p></td>
+<td><p>4</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_HYBRID_CANDIDATE_MULTIPLIER</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>MMR enabled</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">false</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_MMR_ENABLED</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>MMR lambda</p></td>
+<td><p>0.7</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_MMR_LAMBDA</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Temporal decay enabled</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">false</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_TEMPORAL_DECAY_ENABLED</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Temporal decay half-life</p></td>
+<td><p>30 days</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEFAULT_TEMPORAL_DECAY_HALF_LIFE_DAYS</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Snippet max chars</p></td>
+<td><p>700</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SNIPPET_MAX_CHARS</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="stage-1-query-expansion">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Stage 1: Query Expansion</a><a class="headerlink" href="#stage-1-query-expansion" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/query-expansion.ts</span></code></p>
+<p>Query expansion is primarily used in <strong>FTS-only mode</strong> (no embedding provider
+available).  The <code class="docutils literal notranslate"><span class="pre">extractKeywords()</span></code> function strips stop words and extracts
+meaningful terms from conversational queries.</p>
+<p><strong>Supported languages:</strong> English, Spanish, Portuguese, Arabic, Chinese,
+Korean, Japanese.</p>
+<p><strong>Algorithm:</strong></p>
+<ol class="arabic simple">
+<li><p>Tokenize the query by splitting on whitespace and punctuation.</p></li>
+<li><p>For CJK text, extract character unigrams and bigrams.</p></li>
+<li><p>For Korean, strip trailing particles (e.g. <code class="docutils literal notranslate"><span class="pre">API</span></code> from <code class="docutils literal notranslate"><span class="pre">API</span></code>).</p></li>
+<li><p>Filter out stop words across all supported languages.</p></li>
+<li><p>Filter out tokens that are too short (&lt;3 chars for English), numeric-only,
+or punctuation-only.</p></li>
+<li><p>Deduplicate.</p></li>
+</ol>
+<p><strong>Example:</strong></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Input:  &quot;that thing we discussed about the API&quot;
+Output: [&quot;discussed&quot;, &quot;API&quot;]
+</pre></div>
+</div>
+<p>In FTS-only mode, each extracted keyword is searched separately and results
+are merged, keeping the highest score for each chunk ID.</p>
+<p>In hybrid mode, query expansion is not applied – the raw query is used for
+both vector embedding and FTS.</p>
+</section>
+<section id="stage-2-vector-search">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Stage 2: Vector Search</a><a class="headerlink" href="#stage-2-vector-search" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/manager-search.ts</span></code> (<code class="docutils literal notranslate"><span class="pre">searchVector</span></code>)</p>
+<p><strong>With sqlite-vec available:</strong></p>
+<p>The query is embedded into a vector, then searched against <code class="docutils literal notranslate"><span class="pre">chunks_vec</span></code>
+using native cosine distance:</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">SELECT</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">path</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">start_line</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">end_line</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="nb">text</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
+<span class="w">       </span><span class="n">vec_distance_cosine</span><span class="p">(</span><span class="n">v</span><span class="p">.</span><span class="n">embedding</span><span class="p">,</span><span class="w"> </span><span class="o">?</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">dist</span>
+<span class="w">  </span><span class="k">FROM</span><span class="w"> </span><span class="n">chunks_vec</span><span class="w"> </span><span class="n">v</span>
+<span class="w">  </span><span class="k">JOIN</span><span class="w"> </span><span class="n">chunks</span><span class="w"> </span><span class="k">c</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">.</span><span class="n">id</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span>
+<span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">dist</span><span class="w"> </span><span class="k">ASC</span>
+<span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="o">?</span>
+</pre></div>
+</div>
+<p>The score is computed as <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">-</span> <span class="pre">dist</span></code> (cosine similarity from cosine
+distance).</p>
+<p><strong>Without sqlite-vec (JavaScript fallback):</strong></p>
+<p>If the sqlite-vec extension cannot be loaded, all chunks are loaded from the
+<code class="docutils literal notranslate"><span class="pre">chunks</span></code> table, their JSON-encoded embeddings are parsed, and cosine
+similarity is computed in JavaScript:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">cosineSimilarity</span><span class="p">(</span><span class="nx">a</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">[],</span><span class="w"> </span><span class="nx">b</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">[])</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">let</span><span class="w"> </span><span class="nx">dot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">normA</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">normB</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kd">let</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="nx">a</span><span class="p">.</span><span class="nx">length</span><span class="p">;</span><span class="w"> </span><span class="nx">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">dot</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">b</span><span class="p">[</span><span class="nx">i</span><span class="p">];</span>
+<span class="w">    </span><span class="nx">normA</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">];</span>
+<span class="w">    </span><span class="nx">normB</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">b</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">b</span><span class="p">[</span><span class="nx">i</span><span class="p">];</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">dot</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="nb">Math</span><span class="p">.</span><span class="nx">sqrt</span><span class="p">(</span><span class="nx">normA</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">Math</span><span class="p">.</span><span class="nx">sqrt</span><span class="p">(</span><span class="nx">normB</span><span class="p">));</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>This is significantly slower but correct.  It works because chunk counts in
+personal memory workspaces are typically in the hundreds, not millions.</p>
+</section>
+<section id="stage-2-keyword-search-fts5-bm25">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Stage 2: Keyword Search (FTS5 BM25)</a><a class="headerlink" href="#stage-2-keyword-search-fts5-bm25" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/manager-search.ts</span></code> (<code class="docutils literal notranslate"><span class="pre">searchKeyword</span></code>),
+<code class="docutils literal notranslate"><span class="pre">src/memory/hybrid.ts</span></code></p>
+<p>The raw query is transformed into an FTS5 query by <code class="docutils literal notranslate"><span class="pre">buildFtsQuery()</span></code>:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="c1">// &quot;hello world&quot; -&gt; &#39;&quot;hello&quot; AND &quot;world&quot;&#39;</span>
+<span class="kd">function</span><span class="w"> </span><span class="nx">buildFtsQuery</span><span class="p">(</span><span class="nx">raw</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">raw</span><span class="p">.</span><span class="nx">match</span><span class="p">(</span><span class="sr">/[\p{L}\p{N}_]+/gu</span><span class="p">)</span>
+<span class="w">    </span><span class="o">?</span><span class="p">.</span><span class="nx">map</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">trim</span><span class="p">()).</span><span class="nx">filter</span><span class="p">(</span><span class="nb">Boolean</span><span class="p">)</span><span class="w"> </span><span class="o">??</span><span class="w"> </span><span class="p">[];</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">tokens</span><span class="p">.</span><span class="nx">length</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="mf">0</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">tokens</span><span class="p">.</span><span class="nx">map</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="sb">`&quot;</span><span class="si">${</span><span class="nx">t</span><span class="si">}</span><span class="sb">&quot;`</span><span class="p">).</span><span class="nx">join</span><span class="p">(</span><span class="s2">&quot; AND &quot;</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The FTS5 <code class="docutils literal notranslate"><span class="pre">bm25()</span></code> function returns a rank (lower is better).  This is
+converted to a score in [0, 1] by <code class="docutils literal notranslate"><span class="pre">bm25RankToScore()</span></code>:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">bm25RankToScore</span><span class="p">(</span><span class="nx">rank</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">normalized</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Number</span><span class="p">.</span><span class="nb">isFinite</span><span class="p">(</span><span class="nx">rank</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="nb">Math</span><span class="p">.</span><span class="nx">max</span><span class="p">(</span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">rank</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">999</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="mf">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mf">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">normalized</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>In FTS-only mode (no provider), the model filter is removed so chunks from
+any model are searchable.</p>
+</section>
+<section id="stage-3-hybrid-merge">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Stage 3: Hybrid Merge</a><a class="headerlink" href="#stage-3-hybrid-merge" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/hybrid.ts</span></code> (<code class="docutils literal notranslate"><span class="pre">mergeHybridResults</span></code>)</p>
+<p>Vector and keyword results are merged by chunk ID.  Each chunk gets a
+combined score:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>score = vectorWeight * vectorScore + textWeight * textScore
+</pre></div>
+</div>
+<p><strong>Default weights:</strong> <code class="docutils literal notranslate"><span class="pre">vectorWeight</span> <span class="pre">=</span> <span class="pre">0.7</span></code>, <code class="docutils literal notranslate"><span class="pre">textWeight</span> <span class="pre">=</span> <span class="pre">0.3</span></code>.</p>
+<p>Weights are normalized so they always sum to 1.0.  If a chunk appears in
+only one result set, the missing score is 0.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">candidateMultiplier</span></code> (default 4) controls how many candidates each
+search arm fetches: <code class="docutils literal notranslate"><span class="pre">Math.min(200,</span> <span class="pre">maxResults</span> <span class="pre">*</span> <span class="pre">candidateMultiplier)</span></code>.</p>
+</section>
+<section id="stage-4-temporal-decay">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Stage 4: Temporal Decay</a><a class="headerlink" href="#stage-4-temporal-decay" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/temporal-decay.ts</span></code></p>
+<p>When enabled (<code class="docutils literal notranslate"><span class="pre">temporalDecay.enabled</span> <span class="pre">=</span> <span class="pre">true</span></code>), scores are multiplied by an
+exponential decay factor based on the age of the source file:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>decayedScore = score * exp(-lambda * ageInDays)
+
+where lambda = ln(2) / halfLifeDays
+</pre></div>
+</div>
+<p><strong>Default half-life:</strong> 30 days (score halves every 30 days).</p>
+<p><strong>Timestamp extraction priority:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Date in filename</strong> – <code class="docutils literal notranslate"><span class="pre">memory/2025-11-27.md</span></code> -&gt; Nov 27, 2025.</p></li>
+<li><p><strong>Evergreen check</strong> – <code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code>, <code class="docutils literal notranslate"><span class="pre">memory.md</span></code>, or non-dated files
+in <code class="docutils literal notranslate"><span class="pre">memory/</span></code> are immune to decay (return <code class="docutils literal notranslate"><span class="pre">null</span></code> timestamp).</p></li>
+<li><p><strong>File mtime</strong> – If no date is in the path and the file is not evergreen,
+use the filesystem modification time.</p></li>
+<li><p><strong>No timestamp</strong> – If no timestamp can be extracted, the chunk is not
+decayed (score unchanged).</p></li>
+</ol>
+<p>This ensures that evergreen knowledge (<code class="docutils literal notranslate"><span class="pre">MEMORY.md</span></code>) always has full weight,
+while episodic daily notes naturally fade unless they remain relevant via
+high vector/keyword scores.</p>
+</section>
+<section id="stage-5-mmr-re-ranking">
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">Stage 5: MMR Re-ranking</a><a class="headerlink" href="#stage-5-mmr-re-ranking" title="Link to this heading">¶</a></h2>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/memory/mmr.ts</span></code></p>
+<p>Maximal Marginal Relevance (MMR) is an optional re-ranking step that balances
+relevance with diversity.  When enabled (<code class="docutils literal notranslate"><span class="pre">mmr.enabled</span> <span class="pre">=</span> <span class="pre">true</span></code>):</p>
+<p><strong>Algorithm</strong> (Carbonell &amp; Goldstein, 1998):</p>
+<ol class="arabic">
+<li><p>Normalize all scores to [0, 1].</p></li>
+<li><p>Start with the highest-scoring item.</p></li>
+<li><p>For each remaining slot, select the candidate that maximizes:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>MMR = lambda * relevance - (1 - lambda) * max_similarity_to_selected
+</pre></div>
+</div>
+</li>
+<li><p>Similarity is computed via <strong>Jaccard similarity</strong> on lowercased
+alphanumeric token sets:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">function</span><span class="w"> </span><span class="nx">jaccardSimilarity</span><span class="p">(</span><span class="nx">setA</span><span class="o">:</span><span class="w"> </span><span class="kt">Set</span><span class="o">&lt;</span><span class="kt">string</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="nx">setB</span><span class="o">:</span><span class="w"> </span><span class="kt">Set</span><span class="o">&lt;</span><span class="kt">string</span><span class="o">&gt;</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">intersectionSize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[...</span><span class="nx">smaller</span><span class="p">].</span><span class="nx">filter</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">larger</span><span class="p">.</span><span class="nx">has</span><span class="p">(</span><span class="nx">t</span><span class="p">)).</span><span class="nx">length</span><span class="p">;</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unionSize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">setA</span><span class="p">.</span><span class="nx">size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">setB</span><span class="p">.</span><span class="nx">size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nx">intersectionSize</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">unionSize</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="mf">0</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="nx">0</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">intersectionSize</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nx">unionSize</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+</ol>
+<p><strong>Default lambda:</strong> 0.7 (biased toward relevance; set lower for more
+diversity).</p>
+<p>Token sets are pre-computed and cached per item for efficiency.</p>
+</section>
+<section id="stage-6-score-threshold">
+<h2><a class="toc-backref" href="#id8" role="doc-backlink">Stage 6: Score Threshold</a><a class="headerlink" href="#stage-6-score-threshold" title="Link to this heading">¶</a></h2>
+<p>After all scoring adjustments, results with <code class="docutils literal notranslate"><span class="pre">score</span> <span class="pre">&lt;</span> <span class="pre">minScore</span></code> are
+filtered out.</p>
+<p><strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">minScore</span> <span class="pre">=</span> <span class="pre">0.35</span></code>.</p>
+<p>This can be overridden per-call via the <code class="docutils literal notranslate"><span class="pre">minScore</span></code> parameter on
+<code class="docutils literal notranslate"><span class="pre">memory_search</span></code>.</p>
+</section>
+<section id="stage-7-top-k-selection">
+<h2><a class="toc-backref" href="#id9" role="doc-backlink">Stage 7: Top-K Selection</a><a class="headerlink" href="#stage-7-top-k-selection" title="Link to this heading">¶</a></h2>
+<p>The final results are sliced to <code class="docutils literal notranslate"><span class="pre">maxResults</span></code> (default 6).  This can be
+overridden per-call via the <code class="docutils literal notranslate"><span class="pre">maxResults</span></code> parameter.</p>
+</section>
+<section id="fts-only-mode">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">FTS-Only Mode</a><a class="headerlink" href="#fts-only-mode" title="Link to this heading">¶</a></h2>
+<p>When no embedding provider is available (all API keys missing, local
+embeddings not installed), the search pipeline simplifies to:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Query
+  |
+  v
+extractKeywords() -- stop-word removal + tokenization
+  |
+  v
+searchKeyword() per keyword -- FTS5 BM25 matching
+  |
+  v
+Merge results -- deduplicate by chunk ID, keep highest score
+  |
+  v
+Filter by minScore
+  |
+  v
+Slice to maxResults
+  |
+  v
+MemorySearchResult[]
+</pre></div>
+</div>
+<p>This mode ensures the knowledge system remains functional even without any
+embedding infrastructure – just SQLite with FTS5 is sufficient for basic
+keyword recall.</p>
+</section>
+<section id="complete-search-flow-code-walkthrough">
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">Complete Search Flow (Code Walkthrough)</a><a class="headerlink" href="#complete-search-flow-code-walkthrough" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">search()</span></code> method in <code class="docutils literal notranslate"><span class="pre">MemoryIndexManager</span></code> (<code class="docutils literal notranslate"><span class="pre">src/memory/manager.ts</span></code>)
+orchestrates the full pipeline:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="k">async</span><span class="w"> </span><span class="nx">search</span><span class="p">(</span><span class="nx">query</span><span class="p">,</span><span class="w"> </span><span class="nx">opts</span><span class="o">?</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Warm session (trigger sync on first search in a session)</span>
+<span class="w">  </span><span class="ow">void</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">warmSession</span><span class="p">(</span><span class="nx">opts</span><span class="o">?</span><span class="p">.</span><span class="nx">sessionKey</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// Sync if dirty</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">this</span><span class="p">.</span><span class="nx">settings</span><span class="p">.</span><span class="nx">sync</span><span class="p">.</span><span class="nx">onSearch</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="p">(</span><span class="k">this</span><span class="p">.</span><span class="nx">dirty</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">sessionsDirty</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="ow">void</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">sync</span><span class="p">({</span><span class="w"> </span><span class="nx">reason</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;search&quot;</span><span class="w"> </span><span class="p">});</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">minScore</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">opts</span><span class="o">?</span><span class="p">.</span><span class="nx">minScore</span><span class="w"> </span><span class="o">??</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">settings</span><span class="p">.</span><span class="nx">query</span><span class="p">.</span><span class="nx">minScore</span><span class="p">;</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">maxResults</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">opts</span><span class="o">?</span><span class="p">.</span><span class="nx">maxResults</span><span class="w"> </span><span class="o">??</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">settings</span><span class="p">.</span><span class="nx">query</span><span class="p">.</span><span class="nx">maxResults</span><span class="p">;</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">candidates</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Math</span><span class="p">.</span><span class="nx">min</span><span class="p">(</span><span class="mf">200</span><span class="p">,</span><span class="w"> </span><span class="nx">maxResults</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">candidateMultiplier</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// FTS-only mode</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="k">this</span><span class="p">.</span><span class="nx">provider</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">keywords</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">extractKeywords</span><span class="p">(</span><span class="nx">query</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// Search each keyword, merge, sort, filter, slice</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">merged</span><span class="p">.</span><span class="nx">filter</span><span class="p">(</span><span class="nx">e</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">score</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nx">minScore</span><span class="p">).</span><span class="nx">slice</span><span class="p">(</span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">maxResults</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="c1">// Hybrid mode</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">keywordResults</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">hybrid</span><span class="p">.</span><span class="nx">enabled</span>
+<span class="w">    </span><span class="o">?</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">searchKeyword</span><span class="p">(</span><span class="nx">query</span><span class="p">,</span><span class="w"> </span><span class="nx">candidates</span><span class="p">)</span>
+<span class="w">    </span><span class="o">:</span><span class="w"> </span><span class="p">[];</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">queryVec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">embedQueryWithTimeout</span><span class="p">(</span><span class="nx">query</span><span class="p">);</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">vectorResults</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">queryVec</span><span class="p">.</span><span class="nx">some</span><span class="p">(</span><span class="nx">v</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">v</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="mf">0</span><span class="p">)</span>
+<span class="w">    </span><span class="o">?</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">searchVector</span><span class="p">(</span><span class="nx">queryVec</span><span class="p">,</span><span class="w"> </span><span class="nx">candidates</span><span class="p">)</span>
+<span class="w">    </span><span class="o">:</span><span class="w"> </span><span class="p">[];</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="nx">hybrid</span><span class="p">.</span><span class="nx">enabled</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">vectorResults</span><span class="p">.</span><span class="nx">filter</span><span class="p">(</span><span class="nx">e</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">score</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nx">minScore</span><span class="p">).</span><span class="nx">slice</span><span class="p">(</span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">maxResults</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">merged</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">mergeHybridResults</span><span class="p">({</span>
+<span class="w">    </span><span class="nx">vector</span><span class="o">:</span><span class="w"> </span><span class="kt">vectorResults</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">keyword</span><span class="o">:</span><span class="w"> </span><span class="kt">keywordResults</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">vectorWeight</span><span class="p">,</span><span class="w"> </span><span class="nx">textWeight</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">mmr</span><span class="p">,</span><span class="w"> </span><span class="nx">temporalDecay</span><span class="p">,</span>
+<span class="w">  </span><span class="p">});</span>
+
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">merged</span><span class="p">.</span><span class="nx">filter</span><span class="p">(</span><span class="nx">e</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">score</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nx">minScore</span><span class="p">).</span><span class="nx">slice</span><span class="p">(</span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="nx">maxResults</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Knowledge System Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#big-picture">Big Picture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#knowledge-lifecycle">Knowledge Lifecycle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#dual-backend-architecture">Dual-Backend Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#graceful-degradation-chain">Graceful Degradation Chain</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#memory-v2-research-direction">Memory v2 Research Direction</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="memory-architecture.html">Architecture Deep-Dive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-creation.html">How Knowledge is Created</a></li>
+<li class="toctree-l3"><a class="reference internal" href="knowledge-storage.html">SQLite Storage Schema</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Retrieval Pipeline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="embeddings.html">Embedding Providers &amp; Operations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="qmd-backend.html">External QMD Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory-tools.html">Memory Tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../channels/index.html">Channel System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Knowledge System Overview</a><ul>
+      <li>Previous: <a href="knowledge-storage.html" title="previous chapter">SQLite Storage Schema</a></li>
+      <li>Next: <a href="embeddings.html" title="next chapter">Embedding Providers &amp; Operations</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/knowledge/knowledge-retrieval.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

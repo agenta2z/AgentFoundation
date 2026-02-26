@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Channel Plugin SDK &#8212; OpenClaw Technical Documentation 2026.2.23 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=12dfc556" />
+    <script src="../_static/documentation_options.js?v=54c96c00"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Channel List" href="channel-list.html" />
+    <link rel="prev" title="Channel System" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="channel-plugin-sdk">
+<span id="channels-plugin-sdk"></span><h1>Channel Plugin SDK<a class="headerlink" href="#channel-plugin-sdk" title="Link to this heading">¶</a></h1>
+<p>Channel plugins implement a set of typed adapter interfaces exported from
+<code class="docutils literal notranslate"><span class="pre">src/plugin-sdk/index.ts</span></code>. These interfaces define how channels send and
+receive messages, manage configuration, and handle pairing/authentication.</p>
+<section id="core-interfaces">
+<h2>Core Interfaces<a class="headerlink" href="#core-interfaces" title="Link to this heading">¶</a></h2>
+<section id="channelmessagingadapter">
+<h3>ChannelMessagingAdapter<a class="headerlink" href="#channelmessagingadapter" title="Link to this heading">¶</a></h3>
+<p>The primary interface for message exchange:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">interface</span><span class="w"> </span><span class="nx">ChannelMessagingAdapter</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Send a message to a channel destination</span>
+<span class="w">  </span><span class="nx">send</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">to</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">text</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">media?</span><span class="o">:</span><span class="w"> </span><span class="kt">MediaAttachment</span><span class="p">[];</span>
+<span class="w">    </span><span class="nx">replyTo?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">threadId?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="p">})</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">SendResult</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// Receive and route inbound messages</span>
+<span class="w">  </span><span class="nx">onMessage</span><span class="p">(</span><span class="nx">handler</span><span class="o">:</span><span class="w"> </span><span class="kt">MessageHandler</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="ow">void</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// Channel-specific capabilities</span>
+<span class="w">  </span><span class="nx">capabilities</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">ChannelCapabilities</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="channelconfigadapter">
+<h3>ChannelConfigAdapter<a class="headerlink" href="#channelconfigadapter" title="Link to this heading">¶</a></h3>
+<p>Handles channel-specific configuration UI and validation:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">interface</span><span class="w"> </span><span class="nx">ChannelConfigAdapter</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Configuration fields for the setup wizard</span>
+<span class="w">  </span><span class="nx">configFields</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">ConfigField</span><span class="p">[];</span>
+
+<span class="w">  </span><span class="c1">// Validate configuration</span>
+<span class="w">  </span><span class="nx">validate</span><span class="p">(</span><span class="nx">config</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nx">ValidationResult</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="channelpairingadapter">
+<h3>ChannelPairingAdapter<a class="headerlink" href="#channelpairingadapter" title="Link to this heading">¶</a></h3>
+<p>Manages authentication and connection pairing:</p>
+<div class="highlight-typescript notranslate"><div class="highlight"><pre><span></span><span class="kd">interface</span><span class="w"> </span><span class="nx">ChannelPairingAdapter</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Initiate pairing (e.g., QR code for WhatsApp)</span>
+<span class="w">  </span><span class="nx">pair</span><span class="p">(</span><span class="nx">params</span><span class="o">:</span><span class="w"> </span><span class="kt">PairingParams</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">PairingResult</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// Check connection status</span>
+<span class="w">  </span><span class="nx">status</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">ConnectionStatus</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// Disconnect</span>
+<span class="w">  </span><span class="nx">disconnect</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="ow">void</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="plugin-registration">
+<h2>Plugin Registration<a class="headerlink" href="#plugin-registration" title="Link to this heading">¶</a></h2>
+<p>Channel plugins register themselves via the <code class="docutils literal notranslate"><span class="pre">openclaw.plugin.json</span></code> manifest:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-channel&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;channel&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;main&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dist/index.js&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-channel&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;displayName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My Channel&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;messaging&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;pairing&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The plugin’s main entry point exports adapter factory functions that the
+gateway calls during channel initialization.</p>
+<p>Source: <code class="docutils literal notranslate"><span class="pre">src/plugin-sdk/index.ts</span></code>, <code class="docutils literal notranslate"><span class="pre">src/channels/</span></code></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">OpenClaw Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture/index.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../orchestration/index.html">Orchestration Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../knowledge/index.html">Knowledge System Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../skills/index.html">Skills System</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Channel System</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#architecture">Architecture</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#core-vs-extension-channels">Core vs Extension Channels</a><ul class="current">
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Channel Plugin SDK</a></li>
+<li class="toctree-l3"><a class="reference internal" href="channel-list.html">Channel List</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../gateway/index.html">Gateway Server</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../plugins/index.html">Plugin System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../infrastructure/index.html">Infrastructure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/index.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Channel System</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Channel System</a></li>
+      <li>Next: <a href="channel-list.html" title="next chapter">Channel List</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024-2026, OpenClaw Contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="../_sources/channels/plugin-sdk.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
