@@ -15,7 +15,7 @@ Using the agent factory pattern for creating per-session agents:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from threading import Thread
    import time
 
@@ -63,7 +63,7 @@ Using ``QueueBasedDashInteractiveApp`` with a separate agent service:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
    from queue import Queue
    from threading import Thread
    import time
@@ -127,8 +127,8 @@ Agent that uses multiple tools:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    import time
    import random
 
@@ -220,7 +220,7 @@ Pattern for streaming agent responses:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
    from queue import Queue
    from threading import Thread
    import time
@@ -290,7 +290,7 @@ Example integrating with LangChain:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
 
    # Note: Requires langchain installed
    try:

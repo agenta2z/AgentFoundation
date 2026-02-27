@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 
 from attr import attrs, attrib
 
-from science_modeling_tools.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 

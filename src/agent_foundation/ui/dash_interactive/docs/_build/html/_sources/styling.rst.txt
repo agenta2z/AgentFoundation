@@ -451,7 +451,7 @@ Pass custom styles when creating components:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.chat_window import ChatWindow
+   from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
 
    chat_window = ChatWindow(
        component_id="my-chat",

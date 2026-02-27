@@ -20,7 +20,7 @@ project_root = Path(__file__).parent.parent.parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
 
 class MockAgent:

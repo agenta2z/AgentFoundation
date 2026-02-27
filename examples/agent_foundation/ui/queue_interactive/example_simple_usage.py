@@ -26,11 +26,11 @@ project_root = Path(__file__).parent.parent.parent.parent.parent
 sys.path.insert(0, str(project_root / 'src'))
 
 # Also add rich_python_utils to path if available
-science_python_utils_path = project_root.parent / 'SciencePythonUtils' / 'src'
-if science_python_utils_path.exists():
-    sys.path.insert(0, str(science_python_utils_path))
+rich_python_utils_path = project_root.parent / 'SciencePythonUtils' / 'src'
+if rich_python_utils_path.exists():
+    sys.path.insert(0, str(rich_python_utils_path))
 
-from science_modeling_tools.ui.queue_interactive import QueueInteractive
+from agent_foundation.ui.queue_interactive import QueueInteractive
 
 try:
     from rich_python_utils.service_utils.queue_service.storage_based_queue_service import (

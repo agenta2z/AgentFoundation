@@ -15,7 +15,7 @@ Extend ``BaseComponent`` to create custom UI elements:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+   from agent_foundation.ui.dash_interactive.components.base import BaseComponent
    from dash import html, dcc
    from dash.dependencies import Input, Output
    from typing import Dict, Any, List
@@ -76,7 +76,7 @@ Add a custom tab to the monitor panel:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from dash import html, dcc
    from dash.dependencies import Input, Output, State
 
@@ -176,7 +176,7 @@ Add a custom tab to the main panel:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from dash import html, dcc
    import plotly.graph_objs as go
 
@@ -242,7 +242,7 @@ Modify the ChatWindow component styling:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from dash import html
 
    def custom_message_renderer(message: dict) -> html.Div:
@@ -299,7 +299,7 @@ Create a fully customized application subclass:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from dash import html, dcc
    from dash.dependencies import Input, Output, State
    import time
@@ -371,7 +371,7 @@ Inject custom CSS for advanced styling:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
 
    app = DashInteractiveAppWithLogs(title="Styled App")
 

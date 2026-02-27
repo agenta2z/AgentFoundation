@@ -9,10 +9,10 @@ from functools import partial
 # Navigate up from utils/ -> dash_interactive/ -> ui/ -> agent_foundation/ -> src/ -> ScienceModelingTools/ -> PythonProjects/
 current_file = Path(__file__).resolve()
 project_root = current_file.parent.parent.parent.parent.parent.parent
-science_python_utils_src = project_root / "SciencePythonUtils" / "src"
-if science_python_utils_src.exists() and str(science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(science_python_utils_src))
-elif not science_python_utils_src.exists():
+rich_python_utils_src = project_root / "SciencePythonUtils" / "src"
+if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(rich_python_utils_src))
+elif not rich_python_utils_src.exists():
     # Fallback: try to find it relative to current working directory
     fallback_path = Path.cwd().parent / "SciencePythonUtils" / "src"
     if fallback_path.exists() and str(fallback_path) not in sys.path:
@@ -20,7 +20,7 @@ elif not science_python_utils_src.exists():
 
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
-from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
 
 def dummy_task_1(x: int) -> int:

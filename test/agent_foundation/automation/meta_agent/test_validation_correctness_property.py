@@ -16,11 +16,11 @@ from typing import Any, Dict, List, Optional
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.validator import GraphValidator
+from agent_foundation.automation.meta_agent.validator import GraphValidator
 
 
 # ---------------------------------------------------------------------------

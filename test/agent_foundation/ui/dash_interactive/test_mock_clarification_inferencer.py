@@ -14,16 +14,16 @@ src_dir = os.path.join(os.path.dirname(test_dir), 'src')
 
 # Add SciencePythonUtils to path (at same level as ScienceModelingTools)
 python_projects_dir = os.path.dirname(os.path.dirname(test_dir))
-science_python_utils_path = os.path.join(python_projects_dir, 'SciencePythonUtils', 'src')
+rich_python_utils_path = os.path.join(python_projects_dir, 'SciencePythonUtils', 'src')
 
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
-if science_python_utils_path not in sys.path:
-    sys.path.insert(0, science_python_utils_path)
+if rich_python_utils_path not in sys.path:
+    sys.path.insert(0, rich_python_utils_path)
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
-from science_modeling_tools.common.inferencers.mock_inferencers import MockClarificationInferencer
-from science_modeling_tools.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.common.inferencers.mock_inferencers import MockClarificationInferencer
+from agent_foundation.agents.agent_response import AgentResponse, AgentAction
 
 def create_mock_message_handler(inferencer):
     """

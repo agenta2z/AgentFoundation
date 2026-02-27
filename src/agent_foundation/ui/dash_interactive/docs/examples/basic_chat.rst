@@ -15,7 +15,7 @@ The simplest example - a bot that echoes back user messages:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    def echo_handler(message: str) -> str:
        """Simple echo handler."""
@@ -45,7 +45,7 @@ A slightly more sophisticated example with predefined responses:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    FAQ_RESPONSES = {
        'hello': 'Hi there! How can I help you today?',
@@ -83,7 +83,7 @@ Example with conversation state tracking:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    class ConversationBot:
        """Bot that tracks conversation history."""
@@ -125,7 +125,7 @@ Example connecting to an external LLM API:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
    import os
 
    # Note: Install openai package: pip install openai
@@ -172,7 +172,7 @@ Example with simple expression evaluation:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
    import re
 
    def calculator_handler(message: str) -> str:
@@ -217,7 +217,7 @@ Example showing session awareness (requires 2-parameter handler):
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
    from collections import defaultdict
 
    # Per-session state
@@ -253,7 +253,7 @@ Example with custom port and host settings:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    def handler(message: str) -> str:
        return f"Processed: {message}"

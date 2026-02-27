@@ -24,7 +24,7 @@ if TYPE_CHECKING:
         TemplateManager,
     )
 
-from science_modeling_tools.automation.meta_agent.models import ExecutionTrace
+from agent_foundation.automation.meta_agent.models import ExecutionTrace
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,7 @@ class TraceEvaluator:
         Otherwise falls back to the original inline f-string for
         bit-identical backward compatibility.
         """
-        from science_modeling_tools.automation.meta_agent.prompt_templates import (
+        from agent_foundation.automation.meta_agent.prompt_templates import (
             build_evaluation_feed,
             EVALUATION_TEMPLATE_KEY,
         )

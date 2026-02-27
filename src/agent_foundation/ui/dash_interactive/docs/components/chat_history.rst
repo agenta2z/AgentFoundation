@@ -2,7 +2,7 @@
 ChatHistoryList
 ===============
 
-.. module:: science_modeling_tools.ui.dash_interactive.components.chat_history
+.. module:: agent_foundation.ui.dash_interactive.components.chat_history
    :synopsis: Chat session history sidebar component
 
 The ``ChatHistoryList`` component displays a list of chat sessions in a sidebar,
@@ -238,7 +238,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.chat_history import (
+   from agent_foundation.ui.dash_interactive.components.chat_history import (
        ChatHistoryList
    )
 

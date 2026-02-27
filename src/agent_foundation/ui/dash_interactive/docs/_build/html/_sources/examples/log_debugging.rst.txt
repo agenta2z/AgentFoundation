@@ -15,8 +15,8 @@ Simple example showing log collection and visualization:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    from dash.dependencies import Input, Output
 
    # Global log collector
@@ -94,8 +94,8 @@ Example with nested agent calls:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    from dash.dependencies import Input, Output
    import time
    import random
@@ -222,8 +222,8 @@ Visualize previously saved execution logs:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    from dash.dependencies import Input, Output
    import os
 
@@ -279,8 +279,8 @@ Pattern for updating logs during long-running operations:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    from dash.dependencies import Input, Output
    from threading import Thread
    import time
@@ -357,8 +357,8 @@ Using log levels for visual differentiation:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
    from dash.dependencies import Input, Output
 
    collector = LogCollector()

@@ -11,10 +11,10 @@ This module provides mock implementations of agent components including:
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent import Agent
-from science_modeling_tools.agents.agent_response import AgentResponse, AgentAction
-from science_modeling_tools.agents.agent_state import AgentStateItem
-from science_modeling_tools.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.agents.agent import Agent
+from agent_foundation.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.agents.agent_state import AgentStateItem
+from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
 
 
 @attrs

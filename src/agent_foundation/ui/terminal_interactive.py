@@ -3,7 +3,7 @@ from typing import Any
 
 from attr import attrs, attrib
 
-from science_modeling_tools.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
 from webaxon.html_utils.common import is_html_string
 
 

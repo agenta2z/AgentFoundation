@@ -5,10 +5,10 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc, clientside_callback, ClientsideFunction
 from dash.dependencies import Input, Output, State
 
-from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
-from science_modeling_tools.ui.dash_interactive.components.chat_window import ChatWindow
-from science_modeling_tools.ui.dash_interactive.components.log_graph import LogGraphVisualization
-from science_modeling_tools.ui.dash_interactive.components.log_details import LogDetailsPanel
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
+from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
+from agent_foundation.ui.dash_interactive.components.log_graph import LogGraphVisualization
+from agent_foundation.ui.dash_interactive.components.log_details import LogDetailsPanel
 
 
 class TabbedPanel(BaseComponent):

@@ -38,7 +38,7 @@ Route Claude API requests through AI Gateway with Bedrock backend.
 #### Basic Example
 
 ```python
-from science_modeling_tools.apis.ai_gateway import ai_gateway_claude_llm
+from agent_foundation.apis.ai_gateway import ai_gateway_claude_llm
 
 # Simple text generation
 response = ai_gateway_claude_llm.generate_text(
@@ -51,7 +51,7 @@ print(response)
 #### Using Different Models
 
 ```python
-from science_modeling_tools.apis.ai_gateway.ai_gateway_claude_llm import (
+from agent_foundation.apis.ai_gateway.ai_gateway_claude_llm import (
     generate_text,
     AIGatewayClaudeModels
 )

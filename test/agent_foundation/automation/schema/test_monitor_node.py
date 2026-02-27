@@ -41,14 +41,14 @@ if src_dir.exists() and str(src_dir) not in sys.path:
 
 # Add SciencePythonUtils if it exists
 projects_root = smt_root.parent
-science_python_utils_src = projects_root / "SciencePythonUtils" / "src"
+rich_python_utils_src = projects_root / "SciencePythonUtils" / "src"
 
-if science_python_utils_src.exists() and str(science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(science_python_utils_src))
+if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(rich_python_utils_src))
 
 import pytest
 from unittest.mock import MagicMock, call
-from science_modeling_tools.automation.schema.monitor import (
+from agent_foundation.automation.schema.monitor import (
     MonitorNode,
     MonitorResult,
     MonitorStatus,

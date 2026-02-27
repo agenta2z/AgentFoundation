@@ -31,7 +31,7 @@ Then import from the module:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import (
+   from agent_foundation.ui.dash_interactive import (
        DashInteractiveApp,
        DashInteractiveAppWithLogs,
        QueueBasedDashInteractiveApp

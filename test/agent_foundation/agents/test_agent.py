@@ -26,16 +26,16 @@ from typing import Any, List, Tuple
 
 # Add source paths
 project_root = Path(__file__).parent.parent.parent.parent.parent
-science_python_utils_src = project_root / "SciencePythonUtils" / "src"
-science_modeling_tools_src = project_root / "ScienceModelingTools" / "src"
+rich_python_utils_src = project_root / "SciencePythonUtils" / "src"
+agent_foundation_src = project_root / "ScienceModelingTools" / "src"
 
-for path in [science_python_utils_src, science_modeling_tools_src]:
+for path in [rich_python_utils_src, agent_foundation_src]:
     if path.exists() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from science_modeling_tools.agents.agent import Agent, AgentResponse, AgentAction, AgentTaskStatusFlags
-from science_modeling_tools.agents.agent_state import AgentStateItem
-from science_modeling_tools.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.agents.agent import Agent, AgentResponse, AgentAction, AgentTaskStatusFlags
+from agent_foundation.agents.agent_state import AgentStateItem
+from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
 
 
 class MockInteractive(InteractiveBase):

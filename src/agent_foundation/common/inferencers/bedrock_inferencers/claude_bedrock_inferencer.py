@@ -1,7 +1,7 @@
 from attr import attrs, attrib
 
-from science_modeling_tools.common.inferencers.bedrock_inferencers.bedrock_inferencer import BedrockInferencer
-from science_modeling_tools.common.inferencers.bedrock_inferencers.constants import (
+from agent_foundation.common.inferencers.bedrock_inferencers.bedrock_inferencer import BedrockInferencer
+from agent_foundation.common.inferencers.bedrock_inferencers.constants import (
     DEFAULT_INFERENCE_ARGS_CLAUDE3,
     MODEL_ID_CLAUDE3_HAIKU,
     BEDROCK_ANTHROPIC_VERSION

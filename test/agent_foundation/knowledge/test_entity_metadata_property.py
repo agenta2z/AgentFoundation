@@ -18,7 +18,7 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 
 # Import strategies from conftest (same directory, added to sys.path)
 _test_dir = Path(__file__).resolve().parent

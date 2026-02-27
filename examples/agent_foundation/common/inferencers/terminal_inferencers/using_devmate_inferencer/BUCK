@@ -18,6 +18,6 @@ python_binary(
     typing = False,
     deps = [
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )

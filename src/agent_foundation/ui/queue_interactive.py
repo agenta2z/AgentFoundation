@@ -2,9 +2,9 @@ from abc import ABC
 from typing import Optional, Any, Union, Dict
 
 from attr import attrs, attrib
-from science_modeling_tools.ui.interactive_base import LOG_TYPE_USER_INPUT, LOG_TYPE_SYSTEM_RESPONSE, \
+from agent_foundation.ui.interactive_base import LOG_TYPE_USER_INPUT, LOG_TYPE_SYSTEM_RESPONSE, \
     InteractionFlags
-from science_modeling_tools.ui.rich_interactive_base import RichInteractiveBase
+from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
 from rich_python_utils.service_utils.queue_service.queue_service_base import QueueServiceBase
 
 @attrs

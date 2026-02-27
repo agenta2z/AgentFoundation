@@ -36,8 +36,8 @@ from rich_python_utils.service_utils.session_management.session_logger import (
     SessionLogReader,
 )
 
-from science_modeling_tools.automation.meta_agent.errors import TraceCollectionError
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.errors import TraceCollectionError
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceActionResult,
     TraceStep,

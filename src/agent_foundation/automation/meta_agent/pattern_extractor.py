@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
@@ -22,7 +22,7 @@ from science_modeling_tools.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.target_converter import (
+from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )

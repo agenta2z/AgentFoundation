@@ -18,17 +18,17 @@ _src_dir = _project_root / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 _workspace_root = _project_root.parent
-_science_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
-if _science_python_utils_src.exists() and str(_science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(_science_python_utils_src))
+_rich_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
+if _rich_python_utils_src.exists() and str(_rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(_rich_python_utils_src))
 
 from typing import Any, Dict, Optional
 from hypothesis import given, strategies as st, settings
 
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_flow import ActionFlow
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
-from science_modeling_tools.automation.schema.common import Action, ActionSequence
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_flow import ActionFlow
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.common import Action, ActionSequence
 
 
 # region Test Fixtures
@@ -209,7 +209,7 @@ def test_action_graph_python_serialization_with_conditions_valid():
     **Feature: python-script-serialization, Property 1: ActionGraph Python serialization produces valid Python**
     **Validates: Requirements 1.1, 1.5**
     """
-    from science_modeling_tools.automation.schema.action_graph import condition_expr
+    from agent_foundation.automation.schema.action_graph import condition_expr
     
     graph = ActionGraph(action_executor=mock_executor, action_metadata=ActionMetadataRegistry())
     graph.action('click', target='#submit')
@@ -274,7 +274,7 @@ def test_branching_style_affects_output_syntax(
     - 'branch': contains "graph.branch(" and "if_true=" and "if_false="
     - 'if': contains "if graph.condition" and "else_branch()"
     """
-    from science_modeling_tools.automation.schema.action_graph import condition_expr
+    from agent_foundation.automation.schema.action_graph import condition_expr
     
     # Build graph with a condition
     graph = ActionGraph(action_executor=mock_executor, action_metadata=ActionMetadataRegistry())
@@ -336,7 +336,7 @@ def test_branching_style_with_custom_variable_name():
     **Feature: python-script-serialization, Property 5: Branching style affects output syntax**
     **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 8.1**
     """
-    from science_modeling_tools.automation.schema.action_graph import condition_expr
+    from agent_foundation.automation.schema.action_graph import condition_expr
     
     graph = ActionGraph(action_executor=mock_executor, action_metadata=ActionMetadataRegistry())
     graph.action('click', target='#submit')
@@ -398,7 +398,7 @@ def test_default_branching_style_is_match():
     **Feature: python-script-serialization, Property 5: Branching style affects output syntax**
     **Validates: Requirements 2.5**
     """
-    from science_modeling_tools.automation.schema.action_graph import condition_expr
+    from agent_foundation.automation.schema.action_graph import condition_expr
     
     graph = ActionGraph(action_executor=mock_executor, action_metadata=ActionMetadataRegistry())
     graph.action('click', target='#submit')
@@ -565,7 +565,7 @@ def test_action_graph_round_trip_with_conditions():
     **Feature: python-script-serialization, Property 3: ActionGraph round-trip preserves structure**
     **Validates: Requirements 6.1, 3.1, 3.4, 3.5, 6.3, 6.4**
     """
-    from science_modeling_tools.automation.schema.action_graph import condition_expr
+    from agent_foundation.automation.schema.action_graph import condition_expr
     
     # Build original graph with conditions
     original_graph = ActionGraph(

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
     ExecutionTrace,
@@ -19,7 +19,7 @@ from science_modeling_tools.automation.meta_agent.models import (
     TraceActionResult,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.prompt_templates import (
+from agent_foundation.automation.meta_agent.prompt_templates import (
     DEFAULT_PROMPT_TEMPLATES,
     EVALUATION_TEMPLATE_KEY,
     SYNTHESIS_TEMPLATE_KEY,
@@ -323,7 +323,7 @@ class TestPipelineIntegration:
 
     def test_evaluator_uses_prompt_formatter(self):
         """TraceEvaluator._build_llm_prompt uses prompt_formatter when provided."""
-        from science_modeling_tools.automation.meta_agent.evaluator import (
+        from agent_foundation.automation.meta_agent.evaluator import (
             EvaluationStrategy,
             TraceEvaluator,
         )
@@ -347,7 +347,7 @@ class TestPipelineIntegration:
 
     def test_evaluator_legacy_without_formatter(self):
         """TraceEvaluator._build_llm_prompt falls back to f-string without formatter."""
-        from science_modeling_tools.automation.meta_agent.evaluator import (
+        from agent_foundation.automation.meta_agent.evaluator import (
             EvaluationStrategy,
             TraceEvaluator,
         )
@@ -362,7 +362,7 @@ class TestPipelineIntegration:
 
     def test_synthesizer_accepts_prompt_formatter(self):
         """GraphSynthesizer subclasses accept prompt_formatter parameter."""
-        from science_modeling_tools.automation.meta_agent.synthesizer import (
+        from agent_foundation.automation.meta_agent.synthesizer import (
             HybridSynthesizer,
             LLMSynthesizer,
             RuleBasedSynthesizer,
@@ -389,7 +389,7 @@ class TestPipelineIntegration:
 
     def test_evaluator_formatter_and_legacy_produce_same_content(self):
         """TemplateManager path and legacy f-string produce equivalent prompts."""
-        from science_modeling_tools.automation.meta_agent.evaluator import (
+        from agent_foundation.automation.meta_agent.evaluator import (
             EvaluationStrategy,
             TraceEvaluator,
         )

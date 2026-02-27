@@ -35,7 +35,7 @@ The simplest way to use Dash Interactive is with a basic chat interface:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    # Create a simple message handler
    def echo_handler(message: str) -> str:
@@ -60,7 +60,7 @@ You can implement more complex message handling:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
    import random
 
    def smart_handler(message: str) -> str:
@@ -91,7 +91,7 @@ For applications that need to visualize execution logs:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import (
+   from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
        DashInteractiveAppWithLogs
    )
 

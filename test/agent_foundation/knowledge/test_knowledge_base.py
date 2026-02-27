@@ -22,24 +22,24 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.knowledge_base import KnowledgeBase
-from science_modeling_tools.knowledge.formatter import RetrievalResult
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphNode,
     GraphEdge,
 )
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
@@ -238,3 +238,272 @@ class TestRemovePiece:
         kb.add_piece(piece)
         kb.remove_piece("rm-2")
         assert piece_store.get_by_id("rm-2") is None
+
+
+# ── Setter method tests ──────────────────────────────────────────────────────
+
+
+class TestSetterMethods:
+    """Tests for KnowledgeBase setter methods (set_hybrid_retriever, etc.)."""
+
+    def test_set_hybrid_retriever(self, kb):
+        from agent_foundation.knowledge.retrieval.hybrid_search import (
+            HybridRetriever,
+            HybridSearchConfig,
+        )
+
+        def dummy_vector(query, entity_id=None, tags=None, top_k=10):
+            return []
+
+        def dummy_keyword(query, entity_id=None, tags=None, top_k=10):
+            return []
+
+        retriever = HybridRetriever(
+            vector_search_fn=dummy_vector,
+            keyword_search_fn=dummy_keyword,
+        )
+        kb.set_hybrid_retriever(retriever)
+        assert kb._hybrid_retriever is retriever
+
+    def test_set_temporal_decay(self, kb):
+        from agent_foundation.knowledge.retrieval.temporal_decay import TemporalDecayConfig
+
+        config = TemporalDecayConfig(half_life_days=14.0)
+        kb.set_temporal_decay(config)
+        assert kb._temporal_decay_config is config
+        assert kb._temporal_decay_config.half_life_days == 14.0
+
+    def test_set_mmr_config(self, kb):
+        from agent_foundation.knowledge.retrieval.mmr_reranking import MMRConfig
+
+        config = MMRConfig(lambda_param=0.5)
+        kb.set_mmr_config(config)
+        assert kb._mmr_config is config
+        assert kb._mmr_config.lambda_param == 0.5
+
+    def test_initial_state_has_no_enhancements(self, kb):
+        assert kb._hybrid_retriever is None
+        assert kb._temporal_decay_config is None
+        assert kb._mmr_config is None
+
+
+# ── Domain-aware retrieval tests ─────────────────────────────────────────────
+
+
+class TestRetrieveWithDomainFilters:
+    """Tests for KnowledgeBase.retrieve with domain/tags/min_results params."""
+
+    def test_retrieve_accepts_new_params(self, populated_kb):
+        """retrieve() accepts domain, secondary_domains, tags, min_results without error."""
+        result = populated_kb.retrieve(
+            "eggs",
+            domain="general",
+            secondary_domains=["data_engineering"],
+            tags=["eggs"],
+            min_results=1,
+        )
+        assert result is not None
+
+    def test_retrieve_without_new_params_unchanged(self, populated_kb):
+        """retrieve() without new params behaves identically to before."""
+        result = populated_kb.retrieve("eggs")
+        assert result is not None
+        # Should still return pieces (standard path)
+        assert isinstance(result.pieces, list)
+
+    def test_retrieve_with_tags_filter(self, populated_kb):
+        """retrieve() with tags filter uses the fallback path."""
+        result = populated_kb.retrieve("eggs", tags=["eggs"])
+        assert result is not None
+
+    def test_retrieve_with_domain_filter(self, populated_kb):
+        """retrieve() with domain filter uses the fallback path."""
+        result = populated_kb.retrieve("eggs", domain="general")
+        assert result is not None
+
+
+# ── Fallback strategy tests ──────────────────────────────────────────────────
+
+
+class TestRetrievePiecesWithFallback:
+    """Tests for KnowledgeBase._retrieve_pieces_with_fallback."""
+
+    def test_fallback_returns_list(self, populated_kb):
+        """_retrieve_pieces_with_fallback returns a list of (piece, score) tuples."""
+        result = populated_kb._retrieve_pieces_with_fallback(
+            query="eggs",
+            entity_id="user:xinli",
+            top_k=5,
+            tags=["eggs"],
+        )
+        assert isinstance(result, list)
+
+    def test_fallback_tier4_pure_semantic(self, populated_kb):
+        """When domain doesn't match anything, falls back to pure semantic."""
+        result = populated_kb._retrieve_pieces_with_fallback(
+            query="eggs",
+            entity_id="user:xinli",
+            top_k=5,
+            domain="nonexistent_domain",
+            min_results=1,
+        )
+        # Should still return results via tier 4 fallback
+        assert isinstance(result, list)
+
+    def test_fallback_with_secondary_domains(self, populated_kb):
+        """Tier 2 expands to secondary_domains."""
+        result = populated_kb._retrieve_pieces_with_fallback(
+            query="eggs",
+            entity_id="user:xinli",
+            top_k=5,
+            domain="nonexistent_domain",
+            secondary_domains=["general"],
+            min_results=1,
+        )
+        assert isinstance(result, list)
+
+    def test_fallback_respects_top_k(self, populated_kb):
+        """Fallback never returns more than top_k results."""
+        result = populated_kb._retrieve_pieces_with_fallback(
+            query="eggs",
+            entity_id="user:xinli",
+            top_k=1,
+            min_results=0,
+        )
+        assert len(result) <= 1
+
+
+# ── Enhanced retrieval path tests ────────────────────────────────────────────
+
+
+class TestEnhancedRetrievalPath:
+    """Tests for the enhanced retrieval path with HybridRetriever."""
+
+    def test_hybrid_retriever_path_used(self, kb):
+        """When hybrid retriever is set, it is used for retrieval."""
+        from agent_foundation.knowledge.retrieval.hybrid_search import HybridRetriever
+        from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
+
+        call_log = []
+
+        def mock_vector(query, entity_id=None, tags=None, top_k=10):
+            call_log.append(("vector", query))
+            piece = KnowledgePiece(content="hybrid result", piece_id="hyb-1")
+            return [(piece, 0.9)]
+
+        def mock_keyword(query, entity_id=None, tags=None, top_k=10):
+            call_log.append(("keyword", query))
+            return []
+
+        retriever = HybridRetriever(
+            vector_search_fn=mock_vector,
+            keyword_search_fn=mock_keyword,
+        )
+        kb.set_hybrid_retriever(retriever)
+
+        result = kb.retrieve("test query")
+        # The hybrid retriever should have been called
+        assert len(call_log) > 0
+        assert any(t[0] == "vector" for t in call_log)
+
+    def test_hybrid_with_temporal_decay(self, kb):
+        """Enhanced path applies temporal decay when configured."""
+        from agent_foundation.knowledge.retrieval.hybrid_search import HybridRetriever
+        from agent_foundation.knowledge.retrieval.temporal_decay import TemporalDecayConfig
+
+        piece = KnowledgePiece(
+            content="decayed result",
+            piece_id="decay-1",
+            info_type="context",
+        )
+
+        def mock_vector(query, entity_id=None, tags=None, top_k=10):
+            return [(piece, 0.9)]
+
+        def mock_keyword(query, entity_id=None, tags=None, top_k=10):
+            return []
+
+        retriever = HybridRetriever(
+            vector_search_fn=mock_vector,
+            keyword_search_fn=mock_keyword,
+        )
+        kb.set_hybrid_retriever(retriever)
+        kb.set_temporal_decay(TemporalDecayConfig(enabled=True, half_life_days=30.0))
+
+        result = kb.retrieve("test query")
+        assert result.pieces is not None
+
+    def test_hybrid_with_mmr(self, kb):
+        """Enhanced path applies MMR when configured."""
+        from agent_foundation.knowledge.retrieval.hybrid_search import HybridRetriever
+        from agent_foundation.knowledge.retrieval.mmr_reranking import MMRConfig
+
+        piece = KnowledgePiece(
+            content="mmr result",
+            piece_id="mmr-1",
+            embedding=[1.0, 0.0, 0.0],
+        )
+
+        def mock_vector(query, entity_id=None, tags=None, top_k=10):
+            return [(piece, 0.9)]
+
+        def mock_keyword(query, entity_id=None, tags=None, top_k=10):
+            return []
+
+        retriever = HybridRetriever(
+            vector_search_fn=mock_vector,
+            keyword_search_fn=mock_keyword,
+        )
+        kb.set_hybrid_retriever(retriever)
+        kb.set_mmr_config(MMRConfig(enabled=True, lambda_param=0.7))
+
+        result = kb.retrieve("test query")
+        assert result.pieces is not None
+
+    def test_graph_retrieval_preserved_with_hybrid(self, populated_kb):
+        """graph_retrieval_ignore_pieces_already_retrieved still works with hybrid path."""
+        from agent_foundation.knowledge.retrieval.hybrid_search import HybridRetriever
+
+        piece = KnowledgePiece(
+            content="hybrid graph test",
+            piece_id="hg-1",
+        )
+
+        def mock_vector(query, entity_id=None, tags=None, top_k=10):
+            return [(piece, 0.9)]
+
+        def mock_keyword(query, entity_id=None, tags=None, top_k=10):
+            return []
+
+        retriever = HybridRetriever(
+            vector_search_fn=mock_vector,
+            keyword_search_fn=mock_keyword,
+        )
+        populated_kb.set_hybrid_retriever(retriever)
+        populated_kb.graph_retrieval_ignore_pieces_already_retrieved = True
+
+        result = populated_kb.retrieve("test query")
+        # Should not error — graph dedup logic still works
+        assert result is not None
+
+
+# ── Preservation tests ───────────────────────────────────────────────────────
+
+
+class TestPreservation:
+    """Tests that AgentFoundation-specific features are preserved."""
+
+    def test_graph_retrieval_ignore_attribute_exists(self, kb):
+        """graph_retrieval_ignore_pieces_already_retrieved attribute is preserved."""
+        assert hasattr(kb, "graph_retrieval_ignore_pieces_already_retrieved")
+
+    def test_should_skip_graph_piece_method_exists(self, kb):
+        """_should_skip_graph_piece helper method is preserved."""
+        assert hasattr(kb, "_should_skip_graph_piece")
+        assert callable(kb._should_skip_graph_piece)
+
+    def test_extract_graph_knowledge_has_already_retrieved_param(self, kb):
+        """_extract_graph_knowledge retains already_retrieved_piece_ids parameter."""
+        import inspect
+        sig = inspect.signature(kb._extract_graph_knowledge)
+        assert "already_retrieved_piece_ids" in sig.parameters

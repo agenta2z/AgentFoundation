@@ -21,18 +21,18 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-# Also add SciencePythonUtils src to path
-_spu_src = Path(__file__).resolve().parents[3] / "SciencePythonUtils" / "src"
-if _spu_src.exists() and str(_spu_src) not in sys.path:
-    sys.path.insert(0, str(_spu_src))
+# Also add RichPythonUtils src to path (provides rich_python_utils.service_utils)
+_rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
+if _rpu_src.exists() and str(_rpu_src) not in sys.path:
+    sys.path.insert(0, str(_rpu_src))
 
 from hypothesis import strategies as st
 
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
     KnowledgePiece,
 )
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphNode,
     GraphEdge,
@@ -90,8 +90,13 @@ _properties_strategy = st.dictionaries(
 
 
 @st.composite
-def knowledge_piece_strategy(draw):
+def knowledge_piece_strategy(draw, include_new_fields=False):
     """Generate a random KnowledgePiece instance.
+
+    Args:
+        include_new_fields: If True, also populate all new fields (domain,
+            content_hash, embedding, space, merge strategy, validation,
+            versioning, summary). If False, only original 10 fields are set.
 
     - content: non-empty text (required, must have non-whitespace chars)
     - piece_id: explicit UUID-like string to ensure round-trip stability
@@ -113,7 +118,7 @@ def knowledge_piece_strategy(draw):
     created_at = draw(_timestamp_strategy)
     updated_at = draw(_timestamp_strategy)
 
-    return KnowledgePiece(
+    kwargs = dict(
         content=content,
         piece_id=piece_id,
         knowledge_type=knowledge_type,
@@ -125,6 +130,40 @@ def knowledge_piece_strategy(draw):
         created_at=created_at,
         updated_at=updated_at,
     )
+
+    if include_new_fields:
+        _domain_strategy = st.sampled_from(["general", "model_optimization", "data_engineering", "testing", "debugging"])
+        _space_strategy = st.sampled_from(["main", "personal", "developmental"])
+        _merge_strategy_values = st.sampled_from([None, "auto-merge-on-ingest", "suggestion-on-ingest", "post-ingestion-auto", "manual-only"])
+        _suggestion_status_values = st.sampled_from([None, "pending", "approved", "rejected", "expired"])
+        _validation_status_values = st.sampled_from(["not_validated", "pending", "passed", "failed"])
+        _embedding_strategy = st.one_of(
+            st.none(),
+            st.lists(st.floats(allow_nan=False, allow_infinity=False, min_value=-10.0, max_value=10.0), min_size=3, max_size=8),
+        )
+
+        kwargs.update(
+            domain=draw(_domain_strategy),
+            secondary_domains=draw(st.lists(_domain_strategy, max_size=3)),
+            custom_tags=draw(st.lists(st.text(min_size=1, max_size=20), max_size=3)),
+            embedding=draw(_embedding_strategy),
+            space=draw(_space_strategy),
+            merge_strategy=draw(_merge_strategy_values),
+            merge_processed=draw(st.booleans()),
+            pending_merge_suggestion=draw(st.one_of(st.none(), _identifier_text)),
+            merge_suggestion_reason=draw(st.one_of(st.none(), st.text(max_size=50))),
+            suggestion_status=draw(_suggestion_status_values),
+            validation_status=draw(_validation_status_values),
+            validation_issues=draw(st.lists(st.text(min_size=1, max_size=30), max_size=3)),
+            supersedes=draw(st.one_of(st.none(), _identifier_text)),
+            is_active=draw(st.booleans()),
+            version=draw(st.integers(min_value=1, max_value=100)),
+            summary=draw(st.one_of(st.none(), st.text(max_size=100))),
+        )
+        # content_hash is auto-computed, so we don't set it explicitly
+
+    return KnowledgePiece(**kwargs)
+
 
 
 # ── EntityMetadata strategy ──────────────────────────────────────────────────

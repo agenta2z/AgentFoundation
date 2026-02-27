@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 from dash.dependencies import Input, Output, State, ALL
 
-from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
 
 
 class ChatHistoryList(BaseComponent):

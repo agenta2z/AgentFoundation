@@ -101,7 +101,7 @@ Extended application with log debugging that:
 ### Basic Chat Demo
 
 ```python
-from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
 def my_handler(message: str) -> str:
     return f"You said: {message}"
@@ -120,7 +120,7 @@ Then navigate to `http://localhost:8050`
 ### Log Debugging Demo
 
 ```python
-from science_modeling_tools.ui.dash_interactive.app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.ui.dash_interactive.app_with_logs import DashInteractiveAppWithLogs
 
 app = DashInteractiveAppWithLogs(
     title="Log Debugging Demo",
@@ -153,8 +153,8 @@ python log_debugging_demo.py
 To integrate with an actual agent:
 
 ```python
-from science_modeling_tools.agents.agent import Agent
-from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+from agent_foundation.agents.agent import Agent
+from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
 # Create your agent
 agent = Agent(...)
@@ -175,7 +175,7 @@ app.run()
 To use log debugging with your own WorkGraphs:
 
 ```python
-from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode
 
 # Create log collector
@@ -226,7 +226,7 @@ The UI uses a dark theme similar to ChatGPT with:
 - dash-bootstrap-components
 - plotly
 - python >= 3.8
-- science_python_utils (for WorkGraph and Debuggable)
+- rich_python_utils (for WorkGraph and Debuggable)
 - attrs
 
 ## Graph Types

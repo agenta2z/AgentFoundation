@@ -1069,7 +1069,7 @@ each offering different levels of functionality for building interactive chat in
 <li><p>Direct function-based message handlers</p></li>
 <li><p>Minimal complexity requirements</p></li>
 </ul>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">handle_message</span><span class="p">(</span><span class="n">message</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">history</span><span class="p">):</span>
     <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;You said: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span>
@@ -1090,7 +1090,7 @@ each offering different levels of functionality for building interactive chat in
 <li><p>Visualizing execution flow</p></li>
 <li><p>Monitoring LLM calls and tool usage</p></li>
 </ul>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">handle_with_logs</span><span class="p">(</span><span class="n">message</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">history</span><span class="p">,</span> <span class="n">log_collector</span><span class="p">):</span>
     <span class="n">log_collector</span><span class="o">.</span><span class="n">log_group_start</span><span class="p">(</span><span class="s2">&quot;agent&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">message</span><span class="p">})</span>
@@ -1114,7 +1114,7 @@ each offering different levels of functionality for building interactive chat in
 <li><p>Background processing</p></li>
 <li><p>Production deployments</p></li>
 </ul>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">QueueBasedDashInteractiveApp</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">QueueBasedDashInteractiveApp</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">queue</span><span class="w"> </span><span class="kn">import</span> <span class="n">Queue</span>
 
 <span class="n">input_queue</span> <span class="o">=</span> <span class="n">Queue</span><span class="p">()</span>

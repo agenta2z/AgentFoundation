@@ -50,7 +50,7 @@ Best for:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    def handle_message(message, session_id, history):
        return f"You said: {message}"
@@ -72,7 +72,7 @@ Best for:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
 
    def handle_with_logs(message, session_id, history, log_collector):
        log_collector.log_group_start("agent", {"query": message})
@@ -97,7 +97,7 @@ Best for:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
    from queue import Queue
 
    input_queue = Queue()

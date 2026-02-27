@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.synthetic_data import (
+from agent_foundation.automation.meta_agent.synthetic_data import (
     SyntheticDataProvider,
 )
 

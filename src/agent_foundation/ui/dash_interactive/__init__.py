@@ -7,6 +7,6 @@ This package provides modular Dash components for:
 - Interactive agent testing
 """
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
+from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
 
 __all__ = ['DashInteractiveApp']

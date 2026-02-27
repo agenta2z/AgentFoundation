@@ -4,10 +4,10 @@ from typing import Any, Dict, Union
 import requests
 from attr import attrib, attrs
 
-from science_modeling_tools.common.inferencers.inference_args import (
+from agent_foundation.common.inferencers.inference_args import (
     CommonLlmInferenceArgs,
 )
-from science_modeling_tools.common.inferencers.remote_inferencer_base import (
+from agent_foundation.common.inferencers.remote_inferencer_base import (
     RemoteInferencerBase,
 )
 from rich_python_utils.common_utils import dict_

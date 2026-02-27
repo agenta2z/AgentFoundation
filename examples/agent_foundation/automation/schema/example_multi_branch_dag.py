@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import resolve_path  # noqa: F401 - Must be first import for path setup
 
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_graph import ActionGraph
 from arithmetic_executor import ArithmeticExecutor
 from arithmetic_registry import create_arithmetic_registry
 

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
     ExtractedPatterns,
@@ -21,7 +21,7 @@ from science_modeling_tools.automation.meta_agent.models import (
     SynthesisReport,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.synthesizer import (
+from agent_foundation.automation.meta_agent.synthesizer import (
     ActionDecision,
     GraphSynthesizer,
     HybridSynthesizer,

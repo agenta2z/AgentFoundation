@@ -6,7 +6,7 @@ from dash import html, dcc
 from dash.dependencies import Input, Output, State
 import json
 
-from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
 
 
 class LogDetailsPanel(BaseComponent):

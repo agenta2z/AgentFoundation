@@ -22,14 +22,14 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 # Add SciencePythonUtils if needed
 _workspace_root = _project_root.parent
-_science_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
-if _science_python_utils_src.exists() and str(_science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(_science_python_utils_src))
+_rich_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
+if _rich_python_utils_src.exists() and str(_rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(_rich_python_utils_src))
 
 import pytest
 
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 
 
 # region Result Object
@@ -161,7 +161,7 @@ def string_registry():
     
     Requirements: 8.1
     """
-    from science_modeling_tools.automation.schema.action_metadata import ActionTypeMetadata
+    from agent_foundation.automation.schema.action_metadata import ActionTypeMetadata
     
     fixtures_dir = Path(__file__).parent / "fixtures"
     json_path = fixtures_dir / "string_actions.json"
@@ -838,7 +838,7 @@ class TestStringSerializationRoundtrip:
         Requirements: 11.2
         """
         import ast
-        from science_modeling_tools.automation.schema.action_graph import condition_expr
+        from agent_foundation.automation.schema.action_graph import condition_expr
         
         # Build original graph with branching
         original_graph = ActionGraph(
@@ -1023,7 +1023,7 @@ class TestStringSerializationRoundtripProperty:
         3. Execute the original graph correctly
         """
         import ast
-        from science_modeling_tools.automation.schema.action_graph import condition_expr
+        from agent_foundation.automation.schema.action_graph import condition_expr
         
         string_executor.reset()
         

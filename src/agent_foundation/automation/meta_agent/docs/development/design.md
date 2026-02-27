@@ -12,15 +12,15 @@ The Meta Agent Workflow feature automates the creation of deterministic ActionGr
 6. **Graph Synthesis & Validation** — Convert extracted patterns into an ActionGraph using configurable synthesis strategies (rule-based, LLM-assisted, or hybrid), then validate by executing the graph.
 
 The design builds on existing infrastructure:
-- **ActionGraph** (`science_modeling_tools.automation.schema.action_graph`) — DAG-based workflow with fluent API, conditions, loops, serialization
-- **Agent** (`science_modeling_tools.agents.agent`) — LLM-based reasoning with structured logging via Debuggable hierarchy
-- **SessionLogger** (`science_python_utils.service_utils.session_management.session_logger`) — Turn-aware callable logger that routes agent logs to JSONL session files with `.parts/` artifact extraction
-- **SessionLogReader** (`science_python_utils.service_utils.session_management.session_logger`) — Read-side counterpart to SessionLogger; loads the session manifest and iterates JSONL entries per-turn with automatic `.parts/` artifact resolution via `resolve_parts=True`
-- **JsonLogger** (`science_python_utils.io_utils.json_io`) — Writes structured JSONL logs with automatic extraction of large fields (HTML snapshots, responses) into `.parts/` subdirectories
-- **WebDriver** (`webagent.automation.web_driver`) — Local browser execution with action execution and element finding
-- **MultiActionExecutor** (`science_modeling_tools.automation.schema.action_executor`) — Routes action types to agents or standard executors
-- **InferencerBase** (`science_modeling_tools.common.inferencers.inferencer_base`) — Abstract base class for LLM inference with retry, pre/post-processing, and model-agnostic `infer()` / `__call__()` interface. Used by LLMSynthesizer and LLM-judge evaluation strategy.
-- **TemplateManager** (`science_python_utils.string_utils.formatting.template_manager`) — Jinja2-based template manager with hierarchical namespace resolution, versioning, and `__call__(template_key, **kwargs) -> str` interface. Used for centralised prompt management in the evaluation and synthesis stages.
+- **ActionGraph** (`agent_foundation.automation.schema.action_graph`) — DAG-based workflow with fluent API, conditions, loops, serialization
+- **Agent** (`agent_foundation.agents.agent`) — LLM-based reasoning with structured logging via Debuggable hierarchy
+- **SessionLogger** (`rich_python_utils.service_utils.session_management.session_logger`) — Turn-aware callable logger that routes agent logs to JSONL session files with `.parts/` artifact extraction
+- **SessionLogReader** (`rich_python_utils.service_utils.session_management.session_logger`) — Read-side counterpart to SessionLogger; loads the session manifest and iterates JSONL entries per-turn with automatic `.parts/` artifact resolution via `resolve_parts=True`
+- **JsonLogger** (`rich_python_utils.io_utils.json_io`) — Writes structured JSONL logs with automatic extraction of large fields (HTML snapshots, responses) into `.parts/` subdirectories
+- **WebDriver** (`webaxonautomation.web_driver`) — Local browser execution with action execution and element finding
+- **MultiActionExecutor** (`agent_foundation.automation.schema.action_executor`) — Routes action types to agents or standard executors
+- **InferencerBase** (`agent_foundation.common.inferencers.inferencer_base`) — Abstract base class for LLM inference with retry, pre/post-processing, and model-agnostic `infer()` / `__call__()` interface. Used by LLMSynthesizer and LLM-judge evaluation strategy.
+- **TemplateManager** (`rich_python_utils.string_utils.formatting.template_manager`) — Jinja2-based template manager with hierarchical namespace resolution, versioning, and `__call__(template_key, **kwargs) -> str` interface. Used for centralised prompt management in the evaluation and synthesis stages.
 - **Agent-as-Action pattern** (`.kiro/specs/agent-as-action/`) — Agents registered as action types for bounded ambiguity within deterministic graphs
 
 ## Architecture

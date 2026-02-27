@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional, Set
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.automation.meta_agent.collector import TraceCollector
-from science_modeling_tools.automation.meta_agent.models import ExecutionTrace
+from agent_foundation.automation.meta_agent.collector import TraceCollector
+from agent_foundation.automation.meta_agent.models import ExecutionTrace
 
 
 # ---------------------------------------------------------------------------

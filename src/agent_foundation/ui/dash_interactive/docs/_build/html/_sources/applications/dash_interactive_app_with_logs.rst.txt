@@ -76,7 +76,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
 
    app = DashInteractiveAppWithLogs(
        title="Agent Debugger",
@@ -89,8 +89,8 @@ With Log Visualization
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
    def handler_with_logs(message: str, session_id: str) -> str:
        log_collector = LogCollector()
@@ -116,7 +116,7 @@ With Agent Factory
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
 
    def create_agent():
        """Factory function that creates a configured agent."""
@@ -475,8 +475,8 @@ Complete Example
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
    # Global log collector for demonstration
    log_collector = None

@@ -2,7 +2,7 @@
 LogGraphVisualization
 =====================
 
-.. module:: science_modeling_tools.ui.dash_interactive.components.log_graph
+.. module:: agent_foundation.ui.dash_interactive.components.log_graph
    :synopsis: Interactive graph visualization for hierarchical log structure
 
 The ``LogGraphVisualization`` component displays hierarchical log groups as an
@@ -360,7 +360,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.log_graph import (
+   from agent_foundation.ui.dash_interactive.components.log_graph import (
        LogGraphVisualization
    )
 
@@ -373,7 +373,7 @@ From Log Collector
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
    # Collect logs
    collector = LogCollector()

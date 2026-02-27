@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Uni
 from attr import attrs, attrib
 
 if TYPE_CHECKING:
-    from science_modeling_tools.agents.agent import Agent
+    from agent_foundation.agents.agent import Agent
 
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode
 from rich_python_utils.common_objects.serializable import (
@@ -936,7 +936,7 @@ class ActionNode(WorkGraphNode):
             True if executor is an Agent instance, False otherwise
         """
         try:
-            from science_modeling_tools.agents.agent import Agent
+            from agent_foundation.agents.agent import Agent
             return isinstance(executor, Agent)
         except ImportError:
             return False
@@ -958,7 +958,7 @@ class ActionNode(WorkGraphNode):
         if callable(executor):
             return True
         try:
-            from science_modeling_tools.agents.agent import Agent
+            from agent_foundation.agents.agent import Agent
             return isinstance(executor, Agent)
         except ImportError:
             return False

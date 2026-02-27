@@ -1,7 +1,7 @@
 from attr import attrs
 
-from science_modeling_tools.apis.metagen import load_model_to_key_map, MetaGenModels
-from science_modeling_tools.common.inferencers.api_inferencer_base import (
+from agent_foundation.apis.metagen import load_model_to_key_map, MetaGenModels
+from agent_foundation.common.inferencers.api_inferencer_base import (
     ApiInferencerBase,
 )
 
@@ -15,7 +15,7 @@ class MetagenApiInferencer(ApiInferencerBase):
 
     def __attrs_post_init__(self):
         super(MetagenApiInferencer, self).__attrs_post_init__()
-        from science_modeling_tools.apis.metagen import generate_text
+        from agent_foundation.apis.metagen import generate_text
 
         self._inference_api = generate_text
 

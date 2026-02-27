@@ -27,7 +27,7 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
     KnowledgePiece,
 )

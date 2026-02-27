@@ -14,8 +14,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from science_modeling_tools.automation.meta_agent.evaluator import EvaluationResult
-    from science_modeling_tools.automation.meta_agent.target_converter import TargetConverterBase
+    from agent_foundation.automation.meta_agent.evaluator import EvaluationResult
+    from agent_foundation.automation.meta_agent.target_converter import TargetConverterBase
 
 
 # ---------------------------------------------------------------------------

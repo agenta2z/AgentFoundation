@@ -3,7 +3,7 @@ from typing import Any, Dict, Union
 
 from attr import attrib, attrs
 
-from science_modeling_tools.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from rich_python_utils.string_utils import add_prefix
 
 

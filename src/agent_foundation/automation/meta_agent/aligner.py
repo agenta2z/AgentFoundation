@@ -13,7 +13,7 @@ import re
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,

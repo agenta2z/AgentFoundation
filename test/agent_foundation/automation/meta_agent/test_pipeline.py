@@ -17,21 +17,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.errors import (
+from agent_foundation.automation.meta_agent.errors import (
     InsufficientSuccessTracesError,
 )
-from science_modeling_tools.automation.meta_agent.evaluator import (
+from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationResult,
     EvaluationRule,
 )
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     PipelineConfig,
     PipelineResult,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.pipeline import MetaAgentPipeline
-from science_modeling_tools.automation.meta_agent.synthesizer import (
+from agent_foundation.automation.meta_agent.pipeline import MetaAgentPipeline
+from agent_foundation.automation.meta_agent.synthesizer import (
     SynthesisStrategy,
 )
 
@@ -415,7 +415,7 @@ class TestSynthesizerSelection:
             action_executor=_make_executor(),
         )
         synth = pipeline._create_synthesizer()
-        from science_modeling_tools.automation.meta_agent.synthesizer import (
+        from agent_foundation.automation.meta_agent.synthesizer import (
             RuleBasedSynthesizer,
         )
         assert isinstance(synth, RuleBasedSynthesizer)
@@ -429,7 +429,7 @@ class TestSynthesizerSelection:
             inferencer=MagicMock(name="inferencer"),
         )
         synth = pipeline._create_synthesizer()
-        from science_modeling_tools.automation.meta_agent.synthesizer import (
+        from agent_foundation.automation.meta_agent.synthesizer import (
             LLMSynthesizer,
         )
         assert isinstance(synth, LLMSynthesizer)
@@ -443,7 +443,7 @@ class TestSynthesizerSelection:
             inferencer=MagicMock(name="inferencer"),
         )
         synth = pipeline._create_synthesizer()
-        from science_modeling_tools.automation.meta_agent.synthesizer import (
+        from agent_foundation.automation.meta_agent.synthesizer import (
             HybridSynthesizer,
         )
         assert isinstance(synth, HybridSynthesizer)
@@ -485,7 +485,7 @@ class TestValidationStage:
         mock_synth_result.python_script = None
         MockSynthesizer.return_value.synthesize.return_value = mock_synth_result
 
-        from science_modeling_tools.automation.meta_agent.models import ValidationResults
+        from agent_foundation.automation.meta_agent.models import ValidationResults
         mock_val_results = MagicMock(spec=ValidationResults)
         MockValidator.return_value.validate.return_value = mock_val_results
 

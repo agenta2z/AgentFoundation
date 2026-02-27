@@ -101,7 +101,7 @@ def get_default_actions():
         List of ActionTypeMetadata instances for all default actions.
     """
     # Import here to avoid circular dependency
-    from science_modeling_tools.automation.schema.action_metadata import ActionTypeMetadata
+    from agent_foundation.automation.schema.action_metadata import ActionTypeMetadata
     
     return [
         ActionTypeMetadata(

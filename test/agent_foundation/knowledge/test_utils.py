@@ -14,7 +14,7 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from science_modeling_tools.knowledge.utils import sanitize_id, unsanitize_id, parse_entity_type
+from agent_foundation.knowledge.retrieval.utils import sanitize_id, unsanitize_id, parse_entity_type
 
 
 # ── sanitize_id ──────────────────────────────────────────────────────────────

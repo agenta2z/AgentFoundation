@@ -54,7 +54,7 @@ When running in interactive mode:
 You can also use the `DevmateInferencer` directly in your Python code:
 
 ```python
-from science_modeling_tools.common.inferencers.terminal_inferencers.devmate.devmate_inferencer import (
+from agent_foundation.common.inferencers.terminal_inferencers.devmate.devmate_inferencer import (
     DevmateInferencer,
 )
 
@@ -116,6 +116,6 @@ Enter your queries below. Commands:
 
 ## Related Files
 
-- **Source**: `src/science_modeling_tools/common/inferencers/terminal_inferencers/devmate/devmate_inferencer.py`
-- **Tests**: `test/science_modeling_tools/common/inferencers/terminal_inferencers/test_devmate_inferencer.py`
-- **Live Tests**: `test/science_modeling_tools/common/inferencers/terminal_inferencers/test_devmate_inferencer_live.py`
+- **Source**: `src/agent_foundation/common/inferencers/terminal_inferencers/devmate/devmate_inferencer.py`
+- **Tests**: `test/agent_foundation/common/inferencers/terminal_inferencers/test_devmate_inferencer.py`
+- **Live Tests**: `test/agent_foundation/common/inferencers/terminal_inferencers/test_devmate_inferencer_live.py`

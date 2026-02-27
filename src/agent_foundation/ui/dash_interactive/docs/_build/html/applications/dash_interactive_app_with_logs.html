@@ -1143,7 +1143,7 @@ and debugging capabilities, featuring a tabbed interface for chat and log debugg
 <h2><a class="toc-backref" href="#id3" role="doc-backlink">Quick Start</a><a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
 <section id="basic-usage">
 <h3><a class="toc-backref" href="#id4" role="doc-backlink">Basic Usage</a><a class="headerlink" href="#basic-usage" title="Link to this heading"></a></h3>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">DashInteractiveAppWithLogs</span><span class="p">(</span>
     <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Agent Debugger&quot;</span><span class="p">,</span>
@@ -1155,8 +1155,8 @@ and debugging capabilities, featuring a tabbed interface for chat and log debugg
 </section>
 <section id="with-log-visualization">
 <h3><a class="toc-backref" href="#id5" role="doc-backlink">With Log Visualization</a><a class="headerlink" href="#with-log-visualization" title="Link to this heading"></a></h3>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">handler_with_logs</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
     <span class="n">log_collector</span> <span class="o">=</span> <span class="n">LogCollector</span><span class="p">()</span>
@@ -1181,7 +1181,7 @@ and debugging capabilities, featuring a tabbed interface for chat and log debugg
 </section>
 <section id="with-agent-factory">
 <h3><a class="toc-backref" href="#id6" role="doc-backlink">With Agent Factory</a><a class="headerlink" href="#with-agent-factory" title="Link to this heading"></a></h3>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">create_agent</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Factory function that creates a configured agent.&quot;&quot;&quot;</span>
@@ -1570,8 +1570,8 @@ and debugging capabilities, featuring a tabbed interface for chat and log debugg
 </section>
 <section id="complete-example">
 <h2><a class="toc-backref" href="#id32" role="doc-backlink">Complete Example</a><a class="headerlink" href="#complete-example" title="Link to this heading"></a></h2>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveAppWithLogs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive.utils.log_collector</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogCollector</span>
 
 <span class="c1"># Global log collector for demonstration</span>
 <span class="n">log_collector</span> <span class="o">=</span> <span class="kc">None</span>

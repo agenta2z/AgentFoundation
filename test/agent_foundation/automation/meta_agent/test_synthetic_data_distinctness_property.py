@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.automation.meta_agent.synthetic_data import (
+from agent_foundation.automation.meta_agent.synthetic_data import (
     SyntheticDataProvider,
 )
 

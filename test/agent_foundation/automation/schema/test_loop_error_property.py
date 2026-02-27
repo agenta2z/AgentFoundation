@@ -18,9 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import resolve_path  # noqa: F401
 
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
-from science_modeling_tools.automation.schema.common import ExecutionResult, ExecutionRuntime, LoopExecutionError
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.common import ExecutionResult, ExecutionRuntime, LoopExecutionError
 
 
 # region Test Fixtures

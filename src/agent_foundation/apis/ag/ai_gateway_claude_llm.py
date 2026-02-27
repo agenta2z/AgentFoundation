@@ -8,7 +8,7 @@ from ai_gateway.constants import AIGatewayHeaders
 from ai_gateway.models.common import HttpMethod, HttpHeaders
 from ai_gateway.models.wrapper import RequestWrapper
 
-from science_modeling_tools.apis.common import _resolve_llm_timeout
+from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.console_utils import hprint_message
 
 # Environment variable names

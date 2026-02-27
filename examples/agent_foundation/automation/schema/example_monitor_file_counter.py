@@ -35,7 +35,7 @@ from rich_python_utils.common_objects.workflow.common.result_pass_down_mode impo
 from rich_python_utils.mp_utils.queued_executor import SimulatedMultiThreadExecutor
 from rich_python_utils.service_utils.queue_service.thread_queue_service import ThreadQueueService
 
-from science_modeling_tools.automation.schema.monitor import MonitorNode, MonitorResult, MonitorStatus
+from agent_foundation.automation.schema.monitor import MonitorNode, MonitorResult, MonitorStatus
 
 
 # =============================================================================

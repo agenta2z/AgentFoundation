@@ -11,10 +11,10 @@ from dash.dependencies import Input, Output, State, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
-from science_modeling_tools.ui.dash_interactive.components.tabbed_panel import TabbedPanel
-from science_modeling_tools.ui.dash_interactive.utils.dummy_graph_executor import execute_and_collect_logs
-from science_modeling_tools.ui.queue_interactive import QueueInteractive
+from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
+from agent_foundation.ui.dash_interactive.components.tabbed_panel import TabbedPanel
+from agent_foundation.ui.dash_interactive.utils.dummy_graph_executor import execute_and_collect_logs
+from agent_foundation.ui.queue_interactive import QueueInteractive
 
 
 class DashInteractiveAppWithLogs(DashInteractiveApp):

@@ -38,20 +38,20 @@ from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphNode,
     GraphEdge,
 )
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
-from science_modeling_tools.knowledge.knowledge_base import KnowledgeBase
-from science_modeling_tools.knowledge.provider import KnowledgeProvider, InfoType
-from science_modeling_tools.knowledge.formatter import RetrievalResult
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider, InfoType
+from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )

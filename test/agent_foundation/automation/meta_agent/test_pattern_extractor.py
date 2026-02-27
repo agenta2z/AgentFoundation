@@ -7,16 +7,16 @@ from __future__ import annotations
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.pattern_extractor import (
+from agent_foundation.automation.meta_agent.pattern_extractor import (
     PatternExtractor,
 )
-from science_modeling_tools.automation.meta_agent.target_converter import (
+from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )

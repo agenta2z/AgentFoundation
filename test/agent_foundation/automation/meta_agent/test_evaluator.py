@@ -5,12 +5,12 @@ Validates: Requirements 12.1, 12.2, 12.3, 12.6, 12.7
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.evaluator import (
+from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationRule,
     EvaluationStrategy,
     TraceEvaluator,
 )
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceStep,
 )

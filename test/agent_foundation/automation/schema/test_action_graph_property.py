@@ -18,20 +18,20 @@ _src_dir = _project_root / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 _workspace_root = _project_root.parent
-_science_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
-if _science_python_utils_src.exists() and str(_science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(_science_python_utils_src))
+_rich_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
+if _rich_python_utils_src.exists() and str(_rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(_rich_python_utils_src))
 
 from typing import Any, Dict, Optional
 from hypothesis import given, strategies as st, settings
 
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraph
 
-from science_modeling_tools.automation.schema.action_graph import (
+from agent_foundation.automation.schema.action_graph import (
     ActionGraph,
     ActionSequenceNode,
 )
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 
 
 # region Test Fixtures
@@ -131,7 +131,7 @@ def test_condition_method_exists():
     **Feature: action-flow-workflow-refactor**
     **Validates: Requirements 9.7**
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     
     graph = ActionGraph(action_executor=mock_executor)
     graph.action("click", target="#first")
@@ -222,7 +222,7 @@ def test_conditional_branching_structure():
     - Actions in else-blocks SHALL be associated with the fallback branch
     - All branches SHALL merge back for subsequent actions
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     
     graph = ActionGraph(action_executor=mock_executor)
     
@@ -264,7 +264,7 @@ def test_condition_context_bool_returns_true():
     **Feature: action-flow-workflow-refactor**
     **Validates: Requirements 9.1, 9.2**
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     
     graph = ActionGraph(action_executor=mock_executor)
     cond = ConditionContext(graph, lambda r: r.success)
@@ -365,7 +365,7 @@ def test_context_manager_branching():
             with branch.if_false():
                 graph.action('click', '#retry')
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     
     graph = ActionGraph(action_executor=mock_executor)
     graph.action('navigate', target='https://example.com')
@@ -434,7 +434,7 @@ def test_match_case_branching():
             case ConditionContext.FALSE:
                 graph.action('click', '#retry')
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     
     graph = ActionGraph(action_executor=mock_executor)
     graph.action('navigate', target='https://example.com')
@@ -597,7 +597,7 @@ def test_if_true_if_false_require_context_manager():
     """
     Test that if_true() and if_false() raise error outside context manager.
     """
-    from science_modeling_tools.automation.schema.action_graph import ConditionContext
+    from agent_foundation.automation.schema.action_graph import ConditionContext
     import pytest
     
     graph = ActionGraph(action_executor=mock_executor)

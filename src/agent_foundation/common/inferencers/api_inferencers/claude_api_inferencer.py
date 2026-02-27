@@ -1,7 +1,7 @@
 from attr import attrs
 
-from science_modeling_tools.apis.claude_llm import ClaudeModels, DEFAULT_CLAUDE_MODEL
-from science_modeling_tools.common.inferencers.api_inferencer_base import ApiInferencerBase
+from agent_foundation.apis.claude_llm import ClaudeModels, DEFAULT_CLAUDE_MODEL
+from agent_foundation.common.inferencers.api_inferencer_base import ApiInferencerBase
 
 
 @attrs
@@ -40,7 +40,7 @@ class ClaudeApiInferencer(ApiInferencerBase):
 
     def __attrs_post_init__(self):
         super(ClaudeApiInferencer, self).__attrs_post_init__()
-        from science_modeling_tools.apis.claude_llm import generate_text, ENV_NAME_CLAUDE_API_KEY
+        from agent_foundation.apis.claude_llm import generate_text, ENV_NAME_CLAUDE_API_KEY
         self._inference_api = generate_text
 
         if not self._secret_key:

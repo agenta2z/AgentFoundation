@@ -19,7 +19,7 @@ import json
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from science_modeling_tools.automation.meta_agent.models import SynthesisReport
+from agent_foundation.automation.meta_agent.models import SynthesisReport
 
 
 # ---------------------------------------------------------------------------

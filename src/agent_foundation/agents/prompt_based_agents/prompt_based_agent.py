@@ -6,16 +6,16 @@ from typing import Tuple, Any, Union, Dict, Mapping, Iterable, Optional, Sequenc
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent import Agent
-from science_modeling_tools.agents.agent_response import AgentAction, AgentResponse, AgentResponseFormat
-from science_modeling_tools.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
-from science_modeling_tools.agents.prompt_based_agents.constants import DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT, \
+from agent_foundation.agents.agent import Agent
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse, AgentResponseFormat
+from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
+from agent_foundation.agents.prompt_based_agents.constants import DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT, \
     DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_INPUT, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONVERSATIONAL_INPUT, \
     DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT, \
     DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_RESULT, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_MEMORY, \
     DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CURRENT_STATE, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_PREVIOUS_STATES, \
     DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ATTACHMENTS
-from science_modeling_tools.common.inferencers.agentic_inferencers.common import InferencerResponse
+from agent_foundation.common.inferencers.agentic_inferencers.common import InferencerResponse
 from rich_python_utils.common_utils import iter_, get_relevant_named_args, get_
 from rich_python_utils.string_utils import join_, extract_between, add_prefix
 from rich_python_utils.string_utils.formatting.common import format_key_value, KeyValueStringFormat

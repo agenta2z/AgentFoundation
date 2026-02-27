@@ -253,7 +253,7 @@ class TestDictCallableOverridesKey:
         assert "_knowledge" not in result
 
 
-from science_modeling_tools.agents.prompt_based_agents.prompt_based_agent import (
+from agent_foundation.agents.prompt_based_agents.prompt_based_agent import (
     FeedConflictResolution,
 )
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from science_modeling_tools.automation.meta_agent.models import (
+    from agent_foundation.automation.meta_agent.models import (
         AlignedPosition,
         ExecutionTrace,
     )

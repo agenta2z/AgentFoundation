@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.automation.meta_agent.models import TraceStep
-from science_modeling_tools.automation.meta_agent.target_converter import (
+from agent_foundation.automation.meta_agent.models import TraceStep
+from agent_foundation.automation.meta_agent.target_converter import (
     TargetStrategyConverter,
 )
 

@@ -13,11 +13,11 @@ Requirements: 2.1, 2.2, 2.3, 2.4, 2.6
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.normalizer import (
+from agent_foundation.automation.meta_agent.normalizer import (
     KNOWN_CANONICAL_TYPES,
     TraceNormalizer,
 )

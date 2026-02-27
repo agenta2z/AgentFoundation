@@ -1,6 +1,6 @@
 from attr import attrs
 
-from science_modeling_tools.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
+from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
 from rich_python_utils.common_utils import has_single_key, iter_
 
 

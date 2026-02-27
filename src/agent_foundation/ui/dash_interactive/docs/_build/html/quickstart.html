@@ -1030,7 +1030,7 @@
 <section id="simple-echo-chat">
 <h3>1. Simple Echo Chat<a class="headerlink" href="#simple-echo-chat" title="Link to this heading"></a></h3>
 <p>The simplest way to use Dash Interactive is with a basic chat interface:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
 
 <span class="c1"># Create a simple message handler</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">echo_handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
@@ -1051,7 +1051,7 @@
 <section id="chat-with-custom-logic">
 <h3>2. Chat with Custom Logic<a class="headerlink" href="#chat-with-custom-logic" title="Link to this heading"></a></h3>
 <p>You can implement more complex message handling:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive</span><span class="w"> </span><span class="kn">import</span> <span class="n">DashInteractiveApp</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">smart_handler</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
@@ -1079,7 +1079,7 @@
 <section id="chat-with-log-debugging">
 <h3>3. Chat with Log Debugging<a class="headerlink" href="#chat-with-log-debugging" title="Link to this heading"></a></h3>
 <p>For applications that need to visualize execution logs:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">DashInteractiveAppWithLogs</span>
 <span class="p">)</span>
 

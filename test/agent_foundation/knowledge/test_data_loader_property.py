@@ -30,16 +30,16 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 import pytest
 from hypothesis import given, settings, assume, strategies as st
 
-from science_modeling_tools.knowledge.data_loader import KnowledgeDataLoader
-from science_modeling_tools.knowledge.knowledge_base import KnowledgeBase
-from science_modeling_tools.knowledge.models.knowledge_piece import KnowledgeType
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgeType
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (

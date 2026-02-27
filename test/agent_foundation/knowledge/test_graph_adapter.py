@@ -31,8 +31,8 @@ from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphEdge,
     GraphNode,
 )
-from science_modeling_tools.knowledge.stores.graph.base import EntityGraphStore
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (

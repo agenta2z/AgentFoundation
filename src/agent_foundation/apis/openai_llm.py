@@ -4,7 +4,7 @@ import openai
 from enum import StrEnum
 from os import environ, path
 
-from science_modeling_tools.apis.common import _resolve_llm_timeout
+from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.common_utils import get_
 from rich_python_utils.console_utils import hprint_message
 from rich_python_utils.io_utils.text_io import read_all_text

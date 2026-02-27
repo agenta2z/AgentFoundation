@@ -5,7 +5,7 @@ from typing import List
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
+from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
 from rich_python_utils.string_utils import strip_, split_
 

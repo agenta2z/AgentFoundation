@@ -6,15 +6,15 @@ from pathlib import Path
 
 # Add ScienceModelingTools and SciencePythonUtils to path
 project_root = Path(__file__).parent.parent.parent.parent.parent
-science_python_utils_src = project_root / "SciencePythonUtils" / "src"
-science_modeling_tools_src = project_root / "ScienceModelingTools" / "src"
+rich_python_utils_src = project_root / "SciencePythonUtils" / "src"
+agent_foundation_src = project_root / "ScienceModelingTools" / "src"
 
-for path_item in [science_modeling_tools_src, science_python_utils_src]:
+for path_item in [agent_foundation_src, rich_python_utils_src]:
     if path_item.exists() and str(path_item) not in sys.path:
         sys.path.insert(0, str(path_item))
 
-from science_modeling_tools.agents.agent import Agent
-from science_modeling_tools.common.inferencers.api_inferencers.claude_api_inferencer import ClaudeApiInferencer
+from agent_foundation.agents.agent import Agent
+from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import ClaudeApiInferencer
 from rich_python_utils.common_objects.debuggable import Debuggable
 
 def test_reasoner_property():

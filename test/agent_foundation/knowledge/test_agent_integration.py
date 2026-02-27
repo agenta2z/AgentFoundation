@@ -28,23 +28,23 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.knowledge_base import KnowledgeBase
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphNode,
     GraphEdge,
 )
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
@@ -56,7 +56,7 @@ from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service 
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (
     MemoryGraphService,
 )
-from science_modeling_tools.agents.agent import Agent
+from agent_foundation.agents.agent import Agent
 
 
 # ── Helper ───────────────────────────────────────────────────────────────────

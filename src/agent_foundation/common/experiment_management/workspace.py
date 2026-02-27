@@ -5,7 +5,7 @@ from typing import List, Union, Iterable, Mapping
 
 from attr import attrs, attrib
 
-from science_modeling_tools.common.experiment_management.constants import (
+from agent_foundation.common.experiment_management.constants import (
     SPACE_TYPE_ARTIFACTS,
     SPACE_TYPE_DATA,
     SPACE_TYPE_EVALUATION,

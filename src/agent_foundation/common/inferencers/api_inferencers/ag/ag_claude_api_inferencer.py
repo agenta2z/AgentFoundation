@@ -2,12 +2,12 @@ from attr import attrs
 
 from typing import Iterable, Union
 
-from science_modeling_tools.apis.claude_llm import ClaudeModels
-from science_modeling_tools.apis.ag.ai_gateway_claude_llm import (
+from agent_foundation.apis.claude_llm import ClaudeModels
+from agent_foundation.apis.ag.ai_gateway_claude_llm import (
     AIGatewayClaudeModels,
     generate_text as ai_gateway_generate_text,
 )
-from science_modeling_tools.common.inferencers.api_inferencer_base import ApiInferencerBase
+from agent_foundation.common.inferencers.api_inferencer_base import ApiInferencerBase
 
 
 # Tuple of supported model identifier inputs for quick isinstance checks

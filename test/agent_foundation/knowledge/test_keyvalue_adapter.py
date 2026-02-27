@@ -26,9 +26,9 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
-from science_modeling_tools.knowledge.stores.metadata.base import MetadataStore
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (

@@ -2,7 +2,7 @@
 TabbedPanel
 ===========
 
-.. module:: science_modeling_tools.ui.dash_interactive.components.tabbed_panel
+.. module:: agent_foundation.ui.dash_interactive.components.tabbed_panel
    :synopsis: Tab container for chat and log debugging views
 
 The ``TabbedPanel`` component provides a tabbed interface that contains both the
@@ -277,7 +277,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.tabbed_panel import (
+   from agent_foundation.ui.dash_interactive.components.tabbed_panel import (
        TabbedPanel
    )
 

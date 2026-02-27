@@ -10,8 +10,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent.parent
 sys.path.insert(0, str(project_root / 'src'))
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
 
 
 def test_inheritance():

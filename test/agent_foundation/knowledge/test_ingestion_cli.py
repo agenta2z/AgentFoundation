@@ -26,15 +26,15 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge import KnowledgeIngestionCLI, KnowledgeBase
-from science_modeling_tools.knowledge.ingestion_cli import STRUCTURING_PROMPT
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge import KnowledgeIngestionCLI, KnowledgeBase
+from agent_foundation.knowledge.retrieval.ingestion_cli import STRUCTURING_PROMPT
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (

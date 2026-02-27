@@ -32,8 +32,8 @@ import pytest
 from hypothesis import given, settings, HealthCheck, assume
 from hypothesis import strategies as st
 
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import (
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
@@ -237,11 +237,11 @@ class TestMetadataAdapterListEntitiesFiltering:
 
 # ── Additional imports for piece adapter tests ───────────────────────────────
 
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
@@ -300,6 +300,21 @@ def knowledge_piece_for_adapter(draw):
     embedding_text = draw(st.one_of(st.none(), _content_strategy))
     created_at = draw(_fixed_timestamp)
     updated_at = draw(_fixed_timestamp)
+    domain = draw(st.text(
+        alphabet=st.characters(whitelist_categories=("L",)),
+        min_size=1,
+        max_size=15,
+    ).map(str.lower))
+    secondary_domains = draw(st.lists(
+        st.text(
+            alphabet=st.characters(whitelist_categories=("L",)),
+            min_size=1,
+            max_size=15,
+        ).map(str.lower),
+        min_size=0,
+        max_size=3,
+    ))
+    custom_tags = draw(st.lists(_tag_strategy_piece, min_size=0, max_size=3))
 
     return KnowledgePiece(
         content=content,
@@ -311,6 +326,9 @@ def knowledge_piece_for_adapter(draw):
         embedding_text=embedding_text,
         created_at=created_at,
         updated_at=updated_at,
+        domain=domain,
+        secondary_domains=secondary_domains,
+        custom_tags=custom_tags,
     )
 
 
@@ -324,9 +342,10 @@ class TestPieceAdapterRoundTrip:
     For any valid KnowledgePiece, adding it through RetrievalKnowledgePieceStore
     and then retrieving it with get_by_id should return a KnowledgePiece with
     equivalent content, piece_id, knowledge_type, tags, entity_id, source,
-    embedding_text, created_at, and updated_at.
+    embedding_text, created_at, updated_at, domain, secondary_domains,
+    and custom_tags.
 
-    **Validates: Requirements 12.2, 12.4**
+    **Validates: Requirements 12.2, 12.4, 23.1, 23.2**
     """
 
     @given(piece=knowledge_piece_for_adapter())
@@ -334,7 +353,7 @@ class TestPieceAdapterRoundTrip:
     def test_property_19_add_get_round_trip(self, piece):
         """add(piece) then get_by_id(piece.piece_id) returns equivalent piece.
 
-        **Validates: Requirements 12.2, 12.4**
+        **Validates: Requirements 12.2, 12.4, 23.1, 23.2**
         """
         # Fresh store per iteration to avoid cross-iteration data leakage
         retrieval_service = MemoryRetrievalService()
@@ -372,6 +391,15 @@ class TestPieceAdapterRoundTrip:
         )
         assert retrieved.updated_at == piece.updated_at, (
             f"updated_at mismatch: {retrieved.updated_at!r} != {piece.updated_at!r}"
+        )
+        assert retrieved.domain == piece.domain, (
+            f"domain mismatch: {retrieved.domain!r} != {piece.domain!r}"
+        )
+        assert retrieved.secondary_domains == piece.secondary_domains, (
+            f"secondary_domains mismatch: {retrieved.secondary_domains!r} != {piece.secondary_domains!r}"
+        )
+        assert retrieved.custom_tags == piece.custom_tags, (
+            f"custom_tags mismatch: {retrieved.custom_tags!r} != {piece.custom_tags!r}"
         )
 
 
@@ -526,7 +554,7 @@ from rich_python_utils.service_utils.graph_service.graph_node import (
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (
     MemoryGraphService,
 )
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import (
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 

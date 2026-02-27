@@ -16,18 +16,18 @@ from rich_python_utils.common_objects.workflow.common.result_pass_down_mode impo
     ResultPassDownMode,
 )
 
-from science_modeling_tools.automation.meta_agent.errors import (
+from agent_foundation.automation.meta_agent.errors import (
     InsufficientSuccessTracesError,
     PipelineAborted,
 )
-from science_modeling_tools.automation.meta_agent.evaluator import EvaluationResult
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.evaluator import EvaluationResult
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     PipelineConfig,
     PipelineResult,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.pipeline import (
+from agent_foundation.automation.meta_agent.pipeline import (
     MetaAgentPipeline,
     _StepWrapper,
 )

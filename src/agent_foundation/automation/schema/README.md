@@ -5,7 +5,7 @@ Platform-agnostic action schema system for UI automation. This module provides t
 ## Architecture
 
 ```
-science_modeling_tools/automation/schema/
+agent_foundation/automation/schema/
 ├── __init__.py           # Public API exports
 ├── constants.py          # Enums, constants, default actions (SOURCE OF TRUTH)
 ├── common.py             # Core models (Action, ActionSequence, ExecutionRuntime, ExecutionResult)
@@ -44,7 +44,7 @@ The module provides two execution layers:
 ### Basic Usage
 
 ```python
-from science_modeling_tools.automation.schema import (
+from agent_foundation.automation.schema import (
     ActionFlow,
     ActionSequence,
     Action,
@@ -117,7 +117,7 @@ result = flow_resume.execute(sequence)
 ### Basic Usage with Method Chaining
 
 ```python
-from science_modeling_tools.automation.schema import ActionGraph, ActionMetadataRegistry
+from agent_foundation.automation.schema import ActionGraph, ActionMetadataRegistry
 
 # Create graph with builder pattern
 graph = ActionGraph(
@@ -206,7 +206,7 @@ result = graph.execute()
 For those who prefer pattern matching:
 
 ```python
-from science_modeling_tools.automation.schema import ActionGraph, ConditionContext
+from agent_foundation.automation.schema import ActionGraph, ConditionContext
 
 graph = ActionGraph(action_executor=driver, action_metadata=registry)
 graph.action("click", target="submit_btn")
@@ -291,7 +291,7 @@ result = graph.execute()
 Here's a complete example combining multiple features:
 
 ```python
-from science_modeling_tools.automation.schema import (
+from agent_foundation.automation.schema import (
     ActionGraph,
     ActionMetadataRegistry,
     TargetSpec,
@@ -410,8 +410,8 @@ graph TD
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from science_modeling_tools.automation.schema import ActionGraph, ActionMetadataRegistry
-from science_modeling_tools.automation.schema.action_metadata import ActionTypeMetadata
+from agent_foundation.automation.schema import ActionGraph, ActionMetadataRegistry
+from agent_foundation.automation.schema.action_metadata import ActionTypeMetadata
 
 
 @dataclass
@@ -714,7 +714,7 @@ graph.action("click", target="button_id")
 ### Explicit Strategy
 
 ```python
-from science_modeling_tools.automation.schema import TargetSpec
+from agent_foundation.automation.schema import TargetSpec
 
 graph.action("click", target=TargetSpec(strategy="xpath", value="//button[@id='submit']"))
 graph.action("click", target=TargetSpec(strategy="css", value="button.primary"))
@@ -725,7 +725,7 @@ graph.action("click", target=TargetSpec(strategy="css", value="button.primary"))
 Try multiple strategies in order until one succeeds:
 
 ```python
-from science_modeling_tools.automation.schema import TargetSpec, TargetSpecWithFallback
+from agent_foundation.automation.schema import TargetSpec, TargetSpecWithFallback
 
 graph.action(
     "click",
@@ -783,7 +783,7 @@ result = graph.execute()
 Use `@condition_expr` decorator to make conditions serializable:
 
 ```python
-from science_modeling_tools.automation.schema import condition_expr
+from agent_foundation.automation.schema import condition_expr
 
 @condition_expr("result.success")
 def check_success(result):

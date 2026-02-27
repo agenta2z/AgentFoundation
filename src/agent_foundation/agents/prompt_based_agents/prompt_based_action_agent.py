@@ -3,11 +3,11 @@ from typing import Tuple, Any, Union, Sequence
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent_attachment import AgentAttachment
-from science_modeling_tools.agents.agent_actor import AgentActionResult
-from science_modeling_tools.agents.agent_response import AgentAction, AgentResponse
-from science_modeling_tools.agents.agent_state import AgentTaskStatusFlags, AgentStateItem, AgentStates
-from science_modeling_tools.agents.prompt_based_agents.prompt_based_agent import PromptBasedAgent
+from agent_foundation.agents.agent_attachment import AgentAttachment
+from agent_foundation.agents.agent_actor import AgentActionResult
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse
+from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem, AgentStates
+from agent_foundation.agents.prompt_based_agents.prompt_based_agent import PromptBasedAgent
 from rich_python_utils.common_utils import iter_, bool_
 from rich_python_utils.common_utils.workflow import cleanup_obj
 
@@ -98,7 +98,7 @@ class PromptBasedActionAgent(PromptBasedAgent):
         if not instant_learnings:
             instant_learnings = None
 
-        from science_modeling_tools.agents.prompt_based_agents.prompt_based_response_agent import \
+        from agent_foundation.agents.prompt_based_agents.prompt_based_response_agent import \
             PromptBasedResponseActionAgent
         if isinstance(self, PromptBasedResponseActionAgent):
             pass

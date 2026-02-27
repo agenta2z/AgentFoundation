@@ -40,7 +40,7 @@ Here's a minimal example to get started with a basic chat interface:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    def my_handler(message: str) -> str:
        return f"You said: {message}"
@@ -63,7 +63,7 @@ For applications that need log debugging capabilities:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import (
+   from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
        DashInteractiveAppWithLogs
    )
 

@@ -27,12 +27,12 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from science_modeling_tools.knowledge.stores.pieces.base import KnowledgePieceStore
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import (
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
@@ -83,6 +83,9 @@ class TestAddAndGetById:
             entity_id=None,
             source="manual",
             embedding_text="python programming language",
+            domain="infrastructure",
+            secondary_domains=["debugging", "testing"],
+            custom_tags=["lang", "intro"],
         )
         returned_id = store.add(piece)
         assert returned_id == "piece-001"
@@ -98,6 +101,23 @@ class TestAddAndGetById:
         assert result.embedding_text == piece.embedding_text
         assert result.created_at == piece.created_at
         assert result.updated_at == piece.updated_at
+        assert result.domain == piece.domain
+        assert result.secondary_domains == piece.secondary_domains
+        assert result.custom_tags == piece.custom_tags
+
+    def test_round_trip_preserves_default_domain_fields(self, store):
+        """Piece with default domain fields should round-trip with correct defaults."""
+        piece = KnowledgePiece(
+            content="No domain specified",
+            piece_id="piece-defaults",
+        )
+        store.add(piece)
+
+        result = store.get_by_id("piece-defaults")
+        assert result is not None
+        assert result.domain == "general"
+        assert result.secondary_domains == []
+        assert result.custom_tags == []
 
     def test_add_piece_with_entity_id(self, store):
         """Adding a piece with entity_id should scope it to that namespace."""

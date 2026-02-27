@@ -8,7 +8,7 @@ This document provides a deep dive into how the Agent framework uses WorkGraph f
 
 ## What is WorkGraph?
 
-`WorkGraph` (from `science_python_utils`) is a **Directed Acyclic Graph (DAG)** execution engine that:
+`WorkGraph` (from `rich_python_utils`) is a **Directed Acyclic Graph (DAG)** execution engine that:
 
 1. Manages sequential and parallel execution of nodes
 2. Passes results between nodes based on `result_pass_down_mode`

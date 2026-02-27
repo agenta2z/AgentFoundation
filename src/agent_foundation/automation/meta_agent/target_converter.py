@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
 
-from science_modeling_tools.automation.meta_agent.models import TraceStep
+from agent_foundation.automation.meta_agent.models import TraceStep
 
 # ---------------------------------------------------------------------------
 # Local selector data models (kept lightweight to avoid depending on the

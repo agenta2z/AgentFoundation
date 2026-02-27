@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 
 
 # ---------------------------------------------------------------------------

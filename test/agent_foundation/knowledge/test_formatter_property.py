@@ -23,12 +23,12 @@ import copy
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
-from science_modeling_tools.knowledge.formatter import (
+from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
 )
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
-from science_modeling_tools.knowledge.models.knowledge_piece import (
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )

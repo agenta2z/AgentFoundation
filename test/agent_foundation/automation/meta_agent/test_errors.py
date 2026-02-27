@@ -2,7 +2,7 @@
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.errors import (
+from agent_foundation.automation.meta_agent.errors import (
     GraphSynthesisError,
     InsufficientSuccessTracesError,
     MetaAgentError,

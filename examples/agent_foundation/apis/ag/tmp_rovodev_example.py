@@ -9,7 +9,7 @@ Prerequisites:
 4. pip install atlassian-ai-gateway-sdk atlassian_ml_studio_sdk
 """
 
-from science_modeling_tools.apis.ai_gateway.ai_gateway_claude_llm import (
+from agent_foundation.apis.ai_gateway.ai_gateway_claude_llm import (
     generate_text,
     AIGatewayClaudeModels
 )

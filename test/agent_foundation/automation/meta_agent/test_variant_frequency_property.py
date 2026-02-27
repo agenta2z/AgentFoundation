@@ -19,13 +19,13 @@ from typing import Dict, List, Optional
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.pattern_extractor import (
+from agent_foundation.automation.meta_agent.pattern_extractor import (
     PatternExtractor,
 )
 

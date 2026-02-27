@@ -10,10 +10,10 @@ import dash_bootstrap_components as dbc
 from dash import dcc, html
 from dash.dependencies import ALL, Input, Output, State
 
-from science_modeling_tools.ui.dash_interactive.components.chat_history import (
+from agent_foundation.ui.dash_interactive.components.chat_history import (
     ChatHistoryList,
 )
-from science_modeling_tools.ui.dash_interactive.components.chat_window import ChatWindow
+from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
 
 
 class DashInteractiveApp:

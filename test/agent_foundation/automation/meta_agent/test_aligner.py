@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.aligner import TraceAligner
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.aligner import TraceAligner
+from agent_foundation.automation.meta_agent.models import (
     AlignedTraceSet,
     AlignmentType,
     ExecutionTrace,

@@ -21,14 +21,14 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 # Also add SciencePythonUtils and ScienceModelingTools src paths
-science_python_utils_src = project_root / "SciencePythonUtils" / "src"
-science_modeling_tools_src = project_root / "ScienceModelingTools" / "src"
-for path in [science_python_utils_src, science_modeling_tools_src]:
+rich_python_utils_src = project_root / "SciencePythonUtils" / "src"
+agent_foundation_src = project_root / "ScienceModelingTools" / "src"
+for path in [rich_python_utils_src, agent_foundation_src]:
     if path.exists() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
-from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 from rich_python_utils.io_utils.json_io import write_json, iter_json_objs
 from rich_python_utils.datetime_utils.common import timestamp
 

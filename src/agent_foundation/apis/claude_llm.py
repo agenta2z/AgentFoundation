@@ -4,7 +4,7 @@ from typing import Union, List, Dict, Sequence, Tuple
 
 from anthropic import Anthropic
 
-from science_modeling_tools.apis.common import _resolve_llm_timeout
+from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.console_utils import hprint_message
 
 ENV_NAME_CLAUDE_API_KEY = 'ANTHROPIC_API_KEY'

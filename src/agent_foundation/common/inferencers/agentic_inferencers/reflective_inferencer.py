@@ -4,13 +4,13 @@ from typing import Callable, Mapping, Union, Sequence, Any
 
 from attr import attrs, attrib
 
-from science_modeling_tools.common.inferencers.agentic_inferencers.constants import (
+from agent_foundation.common.inferencers.agentic_inferencers.constants import (
     DEFAULT_PLACEHOLDER_INFERENCE_PROMPT,
     DEFAULT_PLACEHOLDER_INFERENCE_RESPONSE,
     DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE
 )
-from science_modeling_tools.common.inferencers.inferencer_base import InferencerBase
-from science_modeling_tools.common.inferencers.agentic_inferencers.common import InferencerResponse, ReflectionStyles, \
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.agentic_inferencers.common import InferencerResponse, ReflectionStyles, \
     ResponseSelectors
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.input_and_response import InputAndResponse

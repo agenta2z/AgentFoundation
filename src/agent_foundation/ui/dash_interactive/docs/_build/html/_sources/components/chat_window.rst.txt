@@ -2,7 +2,7 @@
 ChatWindow
 ==========
 
-.. module:: science_modeling_tools.ui.dash_interactive.components.chat_window
+.. module:: agent_foundation.ui.dash_interactive.components.chat_window
    :synopsis: Main chat message display and input component
 
 The ``ChatWindow`` component provides the main chat interface with message display
@@ -311,7 +311,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.chat_window import (
+   from agent_foundation.ui.dash_interactive.components.chat_window import (
        ChatWindow
    )
 

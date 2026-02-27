@@ -4,7 +4,7 @@ MetaGen API module.
 This module provides functions and classes for interacting with the MetaGen LLM API.
 """
 
-from science_modeling_tools.apis.metagen.metagen_llm import (
+from agent_foundation.apis.metagen.metagen_llm import (
     generate_text,
     generate_text_async,
     get_default_metagen_key,

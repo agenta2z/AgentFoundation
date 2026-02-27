@@ -10,7 +10,7 @@ Components:
 - MonitorResult: Result dataclass for monitor execution
 - MonitorNode: WorkGraphNode subclass for monitor execution
 
-The concrete layer (WebDriver-specific) lives in WebAgent.automation.monitor:
+The concrete layer (WebDriver-specific) lives in webaxonautomation.monitor:
 - MonitorConditionType: Enum for built-in condition types
 - MonitorCondition: Condition specification class
 - create_monitor(): Factory function for element monitoring on current tab

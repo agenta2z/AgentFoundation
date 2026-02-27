@@ -3,8 +3,8 @@ from typing import Union, Any, Iterable, List
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent_response import AgentResponse, AgentAction
-from science_modeling_tools.common.inferencers.agentic_inferencers.common import InferencerResponse
+from agent_foundation.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.common.inferencers.agentic_inferencers.common import InferencerResponse
 from rich_python_utils.common_utils import get_
 
 

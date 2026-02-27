@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from science_modeling_tools.automation.meta_agent import (
+from agent_foundation.automation.meta_agent import (
     ExecutionTrace,
     MetaAgentPipeline,
     PipelineConfig,
@@ -24,7 +24,7 @@ from science_modeling_tools.automation.meta_agent import (
     SynthesisReport,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.synthetic_data import (
+from agent_foundation.automation.meta_agent.synthetic_data import (
     SyntheticDataProvider,
 )
 
@@ -121,7 +121,7 @@ def main() -> None:
     #    a real browser.
     from unittest.mock import patch as mock_patch
 
-    from science_modeling_tools.automation.meta_agent.collector import TraceCollector
+    from agent_foundation.automation.meta_agent.collector import TraceCollector
 
     def _mock_collect(
         self: TraceCollector,

@@ -2,7 +2,7 @@
 BaseComponent
 =============
 
-.. module:: science_modeling_tools.ui.dash_interactive.components.base
+.. module:: agent_foundation.ui.dash_interactive.components.base
    :synopsis: Abstract base class for UI components
 
 The ``BaseComponent`` class is the abstract foundation for all UI components in the
@@ -238,7 +238,7 @@ abstract methods:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+   from agent_foundation.ui.dash_interactive.components.base import BaseComponent
    from dash import html, dcc
    from dash.dependencies import Input, Output
    from typing import Any, Dict, List

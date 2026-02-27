@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator, compute
 from rich_python_utils.common_utils.typing_helper import parse_type_string
 
 # Import enums and constants from constants.py
-from science_modeling_tools.automation.schema.constants import (
+from agent_foundation.automation.schema.constants import (
     ActionMemoryMode,
     TargetStrategy,
     CompositeActionStep,

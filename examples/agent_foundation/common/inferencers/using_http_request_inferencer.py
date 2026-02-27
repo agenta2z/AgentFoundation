@@ -1,7 +1,7 @@
 from functools import partial
 from os import path
 
-from science_modeling_tools.common.inferencers.http_request_inferencer import HttpRequestInferencer
+from agent_foundation.common.inferencers.http_request_inferencer import HttpRequestInferencer
 from rich_python_utils.io_utils.json_io import write_json
 from rich_python_utils.datetime_utils.common import timestamp
 

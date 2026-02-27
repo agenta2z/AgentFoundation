@@ -8,7 +8,7 @@ Feature: meta-agent-workflow, Property 21: Validation success rate calculation
 
 from hypothesis import given, settings, strategies as st
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ValidationResult,
     ValidationResults,
 )

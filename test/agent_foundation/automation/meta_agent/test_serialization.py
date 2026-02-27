@@ -19,14 +19,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     SynthesisReport,
     TraceActionResult,
     TraceStep,
 )
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 
 
 # ---------------------------------------------------------------------------

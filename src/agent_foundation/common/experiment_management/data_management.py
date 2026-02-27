@@ -1,7 +1,7 @@
 import warnings
 from typing import Callable, List, Iterable, Union, Mapping, Iterator, Sequence
 
-from science_modeling_tools.common.experiment_management.constants import DIRNAME_SOURCE_DATA, DIRNAME_SAMPLED_DATA
+from agent_foundation.common.experiment_management.constants import DIRNAME_SOURCE_DATA, DIRNAME_SAMPLED_DATA
 from rich_python_utils.io_utils.json_io import iter_all_json_objs_from_all_sub_dirs, write_json_objs
 from os import path
 

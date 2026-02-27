@@ -7,7 +7,7 @@ from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 import dash_cytoscape as cyto
 
-from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
 
 
 class LogGraphVisualization(BaseComponent):

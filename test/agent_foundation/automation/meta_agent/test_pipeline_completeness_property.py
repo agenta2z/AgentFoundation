@@ -16,8 +16,8 @@ from unittest.mock import MagicMock, patch
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from science_modeling_tools.automation.meta_agent.evaluator import EvaluationResult
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.evaluator import EvaluationResult
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     PipelineConfig,
     PipelineResult,
@@ -25,7 +25,7 @@ from science_modeling_tools.automation.meta_agent.models import (
     TraceStep,
     ValidationResults,
 )
-from science_modeling_tools.automation.meta_agent.pipeline import MetaAgentPipeline
+from agent_foundation.automation.meta_agent.pipeline import MetaAgentPipeline
 
 
 # ---------------------------------------------------------------------------

@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-from science_modeling_tools.automation.meta_agent.errors import GraphSynthesisError
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.errors import GraphSynthesisError
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
     BranchPattern,
@@ -48,7 +48,7 @@ from science_modeling_tools.automation.meta_agent.models import (
     SynthesisReport,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.target_converter import (
+from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )
@@ -143,8 +143,8 @@ class GraphSynthesizer(ABC):
         Returns a :class:`SynthesisResult` with the ActionGraph,
         :class:`SynthesisReport`, and per-action decisions.
         """
-        from science_modeling_tools.automation.schema.action_graph import ActionGraph
-        from science_modeling_tools.automation.schema.action_metadata import (
+        from agent_foundation.automation.schema.action_graph import ActionGraph
+        from agent_foundation.automation.schema.action_metadata import (
             ActionMetadataRegistry,
         )
 
@@ -562,7 +562,7 @@ class GraphSynthesizer(ABC):
 
         if isinstance(target, TargetSpecWithFallback):
             try:
-                from science_modeling_tools.automation.schema.common import (
+                from agent_foundation.automation.schema.common import (
                     TargetSpecWithFallback as GraphTargetSpecWithFallback,
                     TargetSpec as GraphTargetSpec,
                 )
@@ -579,7 +579,7 @@ class GraphSynthesizer(ABC):
 
         if isinstance(target, TargetSpec):
             try:
-                from science_modeling_tools.automation.schema.common import (
+                from agent_foundation.automation.schema.common import (
                     TargetSpec as GraphTargetSpec,
                 )
 
@@ -639,7 +639,7 @@ class GraphSynthesizer(ABC):
         Otherwise falls back to the original inline f-string for
         bit-identical backward compatibility.
         """
-        from science_modeling_tools.automation.meta_agent.prompt_templates import (
+        from agent_foundation.automation.meta_agent.prompt_templates import (
             build_synthesis_feed,
             SYNTHESIS_TEMPLATE_KEY,
         )

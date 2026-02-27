@@ -39,37 +39,37 @@ from rich_python_utils.common_objects.workflow.common.exceptions import (
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.datetime_utils.common import timestamp
 
-from science_modeling_tools.automation.meta_agent.aligner import TraceAligner
-from science_modeling_tools.automation.meta_agent.collector import TraceCollector
-from science_modeling_tools.automation.meta_agent.errors import (
+from agent_foundation.automation.meta_agent.aligner import TraceAligner
+from agent_foundation.automation.meta_agent.collector import TraceCollector
+from agent_foundation.automation.meta_agent.errors import (
     InsufficientSuccessTracesError,
     PipelineAborted,
     PipelineStageError,
 )
-from science_modeling_tools.automation.meta_agent.evaluator import (
+from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationResult,
     EvaluationRule,
     EvaluationStrategy,
     TraceEvaluator,
 )
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     PipelineConfig,
     PipelineResult,
 )
-from science_modeling_tools.automation.meta_agent.normalizer import TraceNormalizer
-from science_modeling_tools.automation.meta_agent.pattern_extractor import PatternExtractor
-from science_modeling_tools.automation.meta_agent.synthesizer import (
+from agent_foundation.automation.meta_agent.normalizer import TraceNormalizer
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
+from agent_foundation.automation.meta_agent.synthesizer import (
     GraphSynthesizer,
     HybridSynthesizer,
     LLMSynthesizer,
     RuleBasedSynthesizer,
     SynthesisStrategy,
 )
-from science_modeling_tools.automation.meta_agent.synthetic_data import (
+from agent_foundation.automation.meta_agent.synthetic_data import (
     SyntheticDataProvider,
 )
-from science_modeling_tools.automation.meta_agent.validator import GraphValidator
+from agent_foundation.automation.meta_agent.validator import GraphValidator
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ class MetaAgentPipeline(Workflow):
         self._evaluation_strategy = eval_strat
 
     def _build_prompt_formatter(self):
-        from science_modeling_tools.automation.meta_agent.prompt_templates import (
+        from agent_foundation.automation.meta_agent.prompt_templates import (
             create_prompt_formatter,
         )
         self._prompt_formatter = create_prompt_formatter(

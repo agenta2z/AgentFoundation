@@ -430,7 +430,7 @@ To create a custom component:
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
+   from agent_foundation.ui.dash_interactive.components.base import BaseComponent
    from dash import html
 
    class MyCustomComponent(BaseComponent):

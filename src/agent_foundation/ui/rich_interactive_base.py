@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Tuple, Union
 
 from attr import attrs, attrib
 
-from science_modeling_tools.ui.input_modes import InputMode, InputModeConfig
-from science_modeling_tools.ui.interactive_base import (
+from agent_foundation.ui.input_modes import InputMode, InputModeConfig
+from agent_foundation.ui.interactive_base import (
     InteractiveBase, InteractionFlags,
 )
 

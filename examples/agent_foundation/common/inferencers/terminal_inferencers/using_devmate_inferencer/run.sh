@@ -121,4 +121,4 @@ if [[ ${#ARGS[@]} -gt 0 ]]; then
 fi
 
 # Run the example with buck2
-buck2 run fbcode//_tony_dev/ScienceModelingTools/examples/science_modeling_tools/common/inferencers/terminal_inferencers/devmate:devmate_example -- "${CMD_ARGS[@]}"
+buck2 run fbcode//_tony_dev/ScienceModelingTools/examples/agent_foundation/common/inferencers/terminal_inferencers/devmate:devmate_example -- "${CMD_ARGS[@]}"

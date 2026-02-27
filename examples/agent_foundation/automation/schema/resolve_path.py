@@ -35,10 +35,10 @@ if src_dir.exists() and str(src_dir) not in sys.path:
 
 # Add sibling science packages if they exist
 projects_root = project_root.parent
-science_python_utils_src = projects_root / "SciencePythonUtils" / "src"
+rich_python_utils_src = projects_root / "SciencePythonUtils" / "src"
 
-if science_python_utils_src.exists() and str(science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(science_python_utils_src))
+if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(rich_python_utils_src))
 
 # Verify the setup worked
 _modeling_tools_module_path = src_dir / "agent_foundation"

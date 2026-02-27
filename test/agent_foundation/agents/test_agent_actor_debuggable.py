@@ -14,17 +14,17 @@ from typing import Any, Mapping, Sequence
 
 # Add source paths
 project_root = Path(__file__).parent.parent.parent.parent.parent
-science_python_utils_src = project_root / "SciencePythonUtils" / "src"
-science_modeling_tools_src = project_root / "ScienceModelingTools" / "src"
+rich_python_utils_src = project_root / "SciencePythonUtils" / "src"
+agent_foundation_src = project_root / "ScienceModelingTools" / "src"
 
-for path in [science_python_utils_src, science_modeling_tools_src]:
+for path in [rich_python_utils_src, agent_foundation_src]:
     if path.exists() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import pytest
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent_actor import AgentActor, AgentActionResult
+from agent_foundation.agents.agent_actor import AgentActor, AgentActionResult
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.identifiable import Identifiable
 

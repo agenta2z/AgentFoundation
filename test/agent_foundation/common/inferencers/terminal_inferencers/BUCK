@@ -18,7 +18,7 @@ python_library(
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -31,7 +31,7 @@ python_binary(
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -43,7 +43,7 @@ python_library(
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -56,7 +56,7 @@ python_binary(
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -67,7 +67,7 @@ python_library(
     typing = False,
     deps = [
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -79,7 +79,7 @@ python_binary(
     typing = False,
     deps = [
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )
 
@@ -91,6 +91,6 @@ python_binary(
     typing = False,
     deps = [
         ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:science_modeling_tools",
+        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
     ],
 )

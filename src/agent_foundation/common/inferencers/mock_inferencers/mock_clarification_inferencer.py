@@ -5,7 +5,7 @@ This module provides a mock inferencer that demonstrates how agents handle
 clarification questions, using a grocery order example.
 """
 from typing import Any
-from science_modeling_tools.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.agents.agent_response import AgentResponse, AgentAction
 
 
 class MockClarificationInferencer:

@@ -75,14 +75,14 @@ Importing
 .. code-block:: python
 
    # Applications
-   from science_modeling_tools.ui.dash_interactive import (
+   from agent_foundation.ui.dash_interactive import (
        DashInteractiveApp,
        DashInteractiveAppWithLogs,
        QueueBasedDashInteractiveApp
    )
 
    # Components
-   from science_modeling_tools.ui.dash_interactive.components import (
+   from agent_foundation.ui.dash_interactive.components import (
        BaseComponent,
        ChatHistoryList,
        ChatWindow,
@@ -92,7 +92,7 @@ Importing
    )
 
    # Utilities
-   from science_modeling_tools.ui.dash_interactive.utils import LogCollector
+   from agent_foundation.ui.dash_interactive.utils import LogCollector
 
 Application Classes
 -------------------

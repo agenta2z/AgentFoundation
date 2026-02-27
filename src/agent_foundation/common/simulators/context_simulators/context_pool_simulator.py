@@ -4,7 +4,7 @@ from typing import Mapping, List, Any, Union
 from attr import attrs, attrib
 import random
 
-from science_modeling_tools.common.simulators.context_simulators.context_simulator_base import ContextSimulatorBase
+from agent_foundation.common.simulators.context_simulators.context_simulator_base import ContextSimulatorBase
 from rich_python_utils.io_utils.json_io import iter_all_json_objs_from_all_sub_dirs, DEFAULT_JSON_FILE_PATTERN
 
 

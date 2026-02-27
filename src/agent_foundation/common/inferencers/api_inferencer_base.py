@@ -2,7 +2,7 @@ from typing import Any, Union, Dict, Callable
 
 from attr import attrs, attrib
 
-from science_modeling_tools.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
 import logging
 

@@ -28,7 +28,7 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
 
 import pytest
 
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 
 
 class TestEntityMetadataCreation:

@@ -11,7 +11,7 @@ import time
 import dash
 from dash.dependencies import Input, Output, State
 
-from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
 
 
 class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):

@@ -7,17 +7,17 @@ the ReasonerProtocol interface.
 
 from typing import Any
 
-from science_modeling_tools.agents.agent import (
+from agent_foundation.agents.agent import (
     Agent,
     ReasonerProtocol,
     ReasonerInput,
     ReasonerInferenceConfig,
     ReasonerResponse,
 )
-from science_modeling_tools.common.inferencers.api_inferencers.claude_api_inferencer import (
+from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import (
     ClaudeApiInferencer,
 )
-from science_modeling_tools.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
+from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
     AgClaudeApiInferencer,
 )
 

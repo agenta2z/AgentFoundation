@@ -104,7 +104,7 @@ export PYTHONPATH=/path/to/SciencePythonUtils/src:$PYTHONPATH
 from rich_python_utils.service_utils.queue_service.storage_based_queue_service import (
     StorageBasedQueueService
 )
-from science_modeling_tools.ui.queue_interactive import QueueInteractive
+from agent_foundation.ui.queue_interactive import QueueInteractive
 
 # Create queue service
 queue_service = StorageBasedQueueService(root_path='/tmp/my_agent')
@@ -500,7 +500,7 @@ user_proc.start()
 
 ## Troubleshooting
 
-### Issue: "No module named 'science_python_utils'"
+### Issue: "No module named 'rich_python_utils'"
 
 **Solution:** Install or add to PYTHONPATH:
 

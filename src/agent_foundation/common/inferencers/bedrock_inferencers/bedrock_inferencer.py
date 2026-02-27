@@ -2,13 +2,13 @@ from typing import Union, Sequence
 
 from attr import attrib, attrs
 import json
-from science_modeling_tools.common.infra.bedrock.constants import (
+from agent_foundation.common.infra.bedrock.constants import (
     BEDROCK_SERVICE_NAME_BEDROCK_RUNTIME,
     BEDROCK_SERVICE_REGION_US_WEST2,
     BEDROCK_RUNTIME_SERVICE_URL_PREFIX
 )
-from science_modeling_tools.common.inferencers.remote_inferencer_base import RemoteInferencerBase
-from science_modeling_tools.common.infra.bedrock.client import (
+from agent_foundation.common.inferencers.remote_inferencer_base import RemoteInferencerBase
+from agent_foundation.common.infra.bedrock.client import (
     get_bedrock_session,
     get_bedrock_client,
     get_bedrock_runtime_service_url

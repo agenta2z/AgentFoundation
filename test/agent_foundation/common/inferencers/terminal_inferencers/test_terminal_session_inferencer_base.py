@@ -7,7 +7,7 @@ import resolve_path  # noqa: F401
 
 from attr import attrib, attrs
 
-from science_modeling_tools.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionInferencerBase,
 )
 

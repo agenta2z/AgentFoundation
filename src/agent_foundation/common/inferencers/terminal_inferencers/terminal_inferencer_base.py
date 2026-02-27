@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
 from attr import attrib, attrs
 
-from science_modeling_tools.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
 
 @attrs

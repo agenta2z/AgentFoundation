@@ -53,7 +53,7 @@ Creating a Log Details Panel
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.log_details import LogDetailsPanel
+   from agent_foundation.ui.dash_interactive.components.log_details import LogDetailsPanel
 
    # Create panel with default settings
    log_details = LogDetailsPanel(
@@ -424,8 +424,8 @@ Complete Example
 
    from dash import Dash, html, dcc
    from dash.dependencies import Input, Output, State
-   from science_modeling_tools.ui.dash_interactive.components.log_details import LogDetailsPanel
-   from science_modeling_tools.ui.dash_interactive.components.log_graph import LogGraphVisualization
+   from agent_foundation.ui.dash_interactive.components.log_details import LogDetailsPanel
+   from agent_foundation.ui.dash_interactive.components.log_graph import LogGraphVisualization
 
    app = Dash(__name__)
 

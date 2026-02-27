@@ -36,13 +36,13 @@ if src_dir.exists() and str(src_dir) not in sys.path:
 
 # Add SciencePythonUtils if it exists
 projects_root = smt_root.parent
-science_python_utils_src = projects_root / "SciencePythonUtils" / "src"
+rich_python_utils_src = projects_root / "SciencePythonUtils" / "src"
 
-if science_python_utils_src.exists() and str(science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(science_python_utils_src))
+if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(rich_python_utils_src))
 
 import pytest
-from science_modeling_tools.automation.schema.common import (
+from agent_foundation.automation.schema.common import (
     TargetNotFoundError,
     BranchAlreadyExistsError,
     TargetSpec,
@@ -415,7 +415,7 @@ class TestBranchAlreadyExistsError:
 # =============================================================================
 
 # Import Action model for testing
-from science_modeling_tools.automation.schema.common import Action
+from agent_foundation.automation.schema.common import Action
 
 
 # =============================================================================
@@ -1182,7 +1182,7 @@ class TestActionJsonDeserialization:
 # =============================================================================
 
 # Import ActionGraph and related classes for testing
-from science_modeling_tools.automation.schema.action_graph import (
+from agent_foundation.automation.schema.action_graph import (
     ActionGraph,
     ActionChainHelper,
     TargetNotFoundContext,
@@ -1785,7 +1785,7 @@ class TestMethodForwarding:
 
     def test_condition_forwarding_returns_condition_context(self):
         """ActionChainHelper.condition() should return ConditionContext."""
-        from science_modeling_tools.automation.schema.action_graph import ConditionContext
+        from agent_foundation.automation.schema.action_graph import ConditionContext
         
         mock_executor = lambda **kwargs: "executed"
         graph = ActionGraph(action_executor=mock_executor)
@@ -1858,7 +1858,7 @@ class TestMethodForwarding:
 
     def test_execute_forwarding_returns_execution_result(self):
         """ActionChainHelper.execute() should return ExecutionResult."""
-        from science_modeling_tools.automation.schema.common import ExecutionResult
+        from agent_foundation.automation.schema.common import ExecutionResult
         
         mock_executor = lambda **kwargs: "executed"
         graph = ActionGraph(action_executor=mock_executor)
@@ -2567,7 +2567,7 @@ class TestTargetNotFoundContextMethodForwarding:
 
     def test_context_condition_returns_condition_context(self):
         """TargetNotFoundContext.condition() should return ConditionContext."""
-        from science_modeling_tools.automation.schema.action_graph import ConditionContext
+        from agent_foundation.automation.schema.action_graph import ConditionContext
         
         mock_executor = lambda **kwargs: "executed"
         graph = ActionGraph(action_executor=mock_executor)
@@ -2616,7 +2616,7 @@ class TestTargetNotFoundContextMethodForwarding:
 
     def test_context_condition_uses_graph_condition(self):
         """TargetNotFoundContext.condition() should use graph.condition() internally."""
-        from science_modeling_tools.automation.schema.action_graph import ConditionContext
+        from agent_foundation.automation.schema.action_graph import ConditionContext
         
         mock_executor = lambda **kwargs: "executed"
         graph = ActionGraph(action_executor=mock_executor)
@@ -2637,8 +2637,8 @@ class TestTargetNotFoundContextMethodForwarding:
 # =============================================================================
 
 # Import ActionNode and related classes for execution testing
-from science_modeling_tools.automation.schema.action_node import ActionNode
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_node import ActionNode
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 import time
 
 

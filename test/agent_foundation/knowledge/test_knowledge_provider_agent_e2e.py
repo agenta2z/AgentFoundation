@@ -35,19 +35,19 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 import pytest
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent_response import AgentResponse
-from science_modeling_tools.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
-from science_modeling_tools.agents.prompt_based_agents.prompt_based_agent import (
+from agent_foundation.agents.agent_response import AgentResponse
+from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
+from agent_foundation.agents.prompt_based_agents.prompt_based_agent import (
     PromptBasedAgent,
     FeedConflictResolution,
 )
-from science_modeling_tools.knowledge import KnowledgeProvider
-from science_modeling_tools.knowledge.knowledge_base import KnowledgeBase
-from science_modeling_tools.knowledge.models.entity_metadata import EntityMetadata
-from science_modeling_tools.knowledge.models.knowledge_piece import KnowledgePiece, KnowledgeType
-from science_modeling_tools.knowledge.stores.metadata.keyvalue_adapter import KeyValueMetadataStore
-from science_modeling_tools.knowledge.stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
-from science_modeling_tools.knowledge.stores.graph.graph_adapter import GraphServiceEntityGraphStore
+from agent_foundation.knowledge import KnowledgeProvider
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece, KnowledgeType
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import KeyValueMetadataStore
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import GraphServiceEntityGraphStore
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import MemoryKeyValueService
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import MemoryRetrievalService
 from rich_python_utils.service_utils.graph_service.memory_graph_service import MemoryGraphService

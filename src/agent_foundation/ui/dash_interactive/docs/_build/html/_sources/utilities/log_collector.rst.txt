@@ -57,7 +57,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
    # Create collector
    collector = LogCollector()
@@ -300,8 +300,8 @@ With DashInteractiveAppWithLogs
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveAppWithLogs
-   from science_modeling_tools.ui.dash_interactive.utils.log_collector import LogCollector
+   from agent_foundation.ui.dash_interactive import DashInteractiveAppWithLogs
+   from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
 
    collector = LogCollector()
 
@@ -425,7 +425,7 @@ The ``LogCollector`` output is designed to work with
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive.components.log_graph import LogGraphVisualization
+   from agent_foundation.ui.dash_interactive.components.log_graph import LogGraphVisualization
 
    log_graph = LogGraphVisualization()
    graph_structure = collector.get_graph_structure()

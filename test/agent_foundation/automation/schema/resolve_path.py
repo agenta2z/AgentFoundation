@@ -26,19 +26,19 @@ if current_path.name != PIVOT_FOLDER_NAME:
     raise RuntimeError(f"Could not find '{PIVOT_FOLDER_NAME}' folder in path hierarchy")
 
 # ScienceModelingTools root is parent of test/ directory
-science_modeling_tools_root = current_path.parent
+agent_foundation_root = current_path.parent
 
 # Add src directory to path for agent_foundation imports
-src_dir = science_modeling_tools_root / "src"
+src_dir = agent_foundation_root / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 # Add SciencePythonUtils if it exists (for tests that need it)
-projects_root = science_modeling_tools_root.parent
-science_python_utils_src = projects_root / "SciencePythonUtils" / "src"
+projects_root = agent_foundation_root.parent
+rich_python_utils_src = projects_root / "SciencePythonUtils" / "src"
 
-if science_python_utils_src.exists() and str(science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(science_python_utils_src))
+if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(rich_python_utils_src))
 
 # Verify the setup worked
 _module_path = src_dir / "agent_foundation"

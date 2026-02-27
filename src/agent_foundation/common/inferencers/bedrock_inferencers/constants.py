@@ -1,4 +1,4 @@
-from science_modeling_tools.common.inferencers.inference_args import CommonLlmInferenceArgs
+from agent_foundation.common.inferencers.inference_args import CommonLlmInferenceArgs
 from rich_python_utils.common_utils import dict_
 
 # region Claude3 constants

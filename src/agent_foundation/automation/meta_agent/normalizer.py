@@ -10,7 +10,7 @@ import statistics
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Set
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceStep,
 )

@@ -34,19 +34,19 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 # Add SciencePythonUtils if needed
 _workspace_root = _project_root.parent
-_science_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
-if _science_python_utils_src.exists() and str(_science_python_utils_src) not in sys.path:
-    sys.path.insert(0, str(_science_python_utils_src))
+_rich_python_utils_src = _workspace_root / "SciencePythonUtils" / "src"
+if _rich_python_utils_src.exists() and str(_rich_python_utils_src) not in sys.path:
+    sys.path.insert(0, str(_rich_python_utils_src))
 
-from science_modeling_tools.automation.schema.common import (
+from agent_foundation.automation.schema.common import (
     Action,
     TargetSpec,
     TargetSpecWithFallback,
     TargetStrategy,
     ExecutionRuntime,
 )
-from science_modeling_tools.automation.schema.action_graph import ActionGraph
-from science_modeling_tools.automation.schema.action_metadata import ActionMetadataRegistry
+from agent_foundation.automation.schema.action_graph import ActionGraph
+from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
 
 
 # =============================================================================

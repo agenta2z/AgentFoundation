@@ -31,7 +31,7 @@ import pytest
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
-from science_modeling_tools.knowledge.ingestion_cli import KnowledgeIngestionCLI
+from agent_foundation.knowledge.retrieval.ingestion_cli import KnowledgeIngestionCLI
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────

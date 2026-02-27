@@ -7,17 +7,17 @@ from typing import Tuple, Any, Union, Mapping, Dict, Sequence, Iterable, Optiona
 
 from attr import attrs, attrib
 
-from science_modeling_tools.agents.agent_attachment import AgentAttachment
-from science_modeling_tools.agents.agent_response import AgentResponse, AgentAction
-from science_modeling_tools.agents.agent_state import AgentTaskStatusFlags, AgentStateItem, AgentStates
-from science_modeling_tools.automation.schema.action_executor import MultiActionExecutor
-from science_modeling_tools.agents.constants import DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT, \
+from agent_foundation.agents.agent_attachment import AgentAttachment
+from agent_foundation.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem, AgentStates
+from agent_foundation.automation.schema.action_executor import MultiActionExecutor
+from agent_foundation.agents.constants import DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT, \
     DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE, DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT, \
     DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS, DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES, \
     DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION, DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS, \
     DEFAULT_AGENT_TASK_INPUT_FIELD_TASK_LABEL, DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS, \
     DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS
-from science_modeling_tools.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
 from rich_python_utils.common_objects.workflow.common.worknode_base import WorkGraphStopFlags

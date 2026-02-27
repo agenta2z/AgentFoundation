@@ -4,9 +4,9 @@
 load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
 
 python_library(
-    name = "science_modeling_tools",
+    name = "agent_foundation",
     srcs = glob([
-        "science_modeling_tools/**/*.py",
+        "agent_foundation/**/*.py",
     ]),
     base_module = "",
     typing = False,
@@ -21,7 +21,7 @@ python_library(
         "fbsource//third-party/pypi/plotly:plotly",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/requests:requests",
-        "//_tony_dev/SciencePythonUtils/src:science_python_utils",
+        "//_tony_dev/SciencePythonUtils/src:rich_python_utils",
         "//gen_ai/metagen/pymetagen/lib:metagen",
     ],
 )

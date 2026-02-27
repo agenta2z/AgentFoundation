@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 
-from science_modeling_tools.ui.dash_interactive.components.base import BaseComponent
-from science_modeling_tools.ui.dash_interactive.ui_lib.chat_window import create_typing_indicator
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
+from agent_foundation.ui.dash_interactive.ui_lib.chat_window import create_typing_indicator
 
 
 class ChatWindow(BaseComponent):

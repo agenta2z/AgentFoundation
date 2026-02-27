@@ -4,7 +4,7 @@ from typing import Union, List
 from boto3 import Session
 from botocore.config import Config
 
-from science_modeling_tools.common.infra.bedrock.constants import (
+from agent_foundation.common.infra.bedrock.constants import (
     BEDROCK_SERVICE_NAME_BEDROCK_RUNTIME,
     BEDROCK_SERVICE_REGION_US_WEST2,
     BEDROCK_RUNTIME_SERVICE_URL_PATTERN

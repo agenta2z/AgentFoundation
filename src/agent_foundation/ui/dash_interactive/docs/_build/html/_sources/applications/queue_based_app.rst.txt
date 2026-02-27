@@ -63,7 +63,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
 
    def check_responses():
        """Check for responses from the queue service."""
@@ -283,7 +283,7 @@ Multi-Process Example
 
    # ui_app.py
    import redis
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
 
    redis_client = redis.Redis()
 
@@ -338,7 +338,7 @@ Complete Example
 
    from queue import Queue
    from threading import Thread
-   from science_modeling_tools.ui.dash_interactive import QueueBasedDashInteractiveApp
+   from agent_foundation.ui.dash_interactive import QueueBasedDashInteractiveApp
 
    # Shared queues
    request_queue = Queue()

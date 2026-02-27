@@ -14,12 +14,12 @@ A production-ready Python module that provides Claude API access through AI Gate
 - ✅ Comprehensive error reporting with upstream details
 - ✅ Same API interface as the original `claude_llm.py` for easy migration
 
-**File:** `ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/ai_gateway_claude_llm.py`
+**File:** `ScienceModelingTools/src/agent_foundation/apis/ai_gateway/ai_gateway_claude_llm.py`
 
 ### 2. Package Init: `__init__.py`
 Makes the ai_gateway package properly importable with convenient exports.
 
-**File:** `ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/__init__.py`
+**File:** `ScienceModelingTools/src/agent_foundation/apis/ai_gateway/__init__.py`
 
 ### 3. Documentation: `README.md`
 Comprehensive documentation with:
@@ -30,7 +30,7 @@ Comprehensive documentation with:
 - Troubleshooting guide
 - Command-line usage
 
-**File:** `ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/README.md`
+**File:** `ScienceModelingTools/src/agent_foundation/apis/ai_gateway/README.md`
 
 ### 4. Example Script: `tmp_rovodev_example.py`
 Runnable examples demonstrating:
@@ -40,7 +40,7 @@ Runnable examples demonstrating:
 - Model comparisons
 - Stop sequences
 
-**File:** `ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/tmp_rovodev_example.py`
+**File:** `ScienceModelingTools/src/agent_foundation/apis/ai_gateway/tmp_rovodev_example.py`
 
 ## Design Decisions
 
@@ -76,7 +76,7 @@ Environment-based configuration with sensible defaults:
 
 ### Original `claude_llm.py`
 ```python
-from science_modeling_tools.apis.claude_llm import generate_text, ClaudeModels
+from agent_foundation.apis.claude_llm import generate_text, ClaudeModels
 
 response = generate_text(
     prompt_or_messages="What is AI?",
@@ -87,7 +87,7 @@ response = generate_text(
 
 ### New `ai_gateway_claude_llm.py`
 ```python
-from science_modeling_tools.apis.ai_gateway import generate_text, AIGatewayClaudeModels
+from agent_foundation.apis.ai_gateway import generate_text, AIGatewayClaudeModels
 
 response = generate_text(
     prompt_or_messages="What is AI?",
@@ -113,7 +113,7 @@ response = generate_text(
 ## Files Created
 
 ```
-ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/
+ScienceModelingTools/src/agent_foundation/apis/ai_gateway/
 ├── __init__.py                     # Package initialization
 ├── ai_gateway_claude_llm.py        # Main module (520 lines)
 ├── README.md                       # Comprehensive documentation
@@ -160,7 +160,7 @@ ScienceModelingTools/src/science_modeling_tools/apis/ai_gateway/
 ### For Production Use
 1. Import and use in your code:
    ```python
-   from science_modeling_tools.apis.ai_gateway import generate_text, AIGatewayClaudeModels
+   from agent_foundation.apis.ai_gateway import generate_text, AIGatewayClaudeModels
    ```
 
 2. Set environment variables in your deployment
@@ -175,8 +175,8 @@ rm ScienceModelingTools/src/agent_foundation/apis/ai_gateway/tmp_rovodev_*
 ## Related Files
 
 - **Reference quickstart:** `ai-gateway/user-recipes/quickstart_for_local_environment_claude.py`
-- **Original module:** `ScienceModelingTools/src/science_modeling_tools/apis/claude_llm.py`
-- **Common utilities:** `ScienceModelingTools/src/science_modeling_tools/apis/common.py`
+- **Original module:** `ScienceModelingTools/src/agent_foundation/apis/claude_llm.py`
+- **Common utilities:** `ScienceModelingTools/src/agent_foundation/apis/common.py`
 
 ## Migration Guide
 
@@ -185,10 +185,10 @@ To migrate from direct Claude API to AI Gateway:
 1. **Change import:**
    ```python
    # Before
-   from science_modeling_tools.apis.claude_llm import generate_text, ClaudeModels
+   from agent_foundation.apis.claude_llm import generate_text, ClaudeModels
    
    # After
-   from science_modeling_tools.apis.ai_gateway import generate_text, AIGatewayClaudeModels
+   from agent_foundation.apis.ai_gateway import generate_text, AIGatewayClaudeModels
    ```
 
 2. **Update function calls:**

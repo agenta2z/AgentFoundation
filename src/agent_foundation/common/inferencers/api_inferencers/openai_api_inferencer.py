@@ -1,6 +1,6 @@
 from attr import attrs
 
-from science_modeling_tools.common.inferencers.api_inferencer_base import ApiInferencerBase
+from agent_foundation.common.inferencers.api_inferencer_base import ApiInferencerBase
 
 
 @attrs
@@ -35,7 +35,7 @@ class OpenaiApiInferencer(ApiInferencerBase):
     """
 
     def __attrs_post_init__(self):
-        from science_modeling_tools.apis.openai_llm import generate_text, ENV_NAME_OPENAI_API_KEY
+        from agent_foundation.apis.openai_llm import generate_text, ENV_NAME_OPENAI_API_KEY
         self._inference_api = generate_text
 
         if not self._secret_key:

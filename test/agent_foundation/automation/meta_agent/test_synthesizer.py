@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from science_modeling_tools.automation.meta_agent.models import (
+from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
     BranchPattern,
@@ -18,8 +18,8 @@ from science_modeling_tools.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
-from science_modeling_tools.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
-from science_modeling_tools.automation.meta_agent.target_converter import (
+from agent_foundation.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
+from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )

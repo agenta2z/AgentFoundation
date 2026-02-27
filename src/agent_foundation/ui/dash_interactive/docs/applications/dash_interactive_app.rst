@@ -70,7 +70,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    # Create application with default echo handler
    app = DashInteractiveApp(
@@ -86,7 +86,7 @@ With Custom Handler
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
 
    def my_message_handler(message: str) -> str:
        """Process user message and return response."""
@@ -317,7 +317,7 @@ Complete Example
 
 .. code-block:: python
 
-   from science_modeling_tools.ui.dash_interactive import DashInteractiveApp
+   from agent_foundation.ui.dash_interactive import DashInteractiveApp
    import random
 
    # Example responses

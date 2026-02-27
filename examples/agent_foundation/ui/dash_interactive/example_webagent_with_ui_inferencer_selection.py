@@ -22,10 +22,10 @@ def create_agent_factory_with_ui_inferencer_selection(app):
     """
     def agent_factory_with_ui_selection(session_id):
         """Create agent with inferencer selected in UI."""
-        from science_modeling_tools.agents.prompt_based_agents.prompt_based_planning_agent import (
+        from agent_foundation.agents.prompt_based_agents.prompt_based_planning_agent import (
             PromptBasedActionPlanningAgent
         )
-        from science_modeling_tools.common.inferencers.api_inferencers.claude_api_inferencer import (
+        from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import (
             ClaudeApiInferencer
         )
 
@@ -63,7 +63,7 @@ def create_agent_factory_with_ui_inferencer_selection(app):
 
 def initialize_webagent_with_ui_debugger():
     """Initialize web agent service with UI debugger."""
-    from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import (
+    from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
         DashInteractiveAppWithLogs
     )
 
@@ -88,7 +88,7 @@ def initialize_webagent_with_ui_debugger():
 
 def initialize_simple_inferencer_debugger():
     """Initialize debugger for testing inferencers directly (no full agent)."""
-    from science_modeling_tools.ui.dash_interactive.dash_interactive_app_with_logs import (
+    from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
         DashInteractiveAppWithLogs
     )
 
