@@ -1,7 +1,7 @@
 DEFAULT_PLACEHOLDER_INFERENCE_PROMPT = "prompt"
 DEFAULT_PLACEHOLDER_INFERENCE_RESPONSE = "response"
 
-DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE = """You are a smart agent helping users handle their asks.                                                                                                        
+DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE = """You are a smart agent helping users handle their asks.
 You have been provided a prompt with the the user ask and all the instructions, and you made a response.
 
 Here was the prompt provided to you.
@@ -37,4 +37,113 @@ You output follow this format:
 [compose your improved response; follow exactly the same format as your previous Response]
 </ImprovedResponse>
 """
+
+# DualInferencer placeholder keys
+DEFAULT_PLACEHOLDER_DUAL_INPUT = "input"
+DEFAULT_PLACEHOLDER_DUAL_PROPOSAL = "proposal"
+DEFAULT_PLACEHOLDER_DUAL_ISSUES = "issues"
+DEFAULT_PLACEHOLDER_DUAL_REASONING = "reasoning"
+DEFAULT_PLACEHOLDER_DUAL_COUNTER_FEEDBACK = "counter_feedback"
+
+DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE = """You are a critical reviewer. Review the following proposal against the original request.
+
+<OriginalRequest>
+{{ input }}
+</OriginalRequest>
+
+<Proposal>
+{{ proposal }}
+</Proposal>
+
+{% if counter_feedback %}
+<PreviousCounterFeedback>
+{{ counter_feedback }}
+</PreviousCounterFeedback>
+
+The author has provided counter-feedback on your previous review. Consider their reasoning carefully.
+Only re-raise issues if you have NEW evidence or the author misunderstood.
+{% endif %}
+
+Review the proposal thoroughly for completeness, correctness, feasibility, safety, and consistency.
+
+Severity levels:
+- CRITICAL: Blocks implementation; cannot proceed as-is
+- MAJOR: Significant problem requiring substantial revision
+- MINOR: Small improvements needed but plan is workable
+- COSMETIC: Style/naming suggestions only
+- NONE: No issues found
+
+Verdict rules:
+- Set "approved" to true if there are no CRITICAL or MAJOR issues
+- Set "severity" to the highest severity among all issues, or "NONE" if there are no issues
+
+Respond with structured JSON:
+
+If the proposal is solid:
+```json
+{
+  "approved": true,
+  "severity": "NONE",
+  "issues": [],
+  "reasoning": "<overall assessment>"
+}
+```
+
+If issues are found:
+```json
+{
+  "approved": false,
+  "severity": "MAJOR",
+  "issues": [
+    {
+      "severity": "<CRITICAL|MAJOR|MINOR|COSMETIC>",
+      "category": "<category>",
+      "description": "<detailed description>",
+      "location": "<where in the proposal>",
+      "suggestion": "<how to fix>"
+    }
+  ],
+  "reasoning": "<overall assessment>"
+}
+```"""
+
+DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE = """You are an expert engineer. Address the reviewer's feedback on your proposal.
+
+<OriginalRequest>
+{{ input }}
+</OriginalRequest>
+
+<CurrentProposal>
+{{ proposal }}
+</CurrentProposal>
+
+<ReviewIssues>
+{{ issues }}
+</ReviewIssues>
+
+<ReviewerReasoning>
+{{ reasoning }}
+</ReviewerReasoning>
+
+{% if enable_counter_feedback %}
+For each issue, critically evaluate whether it is valid. Produce counter-feedback:
+```json
+{
+  "items": [
+    {
+      "issue_id": "<ID>",
+      "accepted": <true|false>,
+      "action_taken": "<what you did, if accepted>",
+      "rejection_reason": "<why rejected, if applicable>"
+    }
+  ],
+  "summary": "<brief summary>"
+}
+```
+{% endif %}
+
+Then provide your complete improved proposal inside these tags:
+<ImprovedProposal>
+[your full improved proposal here]
+</ImprovedProposal>"""
 

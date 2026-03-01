@@ -1,7 +1,0 @@
-error: unexpected argument '--no-create-commit' found
-
-  tip: to pass '--no-create-commit' as a value, use '-- --no-create-commit'
-
-Usage: devmate run <TEMPLATE_ARGS>...
-
-For more information, try '--help'.

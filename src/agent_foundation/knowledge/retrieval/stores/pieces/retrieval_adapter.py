@@ -89,6 +89,11 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
                 "pending_merge_suggestion": piece.pending_merge_suggestion,
                 "merge_suggestion_reason": piece.merge_suggestion_reason,
                 "suggestion_status": piece.suggestion_status,
+                # Multi-space membership and suggestion fields
+                "spaces": list(piece.spaces),
+                "pending_space_suggestions": piece.pending_space_suggestions,
+                "space_suggestion_reasons": piece.space_suggestion_reasons,
+                "space_suggestion_status": piece.space_suggestion_status,
             },
             embedding_text=piece.embedding_text,
             created_at=piece.created_at,
@@ -136,6 +141,12 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
             pending_merge_suggestion=doc.metadata.get("pending_merge_suggestion"),
             merge_suggestion_reason=doc.metadata.get("merge_suggestion_reason"),
             suggestion_status=doc.metadata.get("suggestion_status"),
+            # Multi-space membership and suggestion fields
+            # spaces=None triggers __attrs_post_init__ fallback to [space]
+            spaces=doc.metadata.get("spaces"),
+            pending_space_suggestions=doc.metadata.get("pending_space_suggestions"),
+            space_suggestion_reasons=doc.metadata.get("space_suggestion_reasons"),
+            space_suggestion_status=doc.metadata.get("space_suggestion_status"),
         )
 
     def _namespace(self, entity_id: Optional[str]) -> Optional[str]:
@@ -237,12 +248,17 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
         knowledge_type: KnowledgeType = None,
         tags: List[str] = None,
         top_k: int = 5,
+        spaces: Optional[List[str]] = None,
     ) -> List[Tuple[KnowledgePiece, float]]:
         """Search pieces by query with optional filters.
 
         Converts knowledge_type and tags to metadata filters and delegates
         to the retrieval service's search method. The entity_id maps to
         the namespace for scoping.
+
+        The ``spaces`` parameter is accepted for ABC compliance but is NOT
+        applied — this store does not support native space filtering.
+        The KnowledgeBase handles over-fetch and post-filter for this store.
 
         Args:
             query: The search query string.
@@ -251,6 +267,7 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
             knowledge_type: If specified, filter to this knowledge type only.
             tags: If specified, filter to pieces containing all of these tags.
             top_k: Maximum number of results to return.
+            spaces: Accepted for ABC compliance; ignored by this store.
 
         Returns:
             A list of (KnowledgePiece, relevance_score) tuples ordered by
@@ -273,6 +290,7 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
         self,
         entity_id: str = None,
         knowledge_type: KnowledgeType = None,
+        spaces: Optional[List[str]] = None,
     ) -> List[KnowledgePiece]:
         """List all pieces matching the given filters.
 
@@ -280,10 +298,14 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
         retrieval service's list_all method. The entity_id maps to the
         namespace for scoping.
 
+        The ``spaces`` parameter is accepted for ABC compliance but is NOT
+        applied — this store does not support native space filtering.
+
         Args:
             entity_id: If specified, list only this entity's pieces.
                        If None, list only global pieces.
             knowledge_type: If specified, filter to this knowledge type only.
+            spaces: Accepted for ABC compliance; ignored by this store.
 
         Returns:
             A list of KnowledgePiece objects matching the filter criteria.

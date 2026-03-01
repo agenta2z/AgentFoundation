@@ -204,4 +204,5 @@ class SkillSynthesizer:
             domain=source_pieces[0].domain if source_pieces else "general",
             tags=aggregated_tags,
             source="skill_synthesis",
+            spaces=source_pieces[0].spaces if source_pieces else ["main"],
         )

@@ -43,6 +43,9 @@ from agent_foundation.knowledge.ingestion.deduplicator import (
     DedupConfig,
     ThreeTierDeduplicator,
 )
+from agent_foundation.knowledge.ingestion.space_classifier import (
+    SpaceClassifier,
+)
 from agent_foundation.knowledge.ingestion.merge_strategy import (
     MergeStrategyConfig,
     MergeStrategyManager,
@@ -142,6 +145,7 @@ class DocumentIngester:
         deduplicator: Optional[ThreeTierDeduplicator] = None,
         merge_manager: Optional[MergeStrategyManager] = None,
         validator: Optional[KnowledgeValidator] = None,
+        space_classifier: Optional[SpaceClassifier] = None,
     ):
         """Initialize the DocumentIngester.
 
@@ -155,6 +159,8 @@ class DocumentIngester:
             deduplicator: Optional ThreeTierDeduplicator for dedup.
             merge_manager: Optional MergeStrategyManager for merge handling.
             validator: Optional KnowledgeValidator for validation.
+            space_classifier: Optional SpaceClassifier for space assignment.
+                Defaults to a new SpaceClassifier with default rules.
         """
         self.inferencer = inferencer
         self.config = config or IngesterConfig()
@@ -165,6 +171,7 @@ class DocumentIngester:
         self._deduplicator = deduplicator
         self._merge_manager = merge_manager
         self._validator = validator
+        self._space_classifier = space_classifier or SpaceClassifier()
 
     def _report(self, message: str) -> None:
         """Report progress to the callback and logger."""
@@ -175,12 +182,15 @@ class DocumentIngester:
         self,
         file_path: str,
         kb: KnowledgeBase,
+        spaces: Optional[List[str]] = None,
     ) -> IngestionResult:
         """Ingest a file into the KnowledgeBase.
 
         Args:
             file_path: Path to the file to ingest.
             kb: KnowledgeBase to populate.
+            spaces: Optional user-specified spaces override. When provided,
+                the SpaceClassifier is skipped and these spaces are used directly.
 
         Returns:
             IngestionResult with counts and status.
@@ -193,13 +203,14 @@ class DocumentIngester:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         content = path.read_text(encoding="utf-8")
-        return self.ingest_text(content, kb, source_file=file_path)
+        return self.ingest_text(content, kb, source_file=file_path, spaces=spaces)
 
     def ingest_text(
         self,
         text: str,
         kb: KnowledgeBase,
         source_file: Optional[str] = None,
+        spaces: Optional[List[str]] = None,
     ) -> IngestionResult:
         """Ingest text content into the KnowledgeBase.
 
@@ -207,6 +218,8 @@ class DocumentIngester:
             text: The text content to ingest.
             kb: KnowledgeBase to populate.
             source_file: Optional source file path for metadata.
+            spaces: Optional user-specified spaces override. When provided,
+                the SpaceClassifier is skipped and these spaces are used directly.
 
         Returns:
             IngestionResult with counts and status.
@@ -276,9 +289,9 @@ class DocumentIngester:
             for piece in merged.get("pieces", []):
                 piece["source"] = source_file
 
-        # Step 4.5: Apply enhancements (dedup, validation, merge)
+        # Step 4.5: Apply enhancements (dedup, validation, merge, space classification)
         merged, enhancement_counts, pieces_to_deactivate = (
-            self._apply_enhancements(merged)
+            self._apply_enhancements(merged, user_spaces=spaces)
         )
 
         if enhancement_counts.get("updated"):
@@ -456,8 +469,14 @@ class DocumentIngester:
     def _apply_enhancements(
         self,
         data: Dict[str, Any],
+        user_spaces: Optional[List[str]] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int], List[str]]:
-        """Apply deduplication and validation to pieces before loading.
+        """Apply deduplication, validation, and space classification to pieces before loading.
+
+        Args:
+            data: The merged structured data dict containing pieces.
+            user_spaces: Optional user-specified spaces override. When provided,
+                the SpaceClassifier is skipped and these spaces are used directly.
 
         Returns:
             Tuple of (modified data dict, enhancement counts dict,
@@ -465,9 +484,6 @@ class DocumentIngester:
         """
         counts = {"deduped": 0, "failed_validation": 0, "updated": 0, "merged": 0}
         pieces_to_deactivate: List[str] = []
-
-        if not (self._deduplicator or self._validator):
-            return data, counts, []
 
         enhanced_pieces = []
 
@@ -481,7 +497,26 @@ class DocumentIngester:
                     piece.validation_status = "failed"
                     piece.validation_issues = val_result.issues
                     piece.space = "developmental"
+                    piece.spaces = ["developmental"]
                     counts["failed_validation"] += 1
+
+            # Space classification (Req 7.1, 7.5, 7.6)
+            if user_spaces:
+                # User-specified spaces override — skip classifier (Req 7.5)
+                if piece.validation_status != "failed":
+                    piece.spaces = list(user_spaces)
+                    piece.space = piece.spaces[0]
+            elif piece.validation_status != "failed":
+                # Invoke SpaceClassifier for auto-classification (Req 7.1)
+                result = self._space_classifier.classify_piece(piece)
+                piece.spaces = result.auto_spaces
+                piece.space = piece.spaces[0] if piece.spaces else "main"
+
+                # Store suggestions for human review (Req 7.6)
+                if result.suggested_spaces:
+                    piece.pending_space_suggestions = result.suggested_spaces
+                    piece.space_suggestion_reasons = result.suggestion_reasons
+                    piece.space_suggestion_status = "pending"
 
             # Deduplication
             if self._deduplicator:

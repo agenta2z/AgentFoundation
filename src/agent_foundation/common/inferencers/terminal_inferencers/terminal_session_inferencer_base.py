@@ -1,373 +1,279 @@
-"""Abstract base class for terminal-based inferencers with session support."""
+"""Terminal Session Inferencer Base.
 
-import uuid
+Extends StreamingInferencerBase with subprocess-based command execution.
+Subclasses implement ``construct_command()``, ``parse_output()``, and
+``_build_session_args()`` for their specific CLI tools.
+"""
+
+import asyncio
+import subprocess
 from abc import abstractmethod
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
-    TerminalInferencerBase,
+from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    StreamingInferencerBase,
+)
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
+    TerminalInferencerResponse,
 )
 
 
 @attrs
-class TerminalSessionInferencerBase(TerminalInferencerBase):
-    """
-    Abstract base class for terminal-based inferencers with session management.
+class TerminalSessionInferencerBase(StreamingInferencerBase):
+    """Base for CLI/terminal-based streaming inferencers.
 
-    This class extends TerminalInferencerBase to provide session tracking capabilities,
-    allowing multi-turn conversations with CLI tools that support session continuation.
-
-    Default Behavior:
-        - First call: Creates a new session (since active_session_id is None)
-        - Subsequent calls: Automatically resumes the active session
-        - Use new_session=True to force a new session
-
-    Subclasses should implement:
-        - _build_session_args(): Build CLI args for session/resume functionality
+    Executes commands via subprocess and streams stdout line-by-line.
+    Subclasses implement ``construct_command()``, ``parse_output()``,
+    and ``_build_session_args()``.
 
     Attributes:
-        session_arg_name (str): CLI argument name for session ID (e.g., '--session-id').
-        resume_arg_name (str): CLI argument name for resume flag (e.g., '--resume').
-        active_session_id (str): Currently active session ID for continuation.
-
-    Session Storage:
-        _sessions: Dict mapping session_id -> list of historical turns.
-        Each turn has:
-            - from: 'user' or 'system'
-            - content: The message content
-            - timestamp: When the turn occurred
-
-    Example:
-        >>> inferencer = MySessionInferencer()
-        >>> # First call starts a new session (active_session_id is None)
-        >>> result1 = inferencer.infer("Hello")
-        >>> print(inferencer.active_session_id)  # e.g., 'abc-123-def'
-        >>> # Second call automatically resumes (active_session_id exists)
-        >>> result2 = inferencer.infer("What was my last message?")
-        >>> print(inferencer.get_session_history())  # Shows both turns
-        >>> # Force a new session
-        >>> result3 = inferencer.infer("Start fresh", new_session=True)
+        working_dir: Working directory for subprocess execution.
+        pre_exec_scripts: Shell commands to run before the main command.
+        session_arg_name: CLI argument name for session ID.
+        resume_arg_name: CLI argument name for resume flag.
     """
 
-    # CLI argument names for session management
+    # Terminal-specific attributes
+    working_dir: Optional[str] = attrib(default=None)
+    pre_exec_scripts: Optional[List[str]] = attrib(default=None)
     session_arg_name: str = attrib(default="--session-id")
     resume_arg_name: str = attrib(default="--resume")
 
-    # Currently active session ID
-    active_session_id: Optional[str] = attrib(default=None)
+    # Internal state for streaming result
+    _last_streaming_output: str = attrib(default="", init=False, repr=False)
+    _last_streaming_stderr: str = attrib(default="", init=False, repr=False)
+    _last_streaming_return_code: int = attrib(default=0, init=False, repr=False)
 
-    # Internal session storage (not an init parameter)
-    _sessions: Dict[str, List[Dict[str, Any]]] = attrib(factory=dict, init=False)
-
-    # === Session Management Methods ===
-
-    def start_session(self, session_id: Optional[str] = None) -> str:
-        """
-        Start a new session.
-
-        Args:
-            session_id: Optional session ID. If None, generates a new UUID.
-
-        Returns:
-            The session ID (either provided or generated).
-        """
-        if session_id is None:
-            session_id = str(uuid.uuid4())
-
-        if session_id not in self._sessions:
-            self._sessions[session_id] = []
-
-        self.active_session_id = session_id
-        self.log_debug(f"Started session: {session_id}", "Session")
-        return session_id
-
-    def end_session(self, session_id: Optional[str] = None) -> None:
-        """
-        End a session (clears active_session_id if it matches).
-
-        Args:
-            session_id: Session ID to end. If None, ends the active session.
-        """
-        target_id = session_id or self.active_session_id
-
-        if target_id and self.active_session_id == target_id:
-            self.active_session_id = None
-            self.log_debug(f"Ended session: {target_id}", "Session")
-
-    def get_session_history(
-        self, session_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Get the history of turns for a session.
-
-        Args:
-            session_id: Session ID to get history for. If None, uses active session.
-
-        Returns:
-            List of turn dictionaries with 'from', 'content', 'timestamp'.
-        """
-        target_id = session_id or self.active_session_id
-        if target_id and target_id in self._sessions:
-            return self._sessions[target_id].copy()
-        return []
-
-    def clear_session(self, session_id: Optional[str] = None) -> None:
-        """
-        Clear the history for a session.
-
-        Args:
-            session_id: Session ID to clear. If None, clears active session.
-        """
-        target_id = session_id or self.active_session_id
-        if target_id and target_id in self._sessions:
-            self._sessions[target_id] = []
-            self.log_debug(f"Cleared session history: {target_id}", "Session")
-
-    def delete_session(self, session_id: Optional[str] = None) -> None:
-        """
-        Delete a session entirely.
-
-        Args:
-            session_id: Session ID to delete. If None, deletes active session.
-        """
-        target_id = session_id or self.active_session_id
-        if target_id:
-            if target_id in self._sessions:
-                del self._sessions[target_id]
-            if self.active_session_id == target_id:
-                self.active_session_id = None
-            self.log_debug(f"Deleted session: {target_id}", "Session")
-
-    def list_sessions(self) -> List[str]:
-        """
-        List all session IDs.
-
-        Returns:
-            List of session IDs.
-        """
-        return list(self._sessions.keys())
-
-    def get_session_turn_count(self, session_id: Optional[str] = None) -> int:
-        """
-        Get the number of turns in a session.
-
-        Args:
-            session_id: Session ID. If None, uses active session.
-
-        Returns:
-            Number of turns in the session.
-        """
-        target_id = session_id or self.active_session_id
-        if target_id and target_id in self._sessions:
-            return len(self._sessions[target_id])
-        return 0
-
-    # === Turn Management Methods ===
-
-    def _add_turn(
-        self,
-        session_id: str,
-        from_: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """
-        Add a turn to a session's history.
-
-        Args:
-            session_id: The session ID to add the turn to.
-            from_: Who the turn is from ('user' or 'system').
-            content: The content of the turn.
-            metadata: Optional additional metadata for the turn.
-        """
-        if session_id not in self._sessions:
-            self._sessions[session_id] = []
-
-        turn = {
-            "from": from_,
-            "content": content,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        if metadata:
-            turn["metadata"] = metadata
-
-        self._sessions[session_id].append(turn)
-        self.log_debug(f"Added {from_} turn to session {session_id[:8]}...", "Session")
-
-    def get_last_turn(
-        self, session_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get the last turn from a session.
-
-        Args:
-            session_id: Session ID. If None, uses active session.
-
-        Returns:
-            The last turn dictionary, or None if no turns.
-        """
-        history = self.get_session_history(session_id)
-        return history[-1] if history else None
-
-    def get_last_user_turn(
-        self, session_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get the last user turn from a session.
-
-        Args:
-            session_id: Session ID. If None, uses active session.
-
-        Returns:
-            The last user turn dictionary, or None if no user turns.
-        """
-        history = self.get_session_history(session_id)
-        for turn in reversed(history):
-            if turn.get("from") == "user":
-                return turn
-        return None
-
-    def get_last_system_turn(
-        self, session_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get the last system turn from a session.
-
-        Args:
-            session_id: Session ID. If None, uses active session.
-
-        Returns:
-            The last system turn dictionary, or None if no system turns.
-        """
-        history = self.get_session_history(session_id)
-        for turn in reversed(history):
-            if turn.get("from") == "system":
-                return turn
-        return None
-
-    # === Abstract Method for Subclasses ===
+    # === Abstract Methods ===
 
     @abstractmethod
-    def _build_session_args(self, session_id: str, is_resume: bool) -> str:
-        """
-        Build CLI arguments for session management.
-
-        This method should be implemented by subclasses to construct the
-        appropriate CLI arguments for session ID and resume functionality.
+    def construct_command(self, inference_input: Any, **kwargs: Any) -> str:
+        """Build the shell command string.
 
         Args:
-            session_id: The session ID to use.
-            is_resume: Whether this is resuming an existing session.
+            inference_input: The input data (prompt string or dict).
+            **kwargs: Additional arguments (session_id, resume, etc.).
 
         Returns:
-            String containing the CLI arguments for session (e.g., '--resume --session-id abc123').
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses.
+            Shell command string.
         """
         raise NotImplementedError
 
-    # === Override _infer to Track Sessions ===
-
-    def _infer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs
-    ) -> Any:
-        """
-        Execute inference with session tracking.
-
-        Default behavior:
-        - resume=True by default
-        - If active_session_id is None, starts a new session (acts as resume=False)
-        - If active_session_id exists, resumes that session
-
-        This method extends the base _infer to:
-        1. Handle session continuation automatically
-        2. Track user input as a turn
-        3. Track system response as a turn
-        4. Extract and store session ID from response
+    @abstractmethod
+    def parse_output(
+        self, stdout: str, stderr: str, return_code: int
+    ) -> Dict[str, Any]:
+        """Parse command output into result dict.
 
         Args:
-            inference_input: Input for the inference.
-            inference_config: Optional configuration.
-            **kwargs: Additional arguments.
-                - session_id: Override session ID
-                - resume: Whether to resume (default True, but ignored if no session)
-                - new_session: If True, forces a new session (clears active_session_id)
+            stdout: Standard output from command.
+            stderr: Standard error from command.
+            return_code: Process return code.
 
         Returns:
-            Parsed output from parse_output() with session tracking.
+            Parsed result dictionary.
         """
-        # Check if user wants to force a new session
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
+        raise NotImplementedError
 
-        # Determine session context
-        session_id = kwargs.get("session_id", self.active_session_id)
+    @abstractmethod
+    def _build_session_args(self, session_id: str, is_resume: bool) -> str:
+        """Build CLI session arguments.
 
-        # Default resume=True, but if session_id is None, treat as new session
-        is_resume = kwargs.get("resume", True)
-        if session_id is None:
-            # No session to resume, this will be a new session
-            is_resume = False
+        Args:
+            session_id: The session ID.
+            is_resume: Whether this is a resume operation.
 
-        # Update kwargs with session info for construct_command
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume
+        Returns:
+            CLI argument string.
+        """
+        raise NotImplementedError
 
-        if is_resume:
-            self.log_debug(f"Resuming session: {session_id[:8]}...", "Session")
-        else:
-            self.log_debug("Starting new session", "Session")
+    # === Concrete: _produce_chunks (subprocess line streaming) ===
 
-        # Extract the prompt content for turn tracking
-        if isinstance(inference_input, dict):
-            prompt_content = inference_input.get("prompt", str(inference_input))
-        else:
-            prompt_content = str(inference_input)
+    async def _produce_chunks(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+        """Yield lines from subprocess stdout.
 
-        # Call parent's _infer
-        result = super()._infer(inference_input, inference_config, **kwargs)
+        Satisfies the ``@abstractmethod`` contract from StreamingInferencerBase.
 
-        # Extract session ID from result if available
-        result_session_id = (
-            result.get("session_id") if isinstance(result, dict) else None
+        Args:
+            prompt: The prompt string.
+            **kwargs: Additional arguments passed to ``construct_command()``.
+
+        Yields:
+            Lines from subprocess stdout.
+        """
+        command = self.construct_command({"prompt": prompt}, **kwargs)
+        full_command = self._build_full_command(command)
+
+        process = await asyncio.create_subprocess_shell(
+            full_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self.working_dir,
         )
 
-        # Determine the final session ID (from result or from input)
-        final_session_id = result_session_id or session_id
+        collected_stdout: list[str] = []
+        try:
+            async for line_bytes in process.stdout:
+                line = line_bytes.decode("utf-8", errors="replace")
+                collected_stdout.append(line)
+                yield line
+        finally:
+            stderr_bytes = await process.stderr.read() if process.stderr else b""
+            self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+            await process.wait()
+            self._last_streaming_output = "".join(collected_stdout)
+            self._last_streaming_return_code = process.returncode
 
-        # If we got a new session ID, update active session
-        if final_session_id:
-            if final_session_id != self.active_session_id:
-                self.active_session_id = final_session_id
-                self.log_debug(
-                    f"Updated active session to: {final_session_id[:8]}...", "Session"
-                )
+    # === Concrete: _build_full_command ===
 
-            # Track the user turn
-            self._add_turn(
-                final_session_id,
-                "user",
-                prompt_content,
-                metadata={"resume": is_resume},
-            )
+    def _build_full_command(self, command: str) -> str:
+        """Prepend ``pre_exec_scripts`` to the main command.
 
-            # Track the system turn
-            if isinstance(result, dict):
-                response_content = result.get("output", "")
-                self._add_turn(
-                    final_session_id,
-                    "system",
-                    response_content,
-                    metadata={
-                        "success": result.get("success", False),
-                        "session_id": final_session_id,
-                    },
-                )
+        Args:
+            command: The main command string.
 
-        return result
+        Returns:
+            Full command string with pre-exec scripts chained via ``&&``.
+        """
+        parts: list[str] = []
+        if self.pre_exec_scripts:
+            parts.extend(self.pre_exec_scripts)
+        parts.append(command)
+        return " && ".join(parts)
+
+    # === Concrete: _ainfer and _infer (non-streaming execution) ===
+
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Execute command via streaming pipeline and return parsed output dict.
+
+        Delegates to ``super()._ainfer()`` which accumulates from
+        ``ainfer_streaming()`` → ``_produce_chunks()``. This ensures:
+        - Cache file writing (via ``StreamingInferencerBase.ainfer_streaming()``)
+        - Per-chunk idle timeout (via ``idle_timeout_seconds``)
+        - stderr capture (via ``_last_streaming_stderr``)
+
+        Args:
+            inference_input: Input data for inference.
+            inference_config: Optional configuration (unused).
+            **kwargs: Additional arguments passed to ``construct_command()``.
+
+        Returns:
+            Parsed result dictionary from ``parse_output()``.
+        """
+        accumulated = await super()._ainfer(
+            inference_input, inference_config, **kwargs
+        )
+
+        stdout = self._last_streaming_output or str(accumulated)
+        stderr = self._last_streaming_stderr
+        return_code = self._last_streaming_return_code
+
+        result_dict = self.parse_output(stdout, stderr, return_code)
+        return TerminalInferencerResponse.from_dict(result_dict)
+
+    def _infer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Sync execution via subprocess.run().
+
+        Args:
+            inference_input: Input data for inference.
+            inference_config: Optional configuration (unused).
+            **kwargs: Additional arguments passed to ``construct_command()``.
+
+        Returns:
+            TerminalInferencerResponse wrapping ``parse_output()`` result.
+        """
+        command = self.construct_command(inference_input, **kwargs)
+        full_command = self._build_full_command(command)
+
+        result = subprocess.run(
+            full_command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=self.working_dir,
+        )
+        result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
+        return TerminalInferencerResponse.from_dict(result_dict)
+
+    # === Concrete: _infer_streaming (sync subprocess line streaming) ===
+
+    def _infer_streaming(
+        self,
+        inference_input: Any,
+        stream_callback: Any = None,
+        output_stream: Any = None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Sync subprocess streaming — yields stdout lines.
+
+        Args:
+            inference_input: Input data for inference.
+            stream_callback: Optional callback for each line (unused by base).
+            output_stream: Optional output stream (unused by base).
+            **kwargs: Additional arguments passed to ``construct_command()``.
+
+        Yields:
+            Lines from subprocess stdout.
+        """
+        command = self.construct_command(inference_input, **kwargs)
+        full_command = self._build_full_command(command)
+
+        process = subprocess.Popen(
+            full_command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self.working_dir,
+        )
+
+        collected: list[str] = []
+        try:
+            for line in process.stdout:
+                collected.append(line)
+                yield line
+        finally:
+            process.wait()
+            self._last_streaming_output = "".join(collected)
+            self._last_streaming_return_code = process.returncode
+
+    # === Concrete: _ainfer_streaming (async subprocess line streaming) ===
+
+    async def _ainfer_streaming(
+        self, inference_input: Any, **kwargs: Any
+    ) -> AsyncIterator[str]:
+        """Async subprocess streaming — yields stdout lines.
+
+        Args:
+            inference_input: Input data for inference.
+            **kwargs: Additional arguments passed to ``construct_command()``.
+
+        Yields:
+            Lines from subprocess stdout.
+        """
+        command = self.construct_command(inference_input, **kwargs)
+        full_command = self._build_full_command(command)
+
+        process = await asyncio.create_subprocess_shell(
+            full_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self.working_dir,
+        )
+
+        collected: list[str] = []
+        try:
+            async for line_bytes in process.stdout:
+                line = line_bytes.decode("utf-8", errors="replace")
+                collected.append(line)
+                yield line
+        finally:
+            await process.wait()
+            self._last_streaming_output = "".join(collected)
+            self._last_streaming_return_code = process.returncode

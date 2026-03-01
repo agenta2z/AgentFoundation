@@ -20,6 +20,8 @@ from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
     _piece_to_record,
     _record_to_piece,
     _GLOBAL_ENTITY_SENTINEL,
+    _escape_sql_like,
+    _build_where_clause,
 )
 
 
@@ -347,3 +349,223 @@ class TestFindByContentHash:
 
         assert result is not None
         assert result.content == "entity piece"
+
+
+class TestPieceToRecordSpaces:
+    """Tests for _piece_to_record multi-space serialization (Task 3.1)."""
+
+    def test_stores_spaces_as_json_string(self):
+        piece = KnowledgePiece(content="test", spaces=["personal", "main"])
+        record = _piece_to_record(piece, [0.1])
+
+        assert isinstance(record["spaces"], str)
+        assert json.loads(record["spaces"]) == ["personal", "main"]
+
+    def test_stores_primary_space_as_scalar(self):
+        piece = KnowledgePiece(content="test", spaces=["personal", "main"])
+        record = _piece_to_record(piece, [0.1])
+
+        assert record["primary_space"] == "personal"
+
+    def test_default_spaces_produces_main(self):
+        piece = KnowledgePiece(content="test")
+        record = _piece_to_record(piece, [0.1])
+
+        assert json.loads(record["spaces"]) == ["main"]
+        assert record["primary_space"] == "main"
+
+    def test_suggestion_fields_stored_as_json_when_present(self):
+        piece = KnowledgePiece(
+            content="test",
+            pending_space_suggestions=["developmental"],
+            space_suggestion_reasons=["low quality"],
+            space_suggestion_status="pending",
+        )
+        record = _piece_to_record(piece, [0.1])
+
+        assert json.loads(record["pending_space_suggestions"]) == ["developmental"]
+        assert json.loads(record["space_suggestion_reasons"]) == ["low quality"]
+        assert record["space_suggestion_status"] == "pending"
+
+    def test_suggestion_fields_empty_string_when_none(self):
+        piece = KnowledgePiece(content="test")
+        record = _piece_to_record(piece, [0.1])
+
+        assert record["pending_space_suggestions"] == ""
+        assert record["space_suggestion_reasons"] == ""
+        assert record["space_suggestion_status"] == ""
+
+
+class TestRecordToPieceSpaces:
+    """Tests for _record_to_piece multi-space deserialization (Task 3.2)."""
+
+    def _base_record(self, **overrides):
+        record = {
+            "content": "test",
+            "piece_id": "p1",
+            "knowledge_type": "fact",
+            "tags": "[]",
+            "entity_id": _GLOBAL_ENTITY_SENTINEL,
+            "source": "",
+            "embedding_text": "",
+            "created_at": "",
+            "updated_at": "",
+        }
+        record.update(overrides)
+        return record
+
+    def test_deserializes_spaces_from_json(self):
+        record = self._base_record(
+            spaces=json.dumps(["personal", "main"]),
+            primary_space="personal",
+        )
+        piece = _record_to_piece(record)
+
+        assert piece.spaces == ["personal", "main"]
+
+    def test_falls_back_to_space_when_spaces_absent(self):
+        record = self._base_record(space="developmental")
+        piece = _record_to_piece(record)
+
+        assert piece.spaces == ["developmental"]
+
+    def test_falls_back_to_main_when_both_absent(self):
+        record = self._base_record()
+        piece = _record_to_piece(record)
+
+        assert piece.spaces == ["main"]
+
+    def test_ignores_primary_space_column(self):
+        """primary_space is derived from spaces[0], not stored on the piece."""
+        record = self._base_record(
+            spaces=json.dumps(["personal", "main"]),
+            primary_space="main",  # intentionally wrong — should be ignored
+        )
+        piece = _record_to_piece(record)
+
+        assert piece.spaces == ["personal", "main"]
+        assert piece.space == "personal"  # derived from spaces[0]
+
+    def test_deserializes_suggestion_fields(self):
+        record = self._base_record(
+            spaces=json.dumps(["main"]),
+            primary_space="main",
+            pending_space_suggestions=json.dumps(["personal"]),
+            space_suggestion_reasons=json.dumps(["user entity"]),
+            space_suggestion_status="pending",
+        )
+        piece = _record_to_piece(record)
+
+        assert piece.pending_space_suggestions == ["personal"]
+        assert piece.space_suggestion_reasons == ["user entity"]
+        assert piece.space_suggestion_status == "pending"
+
+    def test_empty_string_suggestion_fields_become_none(self):
+        record = self._base_record(
+            spaces=json.dumps(["main"]),
+            primary_space="main",
+            pending_space_suggestions="",
+            space_suggestion_reasons="",
+            space_suggestion_status="",
+        )
+        piece = _record_to_piece(record)
+
+        assert piece.pending_space_suggestions is None
+        assert piece.space_suggestion_reasons is None
+        assert piece.space_suggestion_status is None
+
+
+class TestEscapeSqlLike:
+    """Tests for _escape_sql_like helper (Task 3.3)."""
+
+    def test_escapes_single_quotes(self):
+        assert _escape_sql_like("it's") == "it''s"
+
+    def test_escapes_percent(self):
+        assert _escape_sql_like("100%") == "100\\%"
+
+    def test_escapes_underscore(self):
+        assert _escape_sql_like("my_space") == "my\\_space"
+
+    def test_escapes_all_wildcards(self):
+        assert _escape_sql_like("it's_100%") == "it''s\\_100\\%"
+
+    def test_plain_string_unchanged(self):
+        assert _escape_sql_like("personal") == "personal"
+
+
+class TestBuildWhereClauseSpaces:
+    """Tests for _build_where_clause with spaces parameter (Task 3.3)."""
+
+    def test_no_spaces_produces_no_space_condition(self):
+        clause = _build_where_clause("user:1", None)
+        assert "primary_space" not in clause
+        assert "spaces" not in clause
+
+    def test_single_space_produces_dual_strategy(self):
+        clause = _build_where_clause("user:1", None, spaces=["personal"])
+        assert "primary_space IN ('personal')" in clause
+        assert "spaces LIKE" in clause
+        assert '"personal"' in clause
+
+    def test_multiple_spaces_produces_in_clause(self):
+        clause = _build_where_clause("user:1", None, spaces=["personal", "main"])
+        assert "primary_space IN ('personal', 'main')" in clause
+        assert "spaces LIKE '%\"personal\"%'" in clause
+        assert "spaces LIKE '%\"main\"%'" in clause
+
+    def test_spaces_combined_with_entity_id(self):
+        clause = _build_where_clause("user:1", None, spaces=["personal"])
+        assert clause.startswith("entity_id = 'user:1'")
+        assert "AND" in clause
+        assert "primary_space" in clause
+
+    def test_spaces_with_special_chars_escaped(self):
+        clause = _build_where_clause(None, None, spaces=["my_space"])
+        assert "my\\_space" in clause
+
+    def test_empty_spaces_list_ignored(self):
+        clause = _build_where_clause("user:1", None, spaces=[])
+        assert "primary_space" not in clause
+
+    def test_spaces_none_ignored(self):
+        clause = _build_where_clause("user:1", None, spaces=None)
+        assert "primary_space" not in clause
+
+
+class TestRoundTripSpaces:
+    """Tests for _piece_to_record → _record_to_piece round trip with spaces."""
+
+    def test_round_trip_preserves_spaces(self):
+        piece = KnowledgePiece(
+            content="multi-space test",
+            spaces=["personal", "main"],
+        )
+        record = _piece_to_record(piece, [0.1])
+        restored = _record_to_piece(record)
+
+        assert restored.spaces == piece.spaces
+        assert restored.space == piece.space
+
+    def test_round_trip_preserves_suggestion_fields(self):
+        piece = KnowledgePiece(
+            content="suggestion test",
+            pending_space_suggestions=["developmental"],
+            space_suggestion_reasons=["failed validation"],
+            space_suggestion_status="pending",
+        )
+        record = _piece_to_record(piece, [0.1])
+        restored = _record_to_piece(record)
+
+        assert restored.pending_space_suggestions == piece.pending_space_suggestions
+        assert restored.space_suggestion_reasons == piece.space_suggestion_reasons
+        assert restored.space_suggestion_status == piece.space_suggestion_status
+
+    def test_round_trip_none_suggestions_preserved(self):
+        piece = KnowledgePiece(content="no suggestions")
+        record = _piece_to_record(piece, [0.1])
+        restored = _record_to_piece(record)
+
+        assert restored.pending_space_suggestions is None
+        assert restored.space_suggestion_reasons is None
+        assert restored.space_suggestion_status is None

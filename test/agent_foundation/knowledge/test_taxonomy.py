@@ -24,6 +24,8 @@ EXPECTED_DOMAINS = [
     "debugging",
     "testing",
     "workflow",
+    "agent_skills",
+    "external_knowledge",
     "general",
 ]
 
@@ -31,8 +33,8 @@ EXPECTED_DOMAINS = [
 class TestDomainTaxonomy:
     """Tests for the DOMAIN_TAXONOMY dictionary."""
 
-    def test_has_12_domains(self):
-        assert len(DOMAIN_TAXONOMY) == 12
+    def test_has_14_domains(self):
+        assert len(DOMAIN_TAXONOMY) == 14
 
     def test_all_expected_domains_present(self):
         for domain in EXPECTED_DOMAINS:
@@ -48,9 +50,9 @@ class TestDomainTaxonomy:
 
 
 class TestGetAllDomains:
-    def test_returns_all_12_domains(self):
+    def test_returns_all_14_domains(self):
         domains = get_all_domains()
-        assert len(domains) == 12
+        assert len(domains) == 14
 
     def test_returns_list_of_strings(self):
         domains = get_all_domains()

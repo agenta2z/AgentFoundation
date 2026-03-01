@@ -170,13 +170,14 @@ def knowledge_piece_strategy(draw, include_new_fields=False):
 
 
 @st.composite
-def entity_metadata_strategy(draw):
+def entity_metadata_strategy(draw, include_spaces=False):
     """Generate a random EntityMetadata instance.
 
     - entity_id: required non-empty string
     - entity_type: required non-empty string
     - properties: dict with JSON-serializable values
     - created_at/updated_at: explicit ISO 8601 timestamps for round-trip stability
+    - spaces: optional list of space strings (when include_spaces=True)
     """
     entity_id = draw(_identifier_text)
     entity_type = draw(_identifier_text)
@@ -184,13 +185,22 @@ def entity_metadata_strategy(draw):
     created_at = draw(_timestamp_strategy)
     updated_at = draw(_timestamp_strategy)
 
-    return EntityMetadata(
+    kwargs = dict(
         entity_id=entity_id,
         entity_type=entity_type,
         properties=properties,
         created_at=created_at,
         updated_at=updated_at,
     )
+
+    if include_spaces:
+        _space_strategy = st.sampled_from(["main", "personal", "developmental"])
+        spaces = draw(st.lists(_space_strategy, min_size=1, max_size=3).map(
+            lambda xs: list(dict.fromkeys(xs))  # deduplicate, preserve order
+        ))
+        kwargs["spaces"] = spaces
+
+    return EntityMetadata(**kwargs)
 
 
 # ── GraphNode strategy ───────────────────────────────────────────────────────

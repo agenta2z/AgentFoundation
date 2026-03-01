@@ -312,3 +312,224 @@ class TestEmbeddingText:
         piece = KnowledgePiece(content="Test", embedding_text="enriched text")
         restored = KnowledgePiece.from_dict(piece.to_dict())
         assert restored.embedding_text == "enriched text"
+
+
+class TestSpacesField:
+    """Tests for the new spaces field and space/spaces synchronization.
+
+    Requirements: 1.1, 1.2, 1.3, 1.4, 1.8, 1.9, 11.1
+    """
+
+    def test_default_spaces_from_default_space(self):
+        """No spaces or space specified → spaces=["main"], space="main". (Req 11.1)"""
+        piece = KnowledgePiece(content="Test")
+        assert piece.spaces == ["main"]
+        assert piece.space == "main"
+
+    def test_spaces_derived_from_explicit_space(self):
+        """space="personal" without spaces → spaces=["personal"]. (Req 1.3)"""
+        piece = KnowledgePiece(content="Test", space="personal")
+        assert piece.spaces == ["personal"]
+        assert piece.space == "personal"
+
+    def test_space_derived_from_explicit_spaces(self):
+        """spaces=["personal", "main"] → space="personal". (Req 1.4)"""
+        piece = KnowledgePiece(content="Test", spaces=["personal", "main"])
+        assert piece.space == "personal"
+        assert piece.spaces == ["personal", "main"]
+
+    def test_sync_invariant_space_equals_spaces_first(self):
+        """space always equals spaces[0]. (Req 1.2)"""
+        piece = KnowledgePiece(content="Test", spaces=["developmental", "main"])
+        assert piece.space == piece.spaces[0]
+
+    def test_empty_spaces_defaults_to_main(self):
+        """Empty spaces list defaults to ["main"]. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=[])
+        assert piece.spaces == ["main"]
+        assert piece.space == "main"
+
+    def test_spaces_normalization_strip_whitespace(self):
+        """Spaces are stripped of whitespace. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["  personal  ", " main "])
+        assert piece.spaces == ["personal", "main"]
+
+    def test_spaces_normalization_lowercase(self):
+        """Spaces are lowercased. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["Personal", "MAIN"])
+        assert piece.spaces == ["personal", "main"]
+
+    def test_spaces_normalization_deduplicate(self):
+        """Duplicate spaces are removed preserving order. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["main", "personal", "main"])
+        assert piece.spaces == ["main", "personal"]
+
+    def test_spaces_normalization_combined(self):
+        """Strip + lowercase + dedup combined. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["  Main  ", "personal", " MAIN"])
+        assert piece.spaces == ["main", "personal"]
+
+    def test_spaces_normalization_empty_strings_removed(self):
+        """Empty and whitespace-only space strings are removed. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["main", "", "  ", "personal"])
+        assert piece.spaces == ["main", "personal"]
+
+    def test_spaces_all_empty_defaults_to_main(self):
+        """All-empty spaces list defaults to ["main"]. (Req 1.8)"""
+        piece = KnowledgePiece(content="Test", spaces=["", "  "])
+        assert piece.spaces == ["main"]
+        assert piece.space == "main"
+
+    def test_spaces_non_empty_after_normalization(self):
+        """spaces is always non-empty after __attrs_post_init__. (Req 1.1)"""
+        piece = KnowledgePiece(content="Test")
+        assert len(piece.spaces) > 0
+
+
+class TestSpaceSuggestionFields:
+    """Tests for space suggestion fields. (Req 1.9)"""
+
+    def test_suggestion_fields_default_none(self):
+        """All suggestion fields default to None."""
+        piece = KnowledgePiece(content="Test")
+        assert piece.pending_space_suggestions is None
+        assert piece.space_suggestion_reasons is None
+        assert piece.space_suggestion_status is None
+
+    def test_suggestion_fields_set_explicitly(self):
+        """Suggestion fields can be set explicitly."""
+        piece = KnowledgePiece(
+            content="Test",
+            pending_space_suggestions=["personal"],
+            space_suggestion_reasons=["user entity"],
+            space_suggestion_status="pending",
+        )
+        assert piece.pending_space_suggestions == ["personal"]
+        assert piece.space_suggestion_reasons == ["user entity"]
+        assert piece.space_suggestion_status == "pending"
+
+
+class TestSpacesToDict:
+    """Tests for spaces serialization in to_dict."""
+
+    def test_to_dict_includes_spaces(self):
+        """to_dict includes the spaces field. (Req 1.5)"""
+        piece = KnowledgePiece(content="Test", spaces=["personal", "main"])
+        d = piece.to_dict()
+        assert d["spaces"] == ["personal", "main"]
+
+    def test_to_dict_default_spaces(self):
+        """to_dict includes default spaces=["main"]."""
+        piece = KnowledgePiece(content="Test")
+        d = piece.to_dict()
+        assert d["spaces"] == ["main"]
+
+    def test_to_dict_excludes_none_suggestion_fields(self):
+        """Suggestion fields are excluded from to_dict when None."""
+        piece = KnowledgePiece(content="Test")
+        d = piece.to_dict()
+        assert "pending_space_suggestions" not in d
+        assert "space_suggestion_reasons" not in d
+        assert "space_suggestion_status" not in d
+
+    def test_to_dict_includes_non_none_suggestion_fields(self):
+        """Suggestion fields are included in to_dict when set."""
+        piece = KnowledgePiece(
+            content="Test",
+            pending_space_suggestions=["personal"],
+            space_suggestion_reasons=["user entity"],
+            space_suggestion_status="pending",
+        )
+        d = piece.to_dict()
+        assert d["pending_space_suggestions"] == ["personal"]
+        assert d["space_suggestion_reasons"] == ["user entity"]
+        assert d["space_suggestion_status"] == "pending"
+
+
+class TestSpacesFromDict:
+    """Tests for spaces deserialization in from_dict."""
+
+    def test_from_dict_with_spaces(self):
+        """from_dict reads spaces when present. (Req 1.7)"""
+        piece = KnowledgePiece.from_dict({
+            "content": "Test",
+            "spaces": ["personal", "main"],
+        })
+        assert piece.spaces == ["personal", "main"]
+        assert piece.space == "personal"
+
+    def test_from_dict_without_spaces_derives_from_space(self):
+        """from_dict derives spaces from space when spaces absent. (Req 1.6)"""
+        piece = KnowledgePiece.from_dict({
+            "content": "Test",
+            "space": "developmental",
+        })
+        assert piece.spaces == ["developmental"]
+        assert piece.space == "developmental"
+
+    def test_from_dict_without_spaces_or_space_defaults_main(self):
+        """from_dict defaults to spaces=["main"] when both absent. (Req 11.3)"""
+        piece = KnowledgePiece.from_dict({"content": "Test"})
+        assert piece.spaces == ["main"]
+        assert piece.space == "main"
+
+    def test_from_dict_both_present_spaces_wins(self):
+        """When both space and spaces present, spaces wins. (Req 1.7)"""
+        piece = KnowledgePiece.from_dict({
+            "content": "Test",
+            "space": "developmental",
+            "spaces": ["personal", "main"],
+        })
+        assert piece.spaces == ["personal", "main"]
+        assert piece.space == "personal"
+
+    def test_from_dict_suggestion_fields(self):
+        """from_dict reads suggestion fields with None defaults."""
+        piece = KnowledgePiece.from_dict({
+            "content": "Test",
+            "pending_space_suggestions": ["personal"],
+            "space_suggestion_reasons": ["user entity"],
+            "space_suggestion_status": "pending",
+        })
+        assert piece.pending_space_suggestions == ["personal"]
+        assert piece.space_suggestion_reasons == ["user entity"]
+        assert piece.space_suggestion_status == "pending"
+
+    def test_from_dict_suggestion_fields_default_none(self):
+        """from_dict defaults suggestion fields to None when absent."""
+        piece = KnowledgePiece.from_dict({"content": "Test"})
+        assert piece.pending_space_suggestions is None
+        assert piece.space_suggestion_reasons is None
+        assert piece.space_suggestion_status is None
+
+
+class TestSpacesRoundTrip:
+    """Tests for spaces serialization round-trip."""
+
+    def test_round_trip_preserves_spaces(self):
+        """to_dict → from_dict preserves spaces. (Req 1.5, 1.7)"""
+        original = KnowledgePiece(content="Test", spaces=["personal", "main"])
+        restored = KnowledgePiece.from_dict(original.to_dict())
+        assert restored.spaces == original.spaces
+        assert restored.space == original.space
+
+    def test_round_trip_preserves_suggestion_fields(self):
+        """to_dict → from_dict preserves suggestion fields."""
+        original = KnowledgePiece(
+            content="Test",
+            pending_space_suggestions=["personal"],
+            space_suggestion_reasons=["user entity"],
+            space_suggestion_status="pending",
+        )
+        restored = KnowledgePiece.from_dict(original.to_dict())
+        assert restored.pending_space_suggestions == original.pending_space_suggestions
+        assert restored.space_suggestion_reasons == original.space_suggestion_reasons
+        assert restored.space_suggestion_status == original.space_suggestion_status
+
+    def test_round_trip_none_suggestions_not_in_dict(self):
+        """Round-trip with None suggestions: they're absent from dict but restored as None."""
+        original = KnowledgePiece(content="Test")
+        d = original.to_dict()
+        assert "pending_space_suggestions" not in d
+        restored = KnowledgePiece.from_dict(d)
+        assert restored.pending_space_suggestions is None

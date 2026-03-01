@@ -46,10 +46,15 @@ class PostIngestionMergeJob:
         self.merge_fn = merge_fn
         self.logger = logger or logging.getLogger(__name__)
 
-    def run(self, space: str = "main") -> MergeJobResult:
-        """Process deferred merges for global pieces."""
+    def run(self, space: str = "main", spaces: Optional[List[str]] = None) -> MergeJobResult:
+        """Process deferred merges for global pieces.
+
+        Args:
+            space: Single space to filter by (default "main"). Ignored if ``spaces`` is provided.
+            spaces: List of spaces to filter by. When provided, overrides ``space``.
+        """
         start = time.time()
-        deferred = self._find_deferred_pieces(space)
+        deferred = self._find_deferred_pieces(space=space, spaces=spaces)
 
         errors: List[str] = []
         merged = 0
@@ -100,17 +105,31 @@ class PostIngestionMergeJob:
             duration_seconds=time.time() - start,
         )
 
-    def _find_deferred_pieces(self, space: str) -> List[KnowledgePiece]:
-        """Find global pieces with deferred merge strategies."""
+
+    def _find_deferred_pieces(
+        self,
+        space: str = "main",
+        spaces: Optional[List[str]] = None,
+    ) -> List[KnowledgePiece]:
+        """Find global pieces with deferred merge strategies.
+
+        Args:
+            space: Single space to filter by (default "main"). Ignored if ``spaces`` is provided.
+            spaces: List of spaces to filter by. When provided, overrides ``space``.
+                A piece matches if its ``spaces`` list has at least one element
+                in common with the filter list (OR semantics).
+        """
         all_pieces = self.piece_store.list_all(entity_id=None)
+
+        filter_spaces = set(spaces) if spaces else {space}
 
         deferred = []
         for piece in all_pieces:
             if not getattr(piece, "merge_processed", True):
                 strategy = getattr(piece, "merge_strategy", None)
-                piece_space = getattr(piece, "space", "main")
+                piece_spaces = getattr(piece, "spaces", [getattr(piece, "space", "main")])
 
-                if piece_space == space and strategy in (
+                if set(piece_spaces) & filter_spaces and strategy in (
                     MergeStrategy.POST_INGESTION_AUTO.value,
                     MergeStrategy.POST_INGESTION_SUGGESTION.value,
                 ):

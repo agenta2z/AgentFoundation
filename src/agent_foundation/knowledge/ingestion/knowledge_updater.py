@@ -358,6 +358,7 @@ class KnowledgeUpdater:
                 entity_id=existing.entity_id,
                 source=existing.source,
                 space=existing.space,
+                spaces=list(existing.spaces),
                 supersedes=existing.piece_id,
                 version=old_version + 1,
                 embedding=new_embedding,

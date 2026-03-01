@@ -457,6 +457,7 @@ class TestAtomicUpdateRollback:
         piece.entity_id = "entity-1"
         piece.source = "test-source"
         piece.space = "personal"
+        piece.spaces = ["personal"]
         store = InMemoryPieceStore(pieces=[piece])
         updater = KnowledgeUpdater(piece_store=store)
 
@@ -473,6 +474,73 @@ class TestAtomicUpdateRollback:
 
 
 # ── _compute_final_content Tests ─────────────────────────────────────
+
+
+# ── Spaces Preservation Tests ────────────────────────────────────────
+
+
+class TestSpacesPreservation:
+    """Tests for KnowledgeUpdater preserving the spaces field (Req 16.1, 16.2)."""
+
+    def test_preserve_history_copies_spaces_to_new_piece(self):
+        """In preserve_history mode, the new piece should inherit spaces from the existing piece."""
+        piece = _make_piece("Original content")
+        piece.spaces = ["personal", "main"]
+        piece.space = "personal"
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(piece_store=store)
+
+        result = updater.update_by_id(piece.piece_id, "Updated content")
+
+        assert result.success
+        new_piece = store.get_by_id(result.piece_id)
+        assert new_piece.spaces == ["personal", "main"]
+        assert new_piece.space == "personal"
+
+    def test_preserve_history_copies_single_space(self):
+        """Single-space pieces should also have spaces preserved."""
+        piece = _make_piece("Original content")
+        piece.spaces = ["developmental"]
+        piece.space = "developmental"
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(piece_store=store)
+
+        result = updater.update_by_id(piece.piece_id, "Updated content")
+
+        assert result.success
+        new_piece = store.get_by_id(result.piece_id)
+        assert new_piece.spaces == ["developmental"]
+        assert new_piece.space == "developmental"
+
+    def test_in_place_update_preserves_spaces(self):
+        """In-place update mode should not overwrite the existing spaces field."""
+        piece = _make_piece("Original content")
+        piece.spaces = ["personal", "main"]
+        piece.space = "personal"
+        store = InMemoryPieceStore(pieces=[piece])
+        config = UpdateConfig(preserve_history=False)
+        updater = KnowledgeUpdater(piece_store=store, config=config)
+
+        result = updater.update_by_id(piece.piece_id, "Updated content")
+
+        assert result.success
+        updated = store.get_by_id(result.piece_id)
+        assert updated.spaces == ["personal", "main"]
+        assert updated.space == "personal"
+
+    def test_preserve_history_spaces_are_independent_copy(self):
+        """The new piece's spaces should be an independent copy, not a reference."""
+        piece = _make_piece("Original content")
+        piece.spaces = ["personal", "main"]
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(piece_store=store)
+
+        result = updater.update_by_id(piece.piece_id, "Updated content")
+
+        new_piece = store.get_by_id(result.piece_id)
+        # Mutating the new piece's spaces should not affect the original
+        new_piece.spaces.append("developmental")
+        assert "developmental" not in piece.spaces
 
 
 class TestComputeFinalContent:

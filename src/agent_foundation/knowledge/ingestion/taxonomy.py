@@ -13,6 +13,8 @@ Domain Categories:
 - Data and Evaluation: data_engineering, model_evaluation
 - Infrastructure: infrastructure
 - Engineering: debugging, testing, workflow
+- Agent: agent_skills
+- External: external_knowledge
 - General: general (fallback category)
 
 Each domain has:
@@ -171,6 +173,36 @@ DOMAIN_TAXONOMY: Dict[str, Dict[str, Any]] = {
             "experiment-tracking",
             "reproducibility",
             "ci-cd",
+        ],
+    },
+    # ── Agent Skills ──
+    "agent_skills": {
+        "description": "Agent tool usage, API integrations, and task automation",
+        "tags": [
+            "api-integration",
+            "cli-tool",
+            "web-automation",
+            "file-management",
+            "communication",
+            "productivity",
+            "development",
+            "devops",
+            "data-analysis",
+            "system-admin",
+            "monitoring",
+            "security",
+        ],
+    },
+    # ── External Knowledge ──
+    "external_knowledge": {
+        "description": "Knowledge imported from external registries and sources",
+        "tags": [
+            "clawhub",
+            "community-skill",
+            "official-skill",
+            "third-party",
+            "verified",
+            "unverified",
         ],
     },
     # ── General (fallback) ──

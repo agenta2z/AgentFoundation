@@ -128,6 +128,14 @@ class KnowledgePiece:
     # Progressive Disclosure
     summary: Optional[str] = attrib(default=None)
 
+    # Multi-space membership
+    spaces: List[str] = attrib(default=None)
+
+    # Space suggestion fields for dual-mode classification
+    pending_space_suggestions: Optional[List[str]] = attrib(default=None)
+    space_suggestion_reasons: Optional[List[str]] = attrib(default=None)
+    space_suggestion_status: Optional[str] = attrib(default=None)
+
     def __attrs_post_init__(self):
         if self.piece_id is None:
             self.piece_id = str(uuid.uuid4())
@@ -142,6 +150,17 @@ class KnowledgePiece:
         # Auto-compute content_hash if not provided
         if self.content_hash is None:
             self.content_hash = self._compute_content_hash()
+
+        # Synchronize space/spaces
+        if self.spaces is None:
+            self.spaces = [self.space]
+        else:
+            self.space = self.spaces[0] if self.spaces else "main"
+        # Normalize spaces: strip, lowercase, deduplicate (preserving order), ensure non-empty
+        self.spaces = list(dict.fromkeys(s.strip().lower() for s in self.spaces if s and s.strip()))
+        if not self.spaces:
+            self.spaces = ["main"]
+        self.space = self.spaces[0]
 
     def _compute_content_hash(self) -> str:
         """Compute SHA256 hash of whitespace-normalized content.
@@ -159,7 +178,7 @@ class KnowledgePiece:
         Returns:
             Dictionary representation of this KnowledgePiece with all fields.
         """
-        return {
+        result = {
             "content": self.content,
             "piece_id": self.piece_id,
             "knowledge_type": self.knowledge_type.value,
@@ -188,7 +207,16 @@ class KnowledgePiece:
             "is_active": self.is_active,
             "version": self.version,
             "summary": self.summary,
+            "spaces": list(self.spaces),
         }
+        # Include suggestion fields only when non-None
+        if self.pending_space_suggestions is not None:
+            result["pending_space_suggestions"] = list(self.pending_space_suggestions)
+        if self.space_suggestion_reasons is not None:
+            result["space_suggestion_reasons"] = list(self.space_suggestion_reasons)
+        if self.space_suggestion_status is not None:
+            result["space_suggestion_status"] = self.space_suggestion_status
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "KnowledgePiece":
@@ -219,6 +247,15 @@ class KnowledgePiece:
         if isinstance(knowledge_type, str):
             knowledge_type = KnowledgeType(knowledge_type)
 
+        # Determine spaces: prefer 'spaces' key, fall back to deriving from 'space'
+        raw_spaces = data.get("spaces")
+        space_val = data.get("space", "main")
+        if raw_spaces is not None:
+            spaces = raw_spaces
+            # When both present, spaces wins; space will be synced in __attrs_post_init__
+        else:
+            spaces = None  # __attrs_post_init__ will derive from space
+
         return cls(
             content=content,
             piece_id=data.get("piece_id"),
@@ -236,7 +273,7 @@ class KnowledgePiece:
             custom_tags=data.get("custom_tags", []),
             content_hash=data.get("content_hash"),
             embedding=data.get("embedding"),
-            space=data.get("space", "main"),
+            space=space_val,
             merge_strategy=data.get("merge_strategy"),
             merge_processed=data.get("merge_processed", False),
             pending_merge_suggestion=data.get("pending_merge_suggestion"),
@@ -248,4 +285,8 @@ class KnowledgePiece:
             is_active=data.get("is_active", True),
             version=data.get("version", 1),
             summary=data.get("summary"),
+            spaces=spaces,
+            pending_space_suggestions=data.get("pending_space_suggestions"),
+            space_suggestion_reasons=data.get("space_suggestion_reasons"),
+            space_suggestion_status=data.get("space_suggestion_status"),
         )

@@ -110,3 +110,46 @@ class TestEntityMetadataKeyValueRoundTrip:
         assert retrieved == value, (
             f"Round-trip failed for key={key!r}: set {value!r}, got {retrieved!r}"
         )
+
+
+# Feature: knowledge-space-restructuring, Property 6: EntityMetadata Spaces Round-Trip
+
+
+class TestEntityMetadataSpacesRoundTrip:
+    """Property 6: EntityMetadata Spaces Round-Trip.
+
+    For any valid EntityMetadata with arbitrary spaces values,
+    EntityMetadata.from_dict(metadata.to_dict()).spaces SHALL equal metadata.spaces.
+    For any dict missing the spaces field, from_dict SHALL produce spaces == ["main"].
+
+    **Validates: Requirements 4.1, 4.2**
+    """
+
+    @given(metadata=entity_metadata_strategy(include_spaces=True))
+    @settings(max_examples=200)
+    def test_spaces_round_trip_preserved(self, metadata: EntityMetadata):
+        """Serializing and deserializing preserves the spaces field.
+
+        **Validates: Requirements 4.1, 4.2**
+        """
+        serialized = metadata.to_dict()
+        restored = EntityMetadata.from_dict(serialized)
+
+        assert restored.spaces == metadata.spaces, (
+            f"spaces mismatch: {metadata.spaces!r} -> {restored.spaces!r}"
+        )
+
+    @given(metadata=entity_metadata_strategy(include_spaces=True))
+    @settings(max_examples=200)
+    def test_missing_spaces_defaults_to_main(self, metadata: EntityMetadata):
+        """A dict missing the 'spaces' key deserializes with spaces == ["main"].
+
+        **Validates: Requirements 4.1, 4.2**
+        """
+        serialized = metadata.to_dict()
+        del serialized["spaces"]
+        restored = EntityMetadata.from_dict(serialized)
+
+        assert restored.spaces == ["main"], (
+            f"Expected ['main'] for missing spaces, got {restored.spaces!r}"
+        )

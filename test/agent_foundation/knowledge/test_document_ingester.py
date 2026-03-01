@@ -614,3 +614,184 @@ class TestIngestDirectory:
             lambda p: "",
         )
         assert results == {}
+
+
+# ── Space Classifier Integration Tests ───────────────────────────────────────
+
+from agent_foundation.knowledge.ingestion.space_classifier import (
+    ClassificationResult,
+    SpaceClassifier,
+    SpaceRule,
+)
+
+
+class TestSpaceClassifierIntegration:
+    """Unit tests for SpaceClassifier integration in DocumentIngester.
+
+    Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
+    """
+
+    def test_default_classifier_assigns_main_space(self):
+        """Non-user pieces get spaces=["main"] by default (Req 7.1)."""
+        ingester = DocumentIngester(inferencer=lambda p: "")
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert piece["spaces"] == ["main"]
+        assert piece["space"] == "main"
+
+    def test_user_entity_gets_personal_space(self):
+        """Pieces with user: entity_id get personal space (Req 7.1)."""
+        ingester = DocumentIngester(inferencer=lambda p: "")
+        piece_dict = _simple_piece_dict()
+        piece_dict["entity_id"] = "user:alice"
+        data = {"pieces": [piece_dict]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert "personal" in piece["spaces"]
+        assert "main" in piece["spaces"]
+
+    def test_failed_validation_sets_developmental_spaces(self):
+        """Failed validation sets spaces=["developmental"] (Req 7.4)."""
+        mock_validator = MagicMock(spec=KnowledgeValidator)
+        mock_validator.validate.return_value = ValidationResult(
+            is_valid=False,
+            confidence=0.3,
+            issues=["Content may contain credentials"],
+            checks_failed=["security"],
+        )
+
+        ingester = DocumentIngester(
+            inferencer=lambda p: "",
+            validator=mock_validator,
+        )
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert piece["space"] == "developmental"
+        assert piece["spaces"] == ["developmental"]
+
+    def test_user_spaces_override_skips_classifier(self):
+        """User-specified spaces skip the classifier (Req 7.5)."""
+        ingester = DocumentIngester(inferencer=lambda p: "")
+        piece_dict = _simple_piece_dict()
+        piece_dict["entity_id"] = "user:alice"  # Would normally get "personal"
+        data = {"pieces": [piece_dict]}
+        result_data, counts, _ = ingester._apply_enhancements(
+            data, user_spaces=["main"]
+        )
+
+        piece = result_data["pieces"][0]
+        assert piece["spaces"] == ["main"]
+        assert piece["space"] == "main"
+
+    def test_user_spaces_not_applied_to_failed_validation(self):
+        """User spaces don't override failed validation (Req 7.4, 7.5)."""
+        mock_validator = MagicMock(spec=KnowledgeValidator)
+        mock_validator.validate.return_value = ValidationResult(
+            is_valid=False,
+            confidence=0.0,
+            issues=["bad content"],
+            checks_failed=["security"],
+        )
+
+        ingester = DocumentIngester(
+            inferencer=lambda p: "",
+            validator=mock_validator,
+        )
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(
+            data, user_spaces=["personal"]
+        )
+
+        piece = result_data["pieces"][0]
+        assert piece["space"] == "developmental"
+        assert piece["spaces"] == ["developmental"]
+
+    def test_suggestion_mode_stores_pending_suggestions(self):
+        """Suggestion-mode rules store suggestions on the piece (Req 7.6)."""
+        classifier = SpaceClassifier(rules=[
+            SpaceRule(
+                name="suggest_personal",
+                space="personal",
+                condition=lambda _: True,
+                priority=10,
+                mode="suggestion",
+            ),
+            SpaceRule(
+                name="main_default",
+                space="main",
+                condition=lambda _: True,
+                priority=0,
+                mode="auto",
+            ),
+        ])
+
+        ingester = DocumentIngester(
+            inferencer=lambda p: "",
+            space_classifier=classifier,
+        )
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert piece["spaces"] == ["main"]
+        assert piece["pending_space_suggestions"] == ["personal"]
+        assert piece["space_suggestion_status"] == "pending"
+        assert len(piece["space_suggestion_reasons"]) == 1
+
+    def test_no_suggestions_when_no_suggestion_rules_match(self):
+        """No suggestion fields set when no suggestion rules match."""
+        ingester = DocumentIngester(inferencer=lambda p: "")
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert piece.get("pending_space_suggestions") is None
+        assert piece.get("space_suggestion_status") is None
+
+    def test_custom_classifier_injected(self):
+        """Custom SpaceClassifier can be injected (Req 7.1)."""
+        custom_classifier = SpaceClassifier(rules=[
+            SpaceRule(
+                name="always_personal",
+                space="personal",
+                condition=lambda _: True,
+                priority=10,
+                mode="auto",
+            ),
+        ])
+
+        ingester = DocumentIngester(
+            inferencer=lambda p: "",
+            space_classifier=custom_classifier,
+        )
+        data = {"pieces": [_simple_piece_dict()]}
+        result_data, counts, _ = ingester._apply_enhancements(data)
+
+        piece = result_data["pieces"][0]
+        assert "personal" in piece["spaces"]
+
+    def test_ingest_text_passes_spaces_to_enhancements(self):
+        """ingest_text passes user spaces through to _apply_enhancements."""
+        response = _make_llm_response([_simple_piece_dict()])
+        ingester = DocumentIngester(inferencer=_make_inferencer(response))
+        kb = _make_mock_kb()
+        result = ingester.ingest_text(
+            "# Test\n\nSome content.", kb, spaces=["personal"]
+        )
+        assert result.success is True
+
+    def test_ingest_file_passes_spaces(self, tmp_path):
+        """ingest_file passes user spaces through to ingest_text."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# Hello\n\nWorld content here.")
+
+        response = _make_llm_response([_simple_piece_dict()])
+        ingester = DocumentIngester(inferencer=_make_inferencer(response))
+        kb = _make_mock_kb()
+        result = ingester.ingest_file(str(md_file), kb, spaces=["personal"])
+        assert result.success is True

@@ -39,6 +39,16 @@ class KnowledgePieceStore(ABC):
     override it to release resources.
     """
 
+    @property
+    def supports_space_filter(self) -> bool:
+        """Whether this store natively supports space filtering at the query level.
+
+        Stores returning True (e.g., LanceDB) guarantee pre-filtered results.
+        Stores returning False (e.g., RetrievalKnowledgePieceStore) require
+        the caller to post-filter or over-fetch to compensate.
+        """
+        return False
+
     @abstractmethod
     def add(self, piece: KnowledgePiece) -> str:
         """Add a knowledge piece to the store.
@@ -101,6 +111,7 @@ class KnowledgePieceStore(ABC):
         knowledge_type: KnowledgeType = None,
         tags: List[str] = None,
         top_k: int = 5,
+        spaces: Optional[List[str]] = None,
     ) -> List[Tuple[KnowledgePiece, float]]:
         """Search pieces by query with optional filters.
 
@@ -117,6 +128,8 @@ class KnowledgePieceStore(ABC):
             knowledge_type: If specified, filter to this knowledge type only.
             tags: If specified, filter to pieces containing all of these tags.
             top_k: Maximum number of results to return.
+            spaces: If specified, filter to pieces belonging to at least one
+                    of these spaces. If None, no space filtering is applied.
 
         Returns:
             A list of (KnowledgePiece, relevance_score) tuples ordered by
@@ -129,6 +142,7 @@ class KnowledgePieceStore(ABC):
         self,
         entity_id: str = None,
         knowledge_type: KnowledgeType = None,
+        spaces: Optional[List[str]] = None,
     ) -> List[KnowledgePiece]:
         """List all pieces matching the given filters.
 
@@ -136,6 +150,8 @@ class KnowledgePieceStore(ABC):
             entity_id: If specified, list only this entity's pieces.
                        If None, list only global pieces.
             knowledge_type: If specified, filter to this knowledge type only.
+            spaces: If specified, filter to pieces belonging to at least one
+                    of these spaces. If None, no space filtering is applied.
 
         Returns:
             A list of KnowledgePiece objects matching the filter criteria.

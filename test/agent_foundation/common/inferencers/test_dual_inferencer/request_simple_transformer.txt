@@ -1,0 +1,1 @@
+Create an executable example Transformer model script with a naive training task with 20 synthetic translation training examples

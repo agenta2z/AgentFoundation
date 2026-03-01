@@ -1,10 +1,10 @@
+import asyncio
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Callable, Iterator, Sequence, Type, Union
+from typing import Any, AsyncIterator, Callable, Iterator, Sequence, Type, Union
 
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
-
 from rich_python_utils.common_utils import dict_, iter__, resolve_environ
 from rich_python_utils.common_utils.function_helper import execute_with_retry
 
@@ -54,6 +54,13 @@ class InferencerBase(Debuggable, ABC):
     default_return_or_raise: Union[Any, Exception] = attrib(default=None)
     # endregion
 
+    # Total timeout for async inference (applies to _ainfer_single only).
+    # 0 = disabled (backward compatible). Caps the entire _ainfer() call
+    # including all retries. Sync _infer_single is not wrapped because
+    # sync timeout in Python is inherently complex (signal.alarm is
+    # Unix/main-thread-only).
+    total_timeout_seconds: int = attrib(default=0)
+
     response_types: Sequence[Type] = attrib(default=(str,))
     default_inference_args: dict = attrib(default=None, converter=dict_)
     input_preprocessor: Callable = attrib(default=None)
@@ -68,6 +75,7 @@ class InferencerBase(Debuggable, ABC):
                 self.post_response_merger = merge_results
             else:
                 from rich_python_utils.mp_utils.common import get_merger
+
                 self.post_response_merger = get_merger(self.post_response_merger)
         super().__attrs_post_init__()
 
@@ -264,3 +272,214 @@ class InferencerBase(Debuggable, ABC):
             Any: The response of the inference, as returned by the `infer` method.
         """
         return self.infer(inference_input, inference_config=inference_config, **kwargs)
+
+    # region Async Methods
+
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ):
+        """Async version of _infer().
+
+        Default implementation wraps sync _infer() for backwards compatibility.
+        Async-native subclasses should override this method directly.
+
+        Args:
+            inference_input: Input data for inference.
+            inference_config: Optional configuration for the inference run.
+            **_inference_args: Additional keyword arguments for inference.
+
+        Returns:
+            The inference response.
+        """
+        return self._infer(inference_input, inference_config, **_inference_args)
+
+    async def _ainfer_single(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ):
+        """Async process a single inference input with preprocessing, inference, and post-processing.
+
+        Async equivalent of _infer_single(). Handles:
+        1. Input preprocessing via input_preprocessor
+        2. Merging default_inference_args with provided args
+        3. Executing _ainfer() with retry logic
+        4. Post-processing via response_post_processor
+
+        Args:
+            inference_input: Input data for inference.
+            inference_config: Optional configuration for the inference run.
+            **_inference_args: Additional keyword arguments merged with default_inference_args.
+
+        Returns:
+            The post-processed inference response.
+        """
+        from rich_python_utils.common_utils.async_function_helper import (
+            async_execute_with_retry,
+        )
+
+        if self.input_preprocessor is not None:
+            inference_input = self.input_preprocessor(inference_input)
+
+        inference_args = self.default_inference_args.copy()
+        if _inference_args:
+            inference_args.update(_inference_args)
+
+        self.log_debug(inference_input, "InferenceInput")
+        self.log_debug(inference_args, "InferenceArgs")
+
+        async def _do_inference():
+            return await async_execute_with_retry(
+                func=lambda inp: self._ainfer(inp, inference_config, **inference_args),
+                max_retry=self.max_retry,
+                min_retry_wait=self.min_retry_wait,
+                max_retry_wait=self.max_retry_wait,
+                args=[inference_input],
+                default_return_or_raise=self.default_return_or_raise,
+            )
+
+        if self.total_timeout_seconds > 0:
+            try:
+                inference_response = await asyncio.wait_for(
+                    _do_inference(), timeout=self.total_timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                self.log_info(
+                    f"Total timeout after {self.total_timeout_seconds}s",
+                    "TotalTimeout",
+                )
+                raise
+        else:
+            inference_response = await _do_inference()
+
+        self.log_debug(inference_response, "InferenceResponse")
+
+        if self.response_post_processor is not None:
+            processed_response = self.response_post_processor(inference_response)
+            self.log_debug(processed_response, "PostProcessedResponse")
+            return processed_response
+
+        return inference_response
+
+    async def _ainfer_iterator(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ) -> AsyncIterator:
+        """Async process an iterator of inputs and yield atomized post-processed results.
+
+        Async equivalent of _infer_iterator().
+
+        Args:
+            inference_input: Iterator of input items to process.
+            inference_config: Optional configuration for the inference run.
+            **_inference_args: Additional keyword arguments passed to _ainfer_single().
+
+        Yields:
+            Atomized inference results for each input item.
+        """
+        for _inference_input in inference_input:
+            response = await self._ainfer_single(
+                _inference_input, inference_config, **_inference_args
+            )
+            for item in iter__(response, atom_types=self.response_types):
+                yield item
+
+    async def ainfer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ):
+        """Async version of infer().
+
+        NOTE: For Iterator inputs without post_response_merger, sync infer() returns
+        a lazy generator while this method eagerly collects results into a list.
+        This is an inherent Python limitation — async generators cannot be returned
+        from a regular async def and consumed as a value. All results are computed
+        upfront, which uses more memory than the lazy sync path. For large iterator
+        inputs where memory is a concern, process items individually with
+        await _ainfer_single() in a loop instead.
+
+        Args:
+            inference_input: Input data for inference. Can be a single input or an Iterator.
+            inference_config: Optional configuration for the inference run.
+            **_inference_args: Additional keyword arguments passed to the inference methods.
+
+        Returns:
+            If input is Iterator with post_response_merger: Returns a single merged result.
+            If input is Iterator without post_response_merger: Returns a list of atomized results.
+            Otherwise: Returns a single post-processed inference result.
+        """
+        if isinstance(inference_input, Iterator):
+            all_results = []
+            async for item in self._ainfer_iterator(
+                inference_input, inference_config, **_inference_args
+            ):
+                all_results.append(item)
+
+            if self.post_response_merger is not None:
+                merged = self.post_response_merger(all_results)
+                self.log_debug(merged, "MergedResponse")
+                return merged
+            return all_results
+        else:
+            return await self._ainfer_single(
+                inference_input, inference_config, **_inference_args
+            )
+
+    async def aiter_infer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ) -> AsyncIterator:
+        """Async version of iter_infer().
+
+        Execute inference and always return an async iterator of responses.
+
+        Args:
+            inference_input: Input data for inference (single input or iterator).
+            inference_config: Optional configuration for the inference run.
+            **_inference_args: Additional keyword arguments passed to inference.
+
+        Yields:
+            Inference responses. Atomization behavior depends on response_types configuration.
+        """
+        response = await self.ainfer(
+            inference_input=inference_input,
+            inference_config=inference_config,
+            **_inference_args,
+        )
+        if not self.response_types:
+            if isinstance(response, (list, Iterator)):
+                for item in response:
+                    yield item
+            else:
+                yield response
+        else:
+            for item in iter__(response, atom_types=self.response_types):
+                yield item
+
+    # region Async Lifecycle Methods
+
+    async def aconnect(self, **kwargs):
+        """Establish async connection to external service.
+
+        Override this method in subclasses that need persistent connections.
+        Default implementation does nothing.
+
+        Args:
+            **kwargs: Connection-specific arguments.
+        """
+        pass
+
+    async def adisconnect(self):
+        """Disconnect from external service.
+
+        Override this method in subclasses that need cleanup.
+        Default implementation does nothing.
+        """
+        pass
+
+    async def __aenter__(self):
+        """Async context manager entry. Calls aconnect()."""
+        await self.aconnect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit. Calls adisconnect()."""
+        await self.adisconnect()
+        return False
+
+    # endregion

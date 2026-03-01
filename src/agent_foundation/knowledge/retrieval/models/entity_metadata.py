@@ -8,9 +8,10 @@ automatic timestamp management.
 Requirements: 1.1, 1.6
 """
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from attr import attrs, attrib
+
 
 
 @attrs
@@ -23,12 +24,14 @@ class EntityMetadata:
         properties: Key-value pairs storing entity metadata.
         created_at: ISO 8601 creation timestamp. Auto-generated if None.
         updated_at: ISO 8601 last-update timestamp. Auto-generated if None.
+        spaces: List of space labels this metadata belongs to. Defaults to ["main"].
     """
     entity_id: str = attrib()
     entity_type: str = attrib()
     properties: Dict[str, Any] = attrib(factory=dict)
     created_at: str = attrib(default=None)
     updated_at: str = attrib(default=None)
+    spaces: List[str] = attrib(factory=lambda: ["main"])
 
     def __attrs_post_init__(self):
         now = datetime.now(timezone.utc).isoformat()
@@ -87,6 +90,7 @@ class EntityMetadata:
             "properties": dict(self.properties),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "spaces": list(self.spaces),
         }
 
     @classmethod
@@ -96,7 +100,7 @@ class EntityMetadata:
         Args:
             data: Dictionary containing EntityMetadata fields.
                   Required: entity_id, entity_type.
-                  Optional: properties, created_at, updated_at.
+                  Optional: properties, created_at, updated_at, spaces.
 
         Returns:
             A new EntityMetadata instance.
@@ -115,4 +119,7 @@ class EntityMetadata:
             properties=data.get("properties", {}),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
+            spaces=data.get("spaces", ["main"]),
         )
+
+

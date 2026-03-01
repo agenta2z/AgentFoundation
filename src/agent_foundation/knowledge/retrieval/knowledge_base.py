@@ -142,13 +142,15 @@ class KnowledgeBase:
 
         Args:
             query: The user query string.
-            **kwargs: Passed through to ``retrieve()``.
+            **kwargs: Passed through to ``retrieve()``. Supports ``spaces``
+                      keyword argument for space-filtered retrieval.
 
         Returns:
             A formatted string of retrieved knowledge, or empty string
             if nothing is found.
         """
-        results = self.retrieve(query, **kwargs)
+        spaces = kwargs.pop("spaces", None)
+        results = self.retrieve(query, spaces=spaces, **kwargs)
         return self.formatter.format(results)
 
     # ── Retrieval ────────────────────────────────────────────────────────
@@ -163,6 +165,7 @@ class KnowledgeBase:
         secondary_domains: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
         min_results: int = 1,
+        spaces: Optional[List[str]] = None,
         **kwargs,
     ) -> RetrievalResult:
         """Orchestrate retrieval across all layers.
@@ -170,7 +173,7 @@ class KnowledgeBase:
         1. Get metadata for the entity (always, regardless of query)
         2. If query is non-empty: search knowledge pieces (entity-scoped + global)
            - When a HybridRetriever is configured, uses the enhanced path:
-             hybrid search → domain filter → temporal decay → MMR → truncate
+             hybrid search → space filter → domain filter → temporal decay → MMR → truncate
            - Otherwise, uses the standard path with optional domain-aware
              fallback via ``_retrieve_pieces_with_fallback()``
         3. Traverse entity graph for related knowledge (always, entity-based)
@@ -188,6 +191,8 @@ class KnowledgeBase:
             secondary_domains: Optional list of secondary domains to expand to.
             tags: Optional list of tags to filter by.
             min_results: Minimum number of results before fallback (default 1).
+            spaces: Optional list of space strings to filter by (OR semantics).
+                    When None, no space filtering is applied (all spaces returned).
             **kwargs: Reserved for future use.
 
         Returns:
@@ -203,18 +208,32 @@ class KnowledgeBase:
             result.metadata = self.metadata_store.get_metadata(entity_id)
             if include_global:
                 result.global_metadata = self.metadata_store.get_metadata("global")
+            # Filter metadata by spaces intersection (OR semantics)
+            if spaces:
+                if result.metadata:
+                    meta_spaces = set(getattr(result.metadata, "spaces", ["main"]))
+                    if not meta_spaces & set(spaces):
+                        result.metadata = None
+                if result.global_metadata:
+                    global_meta_spaces = set(getattr(result.global_metadata, "spaces", ["main"]))
+                    if not global_meta_spaces & set(spaces):
+                        result.global_metadata = None
 
         # Layer 2: Knowledge pieces (skip for empty/whitespace queries)
         if query and query.strip():
             if self.include_pieces:
                 if self._hybrid_retriever is not None:
-                    # Enhanced retrieval path: hybrid → domain filter → temporal decay → MMR
+                    # Enhanced retrieval path: hybrid → space filter → domain filter → temporal decay → MMR
                     scored = self._hybrid_retriever.search(
                         query=query,
                         top_k=top_k * 3,  # fetch more for post-processing
                         entity_id=entity_id,
                         tags=tags,
                     )
+
+                    # Space post-filter on hybrid results (before domain/temporal/MMR)
+                    if spaces:
+                        scored = [sp for sp in scored if set(sp.piece.spaces) & set(spaces)]
 
                     # Domain filter: keep pieces matching domain or secondary_domains
                     if domain:
@@ -249,6 +268,9 @@ class KnowledgeBase:
                             entity_id=None,
                             tags=tags,
                         )
+                        # Apply space post-filter to global pieces before merging
+                        if spaces:
+                            global_scored = [sp for sp in global_scored if set(sp.piece.spaces) & set(spaces)]
                         global_pieces = [(sp.piece, sp.score) for sp in global_scored]
                         pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
 
@@ -263,21 +285,22 @@ class KnowledgeBase:
                         secondary_domains=secondary_domains,
                         tags=tags,
                         min_results=min_results,
+                        spaces=spaces,
                     )
                     if include_global:
-                        global_pieces = self.piece_store.search(
-                            query, entity_id=None, top_k=top_k
+                        global_pieces = self._search_with_space_strategy(
+                            query, entity_id=None, top_k=top_k, spaces=spaces
                         )
                         pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
                     result.pieces = pieces
                 else:
                     # Standard retrieval path (no domain/tag filters)
-                    pieces = self.piece_store.search(
-                        query, entity_id=entity_id, top_k=top_k
+                    pieces = self._search_with_space_strategy(
+                        query, entity_id=entity_id, top_k=top_k, spaces=spaces
                     )
                     if include_global:
-                        global_pieces = self.piece_store.search(
-                            query, entity_id=None, top_k=top_k
+                        global_pieces = self._search_with_space_strategy(
+                            query, entity_id=None, top_k=top_k, spaces=spaces
                         )
                         pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
                     result.pieces = pieces
@@ -295,6 +318,12 @@ class KnowledgeBase:
             neighbors = self.graph_store.get_neighbors(
                 entity_id, depth=self.graph_traversal_depth
             )
+            # Filter graph neighbors by spaces intersection (OR semantics)
+            if spaces:
+                neighbors = [
+                    (n, d) for n, d in neighbors
+                    if set(n.properties.get("spaces", ["main"])) & set(spaces)
+                ]
             result.graph_context = self._extract_graph_knowledge(
                 entity_id, neighbors,
                 already_retrieved_piece_ids=already_retrieved,
@@ -313,6 +342,7 @@ class KnowledgeBase:
         secondary_domains: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
         min_results: int = 1,
+        spaces: Optional[List[str]] = None,
     ) -> List[Tuple[KnowledgePiece, float]]:
         """Retrieve pieces with a 4-tier fallback strategy.
 
@@ -332,13 +362,14 @@ class KnowledgeBase:
             secondary_domains: Secondary domains to expand to in Tier 2.
             tags: Tag filters.
             min_results: Minimum acceptable result count before fallback.
+            spaces: Optional list of space strings to filter by (OR semantics).
 
         Returns:
             A list of (KnowledgePiece, score) tuples.
         """
         # Tier 1: Domain + tags
-        pieces = self.piece_store.search(
-            query, entity_id=entity_id, tags=tags, top_k=top_k
+        pieces = self._search_with_space_strategy(
+            query, entity_id=entity_id, tags=tags, top_k=top_k, spaces=spaces
         )
         if domain:
             pieces = [
@@ -352,8 +383,8 @@ class KnowledgeBase:
         if secondary_domains:
             all_domains = {domain} if domain else set()
             all_domains.update(secondary_domains)
-            pieces = self.piece_store.search(
-                query, entity_id=entity_id, tags=tags, top_k=top_k
+            pieces = self._search_with_space_strategy(
+                query, entity_id=entity_id, tags=tags, top_k=top_k, spaces=spaces
             )
             pieces = [
                 (p, s) for p, s in pieces
@@ -364,16 +395,77 @@ class KnowledgeBase:
 
         # Tier 3: Tags only (no domain filter)
         if tags:
-            pieces = self.piece_store.search(
-                query, entity_id=entity_id, tags=tags, top_k=top_k
+            pieces = self._search_with_space_strategy(
+                query, entity_id=entity_id, tags=tags, top_k=top_k, spaces=spaces
             )
             if len(pieces) >= min_results:
                 return pieces[:top_k]
 
         # Tier 4: Pure semantic search (no filters)
-        pieces = self.piece_store.search(
-            query, entity_id=entity_id, top_k=top_k
+        pieces = self._search_with_space_strategy(
+            query, entity_id=entity_id, top_k=top_k, spaces=spaces
         )
+        return pieces[:top_k]
+
+    # ── Adaptive space-aware search ──────────────────────────────────────
+
+    def _search_with_space_strategy(
+        self,
+        query: str,
+        entity_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        top_k: int = 5,
+        spaces: Optional[List[str]] = None,
+    ) -> List[Tuple[KnowledgePiece, float]]:
+        """Search pieces using the adaptive space filtering strategy.
+
+        If the piece store natively supports space filtering
+        (``supports_space_filter is True``), passes ``spaces`` directly
+        and trusts the pre-filtered results.
+
+        If the store does not support native filtering, applies progressive
+        over-fetch (5× initial, 20× retry if insufficient) and post-filters
+        results by spaces intersection.
+
+        When ``spaces`` is None, delegates directly to the store with no
+        space filtering.
+
+        Args:
+            query: The search query string.
+            entity_id: Entity scope for the search.
+            tags: Optional tag filters.
+            top_k: Maximum number of results.
+            spaces: Optional list of space strings to filter by.
+
+        Returns:
+            A list of (KnowledgePiece, score) tuples.
+        """
+        if not spaces:
+            # No space filtering — direct pass-through
+            return self.piece_store.search(
+                query, entity_id=entity_id, tags=tags, top_k=top_k
+            )
+
+        if self.piece_store.supports_space_filter:
+            # Store handles filtering natively (e.g., LanceDB)
+            return self.piece_store.search(
+                query, entity_id=entity_id, tags=tags, top_k=top_k, spaces=spaces
+            )
+
+        # Non-native store: over-fetch and post-filter
+        initial_top_k = top_k * 5
+        pieces = self.piece_store.search(
+            query, entity_id=entity_id, tags=tags, top_k=initial_top_k
+        )
+        pieces = [(p, s) for p, s in pieces if set(p.spaces) & set(spaces)]
+
+        if len(pieces) < top_k:
+            # Retry with larger fetch
+            pieces = self.piece_store.search(
+                query, entity_id=entity_id, tags=tags, top_k=top_k * 20
+            )
+            pieces = [(p, s) for p, s in pieces if set(p.spaces) & set(spaces)]
+
         return pieces[:top_k]
 
     # ── Merge logic ──────────────────────────────────────────────────────

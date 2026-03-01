@@ -103,8 +103,17 @@ Knowledge Lifecycle:
     UpdateConfig, KnowledgeUpdater,
     DeleteConfig, ConfirmationRequiredError, KnowledgeDeleter
 
+Knowledge Packs:
+    KnowledgePack, PackStatus, PackSource, PackInstallResult, PackManagerConfig,
+    KnowledgePackManager, ClawhubClient, ClawhubPackAdapter, parse_skill_md,
+    LocalPackLoader
+
 Pipeline:
     DocumentIngester, PostIngestionMergeJob, IngestionDebugSession
+
+Space Classification & Migration:
+    SpaceClassifier, SpaceRule, ClassificationResult,
+    SpaceMigrationUtility, MigrationReport
 
 Utilities:
     sanitize_id, unsanitize_id, parse_entity_type, cosine_similarity, count_tokens
@@ -271,12 +280,37 @@ from agent_foundation.knowledge.ingestion.knowledge_deleter import (
     KnowledgeDeleter,
 )
 
+# ── Knowledge Packs ─────────────────────────────────────────────────
+from agent_foundation.knowledge.packs import (
+    KnowledgePack,
+    PackStatus,
+    PackSource,
+    PackInstallResult,
+    PackManagerConfig,
+    KnowledgePackManager,
+    ClawhubClient,
+    ClawhubPackAdapter,
+    parse_skill_md,
+    LocalPackLoader,
+)
+
 # ── Pipeline Orchestration ───────────────────────────────────────────────
 from agent_foundation.knowledge.ingestion.document_ingester import DocumentIngester
 from agent_foundation.knowledge.ingestion.post_ingestion_merge_job import (
     PostIngestionMergeJob,
 )
 from agent_foundation.knowledge.ingestion.debug_session import IngestionDebugSession
+
+# ── Space Classification & Migration ─────────────────────────────────────
+from agent_foundation.knowledge.ingestion.space_classifier import (
+    SpaceClassifier,
+    SpaceRule,
+    ClassificationResult,
+)
+from agent_foundation.knowledge.ingestion.space_migration import (
+    SpaceMigrationUtility,
+    MigrationReport,
+)
 
 # ── Utilities ────────────────────────────────────────────────────────────
 from agent_foundation.knowledge.retrieval.utils import (
@@ -381,10 +415,27 @@ __all__ = [
     "DeleteConfig",
     "ConfirmationRequiredError",
     "KnowledgeDeleter",
+    # Knowledge Packs
+    "KnowledgePack",
+    "PackStatus",
+    "PackSource",
+    "PackInstallResult",
+    "PackManagerConfig",
+    "KnowledgePackManager",
+    "ClawhubClient",
+    "ClawhubPackAdapter",
+    "parse_skill_md",
+    "LocalPackLoader",
     # Pipeline Orchestration
     "DocumentIngester",
     "PostIngestionMergeJob",
     "IngestionDebugSession",
+    # Space Classification & Migration
+    "SpaceClassifier",
+    "SpaceRule",
+    "ClassificationResult",
+    "SpaceMigrationUtility",
+    "MigrationReport",
     # Utilities
     "sanitize_id",
     "unsanitize_id",

@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # @nocommit - base_module="" is required for simple relative imports
 
 load("@fbcode_macros//build_defs:python_library.bzl", "python_library")

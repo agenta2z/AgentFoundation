@@ -44,6 +44,8 @@ from .debug_session import (
     get_ingestion_runtime_dir,
     list_all_ingestion_sessions,
 )
+from .space_classifier import SpaceClassifier, SpaceRule, ClassificationResult
+from .space_migration import SpaceMigrationUtility, MigrationReport
 
 __all__ = [
     # Taxonomy
@@ -92,4 +94,12 @@ __all__ = [
     "get_knowledge_base_dir",
     "get_ingestion_runtime_dir",
     "list_all_ingestion_sessions",
+    # Space Classifier
+    "SpaceClassifier",
+    "SpaceRule",
+    "ClassificationResult",
+    # Space Migration
+    "SpaceMigrationUtility",
+    "MigrationReport",
 ]
+

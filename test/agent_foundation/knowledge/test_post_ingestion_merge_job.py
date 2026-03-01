@@ -45,10 +45,10 @@ class InMemoryPieceStore(KnowledgePieceStore):
         del self._pieces[piece_id]
         return True
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5):
+    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
         return []
 
-    def list_all(self, entity_id=None, knowledge_type=None) -> List[KnowledgePiece]:
+    def list_all(self, entity_id=None, knowledge_type=None, spaces=None) -> List[KnowledgePiece]:
         return [
             p for p in self._pieces.values() if p.entity_id == entity_id
         ]
@@ -59,10 +59,11 @@ def _make_piece(
     merge_strategy: Optional[str] = None,
     merge_processed: bool = False,
     space: str = "main",
+    spaces: Optional[List[str]] = None,
     piece_id: Optional[str] = None,
     entity_id: Optional[str] = None,
 ) -> KnowledgePiece:
-    return KnowledgePiece(
+    kwargs = dict(
         content=content,
         piece_id=piece_id or None,
         merge_strategy=merge_strategy,
@@ -70,6 +71,9 @@ def _make_piece(
         space=space,
         entity_id=entity_id,
     )
+    if spaces is not None:
+        kwargs["spaces"] = spaces
+    return KnowledgePiece(**kwargs)
 
 
 class TestFindDeferredPieces:
@@ -148,6 +152,94 @@ class TestFindDeferredPieces:
 
         assert len(deferred) == 1
         assert deferred[0].piece_id == piece_main.piece_id
+
+    def test_finds_multi_space_piece_by_any_space(self):
+        """A piece in ['personal', 'main'] should be found when filtering by 'personal'."""
+        store = InMemoryPieceStore()
+        piece = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            spaces=["personal", "main"],
+        )
+        store.add(piece)
+
+        job = PostIngestionMergeJob(store, detect_candidates_fn=lambda p: [])
+
+        # Should be found when filtering by either space
+        assert len(job._find_deferred_pieces("personal")) == 1
+        assert len(job._find_deferred_pieces("main")) == 1
+        # Should NOT be found for a space it doesn't belong to
+        assert len(job._find_deferred_pieces("developmental")) == 0
+
+    def test_filters_by_spaces_list(self):
+        """The spaces list parameter filters by multiple spaces at once."""
+        store = InMemoryPieceStore()
+        piece_main = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="main",
+        )
+        piece_personal = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="personal",
+        )
+        piece_dev = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="developmental",
+        )
+        store.add(piece_main)
+        store.add(piece_personal)
+        store.add(piece_dev)
+
+        job = PostIngestionMergeJob(store, detect_candidates_fn=lambda p: [])
+        deferred = job._find_deferred_pieces(spaces=["main", "personal"])
+
+        assert len(deferred) == 2
+        ids = {p.piece_id for p in deferred}
+        assert piece_main.piece_id in ids
+        assert piece_personal.piece_id in ids
+
+    def test_spaces_list_overrides_single_space(self):
+        """When both space and spaces are provided, spaces takes precedence."""
+        store = InMemoryPieceStore()
+        piece = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="personal",
+        )
+        store.add(piece)
+
+        job = PostIngestionMergeJob(store, detect_candidates_fn=lambda p: [])
+        # space="main" would exclude this piece, but spaces=["personal"] should find it
+        deferred = job._find_deferred_pieces(space="main", spaces=["personal"])
+
+        assert len(deferred) == 1
+        assert deferred[0].piece_id == piece.piece_id
+
+    def test_run_with_spaces_list(self):
+        """The run() method accepts a spaces list parameter."""
+        store = InMemoryPieceStore()
+        piece_main = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="main",
+            piece_id="p-main",
+        )
+        piece_personal = _make_piece(
+            merge_strategy=MergeStrategy.POST_INGESTION_AUTO.value,
+            merge_processed=False,
+            space="personal",
+            piece_id="p-personal",
+        )
+        store.add(piece_main)
+        store.add(piece_personal)
+
+        job = PostIngestionMergeJob(store, detect_candidates_fn=lambda p: [])
+        result = job.run(spaces=["main", "personal"])
+
+        assert result.processed == 2
 
 
 class TestRunAutoMerge:

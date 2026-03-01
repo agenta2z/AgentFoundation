@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 _GLOBAL_ENTITY_SENTINEL = "__global__"
 
 
+
 def _piece_to_record(piece, vector):
     """Convert a KnowledgePiece and its embedding vector to a LanceDB record."""
     return {
@@ -69,7 +70,16 @@ def _piece_to_record(piece, vector):
         "secondary_domains": json.dumps(piece.secondary_domains, ensure_ascii=False),
         "custom_tags": json.dumps(piece.custom_tags, ensure_ascii=False),
         "validation_issues": json.dumps(piece.validation_issues, ensure_ascii=False),
+        # Multi-space membership
+        "spaces": json.dumps(piece.spaces, ensure_ascii=False),
+        "primary_space": piece.spaces[0] if piece.spaces else "main",
+        # Space suggestion fields
+        "pending_space_suggestions": json.dumps(piece.pending_space_suggestions, ensure_ascii=False) if piece.pending_space_suggestions else "",
+        "space_suggestion_reasons": json.dumps(piece.space_suggestion_reasons, ensure_ascii=False) if piece.space_suggestion_reasons else "",
+        "space_suggestion_status": piece.space_suggestion_status or "",
     }
+
+
 
 
 
@@ -119,6 +129,30 @@ def _record_to_piece(record):
     supersedes = record.get("supersedes", "") or None
     content_hash = record.get("content_hash", "") or None
 
+    # Deserialize multi-space membership
+    spaces_raw = record.get("spaces")
+    if spaces_raw:
+        spaces = _parse_json_list(spaces_raw)
+        if not spaces:
+            spaces = [record.get("space", "main")]
+    else:
+        # Fallback for records without the spaces column (pre-migration data)
+        spaces = [record.get("space", "main")]
+    # Ignore primary_space — it's derived from spaces[0]
+
+    # Deserialize space suggestion fields
+    pending_space_suggestions_raw = record.get("pending_space_suggestions", "")
+    pending_space_suggestions = _parse_json_list(pending_space_suggestions_raw) if pending_space_suggestions_raw else None
+    if pending_space_suggestions is not None and len(pending_space_suggestions) == 0:
+        pending_space_suggestions = None
+
+    space_suggestion_reasons_raw = record.get("space_suggestion_reasons", "")
+    space_suggestion_reasons = _parse_json_list(space_suggestion_reasons_raw) if space_suggestion_reasons_raw else None
+    if space_suggestion_reasons is not None and len(space_suggestion_reasons) == 0:
+        space_suggestion_reasons = None
+
+    space_suggestion_status = record.get("space_suggestion_status", "") or None
+
     return KnowledgePiece(
         content=record.get("content", ""),
         piece_id=record.get("piece_id", ""),
@@ -142,6 +176,12 @@ def _record_to_piece(record):
         validation_issues=validation_issues,
         merge_strategy=merge_strategy,
         supersedes=supersedes,
+        # Multi-space membership
+        spaces=spaces,
+        # Space suggestion fields
+        pending_space_suggestions=pending_space_suggestions,
+        space_suggestion_reasons=space_suggestion_reasons,
+        space_suggestion_status=space_suggestion_status,
     )
 
 
@@ -177,6 +217,11 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
     _table: Any = attrib(init=False, default=None)
     _fts_index_created: bool = attrib(init=False, default=False)
 
+    @property
+    def supports_space_filter(self) -> bool:
+        """LanceDB natively supports space filtering via SQL WHERE clauses."""
+        return True
+
     def __attrs_post_init__(self):
         """Initialize LanceDB connection and open or create the table."""
         import lancedb as _lancedb
@@ -188,9 +233,47 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         if self.table_name in existing_tables:
             self._table = self._db.open_table(self.table_name)
             self._fts_index_created = True
+            self._migrate_schema_if_needed()
         else:
             self._table = None
             self._fts_index_created = False
+
+    def _migrate_schema_if_needed(self):
+        """Check for missing spaces/primary_space columns and migrate if needed.
+
+        Migration is idempotent — if columns already exist, no action is taken.
+        Derives ``spaces`` from the existing ``space`` column as ``[space]``
+        and sets ``primary_space`` to ``space`` for each existing record.
+        """
+        if self._table is None:
+            return
+        try:
+            sample = self._table.search().limit(1).to_list()
+        except Exception as exc:
+            logger.warning("LanceDB schema migration check failed: %s", exc)
+            return
+        if not sample:
+            return
+        if "spaces" in sample[0] and "primary_space" in sample[0]:
+            return  # Already migrated
+
+        logger.info("Migrating LanceDB table '%s' to add spaces columns...", self.table_name)
+        try:
+            all_records = self._table.search().limit(100000).to_list()
+            for record in all_records:
+                space = record.get("space", "main")
+                record["spaces"] = json.dumps([space], ensure_ascii=False)
+                record["primary_space"] = space
+                record["pending_space_suggestions"] = ""
+                record["space_suggestion_reasons"] = ""
+                record["space_suggestion_status"] = ""
+            self._db.drop_table(self.table_name)
+            self._table = self._db.create_table(self.table_name, all_records)
+            self._fts_index_created = False
+            self._create_fts_index()
+            logger.info("Schema migration complete for table '%s' (%d records).", self.table_name, len(all_records))
+        except Exception as exc:
+            logger.error("LanceDB schema migration failed for table '%s': %s", self.table_name, exc)
 
     def _ensure_table(self, first_record):
         """Create the table with the first record if it doesn't exist yet."""
@@ -308,7 +391,7 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         self._rebuild_fts_index()
         return True
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5):
+    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
         """Hybrid search combining vector similarity and BM25 full-text search.
 
         score = hybrid_alpha * vector_score + (1 - hybrid_alpha) * bm25_score
@@ -319,7 +402,7 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         if self._table is None:
             return []
 
-        where_clause = _build_where_clause(entity_id, knowledge_type)
+        where_clause = _build_where_clause(entity_id, knowledge_type, spaces=spaces)
         fetch_limit = top_k * 5 if tags else top_k
 
         # Vector search
@@ -401,23 +484,32 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         scored_pieces.sort(key=lambda x: (-x[1], x[0].piece_id))
         return scored_pieces[:top_k]
 
-    def list_all(self, entity_id=None, knowledge_type=None):
-        """List all pieces matching the given filters."""
+    def list_all(self, entity_id=None, knowledge_type=None, spaces=None, limit=10000):
+        """List all pieces matching the given filters.
+
+        Args:
+            entity_id: If specified, list only this entity's pieces.
+            knowledge_type: If specified, filter to this knowledge type only.
+            spaces: If specified, filter to pieces belonging to at least one of these spaces.
+            limit: Maximum number of records to return. Defaults to 10000 for
+                backward compatibility. Use a larger value for migration use cases
+                that need to iterate all pieces without truncation.
+        """
         if self._table is None:
             return []
 
-        where_clause = _build_where_clause(entity_id, knowledge_type)
+        where_clause = _build_where_clause(entity_id, knowledge_type, spaces=spaces)
 
         try:
             if where_clause:
                 results = (
                     self._table.search()
                     .where(where_clause)
-                    .limit(10000)
+                    .limit(limit)
                     .to_list()
                 )
             else:
-                results = self._table.search().limit(10000).to_list()
+                results = self._table.search().limit(limit).to_list()
         except Exception as exc:
             logger.warning("LanceDB list_all error: %s", exc)
             return []
@@ -485,8 +577,25 @@ def _escape_sql(value):
     return value.replace("'", "''")
 
 
-def _build_where_clause(entity_id, knowledge_type):
-    """Build a SQL WHERE clause string for LanceDB filtering."""
+def _escape_sql_like(value):
+    """Escape LIKE wildcards in addition to single quotes.
+
+    Prevents unintended matching when space names contain ``%`` or ``_``.
+    """
+    return value.replace("'", "''").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_where_clause(entity_id, knowledge_type, spaces=None):
+    """Build a SQL WHERE clause string for LanceDB filtering.
+
+    Args:
+        entity_id: Entity scope filter.
+        knowledge_type: Knowledge type filter.
+        spaces: Optional list of space strings. When provided, generates a
+            dual-strategy WHERE clause using ``primary_space IN (...)`` as the
+            fast indexed path combined with ``spaces LIKE`` fallback for
+            multi-space pieces.
+    """
     conditions = []
 
     entity_value = entity_id if entity_id is not None else _GLOBAL_ENTITY_SENTINEL
@@ -495,6 +604,13 @@ def _build_where_clause(entity_id, knowledge_type):
     if knowledge_type is not None:
         conditions.append(
             f"knowledge_type = '{_escape_sql(knowledge_type.value)}'"
+        )
+
+    if spaces:
+        in_values = ", ".join(f"'{_escape_sql(s)}'" for s in spaces)
+        like_conditions = [f"spaces LIKE '%\"{_escape_sql_like(s)}\"%'" for s in spaces]
+        conditions.append(
+            f"(primary_space IN ({in_values}) OR {' OR '.join(like_conditions)})"
         )
 
     if not conditions:

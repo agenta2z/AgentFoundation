@@ -6,7 +6,11 @@ Feature: knowledge-module-migration
 - Property 2: KnowledgePiece backward-compatible deserialization
 - Property 3: Content hash determinism
 
-**Validates: Requirements 1.2, 1.10, 1.11**
+Feature: knowledge-space-restructuring
+- Property 1: Space/Spaces Synchronization Invariant
+- Property 2: KnowledgePiece Dict Serialization Round-Trip
+
+**Validates: Requirements 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.10, 1.11**
 """
 import hashlib
 import sys
@@ -279,3 +283,218 @@ class TestContentHashDeterminism:
         piece_padded = KnowledgePiece(content=content_padded)
 
         assert piece_normal.content_hash == piece_padded.content_hash
+
+
+# ── Shared strategies for space testing ──────────────────────────────────────
+
+# Valid space names (the three known spaces)
+_valid_space = st.sampled_from(["main", "personal", "developmental"])
+
+# Space strings that may need normalization (whitespace, mixed case, etc.)
+_messy_space = st.one_of(
+    _valid_space,
+    _valid_space.map(lambda s: s.upper()),
+    _valid_space.map(lambda s: s.capitalize()),
+    _valid_space.map(lambda s: f"  {s}  "),
+    _valid_space.map(lambda s: f"\t{s}\n"),
+)
+
+# Non-empty list of space strings (may contain duplicates, whitespace, mixed case)
+_spaces_list = st.lists(_messy_space, min_size=1, max_size=6)
+
+# Possibly empty list of space strings (to test empty-list fallback)
+_spaces_list_possibly_empty = st.lists(_messy_space, min_size=0, max_size=6)
+
+
+# Feature: knowledge-space-restructuring, Property 1: Space/Spaces Synchronization Invariant
+
+
+class TestSpacesSynchronizationInvariant:
+    """Property 1: Space/Spaces Synchronization Invariant.
+
+    For any KnowledgePiece, regardless of how it was constructed (with space
+    only, spaces only, or both), the invariant piece.space == piece.spaces[0]
+    SHALL always hold, and piece.spaces SHALL be a non-empty list of valid
+    space strings.
+
+    **Validates: Requirements 1.2, 1.3, 1.4**
+    """
+
+    @given(space=_messy_space)
+    @settings(max_examples=100)
+    def test_space_only_construction_syncs_spaces(self, space):
+        """When constructed with space only (no spaces), spaces == [normalized(space)].
+
+        **Validates: Requirements 1.2, 1.3**
+        """
+        piece = KnowledgePiece(content="test content", space=space)
+
+        # spaces should be derived from space
+        assert len(piece.spaces) >= 1
+        assert piece.space == piece.spaces[0]
+        # The space value should be normalized (stripped, lowercased)
+        expected = space.strip().lower()
+        assert piece.spaces == [expected]
+        assert piece.space == expected
+
+    @given(spaces=_spaces_list)
+    @settings(max_examples=100)
+    def test_spaces_only_construction_syncs_space(self, spaces):
+        """When constructed with spaces only, space == spaces[0] after normalization.
+
+        **Validates: Requirements 1.2, 1.4**
+        """
+        piece = KnowledgePiece(content="test content", spaces=spaces)
+
+        # Invariant: space == spaces[0]
+        assert piece.space == piece.spaces[0]
+        # spaces must be non-empty
+        assert len(piece.spaces) >= 1
+        # All spaces should be normalized
+        for s in piece.spaces:
+            assert s == s.strip().lower()
+            assert len(s) > 0
+
+    @given(space=_messy_space, spaces=_spaces_list)
+    @settings(max_examples=100)
+    def test_both_space_and_spaces_construction(self, space, spaces):
+        """When constructed with both space and spaces, spaces wins and space is synced.
+
+        **Validates: Requirements 1.2, 1.4**
+        """
+        piece = KnowledgePiece(content="test content", space=space, spaces=spaces)
+
+        # Invariant: space == spaces[0]
+        assert piece.space == piece.spaces[0]
+        # spaces must be non-empty
+        assert len(piece.spaces) >= 1
+        # All spaces should be normalized
+        for s in piece.spaces:
+            assert s == s.strip().lower()
+            assert len(s) > 0
+
+    @settings(max_examples=100)
+    @given(data=st.data())
+    def test_default_construction_has_main(self, data):
+        """When constructed with neither space nor spaces, defaults to ["main"].
+
+        **Validates: Requirements 1.2, 1.3**
+        """
+        piece = KnowledgePiece(content="test content")
+
+        assert piece.space == "main"
+        assert piece.spaces == ["main"]
+        assert piece.space == piece.spaces[0]
+
+    @given(spaces=_spaces_list_possibly_empty)
+    @settings(max_examples=100)
+    def test_empty_spaces_defaults_to_main(self, spaces):
+        """When spaces is empty or normalizes to empty, defaults to ["main"].
+
+        **Validates: Requirements 1.2, 1.4**
+        """
+        piece = KnowledgePiece(content="test content", spaces=spaces)
+
+        # spaces must always be non-empty after normalization
+        assert len(piece.spaces) >= 1
+        assert piece.space == piece.spaces[0]
+        # If input was empty, should default to main
+        if not spaces or not any(s.strip() for s in spaces):
+            assert piece.spaces == ["main"]
+            assert piece.space == "main"
+
+    @given(spaces=_spaces_list)
+    @settings(max_examples=100)
+    def test_spaces_are_deduplicated_preserving_order(self, spaces):
+        """Duplicate spaces are removed while preserving first-occurrence order.
+
+        **Validates: Requirements 1.2, 1.4**
+        """
+        piece = KnowledgePiece(content="test content", spaces=spaces)
+
+        # No duplicates in the result
+        assert len(piece.spaces) == len(set(piece.spaces))
+        # Invariant still holds
+        assert piece.space == piece.spaces[0]
+
+    @given(spaces=_spaces_list)
+    @settings(max_examples=100)
+    def test_spaces_are_normalized_lowercase_stripped(self, spaces):
+        """All space strings are stripped and lowercased.
+
+        **Validates: Requirements 1.2, 1.4**
+        """
+        piece = KnowledgePiece(content="test content", spaces=spaces)
+
+        for s in piece.spaces:
+            assert s == s.strip()
+            assert s == s.lower()
+            assert len(s) > 0  # no empty strings
+
+        # Invariant still holds
+        assert piece.space == piece.spaces[0]
+
+    @given(piece=knowledge_piece_strategy(include_new_fields=True))
+    @settings(max_examples=100)
+    def test_invariant_holds_for_random_full_pieces(self, piece):
+        """The sync invariant holds for fully random KnowledgePiece instances.
+
+        **Validates: Requirements 1.2, 1.3, 1.4**
+        """
+        assert piece.space == piece.spaces[0]
+        assert len(piece.spaces) >= 1
+        for s in piece.spaces:
+            assert s == s.strip().lower()
+            assert len(s) > 0
+
+
+# Feature: knowledge-space-restructuring, Property 2: KnowledgePiece Dict Serialization Round-Trip
+
+
+class TestKnowledgePieceDictSerializationRoundTrip:
+    """Property 2: KnowledgePiece Dict Serialization Round-Trip.
+
+    For any valid KnowledgePiece with arbitrary spaces values,
+    KnowledgePiece.from_dict(piece.to_dict()).spaces SHALL equal piece.spaces,
+    and KnowledgePiece.from_dict(piece.to_dict()).space SHALL equal piece.space.
+    Additionally, for any dict with a space field but no spaces field,
+    from_dict SHALL produce spaces == [space].
+
+    **Validates: Requirements 1.5, 1.6, 1.7**
+    """
+
+    @given(piece=knowledge_piece_strategy(include_new_fields=True))
+    @settings(max_examples=100)
+    def test_round_trip_preserves_spaces_and_space(self, piece):
+        """to_dict() → from_dict() preserves both spaces and space fields.
+
+        **Validates: Requirements 1.5, 1.7**
+        """
+        serialized = piece.to_dict()
+        restored = KnowledgePiece.from_dict(serialized)
+
+        assert restored.spaces == piece.spaces
+        assert restored.space == piece.space
+        # Invariant still holds on the restored piece
+        assert restored.space == restored.spaces[0]
+
+    @given(space=_messy_space)
+    @settings(max_examples=100)
+    def test_missing_spaces_key_derives_from_space(self, space):
+        """When dict has space but no spaces key, from_dict produces spaces == [normalized(space)].
+
+        **Validates: Requirements 1.6**
+        """
+        data = {
+            "content": "test content",
+            "space": space,
+        }
+        # Ensure 'spaces' key is absent
+        assert "spaces" not in data
+
+        piece = KnowledgePiece.from_dict(data)
+
+        expected_space = space.strip().lower()
+        assert piece.spaces == [expected_space]
+        assert piece.space == expected_space
+        assert piece.space == piece.spaces[0]
