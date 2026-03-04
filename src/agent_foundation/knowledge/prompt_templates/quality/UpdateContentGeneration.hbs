@@ -1,0 +1,37 @@
+{{!--
+  Template: UpdateContentGeneration
+  Source: ingestion/prompts/update_prompt.py (UPDATE_CONTENT_GENERATION_PROMPT)
+  Config: temperature=0.2, max_tokens=16384
+  Purpose: Apply natural language instructions to existing knowledge content to generate updated versions
+  Feed: existing_content, update_instruction
+--}}
+You are a knowledge content editor.
+
+Apply the user's instruction to produce the updated version of an existing knowledge piece.
+
+## Existing Content (FULL)
+{{{existing_content}}}
+
+## User Instruction
+{{{update_instruction}}}
+
+## Guidelines
+- Apply the instruction faithfully to produce the COMPLETE updated content
+- CRITICAL — Semantic consistency check: after applying the instruction, review
+  the ENTIRE result. If the instruction changes the topic, purpose, or scope
+  (e.g., changing "shopping procedure" to "price-checking procedure"), you MUST
+  rewrite steps, descriptions, and details so they reflect the NEW purpose.
+  For example, if a "shopping procedure" becomes a "price-checking procedure",
+  steps about "add items to cart, apply coupons, check out" must be rewritten
+  to match price-checking (e.g., "browse items and compare prices, check for
+  member discounts, review final pricing"). Do NOT simply rename the title and
+  leave the body unchanged — that creates an inconsistent knowledge piece.
+- Preserve parts that remain genuinely relevant and consistent after the change
+- Maintain the original formatting, tone, and structure where possible
+- Return ONLY the updated content, no meta-commentary or explanations
+- The output must be the FULL final content, ready to store as-is
+
+Return JSON:
+{
+    "generated_content": "The complete updated content after applying the instruction"
+}

@@ -1,0 +1,32 @@
+{{!--
+  Template: Classification
+  Source: ingestion/prompts/structuring_prompt.py (CLASSIFICATION_PROMPT_TEMPLATE)
+  Config: temperature=0.0, max_tokens=500
+  Purpose: Re-classify existing knowledge pieces that lack domain information
+  Feed: domain_taxonomy* (dynamic via format_taxonomy_for_prompt), content, tags, info_type, knowledge_type
+--}}
+You are a knowledge classification assistant.
+Given a knowledge piece, determine its domain classification.
+
+## Domain Taxonomy
+{{{domain_taxonomy}}}
+
+## Current Piece
+Content: {{{content}}}
+Existing tags: {{{tags}}}
+Existing info_type: {{{info_type}}}
+Existing knowledge_type: {{{knowledge_type}}}
+
+## Task
+Classify this piece into the taxonomy. Return JSON:
+
+```json
+{
+  "domain": "<primary domain>",
+  "secondary_domains": ["<optional>"],
+  "tags": ["<from domain's tag list>"],
+  "custom_tags": ["<any relevant tags NOT in taxonomy>"]
+}
+```
+
+Only output the JSON, no explanation.

@@ -16,12 +16,20 @@ Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8,
 """
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from attr import attrs, attrib
 
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
+from agent_foundation.knowledge.retrieval.models.kb_metadata import (
+    KnowledgeBaseMetadata,
+)
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
@@ -43,6 +51,7 @@ from agent_foundation.knowledge.retrieval.temporal_decay import (
     TemporalDecayConfig,
     apply_temporal_decay,
 )
+from agent_foundation.knowledge.retrieval.utils import parse_entity_type
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +103,9 @@ class KnowledgeBase:
     # Formatting
     formatter: KnowledgeFormatter = attrib(default=None)
 
+    # Store path for KB-level metadata persistence
+    store_path: Optional[str] = attrib(default=None)
+
     def __attrs_post_init__(self):
         if self.formatter is None:
             self.formatter = KnowledgeFormatter()
@@ -101,6 +113,10 @@ class KnowledgeBase:
         self._hybrid_retriever: Optional[HybridRetriever] = None
         self._temporal_decay_config: Optional[TemporalDecayConfig] = None
         self._mmr_config: Optional[MMRConfig] = None
+        # KB-level metadata
+        self._kb_metadata: Optional[KnowledgeBaseMetadata] = None
+        if self.store_path:
+            self._load_kb_metadata()
 
     # ── Setter methods for optional retrieval enhancements ───────────────
 
@@ -586,14 +602,20 @@ class KnowledgeBase:
 
     # ── CRUD operations ──────────────────────────────────────────────────
 
-    def add_piece(self, piece: KnowledgePiece) -> str:
+    def add_piece(
+        self,
+        piece: KnowledgePiece,
+        operation_id: Optional[str] = None,
+    ) -> str:
         """Add a knowledge piece after validation.
 
         Validates that content is non-empty and does not contain sensitive
-        patterns, then delegates to the piece store.
+        patterns, appends an ADD history record, then delegates to the
+        piece store.
 
         Args:
             piece: The KnowledgePiece to add.
+            operation_id: Optional shared operation ID for batch grouping.
 
         Returns:
             The piece_id of the added piece.
@@ -602,16 +624,32 @@ class KnowledgeBase:
             ValueError: If content is empty or contains sensitive patterns.
         """
         self._validate_content(piece.content)
-        return self.piece_store.add(piece)
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("KnowledgeBase", "add_piece")
+        piece.history.append(DataOperationRecord(
+            operation="add",
+            timestamp=now,
+            operation_id=op_id,
+            source="KnowledgeBase.add_piece",
+        ))
+        result = self.piece_store.add(piece)
+        self._log_kb_operation(op_id, f"Added piece {piece.piece_id}", "KnowledgeBase.add_piece", 1)
+        return result
 
-    def update_piece(self, piece: KnowledgePiece) -> bool:
+    def update_piece(
+        self,
+        piece: KnowledgePiece,
+        operation_id: Optional[str] = None,
+    ) -> bool:
         """Update a knowledge piece after validation.
 
-        Validates content, updates the ``updated_at`` timestamp, then
-        delegates to the piece store.
+        Fetches the existing piece first to capture content_before for
+        history tracking. Validates content, appends an UPDATE record,
+        updates the ``updated_at`` timestamp, then delegates to the store.
 
         Args:
             piece: The KnowledgePiece with updated fields.
+            operation_id: Optional shared operation ID for batch grouping.
 
         Returns:
             True if the piece was found and updated, False if not found.
@@ -620,19 +658,92 @@ class KnowledgeBase:
             ValueError: If content is empty or contains sensitive patterns.
         """
         self._validate_content(piece.content)
-        piece.updated_at = datetime.now(timezone.utc).isoformat()
-        return self.piece_store.update(piece)
 
-    def remove_piece(self, piece_id: str) -> bool:
+        # Fetch existing to capture content_before
+        existing = self.piece_store.get_by_id(piece.piece_id)
+        if existing is None:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("KnowledgeBase", "update_piece")
+
+        # Build fields_changed for non-content field diffs
+        fields_changed = {}
+        for field_name in ("spaces", "tags", "domain", "info_type", "knowledge_type"):
+            old_val = getattr(existing, field_name, None)
+            new_val = getattr(piece, field_name, None)
+            # Normalize KnowledgeType to string for comparison
+            if hasattr(old_val, "value"):
+                old_val = old_val.value
+            if hasattr(new_val, "value"):
+                new_val = new_val.value
+            if old_val != new_val:
+                fields_changed[field_name] = {"before": old_val, "after": new_val}
+
+        piece.history.append(DataOperationRecord(
+            operation="update",
+            timestamp=now,
+            operation_id=op_id,
+            source="KnowledgeBase.update_piece",
+            content_before=existing.content if existing.content != piece.content else None,
+            content_after=piece.content if existing.content != piece.content else None,
+            fields_changed=fields_changed or None,
+        ))
+        piece.updated_at = now
+        result = self.piece_store.update(piece)
+        if result:
+            self._log_kb_operation(op_id, f"Updated piece {piece.piece_id}", "KnowledgeBase.update_piece", 1)
+        return result
+
+    def remove_piece(
+        self,
+        piece_id: str,
+        operation_id: Optional[str] = None,
+        hard: bool = False,
+    ) -> bool:
         """Remove a knowledge piece by ID.
+
+        By default performs a soft delete (sets is_active=False and appends
+        a DELETE history record). Pass ``hard=True`` for permanent removal.
 
         Args:
             piece_id: The unique identifier of the piece to remove.
+            operation_id: Optional shared operation ID for batch grouping.
+            hard: If True, permanently removes the piece from the store.
 
         Returns:
-            True if the piece existed and was removed, False if not found.
+            True if the piece existed and was removed/deactivated,
+            False if not found.
         """
-        return self.piece_store.remove(piece_id)
+        if hard:
+            result = self.piece_store.remove(piece_id)
+            if result:
+                op_id = operation_id or generate_operation_id("KnowledgeBase", "hard_delete")
+                self._log_kb_operation(op_id, f"Hard-deleted piece {piece_id}", "KnowledgeBase.remove_piece", 1)
+            return result
+
+        # Soft delete
+        piece = self.piece_store.get_by_id(piece_id)
+        if piece is None:
+            return False
+        if not piece.is_active:
+            return False  # Already soft-deleted
+
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("KnowledgeBase", "delete_piece")
+        piece.is_active = False
+        piece.history.append(DataOperationRecord(
+            operation="delete",
+            timestamp=now,
+            operation_id=op_id,
+            source="KnowledgeBase.remove_piece",
+            details={"delete_mode": "soft"},
+        ))
+        piece.updated_at = now
+        result = self.piece_store.update(piece)
+        if result:
+            self._log_kb_operation(op_id, f"Soft-deleted piece {piece_id}", "KnowledgeBase.remove_piece", 1)
+        return result
 
     # ── Bulk loading ─────────────────────────────────────────────────────
 
@@ -702,6 +813,490 @@ class KnowledgeBase:
             if re.search(pattern, content):
                 return True
         return False
+
+    # ── KB-level metadata ──────────────────────────────────────────────
+
+    def _load_kb_metadata(self) -> None:
+        """Load or create KB metadata from store_path."""
+        meta_path = os.path.join(self.store_path, "_kb_metadata.json")
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    self._kb_metadata = KnowledgeBaseMetadata.from_dict(json.load(f))
+            except Exception as exc:
+                logger.warning("Failed to load KB metadata: %s", exc)
+                self._kb_metadata = KnowledgeBaseMetadata(kb_id=self.store_path)
+        else:
+            self._kb_metadata = KnowledgeBaseMetadata(kb_id=self.store_path)
+
+    def _save_kb_metadata(self) -> None:
+        """Persist KB metadata to store_path."""
+        if self._kb_metadata is None or self.store_path is None:
+            return
+        meta_path = os.path.join(self.store_path, "_kb_metadata.json")
+        try:
+            os.makedirs(self.store_path, exist_ok=True)
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(self._kb_metadata.to_dict(), f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning("Failed to save KB metadata: %s", exc)
+
+    def _log_kb_operation(
+        self,
+        operation_id: str,
+        description: str,
+        source: str,
+        entity_count: int = 1,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Log an operation to KB metadata and persist."""
+        if self._kb_metadata is None:
+            return
+        self._kb_metadata.log_operation(
+            operation_id=operation_id,
+            description=description,
+            source=source,
+            entity_count=entity_count,
+            details=details,
+        )
+        self._save_kb_metadata()
+
+    def get_kb_metadata(self) -> Optional[KnowledgeBaseMetadata]:
+        """Return the KB-level metadata object."""
+        return self._kb_metadata
+
+    def get_operations_since(self, timestamp: str) -> list:
+        """Return KB operation entries after the given timestamp."""
+        if self._kb_metadata is None:
+            return []
+        return [
+            op for op in self._kb_metadata.operations
+            if op.timestamp > timestamp
+        ]
+
+    def get_operation_by_id(self, operation_id: str):
+        """Look up a KB operation entry by its operation_id."""
+        if self._kb_metadata is None:
+            return None
+        for op in self._kb_metadata.operations:
+            if op.operation_id == operation_id:
+                return op
+        return None
+
+    # ── Rollback ─────────────────────────────────────────────────────────
+
+    def rollback_to(self, timestamp: str) -> Dict[str, Any]:
+        """Restore all knowledge to its state at the given ISO 8601 timestamp.
+
+        Scans all pieces, metadata, and graph entities across all namespaces,
+        finds history records after the target timestamp, and applies undo
+        operations in strict reverse chronological order.
+
+        Args:
+            timestamp: ISO 8601 UTC timestamp to roll back to.
+
+        Returns:
+            Dict with counts of entities rolled back per type and
+            operation_ids affected.
+        """
+        op_id = generate_operation_id("KnowledgeBase", "rollback_to")
+        result = {
+            "pieces": 0,
+            "metadata": 0,
+            "graph_nodes": 0,
+            "graph_edges": 0,
+            "operation_ids": set(),
+        }
+
+        # ── Pieces rollback ──────────────────────────────────────────
+        namespaces = list(self.piece_store.retrieval_service.namespaces()) if hasattr(self.piece_store, 'retrieval_service') else []
+        namespaces.append(None)  # default namespace
+
+        for ns in namespaces:
+            pieces = self.piece_store.list_all(entity_id=ns)
+            for piece in pieces:
+                records_after = [
+                    r for r in piece.history
+                    if r.timestamp > timestamp
+                ]
+                if not records_after:
+                    continue
+
+                records_after.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in records_after:
+                    if record.operation_id:
+                        result["operation_ids"].add(record.operation_id)
+
+                    if record.operation == "update" and record.content_before is not None:
+                        piece.content = record.content_before
+                        piece.content_hash = piece._compute_content_hash()
+                        changed = True
+                    elif record.operation == "delete":
+                        piece.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        self.piece_store.remove(piece.piece_id)
+                        result["pieces"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        piece.is_active = False
+                        changed = True
+
+                if changed:
+                    piece.history = [r for r in piece.history if r.timestamp <= timestamp]
+                    piece.updated_at = datetime.now(timezone.utc).isoformat()
+                    self.piece_store.update(piece)
+                    result["pieces"] += 1
+
+        # ── Metadata rollback ────────────────────────────────────────
+        if hasattr(self.metadata_store, 'kv_service'):
+            all_entity_ids = self.metadata_store.list_entities(include_inactive=True)
+            for eid in all_entity_ids:
+                meta = self.metadata_store.get_metadata(eid, include_inactive=True)
+                if meta is None:
+                    continue
+                records_after = [
+                    r for r in meta.history
+                    if r.timestamp > timestamp
+                ]
+                if not records_after:
+                    continue
+
+                records_after.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in records_after:
+                    if record.operation_id:
+                        result["operation_ids"].add(record.operation_id)
+
+                    if record.operation == "update" and record.properties_before is not None:
+                        meta.properties = dict(record.properties_before)
+                        changed = True
+                    elif record.operation == "delete":
+                        meta.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        # Hard-remove metadata added after target
+                        entity_type = parse_entity_type(eid)
+                        self.metadata_store.kv_service.delete(eid, namespace=entity_type)
+                        result["metadata"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        meta.is_active = False
+                        changed = True
+
+                if changed:
+                    meta.history = [r for r in meta.history if r.timestamp <= timestamp]
+                    meta.updated_at = datetime.now(timezone.utc).isoformat()
+                    # Write directly to KV service to bypass adapter history tracking
+                    entity_type = parse_entity_type(eid)
+                    self.metadata_store.kv_service.put(
+                        eid, meta.to_dict(), namespace=entity_type,
+                    )
+                    result["metadata"] += 1
+
+        # ── Graph rollback (nodes then edges) ────────────────────────
+        if hasattr(self.graph_store, 'graph_service'):
+            gs = self.graph_store.graph_service
+
+            # Phase 1: Rollback graph nodes
+            all_nodes = gs.list_nodes()
+            for node in all_nodes:
+                records_after = [
+                    r for r in node.history
+                    if r.timestamp > timestamp
+                ]
+                if not records_after:
+                    continue
+
+                records_after.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in records_after:
+                    if record.operation_id:
+                        result["operation_ids"].add(record.operation_id)
+
+                    if record.operation == "update" and record.properties_before is not None:
+                        node.properties = dict(record.properties_before)
+                        changed = True
+                    elif record.operation == "delete":
+                        node.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        # Hard-remove node added after target (cascades edges)
+                        gs.remove_node(node.node_id)
+                        result["graph_nodes"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        node.is_active = False
+                        changed = True
+
+                if changed:
+                    node.history = [r for r in node.history if r.timestamp <= timestamp]
+                    gs.add_node(node)
+                    result["graph_nodes"] += 1
+
+            # Phase 2: Rollback graph edges
+            processed_edges = set()
+            remaining_nodes = gs.list_nodes()
+            for node in remaining_nodes:
+                edges = gs.get_edges(node.node_id, direction="outgoing")
+                for edge in edges:
+                    edge_key = (edge.source_id, edge.target_id, edge.edge_type)
+                    if edge_key in processed_edges:
+                        continue
+                    processed_edges.add(edge_key)
+
+                    records_after = [
+                        r for r in edge.history
+                        if r.timestamp > timestamp
+                    ]
+                    if not records_after:
+                        continue
+
+                    records_after.sort(key=lambda r: r.timestamp, reverse=True)
+
+                    changed = False
+                    for record in records_after:
+                        if record.operation_id:
+                            result["operation_ids"].add(record.operation_id)
+
+                        if record.operation == "update" and record.properties_before is not None:
+                            edge.properties = dict(record.properties_before)
+                            changed = True
+                        elif record.operation == "delete":
+                            edge.is_active = True
+                            changed = True
+                        elif record.operation == "add":
+                            gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                            result["graph_edges"] += 1
+                            changed = False
+                            break
+                        elif record.operation == "restore":
+                            edge.is_active = False
+                            changed = True
+
+                    if changed:
+                        edge.history = [r for r in edge.history if r.timestamp <= timestamp]
+                        gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                        gs.add_edge(edge)
+                        result["graph_edges"] += 1
+
+        total = result["pieces"] + result["metadata"] + result["graph_nodes"] + result["graph_edges"]
+        result["operation_ids"] = list(result["operation_ids"])
+        self._log_kb_operation(
+            op_id,
+            f"Rolled back to {timestamp}",
+            "KnowledgeBase.rollback_to",
+            total,
+        )
+        return result
+
+    def rollback_operation(self, operation_id: str) -> Dict[str, Any]:
+        """Undo all changes from a specific batch operation.
+
+        Finds all entities (pieces, metadata, graph nodes/edges) with history
+        records matching the operation_id and reverses those records in strict
+        reverse chronological order.
+
+        Args:
+            operation_id: The operation ID to roll back.
+
+        Returns:
+            Dict with counts of entities rolled back per type.
+        """
+        rb_op_id = generate_operation_id("KnowledgeBase", "rollback_op")
+        result = {"pieces": 0, "metadata": 0, "graph_nodes": 0, "graph_edges": 0}
+
+        # ── Pieces ────────────────────────────────────────────────────
+        namespaces = list(self.piece_store.retrieval_service.namespaces()) if hasattr(self.piece_store, 'retrieval_service') else []
+        namespaces.append(None)
+
+        for ns in namespaces:
+            pieces = self.piece_store.list_all(entity_id=ns)
+            for piece in pieces:
+                matching = [
+                    r for r in piece.history
+                    if r.operation_id == operation_id
+                ]
+                if not matching:
+                    continue
+
+                matching.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in matching:
+                    if record.operation == "update" and record.content_before is not None:
+                        piece.content = record.content_before
+                        piece.content_hash = piece._compute_content_hash()
+                        changed = True
+                    elif record.operation == "delete":
+                        piece.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        self.piece_store.remove(piece.piece_id)
+                        result["pieces"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        piece.is_active = False
+                        changed = True
+
+                if changed:
+                    piece.history = [
+                        r for r in piece.history
+                        if r.operation_id != operation_id
+                    ]
+                    piece.updated_at = datetime.now(timezone.utc).isoformat()
+                    self.piece_store.update(piece)
+                    result["pieces"] += 1
+
+        # ── Metadata ──────────────────────────────────────────────────
+        if hasattr(self.metadata_store, 'kv_service'):
+            all_entity_ids = self.metadata_store.list_entities(include_inactive=True)
+            for eid in all_entity_ids:
+                meta = self.metadata_store.get_metadata(eid, include_inactive=True)
+                if meta is None:
+                    continue
+                matching = [
+                    r for r in meta.history
+                    if r.operation_id == operation_id
+                ]
+                if not matching:
+                    continue
+
+                matching.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in matching:
+                    if record.operation == "update" and record.properties_before is not None:
+                        meta.properties = dict(record.properties_before)
+                        changed = True
+                    elif record.operation == "delete":
+                        meta.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        entity_type = parse_entity_type(eid)
+                        self.metadata_store.kv_service.delete(eid, namespace=entity_type)
+                        result["metadata"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        meta.is_active = False
+                        changed = True
+
+                if changed:
+                    meta.history = [
+                        r for r in meta.history
+                        if r.operation_id != operation_id
+                    ]
+                    meta.updated_at = datetime.now(timezone.utc).isoformat()
+                    entity_type = parse_entity_type(eid)
+                    self.metadata_store.kv_service.put(
+                        eid, meta.to_dict(), namespace=entity_type,
+                    )
+                    result["metadata"] += 1
+
+        # ── Graph (nodes then edges) ─────────────────────────────────
+        if hasattr(self.graph_store, 'graph_service'):
+            gs = self.graph_store.graph_service
+
+            # Phase 1: nodes
+            all_nodes = gs.list_nodes()
+            for node in all_nodes:
+                matching = [
+                    r for r in node.history
+                    if r.operation_id == operation_id
+                ]
+                if not matching:
+                    continue
+
+                matching.sort(key=lambda r: r.timestamp, reverse=True)
+
+                changed = False
+                for record in matching:
+                    if record.operation == "update" and record.properties_before is not None:
+                        node.properties = dict(record.properties_before)
+                        changed = True
+                    elif record.operation == "delete":
+                        node.is_active = True
+                        changed = True
+                    elif record.operation == "add":
+                        gs.remove_node(node.node_id)
+                        result["graph_nodes"] += 1
+                        changed = False
+                        break
+                    elif record.operation == "restore":
+                        node.is_active = False
+                        changed = True
+
+                if changed:
+                    node.history = [
+                        r for r in node.history
+                        if r.operation_id != operation_id
+                    ]
+                    gs.add_node(node)
+                    result["graph_nodes"] += 1
+
+            # Phase 2: edges
+            processed_edges = set()
+            remaining_nodes = gs.list_nodes()
+            for node in remaining_nodes:
+                edges = gs.get_edges(node.node_id, direction="outgoing")
+                for edge in edges:
+                    edge_key = (edge.source_id, edge.target_id, edge.edge_type)
+                    if edge_key in processed_edges:
+                        continue
+                    processed_edges.add(edge_key)
+
+                    matching = [
+                        r for r in edge.history
+                        if r.operation_id == operation_id
+                    ]
+                    if not matching:
+                        continue
+
+                    matching.sort(key=lambda r: r.timestamp, reverse=True)
+
+                    changed = False
+                    for record in matching:
+                        if record.operation == "update" and record.properties_before is not None:
+                            edge.properties = dict(record.properties_before)
+                            changed = True
+                        elif record.operation == "delete":
+                            edge.is_active = True
+                            changed = True
+                        elif record.operation == "add":
+                            gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                            result["graph_edges"] += 1
+                            changed = False
+                            break
+                        elif record.operation == "restore":
+                            edge.is_active = False
+                            changed = True
+
+                    if changed:
+                        edge.history = [
+                            r for r in edge.history
+                            if r.operation_id != operation_id
+                        ]
+                        gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                        gs.add_edge(edge)
+                        result["graph_edges"] += 1
+
+        total = result["pieces"] + result["metadata"] + result["graph_nodes"] + result["graph_edges"]
+        self._log_kb_operation(
+            rb_op_id,
+            f"Rolled back operation {operation_id}",
+            "KnowledgeBase.rollback_operation",
+            total,
+        )
+        return result
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 

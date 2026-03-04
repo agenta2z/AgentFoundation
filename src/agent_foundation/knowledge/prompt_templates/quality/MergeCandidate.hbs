@@ -1,0 +1,34 @@
+{{!--
+  Template: MergeCandidate
+  Source: ingestion/prompts/merge_candidate.py (MERGE_CANDIDATE_PROMPT)
+  Config: temperature=0.0, max_tokens=500
+  Purpose: Analyze potential merge candidates for a knowledge piece and classify merge types
+  Feed: new_content, new_domain, new_tags, candidates_formatted
+--}}
+You are analyzing potential merge candidates for a knowledge piece.
+
+## New Piece
+Content: {{{new_content}}}
+Domain: {{{new_domain}}}
+Tags: {{{new_tags}}}
+
+## Candidate Pieces
+{{{candidates_formatted}}}
+
+## Analysis Required
+For each candidate, determine:
+1. merge_type: duplicate|superset|subset|overlapping|update|unrelated
+2. similarity: 0.0-1.0 (semantic similarity)
+3. reason: Why this merge type was assigned
+
+Return JSON:
+{
+  "candidates": [
+    {
+      "piece_id": "...",
+      "merge_type": "duplicate|superset|subset|overlapping|update|unrelated",
+      "similarity": 0.0-1.0,
+      "reason": "..."
+    }
+  ]
+}

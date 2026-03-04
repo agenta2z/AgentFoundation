@@ -33,6 +33,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
 
 
 @attrs
@@ -94,6 +95,8 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
                 "pending_space_suggestions": piece.pending_space_suggestions,
                 "space_suggestion_reasons": piece.space_suggestion_reasons,
                 "space_suggestion_status": piece.space_suggestion_status,
+                # History — full records preserved for rollback support
+                "history": [r.to_dict() for r in piece.history],
             },
             embedding_text=piece.embedding_text,
             created_at=piece.created_at,
@@ -147,6 +150,10 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
             pending_space_suggestions=doc.metadata.get("pending_space_suggestions"),
             space_suggestion_reasons=doc.metadata.get("space_suggestion_reasons"),
             space_suggestion_status=doc.metadata.get("space_suggestion_status"),
+            history=[
+                DataOperationRecord.from_dict(r)
+                for r in doc.metadata.get("history", [])
+            ],
         )
 
     def _namespace(self, entity_id: Optional[str]) -> Optional[str]:

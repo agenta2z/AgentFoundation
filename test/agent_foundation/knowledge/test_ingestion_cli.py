@@ -27,7 +27,7 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
 import pytest
 
 from agent_foundation.knowledge import KnowledgeIngestionCLI, KnowledgeBase
-from agent_foundation.knowledge.retrieval.ingestion_cli import STRUCTURING_PROMPT
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
@@ -194,15 +194,18 @@ class TestParseAndValidate:
 
 
 class TestStructuringPrompt:
-    """Test that STRUCTURING_PROMPT contains required schema structure."""
+    """Test that the CLI structuring prompt template contains required schema structure."""
 
     def test_structuring_prompt_contains_schema(self):
-        """STRUCTURING_PROMPT contains 'metadata', 'pieces', 'graph', 'knowledge_type', 'info_type'."""
-        assert "metadata" in STRUCTURING_PROMPT
-        assert "pieces" in STRUCTURING_PROMPT
-        assert "graph" in STRUCTURING_PROMPT
-        assert "knowledge_type" in STRUCTURING_PROMPT
-        assert "info_type" in STRUCTURING_PROMPT
+        """Rendered Structuring.Cli template contains 'metadata', 'pieces', 'graph', 'knowledge_type', 'info_type'."""
+        rendered = render_prompt(
+            "ingestion/Structuring", template_version="Cli", user_input="test input"
+        )
+        assert "metadata" in rendered
+        assert "pieces" in rendered
+        assert "graph" in rendered
+        assert "knowledge_type" in rendered
+        assert "info_type" in rendered
 
 
 # ── Test: _save_check_in creates files ───────────────────────────────────────

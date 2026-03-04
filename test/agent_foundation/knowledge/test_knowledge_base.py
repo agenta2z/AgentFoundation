@@ -232,12 +232,22 @@ class TestRemovePiece:
         result = kb.remove_piece("nonexistent")
         assert result is False
 
-    def test_remove_then_get_returns_none(self, kb, stores):
+    def test_remove_soft_deletes_piece(self, kb, stores):
         _, piece_store, _ = stores
         piece = KnowledgePiece(content="Temporary", piece_id="rm-2")
         kb.add_piece(piece)
         kb.remove_piece("rm-2")
-        assert piece_store.get_by_id("rm-2") is None
+        # Soft delete: piece still in store but is_active=False
+        soft_deleted = piece_store.get_by_id("rm-2")
+        assert soft_deleted is not None
+        assert soft_deleted.is_active is False
+
+    def test_remove_hard_deletes_piece(self, kb, stores):
+        _, piece_store, _ = stores
+        piece = KnowledgePiece(content="Temporary", piece_id="rm-3")
+        kb.add_piece(piece)
+        kb.remove_piece("rm-3", hard=True)
+        assert piece_store.get_by_id("rm-3") is None
 
 
 # ── Setter method tests ──────────────────────────────────────────────────────

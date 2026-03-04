@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.knowledge_consolidator import KnowledgeConsolidator
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 
@@ -121,10 +122,12 @@ class KnowledgeProvider:
         formatters: Optional[Dict[str, Union[Callable, str]]] = None,
         default_formatter: Optional[Union[Callable, str]] = None,
         metadata_info_type: str = "user_profile",
+        consolidator: Optional[KnowledgeConsolidator] = None,
     ):
         self.kb = kb
         self.formatters = formatters or {}
         self.metadata_info_type = metadata_info_type
+        self.consolidator = consolidator
         # Resolve the default formatter
         if default_formatter is not None:
             self._default_formatter = self._resolve_formatter(default_formatter)
@@ -164,6 +167,10 @@ class KnowledgeProvider:
                 group_data["graph_context"],
             )
             output[info_type] = formatted
+
+        # Optional LLM consolidation (deduplication + conflict detection)
+        if self.consolidator is not None:
+            output = self.consolidator.consolidate(query, output)
 
         return output
 

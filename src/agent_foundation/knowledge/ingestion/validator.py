@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set
 
-from agent_foundation.knowledge.ingestion.prompts.validation import VALIDATION_PROMPT
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ValidationResult
 
@@ -136,7 +136,8 @@ class KnowledgeValidator:
                 "suggestions": [],
             }
 
-        prompt = VALIDATION_PROMPT.format(
+        prompt = render_prompt(
+            "quality/Validation",
             content=piece.content[:1000],
             domain=piece.domain,
             source=piece.source or "unknown",

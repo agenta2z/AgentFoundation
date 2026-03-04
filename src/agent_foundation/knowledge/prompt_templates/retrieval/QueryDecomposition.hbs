@@ -1,0 +1,27 @@
+{{!--
+  Template: QueryDecomposition
+  Source: retrieval/agentic_retriever.py (inline prompt_template in create_llm_decomposer)
+  Config: temperature=0.0, max_tokens=500
+  Purpose: Decompose user queries into 1-3 targeted sub-queries for agentic retrieval
+  Feed: domains_section, query
+--}}
+You are a query decomposition assistant.
+
+Given a user query, decompose it into 1-3 sub-queries that together cover
+the full information need. Each sub-query should target a specific aspect.
+
+{{{domains_section}}}
+User query: {{{query}}}
+
+Return a JSON array of objects with keys:
+- "query": the sub-query string
+- "domain": the target domain (or null for general)
+- "weight": importance weight (0.5-1.5)
+
+Example:
+[
+  {"query": "flash attention memory optimization", "domain": "model_optimization", "weight": 1.0},
+  {"query": "flash attention H100 performance", "domain": "training_efficiency", "weight": 0.8}
+]
+
+Return only the JSON array, no explanation.

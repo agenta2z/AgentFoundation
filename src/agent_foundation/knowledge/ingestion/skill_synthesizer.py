@@ -13,9 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from agent_foundation.knowledge.ingestion.prompts.skill_synthesis import (
-    SKILL_SYNTHESIS_PROMPT,
-)
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
@@ -145,10 +143,11 @@ class SkillSynthesizer:
         common_tags = ", ".join(sorted(all_tags)[:5]) or "none"
         domains = ", ".join(sorted(all_domains))
 
-        prompt = SKILL_SYNTHESIS_PROMPT.format(
+        prompt = render_prompt(
+            "quality/SkillSynthesis",
             pieces_formatted=pieces_formatted,
-            num_pieces=len(pieces),
-            avg_similarity=avg_similarity,
+            num_pieces=str(len(pieces)),
+            avg_similarity=f"{avg_similarity:.3f}",
             common_tags=common_tags,
             domains=domains,
         )

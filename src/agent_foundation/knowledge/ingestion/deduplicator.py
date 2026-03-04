@@ -12,9 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-from agent_foundation.knowledge.ingestion.prompts.dedup_llm_judge import (
-    DEDUP_LLM_JUDGE_PROMPT,
-)
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.enums import DedupAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import DedupResult
@@ -158,8 +156,9 @@ class ThreeTierDeduplicator:
                 similarity_score=similarity,
             )
 
-        prompt = DEDUP_LLM_JUDGE_PROMPT.format(
-            similarity=similarity,
+        prompt = render_prompt(
+            "quality/DedupJudge",
+            similarity=f"{similarity:.3f}",
             existing_content=existing_piece.content[:500],
             existing_domain=existing_piece.domain,
             existing_tags=", ".join(existing_piece.tags),

@@ -1,14 +1,20 @@
-"""Knowledge validation prompt for LLM-based quality checks."""
-
-VALIDATION_PROMPT = """You are a knowledge validator performing quality checks.
+{{!--
+  Template: Validation
+  Source: ingestion/prompts/validation.py (VALIDATION_PROMPT)
+  Config: temperature=0.0, max_tokens=500
+  Purpose: Quality validation checks on knowledge pieces (correctness, authenticity, etc.)
+  Feed: content, domain, source, created_at, checks_to_perform
+  Note: Consumer truncates content to 1000 chars before formatting
+--}}
+You are a knowledge validator performing quality checks.
 
 ## Content to Validate
-Content: {content}
-Domain: {domain}
-Source: {source}
-Created: {created_at}
+Content: {{{content}}}
+Domain: {{{domain}}}
+Source: {{{source}}}
+Created: {{{created_at}}}
 
-## Checks to Perform: {checks_to_perform}
+## Checks to Perform: {{{checks_to_perform}}}
 
 For each check, evaluate and provide a pass/fail with reasoning.
 
@@ -28,16 +34,10 @@ For each check, evaluate and provide a pass/fail with reasoning.
 
 ## Your Evaluation
 Return JSON:
-{{
+{
   "passed": ["list of checks that passed"],
   "failed": ["list of checks that failed"],
   "issues": ["specific issues found, one per failed check"],
   "suggestions": ["how to fix each issue"],
   "overall_confidence": 0.0-1.0
-}}
-"""
-
-VALIDATION_CONFIG = {
-    "temperature": 0.0,
-    "max_tokens": 500,
 }

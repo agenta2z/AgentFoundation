@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 
 from attr import attrs, attrib
 
+from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
+
 
 class KnowledgeType(StrEnum):
     """Classification of knowledge pieces (WHAT the content is).
@@ -136,6 +138,9 @@ class KnowledgePiece:
     space_suggestion_reasons: Optional[List[str]] = attrib(default=None)
     space_suggestion_status: Optional[str] = attrib(default=None)
 
+    # Operation history
+    history: List[DataOperationRecord] = attrib(factory=list)
+
     def __attrs_post_init__(self):
         if self.piece_id is None:
             self.piece_id = str(uuid.uuid4())
@@ -216,6 +221,8 @@ class KnowledgePiece:
             result["space_suggestion_reasons"] = list(self.space_suggestion_reasons)
         if self.space_suggestion_status is not None:
             result["space_suggestion_status"] = self.space_suggestion_status
+        if self.history:
+            result["history"] = [r.to_dict() for r in self.history]
         return result
 
     @classmethod
@@ -289,4 +296,8 @@ class KnowledgePiece:
             pending_space_suggestions=data.get("pending_space_suggestions"),
             space_suggestion_reasons=data.get("space_suggestion_reasons"),
             space_suggestion_status=data.get("space_suggestion_status"),
+            history=[
+                DataOperationRecord.from_dict(r)
+                for r in data.get("history", [])
+            ],
         )

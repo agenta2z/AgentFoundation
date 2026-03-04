@@ -8,10 +8,15 @@ with no model conversion needed.
 
 Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
 """
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from attr import attrs, attrib
 
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
 from rich_python_utils.service_utils.graph_service.graph_service_base import (
     GraphServiceBase,
 )
@@ -35,54 +40,140 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
 
     graph_service: GraphServiceBase = attrib()
 
-    def add_node(self, node: GraphNode) -> None:
-        """Add or update a node in the graph.
+    def add_node(
+        self,
+        node: GraphNode,
+        operation_id: Optional[str] = None,
+    ) -> None:
+        """Add or update a node in the graph with history tracking.
 
-        Delegates directly to the graph service's add_node method.
+        If the node already exists (upsert), appends an UPDATE record.
+        If new, appends an ADD record.
 
         Args:
             node: The GraphNode to add or update.
+            operation_id: Optional shared operation ID for batch grouping.
         """
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("GraphStore", "add_node")
+        existing = self.graph_service.get_node(node.node_id)
+        if existing:
+            node.history = existing.history + node.history
+            node.history.append(DataOperationRecord(
+                operation="update",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.add_node",
+                properties_before=dict(existing.properties),
+                properties_after=dict(node.properties),
+            ))
+        else:
+            node.history.append(DataOperationRecord(
+                operation="add",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.add_node",
+            ))
         self.graph_service.add_node(node)
 
-    def get_node(self, node_id: str) -> Optional[GraphNode]:
-        """Get a node by its ID.
-
-        Delegates directly to the graph service's get_node method.
+    def get_node(
+        self,
+        node_id: str,
+        include_inactive: bool = False,
+    ) -> Optional[GraphNode]:
+        """Get a node by its ID, filtering out soft-deleted nodes.
 
         Args:
             node_id: The unique identifier of the node.
+            include_inactive: If True, return soft-deleted nodes too.
 
         Returns:
-            The GraphNode if found, or None if not found.
+            The GraphNode if found (and active), or None.
         """
-        return self.graph_service.get_node(node_id)
+        node = self.graph_service.get_node(node_id)
+        if node is None:
+            return None
+        if not include_inactive and not node.is_active:
+            return None
+        return node
 
-    def remove_node(self, node_id: str) -> bool:
-        """Remove a node and all its associated edges.
+    def remove_node(
+        self,
+        node_id: str,
+        operation_id: Optional[str] = None,
+    ) -> bool:
+        """Soft-delete a node and cascade to connected edges.
 
-        Delegates to the graph service's remove_node method, which
-        cascade-deletes all edges involving this node.
+        Sets is_active=False on the node and all connected edges,
+        appending DELETE history records with a shared operation_id.
 
         Args:
             node_id: The unique identifier of the node to remove.
+            operation_id: Optional shared operation ID for batch grouping.
 
         Returns:
-            True if the node existed and was removed, False if not found.
+            True if the node existed and was soft-deleted, False if not
+            found or already inactive.
         """
-        return self.graph_service.remove_node(node_id)
+        node = self.graph_service.get_node(node_id)
+        if node is None or not node.is_active:
+            return False
 
-    def add_relation(self, relation: GraphEdge) -> None:
-        """Add an edge between two existing nodes.
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("GraphStore", "remove_node")
 
-        Delegates directly to the graph service's add_edge method.
+        # Soft-delete the node
+        node.is_active = False
+        node.history.append(DataOperationRecord(
+            operation="delete",
+            timestamp=now,
+            operation_id=op_id,
+            source="GraphServiceEntityGraphStore.remove_node",
+            details={"delete_mode": "soft"},
+        ))
+        self.graph_service.add_node(node)  # upsert with updated state
+
+        # Cascade: soft-delete all connected edges
+        edges = self.graph_service.get_edges(node_id, direction="both")
+        for edge in edges:
+            if not edge.is_active:
+                continue
+            edge.is_active = False
+            edge.history.append(DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.remove_node",
+                details={"delete_mode": "soft", "cascade_from": node_id},
+            ))
+            # Re-save edge — strategy varies by backend but add_edge handles it
+            self.graph_service.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+            self.graph_service.add_edge(edge)
+
+        return True
+
+    def add_relation(
+        self,
+        relation: GraphEdge,
+        operation_id: Optional[str] = None,
+    ) -> None:
+        """Add an edge between two existing nodes with history tracking.
 
         Args:
             relation: The GraphEdge to add.
+            operation_id: Optional shared operation ID for batch grouping.
 
         Raises:
             ValueError: If either the source or target node does not exist.
         """
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("GraphStore", "add_relation")
+        relation.history.append(DataOperationRecord(
+            operation="add",
+            timestamp=now,
+            operation_id=op_id,
+            source="GraphServiceEntityGraphStore.add_relation",
+        ))
         self.graph_service.add_edge(relation)
 
     def get_relations(
@@ -90,42 +181,73 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
         node_id: str,
         relation_type: str = None,
         direction: str = "outgoing",
+        include_inactive: bool = False,
     ) -> List[GraphEdge]:
-        """Get edges for a node, optionally filtered by type and direction.
-
-        Delegates directly to the graph service's get_edges method.
+        """Get edges for a node, filtering out soft-deleted edges.
 
         Args:
             node_id: The node whose edges to retrieve.
             relation_type: If specified, only return edges of this type.
             direction: Direction filter ("outgoing", "incoming", or "both").
+            include_inactive: If True, include soft-deleted edges.
 
         Returns:
-            A list of GraphEdge objects matching the filter criteria.
+            A list of active GraphEdge objects matching the filter criteria.
         """
-        return self.graph_service.get_edges(
+        edges = self.graph_service.get_edges(
             node_id, edge_type=relation_type, direction=direction
         )
+        if include_inactive:
+            return edges
+        return [e for e in edges if e.is_active]
 
     def remove_relation(
         self,
         source_id: str,
         target_id: str,
         relation_type: str,
+        operation_id: Optional[str] = None,
     ) -> bool:
-        """Remove a specific edge between two nodes.
+        """Soft-delete a specific edge between two nodes.
 
-        Delegates directly to the graph service's remove_edge method.
+        Fetches the edge, sets is_active=False, appends a DELETE history
+        record, and re-saves via remove+add (to handle backends like Neo4j
+        that use CREATE instead of MERGE for edges).
 
         Args:
             source_id: The source node ID of the edge.
             target_id: The target node ID of the edge.
             relation_type: The type of the edge to remove.
+            operation_id: Optional shared operation ID for batch grouping.
 
         Returns:
-            True if the edge existed and was removed, False if not found.
+            True if the edge existed and was soft-deleted, False if not
+            found or already inactive.
         """
-        return self.graph_service.remove_edge(source_id, target_id, relation_type)
+        # Find the specific edge
+        edges = self.graph_service.get_edges(source_id, edge_type=relation_type, direction="outgoing")
+        target_edge = None
+        for e in edges:
+            if e.target_id == target_id and e.edge_type == relation_type:
+                target_edge = e
+                break
+        if target_edge is None or not target_edge.is_active:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("GraphStore", "remove_relation")
+        target_edge.is_active = False
+        target_edge.history.append(DataOperationRecord(
+            operation="delete",
+            timestamp=now,
+            operation_id=op_id,
+            source="GraphServiceEntityGraphStore.remove_relation",
+            details={"delete_mode": "soft"},
+        ))
+        # Delete and re-create to update stored state
+        self.graph_service.remove_edge(source_id, target_id, relation_type)
+        self.graph_service.add_edge(target_edge)
+        return True
 
     def get_neighbors(
         self,
@@ -135,7 +257,7 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
     ) -> List[Tuple[GraphNode, int]]:
         """Get neighboring nodes up to a given depth via graph traversal.
 
-        Delegates directly to the graph service's get_neighbors method.
+        Filters out inactive nodes and inactive edges from the results.
 
         Args:
             node_id: The starting node for traversal.
@@ -144,11 +266,12 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
 
         Returns:
             A list of (GraphNode, depth) tuples where depth indicates how
-            many hops from the source node.
+            many hops from the source node. Only active nodes returned.
         """
-        return self.graph_service.get_neighbors(
+        neighbors = self.graph_service.get_neighbors(
             node_id, edge_type=relation_type, depth=depth
         )
+        return [(n, d) for n, d in neighbors if n.is_active]
 
     def close(self):
         """Close the underlying graph service."""

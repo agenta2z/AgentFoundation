@@ -35,6 +35,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ def _piece_to_record(piece, vector):
         "pending_space_suggestions": json.dumps(piece.pending_space_suggestions, ensure_ascii=False) if piece.pending_space_suggestions else "",
         "space_suggestion_reasons": json.dumps(piece.space_suggestion_reasons, ensure_ascii=False) if piece.space_suggestion_reasons else "",
         "space_suggestion_status": piece.space_suggestion_status or "",
+        # Operation history as JSON string
+        "history": json.dumps([r.to_dict() for r in piece.history], ensure_ascii=False) if piece.history else "[]",
     }
 
 
@@ -153,6 +156,11 @@ def _record_to_piece(record):
 
     space_suggestion_status = record.get("space_suggestion_status", "") or None
 
+    # Deserialize operation history from JSON string
+    history_raw = record.get("history", "[]")
+    history_list = _parse_json_list(history_raw) if history_raw else []
+    history = [DataOperationRecord.from_dict(r) for r in history_list if isinstance(r, dict)]
+
     return KnowledgePiece(
         content=record.get("content", ""),
         piece_id=record.get("piece_id", ""),
@@ -182,6 +190,7 @@ def _record_to_piece(record):
         pending_space_suggestions=pending_space_suggestions,
         space_suggestion_reasons=space_suggestion_reasons,
         space_suggestion_status=space_suggestion_status,
+        history=history,
     )
 
 
@@ -254,19 +263,24 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
             return
         if not sample:
             return
-        if "spaces" in sample[0] and "primary_space" in sample[0]:
-            return  # Already migrated
+        needs_spaces = "spaces" not in sample[0] or "primary_space" not in sample[0]
+        needs_history = "history" not in sample[0]
+        if not needs_spaces and not needs_history:
+            return  # Already fully migrated
 
         logger.info("Migrating LanceDB table '%s' to add spaces columns...", self.table_name)
         try:
             all_records = self._table.search().limit(100000).to_list()
             for record in all_records:
-                space = record.get("space", "main")
-                record["spaces"] = json.dumps([space], ensure_ascii=False)
-                record["primary_space"] = space
-                record["pending_space_suggestions"] = ""
-                record["space_suggestion_reasons"] = ""
-                record["space_suggestion_status"] = ""
+                if needs_spaces:
+                    space = record.get("space", "main")
+                    record["spaces"] = json.dumps([space], ensure_ascii=False)
+                    record["primary_space"] = space
+                    record["pending_space_suggestions"] = ""
+                    record["space_suggestion_reasons"] = ""
+                    record["space_suggestion_status"] = ""
+                if needs_history:
+                    record["history"] = "[]"
             self._db.drop_table(self.table_name)
             self._table = self._db.create_table(self.table_name, all_records)
             self._fts_index_created = False

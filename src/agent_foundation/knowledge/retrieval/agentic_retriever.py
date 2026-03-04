@@ -274,34 +274,15 @@ def create_llm_decomposer(
     Returns:
         A decomposer function: (query: str) -> List[SubQuery].
     """
-    prompt_template = """You are a query decomposition assistant.
-
-Given a user query, decompose it into 1-3 sub-queries that together cover
-the full information need. Each sub-query should target a specific aspect.
-
-{domains_section}
-User query: {query}
-
-Return a JSON array of objects with keys:
-- "query": the sub-query string
-- "domain": the target domain (or null for general)
-- "weight": importance weight (0.5-1.5)
-
-Example:
-[
-  {{"query": "flash attention memory optimization", "domain": "model_optimization", "weight": 1.0}},
-  {{"query": "flash attention H100 performance", "domain": "training_efficiency", "weight": 0.8}}
-]
-
-Return only the JSON array, no explanation.
-"""
-
     def decomposer(query: str) -> List[SubQuery]:
+        from agent_foundation.knowledge.prompt_templates import render_prompt
+
         domains_section = ""
         if domains:
             domains_section = f"Available domains: {', '.join(domains)}\n\n"
 
-        prompt = prompt_template.format(
+        prompt = render_prompt(
+            "retrieval/QueryDecomposition",
             domains_section=domains_section,
             query=query,
         )

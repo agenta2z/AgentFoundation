@@ -30,9 +30,7 @@ from agent_foundation.knowledge.ingestion.chunker import (
     MarkdownChunker,
 )
 from agent_foundation.knowledge.ingestion.debug_session import IngestionDebugSession
-from agent_foundation.knowledge.ingestion.prompts.structuring_prompt import (
-    get_structuring_prompt,
-)
+from agent_foundation.knowledge.prompt_templates import get_structuring_prompt
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (

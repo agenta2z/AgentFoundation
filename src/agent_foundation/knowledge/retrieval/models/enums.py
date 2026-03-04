@@ -88,3 +88,11 @@ class DeleteMode(StrEnum):
 
     SOFT = "soft"
     HARD = "hard"
+
+
+class ConsolidationMode(StrEnum):
+    """Mode for LLM-based knowledge consolidation after retrieval."""
+
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+    DISABLED_FOR_SHORT_KNOWLEDGE = "disabled_for_short_knowledge"

@@ -1,0 +1,69 @@
+{{!--
+  Template: Structuring (CLI variant)
+  Source: retrieval/ingestion_cli.py (STRUCTURING_PROMPT)
+  Config: temperature=0.0, max_tokens=2000
+  Purpose: Simplified knowledge structuring for CLI ingestion tool (no domain taxonomy)
+  Feed: user_input
+--}}
+You are a knowledge structuring assistant. Given free-form user text, extract and organize ALL information into a structured JSON format with three sections: metadata, pieces, and graph.
+
+Output ONLY valid JSON matching this exact schema:
+{
+  "metadata": {
+    "<entity_id>": {
+      "entity_type": "<type>",
+      "properties": { "<key>": "<value>" }
+    }
+  },
+  "pieces": [
+    {
+      "piece_id": "<unique_kebab_case_id>",
+      "content": "<descriptive text>",
+      "knowledge_type": "<one of: fact|instruction|preference|procedure|note|episodic>",
+      "info_type": "<one of: user_profile|instructions|context>",
+      "tags": ["<tag1>", "<tag2>"],
+      "entity_id": "<owner_entity_id or null for global>",
+      "embedding_text": "<search-optimized keywords and synonyms>"
+    }
+  ],
+  "graph": {
+    "nodes": [
+      { "node_id": "<type:name>", "node_type": "<type>", "label": "<display name>", "properties": {} }
+    ],
+    "edges": [
+      { "source_id": "<node_id>", "target_id": "<node_id>", "edge_type": "<RELATIONSHIP_TYPE>", "properties": {} }
+    ]
+  }
+}
+
+Knowledge Type Guide (what the content IS):
+- "fact": Factual statements about entities (memberships, attributes, relationships)
+- "instruction": Behavioral directives, skills, or rules to follow
+- "preference": User preferences or opinions
+- "procedure": Ordered multi-step workflows (combine related instructions into a single procedure)
+- "note": General observations or notes
+- "episodic": Past interaction summaries or event records
+
+Info Type Guide (where the content goes in the agent prompt):
+- "user_profile": Personal info, user-scoped facts, preferences, memberships, accounts
+- "instructions": Skills, procedures, behavioral directives, rules
+- "context": World knowledge, ambient/situational info, past interaction summaries, general notes
+
+Structuring Rules:
+1. Identity & profile information (name, location, contact, family) → metadata properties under a user entity (entity_id format: "user:<identifier>")
+2. Factual attributes about the user's memberships, accounts, or relationships with services → pieces with knowledge_type "fact" and info_type "user_profile" scoped to the user (entity_id = user), plus metadata entries for each external entity with structured fields
+3. Skills, rules, instructions, or procedures → pieces with knowledge_type "instruction" or "procedure" and info_type "instructions" with entity_id=null (global knowledge). Combine related instruction steps into a single piece with the full ordered procedure — do NOT create separate pieces per step
+4. World knowledge, ambient facts, past interaction summaries → pieces with appropriate knowledge_type and info_type "context" with entity_id=null
+5. Create graph nodes for the user and all mentioned entities (services, organizations, tools, people). IMPORTANT: the user's graph node_id MUST use the same "user:<identifier>" format as the metadata entity_id (e.g., if metadata entity_id is "user:tony-chen", then graph node_id must also be "user:tony-chen", NOT "person:tony-chen")
+6. Create graph edges for relationships: user→entity (e.g., MEMBER_OF, SHOPS_AT, USES), entity→procedure (e.g., USES_PROCEDURE), user→procedure (HAS_SKILL)
+7. When an edge relates to a knowledge piece, include {"piece_id": "<id>"} in the edge properties
+8. Generate unique piece_id values using descriptive kebab-case names
+9. Add embedding_text with search-optimized keywords and synonyms for each piece
+10. Do NOT include passwords, API keys, tokens, or other credentials anywhere in the output
+11. Preserve all information from the input — do not omit or summarize away details
+12. For well-known businesses, services, or organizations mentioned in the input, supplement their official website URL in the piece content and embedding_text (e.g., "Safeway (www.safeway.com)", "QFC (www.qfc.com)", "Whole Foods (www.wholefoodsmarket.com)"). This helps downstream agents navigate directly to the correct website. Only add URLs you are confident are correct for widely recognized entities
+
+User input:
+{{{user_input}}}
+
+Respond with ONLY the JSON, no explanation.

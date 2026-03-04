@@ -9,6 +9,7 @@ from agent_foundation.knowledge.ingestion.knowledge_updater import (
     KnowledgeUpdater,
     UpdateConfig,
 )
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.enums import UpdateAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
@@ -587,3 +588,336 @@ class TestComputeFinalContent:
             "existing", "new", UpdateAction.NO_CHANGE, {}
         )
         assert result == "existing"
+
+
+# ── Instruction-mode LLM mock factories ─────────────────────────────
+
+
+def _make_instruction_mode_llm_fn(
+    generated: str = "LLM-generated updated content",
+    action: str = "replace",
+):
+    """LLM that returns input_mode=instruction on intent call,
+    then returns generated_content on content-generation call.
+
+    Distinguishes calls by checking for the "Determine Input Mode" marker
+    in the intent prompt vs "Apply the user's instruction" in the generation prompt.
+    """
+    def llm_fn(prompt: str) -> str:
+        if "Determine Input Mode" in prompt:
+            # Intent analysis call
+            return json.dumps({
+                "input_mode": "instruction",
+                "action": action,
+                "confidence": 0.95,
+                "reasoning": "User gave an instruction, not content",
+                "changes_summary": "Applied instruction",
+            })
+        elif "Apply the user's instruction" in prompt:
+            # Content generation call
+            return json.dumps({
+                "generated_content": generated,
+            })
+        else:
+            # Fallback — shouldn't happen
+            return json.dumps({"action": "no_change"})
+    return llm_fn
+
+
+def _make_content_mode_llm_fn(action: str = "replace"):
+    """LLM that always returns input_mode=content (existing behavior)."""
+    def llm_fn(prompt: str) -> str:
+        return json.dumps({
+            "input_mode": "content",
+            "action": action,
+            "confidence": 0.9,
+            "reasoning": "User provided actual content",
+            "changes_summary": "Replaced content",
+        })
+    return llm_fn
+
+
+def _make_failing_generation_llm_fn():
+    """LLM that returns instruction mode intent, but raises on generation call."""
+    def llm_fn(prompt: str) -> str:
+        if "Determine Input Mode" in prompt:
+            return json.dumps({
+                "input_mode": "instruction",
+                "action": "replace",
+                "confidence": 0.9,
+                "reasoning": "Instruction detected",
+                "changes_summary": "Would apply instruction",
+            })
+        elif "Apply the user's instruction" in prompt:
+            raise RuntimeError("LLM generation failed")
+        else:
+            return json.dumps({"action": "no_change"})
+    return llm_fn
+
+
+# ── Instruction-mode Tests ──────────────────────────────────────────
+
+
+class TestInstructionModeUpdate:
+    """Tests for instruction-mode updates where LLM generates content."""
+
+    def test_instruction_replace_generates_content(self):
+        """When LLM classifies as instruction mode, generated content replaces piece."""
+        piece = _make_piece("Grocery store shopping procedure: 1. Get cart 2. Shop 3. Checkout")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_instruction_mode_llm_fn(
+                generated="Grocery store price-checking procedure: 1. Get scanner 2. Scan items 3. Compare prices",
+                action="replace",
+            ),
+        )
+
+        result = updater.update_by_id(
+            piece.piece_id,
+            'change "grocery store shopping procedure" to "grocery store price-checking procedure"',
+            update_instruction='change "grocery store shopping procedure" to "grocery store price-checking procedure"',
+        )
+
+        assert result.success is True
+        new = store.get_by_id(result.piece_id)
+        assert "price-checking" in new.content
+        # The instruction text should NOT be stored as content
+        assert "change" not in new.content.lower().split()[0:2]
+
+    def test_instruction_merge_generates_content(self):
+        """Instruction mode with merge action: LLM-generated content used directly,
+        not double-merged."""
+        piece = _make_piece("Section A: Original info")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_instruction_mode_llm_fn(
+                generated="Section A: Original info\n\nSection B: Added by instruction",
+                action="merge",
+            ),
+        )
+
+        result = updater.update_by_id(
+            piece.piece_id,
+            "add a section B with some extra info",
+            update_instruction="add a section B with some extra info",
+        )
+
+        assert result.success is True
+        new = store.get_by_id(result.piece_id)
+        assert "Section A: Original info" in new.content
+        assert "Section B: Added by instruction" in new.content
+        # Should NOT have double content (existing appended to generated)
+        assert new.content.count("Section A: Original info") == 1
+
+    def test_content_mode_uses_programmatic_path(self):
+        """When LLM returns input_mode=content, existing programmatic behavior unchanged."""
+        piece = _make_piece("Old content")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_content_mode_llm_fn(action="replace"),
+        )
+
+        result = updater.update_by_id(piece.piece_id, "Actual new content")
+
+        assert result.success is True
+        new = store.get_by_id(result.piece_id)
+        # Content mode replace: new_content is used directly
+        assert new.content == "Actual new content"
+
+    def test_generation_failure_returns_error(self):
+        """When content generation fails, OperationResult(success=False) returned."""
+        piece = _make_piece("Original content")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_failing_generation_llm_fn(),
+        )
+
+        result = updater.update_by_id(
+            piece.piece_id,
+            "rename X to Y",
+            update_instruction="rename X to Y",
+        )
+
+        assert result.success is False
+        assert "generation failed" in result.error.lower()
+        # Original content should be preserved
+        original = store.get_by_id(piece.piece_id)
+        assert original.content == "Original content"
+        assert original.is_active is True
+
+    def test_no_update_instruction_defaults_to_content_mode(self):
+        """update_by_content without update_instruction never enters instruction mode."""
+        piece = _make_piece("Some content")
+        store = InMemoryPieceStore(pieces=[piece], search_score=0.90)
+
+        # Even if LLM returns instruction mode, without update_instruction
+        # the guard prevents entering instruction path
+        def llm_fn(prompt: str) -> str:
+            return json.dumps({
+                "input_mode": "instruction",
+                "action": "replace",
+                "confidence": 0.9,
+                "reasoning": "Test",
+                "changes_summary": "Test",
+            })
+
+        updater = KnowledgeUpdater(piece_store=store, llm_fn=llm_fn)
+
+        results = updater.update_by_content("New replacement content")
+
+        # Should use programmatic path (REPLACE with new_content)
+        assert len(results) == 1
+        assert results[0].success is True
+        new = store.get_by_id(results[0].piece_id)
+        assert new.content == "New replacement content"
+
+    def test_update_by_id_instruction_mode(self):
+        """update_by_id also supports instruction mode."""
+        piece = _make_piece("Step 1: Do A\nStep 2: Do B\nStep 3: Do C")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_instruction_mode_llm_fn(
+                generated="Step 1: Do X\nStep 2: Do B\nStep 3: Do C",
+            ),
+        )
+
+        result = updater.update_by_id(
+            piece.piece_id,
+            "change step 1 from A to X",
+            update_instruction="change step 1 from A to X",
+        )
+
+        assert result.success is True
+        new = store.get_by_id(result.piece_id)
+        assert "Do X" in new.content
+        assert "Do B" in new.content
+
+    def test_update_by_id_generation_failure(self):
+        """update_by_id returns failure result on generation failure."""
+        piece = _make_piece("Content here")
+        store = InMemoryPieceStore(pieces=[piece])
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_failing_generation_llm_fn(),
+        )
+
+        result = updater.update_by_id(
+            piece.piece_id,
+            "rewrite everything",
+            update_instruction="rewrite everything",
+        )
+
+        assert result.success is False
+        assert "generation failed" in result.error.lower()
+
+    def test_update_by_content_instruction_mode(self):
+        """update_by_content supports instruction mode with update_instruction."""
+        piece = _make_piece("The cat sat on the mat")
+        store = InMemoryPieceStore(pieces=[piece], search_score=0.90)
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_instruction_mode_llm_fn(
+                generated="The dog sat on the mat",
+            ),
+        )
+
+        results = updater.update_by_content(
+            'change "cat" to "dog"',
+            update_instruction='change "cat" to "dog"',
+        )
+
+        assert len(results) == 1
+        assert results[0].success is True
+        new = store.get_by_id(results[0].piece_id)
+        assert "dog" in new.content
+        assert new.content == "The dog sat on the mat"
+
+    def test_update_by_content_generation_failure_appends_error(self):
+        """update_by_content appends failure result (doesn't silently skip)."""
+        piece = _make_piece("Original content")
+        store = InMemoryPieceStore(pieces=[piece], search_score=0.90)
+        updater = KnowledgeUpdater(
+            piece_store=store,
+            llm_fn=_make_failing_generation_llm_fn(),
+        )
+
+        results = updater.update_by_content(
+            "rewrite this",
+            update_instruction="rewrite this",
+        )
+
+        assert len(results) == 1
+        assert results[0].success is False
+        assert "generation failed" in results[0].error.lower()
+
+
+# ── Prompt Template Tests ───────────────────────────────────────────
+
+
+class TestStripJsonFences:
+    """Tests for _strip_json_fences helper."""
+
+    def setup_method(self):
+        store = InMemoryPieceStore()
+        self.updater = KnowledgeUpdater(piece_store=store)
+
+    def test_plain_json_unchanged(self):
+        raw = '{"action": "replace"}'
+        assert self.updater._strip_json_fences(raw) == raw
+
+    def test_strips_json_fence(self):
+        raw = '```json\n{"action": "replace"}\n```'
+        assert self.updater._strip_json_fences(raw) == '{"action": "replace"}'
+
+    def test_strips_plain_fence(self):
+        raw = '```\n{"key": "val"}\n```'
+        assert self.updater._strip_json_fences(raw) == '{"key": "val"}'
+
+    def test_handles_whitespace(self):
+        raw = '  ```json\n{"a": 1}\n```  '
+        assert self.updater._strip_json_fences(raw) == '{"a": 1}'
+
+    def test_fenced_llm_response_parses(self):
+        """End-to-end: LLM returning fenced JSON still works."""
+        piece = _make_piece("Old content")
+        store = InMemoryPieceStore(pieces=[piece])
+
+        def fenced_llm(prompt: str) -> str:
+            if "Determine Input Mode" in prompt:
+                return '```json\n' + json.dumps({
+                    "input_mode": "instruction",
+                    "action": "replace",
+                    "confidence": 0.9,
+                    "reasoning": "Test",
+                    "changes_summary": "Test",
+                }) + '\n```'
+            elif "Apply the user's instruction" in prompt:
+                return '```json\n' + json.dumps({
+                    "generated_content": "Fenced result content",
+                }) + '\n```'
+            return json.dumps({"action": "no_change"})
+
+        updater = KnowledgeUpdater(piece_store=store, llm_fn=fenced_llm)
+        result = updater.update_by_id(
+            piece.piece_id, "rename X", update_instruction="rename X"
+        )
+        assert result.success is True
+        new = store.get_by_id(result.piece_id)
+        assert new.content == "Fenced result content"
+
+
+class TestPromptTemplates:
+    def test_content_generation_prompt_format(self):
+        """render_prompt("quality/UpdateContentGeneration") works with expected placeholders."""
+        result = render_prompt(
+            "quality/UpdateContentGeneration",
+            existing_content="Some existing content",
+            update_instruction="Change X to Y",
+        )
+        assert "Some existing content" in result
+        assert "Change X to Y" in result

@@ -19,6 +19,7 @@ from .models.enums import (
     SuggestionStatus,
     UpdateAction,
     DeleteMode,
+    ConsolidationMode,
 )
 from .models.results import (
     DedupResult,
@@ -49,6 +50,9 @@ from .data_loader import KnowledgeDataLoader
 
 # ── Provider ─────────────────────────────────────────────────────────────
 from .provider import KnowledgeProvider, InfoType
+
+# ── Knowledge Consolidator ──────────────────────────────────────────────
+from .knowledge_consolidator import KnowledgeConsolidator
 
 # ── Budget-Aware Provider ────────────────────────────────────────────────
 from .knowledge_provider import BudgetAwareKnowledgeProvider
@@ -101,6 +105,7 @@ __all__ = [
     "SuggestionStatus",
     "UpdateAction",
     "DeleteMode",
+    "ConsolidationMode",
     # Result types
     "DedupResult",
     "MergeCandidate",
@@ -126,6 +131,8 @@ __all__ = [
     "KnowledgeProvider",
     "InfoType",
     "BudgetAwareKnowledgeProvider",
+    # Knowledge Consolidator
+    "KnowledgeConsolidator",
     # Hybrid Search
     "HybridSearchConfig",
     "HybridRetriever",

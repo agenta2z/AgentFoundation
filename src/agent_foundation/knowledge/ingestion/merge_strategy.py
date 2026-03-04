@@ -14,9 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from agent_foundation.knowledge.ingestion.prompts.merge_execution import (
-    MERGE_EXECUTION_PROMPT,
-)
+from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.enums import (
     MergeAction,
     MergeStrategy,
@@ -152,7 +150,8 @@ class MergeStrategyManager:
         existing_piece: KnowledgePiece,
     ) -> KnowledgePiece:
         """Execute LLM-based merge of two pieces."""
-        prompt = MERGE_EXECUTION_PROMPT.format(
+        prompt = render_prompt(
+            "quality/MergeExecution",
             piece_a_content=existing_piece.content,
             piece_a_domain=existing_piece.domain,
             piece_a_tags=", ".join(existing_piece.tags),

@@ -6,7 +6,9 @@ Supports two modes:
 2. Semantic Update: Find similar pieces and update them
 
 Design Decisions:
-- LLM determines action only; content merging is done programmatically
+- LLM determines action AND input_mode; content handling depends on mode
+- input_mode="content": programmatic merge/replace (no truncation)
+- input_mode="instruction": second LLM call generates content from instruction
 - Add new piece first, deactivate old after; rollback on failure
 - Use ``X if X is not None else Y`` for empty list handling
 - Compute embedding for new pieces
@@ -18,8 +20,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
-from agent_foundation.knowledge.ingestion.prompts.update_prompt import (
-    UPDATE_INTENT_PROMPT,
+from agent_foundation.knowledge.prompt_templates import render_prompt
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
 )
 from agent_foundation.knowledge.retrieval.models.enums import UpdateAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
@@ -107,9 +111,31 @@ class KnowledgeUpdater:
                 )
 
             action = analysis["action"]
-            final_content = self._compute_final_content(
-                existing.content, new_content, action, analysis
-            )
+
+            # Instruction mode: LLM generates content from instruction
+            generated_content = None
+            if analysis.get("input_mode") == "instruction" and update_instruction:
+                generated_content = self._generate_updated_content(
+                    existing.content, update_instruction
+                )
+                if generated_content is None:
+                    return OperationResult(
+                        success=False,
+                        operation="update",
+                        piece_id=piece_id,
+                        error="Instruction-mode content generation failed",
+                    )
+
+            if generated_content is not None:
+                # Instruction mode: LLM already produced the complete final
+                # content. Bypass _compute_final_content to avoid double-merging.
+                final_content = generated_content
+            else:
+                # Content mode: programmatic merge/replace as before
+                final_content = self._compute_final_content(
+                    existing.content, new_content, action, analysis
+                )
+
             final_domain = (
                 analysis.get("updated_domain")
                 if analysis.get("updated_domain") is not None
@@ -197,9 +223,32 @@ class KnowledgeUpdater:
                     continue
 
                 action = analysis["action"]
-                final_content = self._compute_final_content(
-                    piece.content, new_content, action, analysis
-                )
+
+                # Instruction mode: LLM generates content from instruction
+                generated_content = None
+                if analysis.get("input_mode") == "instruction" and update_instruction:
+                    generated_content = self._generate_updated_content(
+                        piece.content, update_instruction
+                    )
+                    if generated_content is None:
+                        results.append(OperationResult(
+                            success=False,
+                            operation="update",
+                            piece_id=piece.piece_id,
+                            error="Instruction-mode content generation failed",
+                        ))
+                        continue
+
+                if generated_content is not None:
+                    # Instruction mode: LLM already produced the complete final
+                    # content. Bypass _compute_final_content to avoid double-merging.
+                    final_content = generated_content
+                else:
+                    # Content mode: programmatic merge/replace as before
+                    final_content = self._compute_final_content(
+                        piece.content, new_content, action, analysis
+                    )
+
                 final_domain = analysis.get("updated_domain")
                 if analysis.get("clear_tags"):
                     final_tags = []
@@ -230,6 +279,18 @@ class KnowledgeUpdater:
         return results
 
     # ── Internal Helpers ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _strip_json_fences(text: str) -> str:
+        """Strip markdown code fences from LLM JSON responses."""
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            # Remove opening fence (```json or ```)
+            first_newline = stripped.index("\n") if "\n" in stripped else len(stripped)
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        return stripped.strip()
 
     def _compute_final_content(
         self,
@@ -274,21 +335,22 @@ class KnowledgeUpdater:
             f"User instruction: {update_instruction}" if update_instruction else ""
         )
 
-        prompt = UPDATE_INTENT_PROMPT.format(
+        prompt = render_prompt(
+            "quality/UpdateIntent",
             existing_id=existing.piece_id,
             existing_content=existing.content[:2000],
-            existing_length=len(existing.content),
+            existing_length=str(len(existing.content)),
             existing_domain=existing.domain,
             existing_tags=", ".join(existing.tags),
             existing_updated_at=existing.updated_at or "unknown",
             new_content=new_content[:2000],
-            new_length=len(new_content),
+            new_length=str(len(new_content)),
             update_instruction=instruction_text,
         )
 
         try:
             response = self.llm_fn(prompt)
-            parsed = json.loads(response)
+            parsed = json.loads(self._strip_json_fences(response))
 
             try:
                 action = UpdateAction(parsed.get("action", "no_change").lower())
@@ -301,6 +363,7 @@ class KnowledgeUpdater:
 
             return {
                 "action": action,
+                "input_mode": parsed.get("input_mode", "content"),
                 "merge_strategy": parsed.get("merge_strategy", "append"),
                 "updated_domain": parsed.get("updated_domain"),
                 "updated_tags": parsed.get("updated_tags"),
@@ -320,6 +383,41 @@ class KnowledgeUpdater:
                 "changes_summary": "",
             }
 
+    def _generate_updated_content(
+        self,
+        existing_content: str,
+        update_instruction: str,
+    ) -> Optional[str]:
+        """Use LLM to generate updated content from an instruction.
+
+        Called only in instruction mode. The LLM applies the user's instruction
+        to the existing content and returns the complete final content.
+
+        Args:
+            existing_content: The full existing piece content (not truncated).
+            update_instruction: The user's natural language instruction.
+
+        Returns:
+            The generated content string, or None if generation failed.
+        """
+        prompt = render_prompt(
+            "quality/UpdateContentGeneration",
+            existing_content=existing_content,
+            update_instruction=update_instruction,
+        )
+
+        try:
+            response = self.llm_fn(prompt)
+            parsed = json.loads(self._strip_json_fences(response))
+            generated = parsed.get("generated_content")
+            if not generated:
+                logger.warning("LLM returned empty generated_content")
+                return None
+            return generated
+        except Exception as e:
+            logger.warning("LLM content generation failed: %s", e)
+            return None
+
     def _apply_update(
         self,
         existing: KnowledgePiece,
@@ -332,9 +430,11 @@ class KnowledgeUpdater:
         """Apply the update to the piece store.
 
         Atomicity: Add new piece first, deactivate old after.
-        Rollback on failure.
+        Rollback on failure. Appends DataOperationRecord history.
         """
         old_version = existing.version
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = generate_operation_id("KnowledgeUpdater", summary[:20])
 
         if self.config.preserve_history:
             # Compute embedding for new piece
@@ -365,6 +465,19 @@ class KnowledgeUpdater:
                 embedding_text=new_content[:2000],
             )
 
+            # ADD record on new piece
+            new_piece.history.append(DataOperationRecord(
+                operation="add",
+                timestamp=now,
+                operation_id=op_id,
+                reason=summary,
+                source="KnowledgeUpdater",
+                details={
+                    "action": action.value,
+                    "supersedes": existing.piece_id,
+                },
+            ))
+
             try:
                 # Add new piece FIRST
                 self.piece_store.add(new_piece)
@@ -372,7 +485,18 @@ class KnowledgeUpdater:
 
                 # Deactivate old piece AFTER new is added
                 existing.is_active = False
-                existing.updated_at = datetime.now(timezone.utc).isoformat()
+                existing.updated_at = now
+                existing.history.append(DataOperationRecord(
+                    operation="delete",
+                    timestamp=now,
+                    operation_id=op_id,
+                    reason=summary,
+                    source="KnowledgeUpdater",
+                    details={
+                        "delete_mode": "soft",
+                        "superseded_by": new_piece_id,
+                    },
+                ))
                 self.piece_store.update(existing)
 
             except Exception as e:
@@ -389,7 +513,8 @@ class KnowledgeUpdater:
                     error=f"Update failed: {e}",
                 )
         else:
-            # In-place update
+            # In-place update — capture content_before
+            content_before = existing.content
             existing.content = new_content
 
             # Recompute content_hash for dedup consistency
@@ -400,7 +525,7 @@ class KnowledgeUpdater:
             if new_tags is not None:
                 existing.tags = new_tags
             existing.version = old_version + 1
-            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            existing.updated_at = now
 
             # Update embedding
             if self.embedding_fn:
@@ -409,6 +534,18 @@ class KnowledgeUpdater:
                     existing.embedding_text = new_content[:2000]
                 except Exception as e:
                     logger.warning("Failed to update embedding: %s", e)
+
+            # UPDATE record with content_before/content_after
+            existing.history.append(DataOperationRecord(
+                operation="update",
+                timestamp=now,
+                operation_id=op_id,
+                reason=summary,
+                source="KnowledgeUpdater",
+                content_before=content_before,
+                content_after=new_content,
+                details={"action": action.value},
+            ))
 
             self.piece_store.update(existing)
             new_piece_id = existing.piece_id
@@ -419,5 +556,9 @@ class KnowledgeUpdater:
             piece_id=new_piece_id,
             old_version=old_version,
             new_version=old_version + 1,
-            details={"action": action.value, "summary": summary},
+            details={
+                "action": action.value,
+                "summary": summary,
+                "operation_id": op_id,
+            },
         )

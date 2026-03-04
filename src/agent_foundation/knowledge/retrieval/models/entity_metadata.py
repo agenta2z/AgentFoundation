@@ -12,6 +12,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from attr import attrs, attrib
 
+from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
+
 
 
 @attrs
@@ -32,6 +34,8 @@ class EntityMetadata:
     created_at: str = attrib(default=None)
     updated_at: str = attrib(default=None)
     spaces: List[str] = attrib(factory=lambda: ["main"])
+    history: List[DataOperationRecord] = attrib(factory=list)
+    is_active: bool = attrib(default=True)
 
     def __attrs_post_init__(self):
         now = datetime.now(timezone.utc).isoformat()
@@ -84,7 +88,7 @@ class EntityMetadata:
         Returns:
             Dictionary representation of this EntityMetadata with all fields.
         """
-        return {
+        d = {
             "entity_id": self.entity_id,
             "entity_type": self.entity_type,
             "properties": dict(self.properties),
@@ -92,6 +96,11 @@ class EntityMetadata:
             "updated_at": self.updated_at,
             "spaces": list(self.spaces),
         }
+        if self.history:
+            d["history"] = [r.to_dict() for r in self.history]
+        if not self.is_active:
+            d["is_active"] = self.is_active
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "EntityMetadata":
@@ -120,6 +129,11 @@ class EntityMetadata:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             spaces=data.get("spaces", ["main"]),
+            history=[
+                DataOperationRecord.from_dict(r)
+                for r in data.get("history", [])
+            ],
+            is_active=data.get("is_active", True),
         )
 
 

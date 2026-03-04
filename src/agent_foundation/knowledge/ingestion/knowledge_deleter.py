@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
 from agent_foundation.knowledge.retrieval.models.enums import DeleteMode
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import OperationResult
@@ -72,8 +76,10 @@ class KnowledgeDeleter:
         self,
         piece_id: str,
         mode: Optional[DeleteMode] = None,
+        reason: Optional[str] = None,
+        operation_id: Optional[str] = None,
     ) -> OperationResult:
-        """Delete a specific piece by its ID."""
+        """Delete a specific piece by its ID with history tracking."""
         mode = mode or self.config.default_mode
 
         existing = self.piece_store.get_by_id(piece_id)
@@ -85,12 +91,31 @@ class KnowledgeDeleter:
                 error=f"Piece not found: {piece_id}",
             )
 
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = operation_id or generate_operation_id("KnowledgeDeleter", "delete")
+
         if mode == DeleteMode.SOFT:
             existing.is_active = False
-            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            existing.updated_at = now
+            existing.history.append(DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                reason=reason,
+                source="KnowledgeDeleter",
+                details={"delete_mode": "soft"},
+            ))
             self.piece_store.update(existing)
             logger.info("Soft deleted piece: %s", piece_id)
         else:
+            existing.history.append(DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                reason=reason,
+                source="KnowledgeDeleter",
+                details={"delete_mode": "hard"},
+            ))
             self.piece_store.remove(piece_id)
             logger.info("Hard deleted piece: %s", piece_id)
 
@@ -98,7 +123,7 @@ class KnowledgeDeleter:
             success=True,
             operation="delete",
             piece_id=piece_id,
-            details={"mode": mode.value},
+            details={"mode": mode.value, "operation_id": op_id},
         )
 
     def find_candidates_for_deletion(
@@ -222,8 +247,16 @@ class KnowledgeDeleter:
                 ),
             )
 
+        now = datetime.now(timezone.utc).isoformat()
+        op_id = generate_operation_id("KnowledgeDeleter", "restore")
         existing.is_active = True
-        existing.updated_at = datetime.now(timezone.utc).isoformat()
+        existing.updated_at = now
+        existing.history.append(DataOperationRecord(
+            operation="restore",
+            timestamp=now,
+            operation_id=op_id,
+            source="KnowledgeDeleter.restore_by_id",
+        ))
         self.piece_store.update(existing)
         logger.info("Restored piece: %s", piece_id)
 
@@ -231,4 +264,5 @@ class KnowledgeDeleter:
             success=True,
             operation="restore",
             piece_id=piece_id,
+            details={"operation_id": op_id},
         )

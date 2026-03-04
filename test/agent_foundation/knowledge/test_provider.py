@@ -544,3 +544,82 @@ class TestResolveFormatter:
 
         with pytest.raises(ValueError, match="callable or str"):
             provider._resolve_formatter(12345)
+
+
+# ── Test: KnowledgeProvider with KnowledgeConsolidator ────────────────────────
+
+
+class TestProviderConsolidation:
+    """Test KnowledgeProvider integration with KnowledgeConsolidator."""
+
+    def test_provider_without_consolidator_unchanged(self, provider):
+        """Without consolidator, output has no consolidated_knowledge key."""
+        result = provider("grocery shopping")
+        assert "consolidated_knowledge" not in result
+
+    def test_provider_with_consolidator_adds_key(self):
+        """With consolidator (ENABLED), consolidated_knowledge key is added."""
+        from unittest.mock import MagicMock
+        from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
+            KnowledgeConsolidator,
+        )
+        from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
+
+        llm = MagicMock(return_value="Deduplicated result.")
+        consolidator = KnowledgeConsolidator(
+            llm_fn=llm, mode=ConsolidationMode.ENABLED
+        )
+
+        kb = _create_kb(active_entity_id="user:alice")
+        # Add a piece so there's content to consolidate
+        # Note: BM25 scoring uses exact term overlap on content (no stemming),
+        # so query words must appear verbatim in content.
+        piece = KnowledgePiece(
+            content="Organic eggs at Safeway cost $5.99 per dozen",
+            piece_id="egg-prices",
+            knowledge_type=KnowledgeType.Fact,
+            info_type="context",
+            tags=["grocery"],
+            entity_id=None,
+            embedding_text="eggs safeway cost",
+        )
+        kb.add_piece(piece)
+
+        provider = KnowledgeProvider(kb, consolidator=consolidator)
+        result = provider("safeway eggs cost")
+
+        assert "consolidated_knowledge" in result
+        assert result["consolidated_knowledge"] == "Deduplicated result."
+        # Original keys preserved
+        assert "context" in result
+
+    def test_provider_consolidation_skip_no_extra_key(self):
+        """When consolidator skips (DISABLED), no extra key is added."""
+        from unittest.mock import MagicMock
+        from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
+            KnowledgeConsolidator,
+        )
+        from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
+
+        llm = MagicMock()
+        consolidator = KnowledgeConsolidator(
+            llm_fn=llm, mode=ConsolidationMode.DISABLED
+        )
+
+        kb = _create_kb(active_entity_id="user:alice")
+        piece = KnowledgePiece(
+            content="Some knowledge.",
+            piece_id="test-piece",
+            knowledge_type=KnowledgeType.Fact,
+            info_type="context",
+            tags=[],
+            entity_id=None,
+            embedding_text="test",
+        )
+        kb.add_piece(piece)
+
+        provider = KnowledgeProvider(kb, consolidator=consolidator)
+        result = provider("test query")
+
+        assert "consolidated_knowledge" not in result
+        llm.assert_not_called()
