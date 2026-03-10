@@ -1,0 +1,11 @@
+{
+  "node_id": "procedure:grocery-shopping",
+  "node_type": "procedure",
+  "label": "Grocery Store Shopping Procedure",
+  "properties": {
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  }
+}

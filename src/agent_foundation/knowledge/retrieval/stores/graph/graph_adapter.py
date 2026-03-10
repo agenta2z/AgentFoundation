@@ -273,6 +273,66 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
         )
         return [(n, d) for n, d in neighbors if n.is_active]
 
+    def list_nodes(
+        self,
+        node_type: Optional[str] = None,
+        include_inactive: bool = False,
+    ) -> List[GraphNode]:
+        """List all nodes, optionally filtered by type and active status.
+
+        Delegates to graph_service.list_nodes() and applies is_active filter.
+
+        Args:
+            node_type: Optional node type filter. If None, returns all types.
+            include_inactive: If True, include soft-deleted nodes.
+
+        Returns:
+            A list of GraphNode objects matching the filter criteria.
+        """
+        nodes = self.graph_service.list_nodes(node_type=node_type)
+        if include_inactive:
+            return nodes
+        return [n for n in nodes if n.is_active]
+
+    @property
+    def supports_semantic_search(self) -> bool:
+        """Delegate to the underlying graph service's ``supports_search``.
+
+        Uses ``getattr`` with a ``False`` fallback for cross-package
+        compatibility — the adapter (AgentFoundation) and the graph service
+        (RichPythonUtils) may be at different versions.
+        """
+        return getattr(self.graph_service, "supports_search", False)
+
+    def search_nodes(
+        self,
+        query: str,
+        top_k: int = 5,
+        node_type: Optional[str] = None,
+        namespace: Optional[str] = None,
+    ) -> List[Tuple[GraphNode, float]]:
+        """Delegate search to the underlying graph service.
+
+        Filters results to only include active nodes, consistent with
+        how ``get_node()``, ``list_nodes()``, and ``get_neighbors()``
+        filter inactive nodes.
+
+        Args:
+            query: The search query string.
+            top_k: Maximum number of results.
+            node_type: Optional node type filter.
+            namespace: Optional namespace to scope the search.
+
+        Returns:
+            List of ``(GraphNode, score)`` tuples for active nodes only.
+        """
+        results = self.graph_service.search_nodes(
+            query, top_k=top_k, node_type=node_type, namespace=namespace
+        )
+        return [(node, score) for node, score in results if node.is_active]
+
     def close(self):
         """Close the underlying graph service."""
         self.graph_service.close()
+
+

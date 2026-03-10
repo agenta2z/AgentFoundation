@@ -1,9 +1,10 @@
 """Retrieval sub-package for the knowledge module.
 
 Provides core retrieval components including the KnowledgeBase orchestrator,
-data models, store ABCs and adapters, hybrid search, MMR re-ranking,
-temporal decay, agentic multi-query retrieval, budget-aware knowledge
-provider, formatter, data loader, utilities, and ingestion CLI.
+composable RetrievalPipeline with pluggable post-processors, data models,
+store ABCs and adapters, hybrid search, MMR re-ranking, temporal decay,
+budget-aware knowledge provider, formatter, data loader, utilities, and
+ingestion CLI.
 """
 
 # ── Data Models ──────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ from .knowledge_base import KnowledgeBase
 from .data_loader import KnowledgeDataLoader
 
 # ── Provider ─────────────────────────────────────────────────────────────
-from .provider import KnowledgeProvider, InfoType
+from .provider import InfoType
 
 # ── Knowledge Consolidator ──────────────────────────────────────────────
 from .knowledge_consolidator import KnowledgeConsolidator
@@ -66,13 +67,25 @@ from .mmr_reranking import MMRConfig, apply_mmr_reranking
 # ── Temporal Decay ───────────────────────────────────────────────────────
 from .temporal_decay import TemporalDecayConfig, apply_temporal_decay
 
-# ── Agentic Retriever ───────────────────────────────────────────────────
-from .agentic_retriever import (
+# ── Query Decomposition & Agentic Models ─────────────────────────────────
+from .retrieval_pipeline import (
     SubQuery,
     AgenticRetrievalResult,
-    AgenticRetriever,
     create_domain_decomposer,
     create_llm_decomposer,
+)
+
+# ── Retrieval Pipeline ──────────────────────────────────────────────────
+from .retrieval_pipeline import (
+    RetrievalPipeline,
+    QueryExpander,
+    PostProcessor,
+)
+from .post_processors import (
+    FlatStringPostProcessor,
+    GroupedDictPostProcessor,
+    AggregatingPostProcessor,
+    BudgetAwarePostProcessor,
 )
 
 # ── Ingestion CLI (legacy) ──────────────────────────────────────────────
@@ -128,7 +141,6 @@ __all__ = [
     # Data Loading
     "KnowledgeDataLoader",
     # Provider
-    "KnowledgeProvider",
     "InfoType",
     "BudgetAwareKnowledgeProvider",
     # Knowledge Consolidator
@@ -142,12 +154,19 @@ __all__ = [
     # Temporal Decay
     "TemporalDecayConfig",
     "apply_temporal_decay",
-    # Agentic Retriever
+    # Query Decomposition & Agentic Models
     "SubQuery",
     "AgenticRetrievalResult",
-    "AgenticRetriever",
     "create_domain_decomposer",
     "create_llm_decomposer",
+    # Retrieval Pipeline
+    "RetrievalPipeline",
+    "QueryExpander",
+    "PostProcessor",
+    "FlatStringPostProcessor",
+    "GroupedDictPostProcessor",
+    "AggregatingPostProcessor",
+    "BudgetAwarePostProcessor",
     # Ingestion CLI (legacy)
     "KnowledgeIngestionCLI",
     # Formatter

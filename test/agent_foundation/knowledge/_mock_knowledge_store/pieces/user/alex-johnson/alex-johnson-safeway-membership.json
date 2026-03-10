@@ -1,0 +1,23 @@
+{
+  "doc_id": "alex-johnson-safeway-membership",
+  "content": "Alex Johnson is a member of Safeway (www.safeway.com) with email alex.j@example.com using Google login authentication",
+  "metadata": {
+    "knowledge_type": "fact",
+    "info_type": "user_profile",
+    "tags": [
+      "membership",
+      "grocery",
+      "safeway",
+      "authentication"
+    ],
+    "entity_id": "user:alex-johnson",
+    "source": null,
+    "space": "personal",
+    "spaces": [
+      "personal"
+    ]
+  },
+  "embedding_text": "Safeway member membership alex.j@example.com google login authentication grocery store www.safeway.com",
+  "created_at": "2026-02-10T05:41:52.664765+00:00",
+  "updated_at": "2026-02-10T05:41:52.664765+00:00"
+}

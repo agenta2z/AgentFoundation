@@ -11,8 +11,8 @@ It implements ``__call__`` so it can be directly assigned to
 these attributes if they are callable, passing ``user_input`` as the argument.
 
 Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8,
-              5.1, 5.2, 5.3, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5,
-              8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.2, 9.4
+              5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5,
+              8.1, 8.2, 8.3, 9.1, 9.2
 """
 import json
 import logging
@@ -50,6 +50,12 @@ from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePie
 from agent_foundation.knowledge.retrieval.temporal_decay import (
     TemporalDecayConfig,
     apply_temporal_decay,
+)
+from agent_foundation.knowledge.retrieval.graph_walk import (
+    find_search_seeds,
+    find_identity_seeds,
+    graph_walk,
+    merge_graph_contexts,
 )
 from agent_foundation.knowledge.retrieval.utils import parse_entity_type
 
@@ -106,6 +112,8 @@ class KnowledgeBase:
     # Store path for KB-level metadata persistence
     store_path: Optional[str] = attrib(default=None)
 
+
+
     def __attrs_post_init__(self):
         if self.formatter is None:
             self.formatter = KnowledgeFormatter()
@@ -153,8 +161,11 @@ class KnowledgeBase:
     def __call__(self, query: str, **kwargs) -> str:
         """Callable interface for Agent integration.
 
-        Retrieves from all enabled layers and returns a formatted string
-        suitable for prompt injection.
+        Delegates to ``RetrievalPipeline`` with ``FlatStringPostProcessor``
+        for flat string output.  Preserves the existing signature.
+
+        Imports are deferred (inside method body) to avoid circular import:
+        ``knowledge_base.py`` → ``retrieval_pipeline.py`` → ``knowledge_base.py``.
 
         Args:
             query: The user query string.
@@ -164,10 +175,286 @@ class KnowledgeBase:
         Returns:
             A formatted string of retrieved knowledge, or empty string
             if nothing is found.
+
+        Requirements: 8.1, 8.2, 8.3
         """
-        spaces = kwargs.pop("spaces", None)
-        results = self.retrieve(query, spaces=spaces, **kwargs)
-        return self.formatter.format(results)
+        # Deferred imports to avoid circular dependency
+        from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
+        from agent_foundation.knowledge.retrieval.post_processors import FlatStringPostProcessor
+
+        pipeline = RetrievalPipeline(
+            kb=self,
+            post_processor=FlatStringPostProcessor(formatter=self.formatter),
+        )
+        spaces = kwargs.get("spaces", None)
+        # Remove spaces from kwargs to avoid passing it twice to pipeline.execute
+        kwargs.pop("spaces", None)
+        return pipeline.execute(query, spaces=spaces, **kwargs)
+
+
+    # ── Layer Methods ────────────────────────────────────────────────────
+
+    def retrieve_metadata(
+        self,
+        entity_id: Optional[str] = None,
+        include_global: bool = True,
+        spaces: Optional[List[str]] = None,
+    ) -> Tuple[Optional["EntityMetadata"], Optional["EntityMetadata"]]:
+        """Layer 1: Retrieve entity and global metadata.
+
+        Returns ``(None, None)`` if ``self.include_metadata`` is False or
+        entity_id is not provided.
+
+        Args:
+            entity_id: Override for active_entity_id. Resolved internally
+                       as ``entity_id or self.active_entity_id``.
+            include_global: Whether to include global metadata.
+            spaces: Optional space filter (OR semantics).
+
+        Returns:
+            Tuple of (entity_metadata, global_metadata). Either may be None.
+
+        Requirements: 13.1, 13.6
+        """
+        entity_id = entity_id or self.active_entity_id
+        metadata = None
+        global_metadata = None
+
+        if not self.include_metadata or not entity_id:
+            return (None, None)
+
+        metadata = self.metadata_store.get_metadata(entity_id)
+        if include_global:
+            global_metadata = self.metadata_store.get_metadata("global")
+
+        # Filter metadata by spaces intersection (OR semantics)
+        if spaces:
+            if metadata:
+                meta_spaces = set(getattr(metadata, "spaces", ["main"]))
+                if not meta_spaces & set(spaces):
+                    metadata = None
+            if global_metadata:
+                global_meta_spaces = set(getattr(global_metadata, "spaces", ["main"]))
+                if not global_meta_spaces & set(spaces):
+                    global_metadata = None
+
+        return (metadata, global_metadata)
+
+    def retrieve_pieces(
+        self,
+        query: str,
+        entity_id: Optional[str] = None,
+        top_k: Optional[int] = None,
+        include_global: bool = True,
+        domain: Optional[str] = None,
+        secondary_domains: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        min_results: int = 1,
+        spaces: Optional[List[str]] = None,
+    ) -> List[Tuple[KnowledgePiece, float]]:
+        """Layer 2: Search knowledge pieces (entity-scoped + optional global).
+
+        Handles all three sub-paths: hybrid retriever, domain-aware fallback,
+        and standard. Returns empty list if ``self.include_pieces`` is False
+        or query is empty/whitespace.
+
+        Args:
+            query: The search query string.
+            entity_id: Override for active_entity_id. Resolved internally
+                       as ``entity_id or self.active_entity_id``.
+            top_k: Override for default_top_k. Resolved internally
+                   as ``top_k if top_k is not None else self.default_top_k``.
+            include_global: Whether to merge global results.
+            domain: Optional primary domain filter.
+            secondary_domains: Optional secondary domain list.
+            tags: Optional tag filter.
+            min_results: Minimum results before fallback.
+            spaces: Optional space filter (OR semantics).
+
+        Returns:
+            List of (KnowledgePiece, score) tuples.
+
+        Requirements: 13.2, 13.6
+        """
+        entity_id = entity_id or self.active_entity_id
+        top_k = top_k if top_k is not None else self.default_top_k
+
+        if not query or not query.strip() or not self.include_pieces:
+            return []
+
+        if self._hybrid_retriever is not None:
+            # Enhanced retrieval path: hybrid → space filter → domain filter → temporal decay → MMR
+            scored = self._hybrid_retriever.search(
+                query=query,
+                top_k=top_k * 3,  # fetch more for post-processing
+                entity_id=entity_id,
+                tags=tags,
+            )
+
+            # Space post-filter on hybrid results (before domain/temporal/MMR)
+            if spaces:
+                scored = [sp for sp in scored if set(sp.piece.spaces) & set(spaces)]
+
+            # Domain filter: keep pieces matching domain or secondary_domains
+            if domain:
+                all_domains = {domain}
+                if secondary_domains:
+                    all_domains.update(secondary_domains)
+                filtered = [
+                    sp for sp in scored
+                    if getattr(sp.piece, "domain", "general") in all_domains
+                ]
+                # Fall back to unfiltered if domain filter yields too few
+                if len(filtered) >= min_results:
+                    scored = filtered
+
+            # Temporal decay
+            if self._temporal_decay_config is not None:
+                scored = apply_temporal_decay(scored, self._temporal_decay_config)
+
+            # MMR diversity re-ranking
+            if self._mmr_config is not None:
+                scored = apply_mmr_reranking(scored, self._mmr_config, top_k=top_k)
+            else:
+                scored = scored[:top_k]
+
+            # Convert ScoredPiece list to (KnowledgePiece, float) tuples
+            pieces = [(sp.piece, sp.score) for sp in scored]
+
+            if include_global:
+                global_scored = self._hybrid_retriever.search(
+                    query=query,
+                    top_k=top_k,
+                    entity_id=None,
+                    tags=tags,
+                )
+                # Apply space post-filter to global pieces before merging
+                if spaces:
+                    global_scored = [sp for sp in global_scored if set(sp.piece.spaces) & set(spaces)]
+                global_pieces = [(sp.piece, sp.score) for sp in global_scored]
+                pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
+
+            return pieces
+
+        elif domain or tags:
+            # Domain-aware fallback path
+            pieces = self._retrieve_pieces_with_fallback(
+                query=query,
+                entity_id=entity_id,
+                top_k=top_k,
+                domain=domain,
+                secondary_domains=secondary_domains,
+                tags=tags,
+                min_results=min_results,
+                spaces=spaces,
+            )
+            if include_global:
+                global_pieces = self._search_with_space_strategy(
+                    query, entity_id=None, top_k=top_k, spaces=spaces
+                )
+                pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
+            return pieces
+
+        else:
+            # Standard retrieval path (no domain/tag filters)
+            pieces = self._search_with_space_strategy(
+                query, entity_id=entity_id, top_k=top_k, spaces=spaces
+            )
+            if include_global:
+                global_pieces = self._search_with_space_strategy(
+                    query, entity_id=None, top_k=top_k, spaces=spaces
+                )
+                pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
+            return pieces
+
+    def retrieve_search_graph(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        spaces: Optional[List[str]] = None,
+        already_retrieved_piece_ids: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Layer 3a: Query-driven graph search via unified graph walk.
+
+        Calls ``find_search_seeds()`` + ``graph_walk()`` internally.
+        Returns empty list if ``self.include_graph`` is False.
+
+        Args:
+            query: The search query string.
+            top_k: Maximum seed nodes for graph search. Resolved internally
+                   as ``top_k if top_k is not None else self.default_top_k``.
+            spaces: Optional space filter (OR semantics).
+            already_retrieved_piece_ids: Piece IDs from L2 for dedup.
+
+        Returns:
+            List of graph context entry dicts from search-based seeds.
+
+        Requirements: 13.3, 13.6
+        """
+        top_k = top_k if top_k is not None else self.default_top_k
+
+        if not self.include_graph:
+            return []
+
+        search_seeds = find_search_seeds(
+            self.graph_store, query, top_k, spaces
+        )
+        if not search_seeds:
+            return []
+
+        return graph_walk(
+            self.graph_store,
+            self.piece_store,
+            search_seeds,
+            self.graph_traversal_depth,
+            already_retrieved_piece_ids,
+            spaces,
+            self.graph_retrieval_ignore_pieces_already_retrieved,
+        )
+
+    def retrieve_identity_graph(
+        self,
+        entity_id: Optional[str] = None,
+        spaces: Optional[List[str]] = None,
+        already_retrieved_piece_ids: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Layer 3b: Identity-based graph traversal via unified graph walk.
+
+        Calls ``find_identity_seeds()`` + ``graph_walk()`` internally.
+        Returns empty list if ``self.include_graph`` is False.
+
+        Args:
+            entity_id: Override for active_entity_id. Resolved internally
+                       as ``entity_id or self.active_entity_id``.
+            spaces: Optional space filter (OR semantics).
+            already_retrieved_piece_ids: Piece IDs from L2 for dedup.
+
+        Returns:
+            List of graph context entry dicts from identity-based seeds.
+
+        Requirements: 13.4, 13.6
+        """
+        entity_id = entity_id or self.active_entity_id
+
+        if not self.include_graph:
+            return []
+
+        identity_seeds = find_identity_seeds(
+            self.graph_store, entity_id, spaces
+        )
+        if not identity_seeds:
+            return []
+
+        return graph_walk(
+            self.graph_store,
+            self.piece_store,
+            identity_seeds,
+            self.graph_traversal_depth,
+            already_retrieved_piece_ids,
+            spaces,
+            self.graph_retrieval_ignore_pieces_already_retrieved,
+        )
+
 
     # ── Retrieval ────────────────────────────────────────────────────────
 
@@ -184,19 +471,15 @@ class KnowledgeBase:
         spaces: Optional[List[str]] = None,
         **kwargs,
     ) -> RetrievalResult:
-        """Orchestrate retrieval across all layers.
+        """Thin orchestrator calling the four layer methods.
 
-        1. Get metadata for the entity (always, regardless of query)
-        2. If query is non-empty: search knowledge pieces (entity-scoped + global)
-           - When a HybridRetriever is configured, uses the enhanced path:
-             hybrid search → space filter → domain filter → temporal decay → MMR → truncate
-           - Otherwise, uses the standard path with optional domain-aware
-             fallback via ``_retrieve_pieces_with_fallback()``
-        3. Traverse entity graph for related knowledge (always, entity-based)
-        4. Merge and return
+        Signature and return type unchanged — full backward compatibility.
 
-        Empty/whitespace queries skip piece search but still return metadata
-        and graph context.
+        1. L1: retrieve_metadata() — entity and global metadata
+        2. L2: retrieve_pieces() — knowledge piece search (if query non-empty)
+        3. L3a: retrieve_search_graph() — query-driven graph search
+        4. L3b: retrieve_identity_graph() — identity-based graph traversal
+        5. Merge L3a + L3b graph contexts
 
         Args:
             query: The search query string.
@@ -213,137 +496,46 @@ class KnowledgeBase:
 
         Returns:
             A RetrievalResult containing metadata, pieces, and graph context.
+
+        Requirements: 13.5
         """
         entity_id = entity_id or self.active_entity_id
         top_k = top_k if top_k is not None else self.default_top_k
 
         result = RetrievalResult()
 
-        # Layer 1: Metadata
-        if self.include_metadata and entity_id:
-            result.metadata = self.metadata_store.get_metadata(entity_id)
-            if include_global:
-                result.global_metadata = self.metadata_store.get_metadata("global")
-            # Filter metadata by spaces intersection (OR semantics)
-            if spaces:
-                if result.metadata:
-                    meta_spaces = set(getattr(result.metadata, "spaces", ["main"]))
-                    if not meta_spaces & set(spaces):
-                        result.metadata = None
-                if result.global_metadata:
-                    global_meta_spaces = set(getattr(result.global_metadata, "spaces", ["main"]))
-                    if not global_meta_spaces & set(spaces):
-                        result.global_metadata = None
+        # L1: Metadata
+        result.metadata, result.global_metadata = self.retrieve_metadata(
+            entity_id, include_global, spaces
+        )
 
-        # Layer 2: Knowledge pieces (skip for empty/whitespace queries)
-        if query and query.strip():
-            if self.include_pieces:
-                if self._hybrid_retriever is not None:
-                    # Enhanced retrieval path: hybrid → space filter → domain filter → temporal decay → MMR
-                    scored = self._hybrid_retriever.search(
-                        query=query,
-                        top_k=top_k * 3,  # fetch more for post-processing
-                        entity_id=entity_id,
-                        tags=tags,
-                    )
+        # L2: Knowledge pieces (skip for empty/whitespace queries)
+        if query and query.strip() and self.include_pieces:
+            result.pieces = self.retrieve_pieces(
+                query, entity_id, top_k, include_global,
+                domain, secondary_domains, tags, min_results, spaces,
+            )
 
-                    # Space post-filter on hybrid results (before domain/temporal/MMR)
-                    if spaces:
-                        scored = [sp for sp in scored if set(sp.piece.spaces) & set(spaces)]
-
-                    # Domain filter: keep pieces matching domain or secondary_domains
-                    if domain:
-                        all_domains = {domain}
-                        if secondary_domains:
-                            all_domains.update(secondary_domains)
-                        filtered = [
-                            sp for sp in scored
-                            if getattr(sp.piece, "domain", "general") in all_domains
-                        ]
-                        # Fall back to unfiltered if domain filter yields too few
-                        if len(filtered) >= min_results:
-                            scored = filtered
-
-                    # Temporal decay
-                    if self._temporal_decay_config is not None:
-                        scored = apply_temporal_decay(scored, self._temporal_decay_config)
-
-                    # MMR diversity re-ranking
-                    if self._mmr_config is not None:
-                        scored = apply_mmr_reranking(scored, self._mmr_config, top_k=top_k)
-                    else:
-                        scored = scored[:top_k]
-
-                    # Convert ScoredPiece list to (KnowledgePiece, float) tuples
-                    pieces = [(sp.piece, sp.score) for sp in scored]
-
-                    if include_global:
-                        global_scored = self._hybrid_retriever.search(
-                            query=query,
-                            top_k=top_k,
-                            entity_id=None,
-                            tags=tags,
-                        )
-                        # Apply space post-filter to global pieces before merging
-                        if spaces:
-                            global_scored = [sp for sp in global_scored if set(sp.piece.spaces) & set(spaces)]
-                        global_pieces = [(sp.piece, sp.score) for sp in global_scored]
-                        pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
-
-                    result.pieces = pieces
-                elif domain or tags:
-                    # Domain-aware fallback path
-                    pieces = self._retrieve_pieces_with_fallback(
-                        query=query,
-                        entity_id=entity_id,
-                        top_k=top_k,
-                        domain=domain,
-                        secondary_domains=secondary_domains,
-                        tags=tags,
-                        min_results=min_results,
-                        spaces=spaces,
-                    )
-                    if include_global:
-                        global_pieces = self._search_with_space_strategy(
-                            query, entity_id=None, top_k=top_k, spaces=spaces
-                        )
-                        pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
-                    result.pieces = pieces
-                else:
-                    # Standard retrieval path (no domain/tag filters)
-                    pieces = self._search_with_space_strategy(
-                        query, entity_id=entity_id, top_k=top_k, spaces=spaces
-                    )
-                    if include_global:
-                        global_pieces = self._search_with_space_strategy(
-                            query, entity_id=None, top_k=top_k, spaces=spaces
-                        )
-                        pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
-                    result.pieces = pieces
-
-        # Build set of already-retrieved piece IDs for graph dedup
-        already_retrieved = None
+        # Build dedup set from L2 pieces for graph walk
+        already_retrieved_piece_ids = None
         if self.graph_retrieval_ignore_pieces_already_retrieved and result.pieces:
-            already_retrieved = {
-                piece.piece_id: piece.info_type
-                for piece, score in result.pieces
+            already_retrieved_piece_ids = {
+                p.piece_id: p.info_type for p, _ in result.pieces
             }
 
-        # Layer 3: Entity graph
-        if self.include_graph and entity_id:
-            neighbors = self.graph_store.get_neighbors(
-                entity_id, depth=self.graph_traversal_depth
-            )
-            # Filter graph neighbors by spaces intersection (OR semantics)
-            if spaces:
-                neighbors = [
-                    (n, d) for n, d in neighbors
-                    if set(n.properties.get("spaces", ["main"])) & set(spaces)
-                ]
-            result.graph_context = self._extract_graph_knowledge(
-                entity_id, neighbors,
-                already_retrieved_piece_ids=already_retrieved,
-            )
+        # L3a: Query-driven graph search
+        search_ctx = self.retrieve_search_graph(
+            query, top_k, spaces, already_retrieved_piece_ids
+        )
+
+        # L3b: Identity-based graph traversal
+        identity_ctx = self.retrieve_identity_graph(
+            entity_id, spaces, already_retrieved_piece_ids
+        )
+
+        # Merge graph contexts from both paths
+        if search_ctx or identity_ctx:
+            result.graph_context = merge_graph_contexts(search_ctx, identity_ctx)
 
         return result
 
@@ -516,89 +708,11 @@ class KnowledgeBase:
         )
         return sorted_pieces[:top_k]
 
-    # ── Graph knowledge extraction ───────────────────────────────────────
 
-    def _extract_graph_knowledge(
-        self,
-        entity_id: str,
-        neighbors: List[Tuple[Any, int]],
-        already_retrieved_piece_ids: Optional[Dict[str, str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Extract knowledge from graph neighbors — relations and linked pieces.
 
-        For each (neighbor, depth):
-        1. Get the relation connecting to this neighbor (depth-1 only)
-        2. If relation has 'piece_id' in properties, look up the piece
-           (unless already retrieved by Layer 2, controlled by
-           graph_retrieval_ignore_pieces_already_retrieved)
-        3. Score graph-derived pieces by traversal depth: depth-N → 1.0/N
-        4. Return list of dicts with relation_type, target info, piece, depth
 
-        Args:
-            entity_id: The source entity ID.
-            neighbors: List of (GraphNode, depth) tuples from get_neighbors.
-            already_retrieved_piece_ids: Dict mapping piece_id to info_type
-                for pieces already found by Layer 2 search. Used for dedup
-                when graph_retrieval_ignore_pieces_already_retrieved is set.
 
-        Returns:
-            List of graph context dictionaries.
-        """
-        graph_context = []
-        for neighbor, depth in neighbors:
-            entry: Dict[str, Any] = {
-                "relation_type": "RELATED",
-                "target_node_id": neighbor.node_id,
-                "target_label": neighbor.label,
-                "piece": None,
-                "depth": depth,
-            }
 
-            # For depth-1 neighbors, get the actual relation
-            if depth == 1:
-                relations = self.graph_store.get_relations(
-                    entity_id, direction="outgoing"
-                )
-                for rel in relations:
-                    if rel.target_id == neighbor.node_id:
-                        entry["relation_type"] = rel.edge_type
-                        # Check for linked piece
-                        piece_id = rel.properties.get("piece_id")
-                        if piece_id and not self._should_skip_graph_piece(
-                            piece_id, already_retrieved_piece_ids
-                        ):
-                            piece = self.piece_store.get_by_id(piece_id)
-                            if piece:
-                                entry["piece"] = piece
-                        break
-
-            graph_context.append(entry)
-
-        return graph_context
-
-    def _should_skip_graph_piece(
-        self,
-        piece_id: str,
-        already_retrieved_piece_ids: Optional[Dict[str, str]],
-    ) -> bool:
-        """Check if a graph-linked piece should be skipped (already retrieved).
-
-        Args:
-            piece_id: The piece_id from the graph edge properties.
-            already_retrieved_piece_ids: Dict mapping piece_id to info_type
-                for pieces already found by Layer 2 search, or None.
-
-        Returns:
-            True if the piece should be skipped (not attached to graph entry).
-        """
-        if not already_retrieved_piece_ids or piece_id not in already_retrieved_piece_ids:
-            return False
-        if self.graph_retrieval_ignore_pieces_already_retrieved is True:
-            return True
-        if isinstance(self.graph_retrieval_ignore_pieces_already_retrieved, (list, tuple)):
-            piece_info_type = already_retrieved_piece_ids[piece_id]
-            return piece_info_type in self.graph_retrieval_ignore_pieces_already_retrieved
-        return False
 
     # ── CRUD operations ──────────────────────────────────────────────────
 

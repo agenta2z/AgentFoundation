@@ -1,0 +1,15 @@
+{
+  "source_id": "user:alex-johnson",
+  "target_id": "service:safeway",
+  "edge_type": "MEMBER_OF",
+  "properties": {
+    "piece_id": "alex-johnson-safeway-membership",
+    "spaces": [
+      "personal",
+      "main",
+      "developmental"
+    ],
+    "email": "alex.j@example.com",
+    "auth_method": "google_login"
+  }
+}

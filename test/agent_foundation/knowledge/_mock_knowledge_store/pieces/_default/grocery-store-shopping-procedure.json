@@ -1,0 +1,28 @@
+{
+  "doc_id": "grocery-store-shopping-procedure",
+  "content": "Complete grocery store shopping procedure: Step 1 - Login first if user is a member to apply member pricing and discounts. Step 2 - Find right store and location first before further operations. Step 3 - Must add items to cart, and apply all coupons, and check out to view final price.",
+  "metadata": {
+    "knowledge_type": "procedure",
+    "info_type": "instructions",
+    "tags": [
+      "grocery",
+      "shopping",
+      "workflow",
+      "login",
+      "cart",
+      "checkout",
+      "coupons",
+      "pricing"
+    ],
+    "entity_id": null,
+    "source": null,
+    "space": "main",
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  },
+  "embedding_text": "grocery store shopping procedure login member pricing discounts find store location add items cart apply coupons checkout final price workflow steps",
+  "created_at": "2026-02-10T05:41:52.664765+00:00",
+  "updated_at": "2026-02-10T05:41:52.664765+00:00"
+}

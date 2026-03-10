@@ -506,14 +506,3 @@ class TestPreservation:
     def test_graph_retrieval_ignore_attribute_exists(self, kb):
         """graph_retrieval_ignore_pieces_already_retrieved attribute is preserved."""
         assert hasattr(kb, "graph_retrieval_ignore_pieces_already_retrieved")
-
-    def test_should_skip_graph_piece_method_exists(self, kb):
-        """_should_skip_graph_piece helper method is preserved."""
-        assert hasattr(kb, "_should_skip_graph_piece")
-        assert callable(kb._should_skip_graph_piece)
-
-    def test_extract_graph_knowledge_has_already_retrieved_param(self, kb):
-        """_extract_graph_knowledge retains already_retrieved_piece_ids parameter."""
-        import inspect
-        sig = inspect.signature(kb._extract_graph_knowledge)
-        assert "already_retrieved_piece_ids" in sig.parameters

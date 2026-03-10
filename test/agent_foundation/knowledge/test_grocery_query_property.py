@@ -2,11 +2,11 @@
 Property-based tests for grocery query relevance.
 
 Property 3: Grocery query retrieves relevant knowledge.
-For any KnowledgeProvider populated with the grocery store knowledge data and
-any query string containing a grocery store name (e.g., "safeway", "qfc",
-"wholefoods"), provider(query)["user_profile"] should contain that store's
-membership information, and provider(query)["instructions"] should contain
-the grocery shopping procedure.
+For any pipeline-based knowledge provider populated with the grocery store
+knowledge data and any query string containing a grocery store name (e.g.,
+"safeway", "qfc", "wholefoods"), provider(query)["user_profile"] should
+contain that store's membership information, and
+provider(query)["instructions"] should contain the grocery shopping procedure.
 
 # Feature: knowledge-agent-integration
 # Property 3: Grocery query retrieves relevant knowledge
@@ -50,7 +50,9 @@ from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
 )
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
-from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
+from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
+from agent_foundation.knowledge.retrieval.provider import _default_formatter
 
 
 # ── Path to grocery data file ────────────────────────────────────────────────
@@ -70,8 +72,8 @@ GROCERY_DATA_FILE = str(
 # ── Module-level populated provider (created ONCE) ───────────────────────────
 
 
-def _create_grocery_provider() -> KnowledgeProvider:
-    """Create a KnowledgeProvider populated from the grocery store knowledge data file."""
+def _create_grocery_provider():
+    """Create a pipeline-based knowledge provider populated from the grocery store knowledge data file."""
     metadata_store = KeyValueMetadataStore(MemoryKeyValueService())
     piece_store = RetrievalKnowledgePieceStore(MemoryRetrievalService())
     graph_store = GraphServiceEntityGraphStore(MemoryGraphService())
@@ -82,7 +84,18 @@ def _create_grocery_provider() -> KnowledgeProvider:
         active_entity_id="user:[name]",
     )
     KnowledgeDataLoader.load(kb, GROCERY_DATA_FILE)
-    return KnowledgeProvider(kb)
+
+    def provider(query: str):
+        post_processor = GroupedDictPostProcessor(
+            type_formatters={},
+            default_formatter=_default_formatter,
+            metadata_info_type="user_profile",
+            active_entity_id=kb.active_entity_id,
+        )
+        pipeline = RetrievalPipeline(kb=kb, post_processor=post_processor)
+        return pipeline.execute(query)
+
+    return provider
 
 
 # Create the provider ONCE at module level

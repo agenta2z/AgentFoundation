@@ -1,0 +1,14 @@
+{
+  "source_id": "user:alex-johnson",
+  "target_id": "service:qfc",
+  "edge_type": "MEMBER_OF",
+  "properties": {
+    "piece_id": "alex-johnson-qfc-membership",
+    "spaces": [
+      "personal",
+      "main",
+      "developmental"
+    ],
+    "email": "alex.j@example.com"
+  }
+}

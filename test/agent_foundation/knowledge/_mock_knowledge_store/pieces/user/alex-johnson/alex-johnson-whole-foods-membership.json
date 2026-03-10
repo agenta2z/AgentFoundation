@@ -1,0 +1,23 @@
+{
+  "doc_id": "alex-johnson-whole-foods-membership",
+  "content": "Alex Johnson is a Prime member of Whole Foods (www.wholefoodsmarket.com) with email alex.j@example.edu",
+  "metadata": {
+    "knowledge_type": "fact",
+    "info_type": "user_profile",
+    "tags": [
+      "membership",
+      "grocery",
+      "whole-foods",
+      "prime"
+    ],
+    "entity_id": "user:alex-johnson",
+    "source": null,
+    "space": "personal",
+    "spaces": [
+      "personal"
+    ]
+  },
+  "embedding_text": "Whole Foods Prime member membership alex.j@example.edu grocery store amazon prime www.wholefoodsmarket.com",
+  "created_at": "2026-02-10T05:41:52.664765+00:00",
+  "updated_at": "2026-02-10T05:41:52.664765+00:00"
+}

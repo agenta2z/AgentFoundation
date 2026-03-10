@@ -1,0 +1,12 @@
+{
+  "node_id": "service:safeway",
+  "node_type": "grocery_store",
+  "label": "Safeway",
+  "properties": {
+    "website": "www.safeway.com",
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  }
+}

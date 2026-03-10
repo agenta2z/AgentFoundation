@@ -1,0 +1,11 @@
+{
+  "node_id": "user:alex-johnson",
+  "node_type": "person",
+  "label": "Alex Johnson",
+  "properties": {
+    "location": "1234 Main St, Portland, OR, 97201",
+    "spaces": [
+      "personal"
+    ]
+  }
+}

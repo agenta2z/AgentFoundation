@@ -1,0 +1,15 @@
+{
+  "source_id": "user:alex-johnson",
+  "target_id": "service:whole-foods",
+  "edge_type": "MEMBER_OF",
+  "properties": {
+    "piece_id": "alex-johnson-whole-foods-membership",
+    "spaces": [
+      "personal",
+      "main",
+      "developmental"
+    ],
+    "email": "alex.j@example.edu",
+    "membership_type": "prime"
+  }
+}

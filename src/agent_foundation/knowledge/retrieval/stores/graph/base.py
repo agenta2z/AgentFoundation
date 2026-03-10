@@ -163,6 +163,47 @@ class EntityGraphStore(ABC):
         """
         ...
 
+    @property
+    def supports_semantic_search(self) -> bool:
+        """Whether this store supports semantic search over nodes."""
+        return False
+
+    def search_nodes(
+        self,
+        query: str,
+        top_k: int = 5,
+        node_type: Optional[str] = None,
+        namespace: Optional[str] = None,
+    ) -> List[Tuple[GraphNode, float]]:
+        """Search nodes by semantic query. Default raises NotImplementedError.
+
+        Args:
+            query: The search query string.
+            top_k: Maximum number of results.
+            node_type: Optional filter to return only nodes of this type.
+            namespace: Reserved for future use. SemanticGraphStore uses its
+                       own index_namespace for sidecar search. Concrete
+                       implementations (e.g., Neo4j vector index) may use
+                       this parameter.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support semantic search"
+        )
+
+    def list_nodes(
+        self,
+        node_type: Optional[str] = None,
+        include_inactive: bool = False,
+    ) -> List[GraphNode]:
+        """List all nodes, optionally filtered by type and active status.
+
+        Must be implemented by subclasses that support reindexing.
+        Default raises NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement list_nodes"
+        )
+
     def close(self):
         """Close any underlying connections.
 
@@ -170,3 +211,5 @@ class EntityGraphStore(ABC):
         stores with external connections (e.g., Neo4j) to release resources.
         """
         pass
+
+

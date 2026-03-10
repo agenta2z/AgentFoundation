@@ -1,12 +1,13 @@
 """
 E2E integration tests for knowledge_provider → Agent → Reasoner Input.
 
-Verifies the complete wiring: a KnowledgeProvider set on the `knowledge_provider`
-attribute flows through Agent.__call__ → _construct_reasoner_input → prompt feed
-merge → formatted template → reasoner input.
+Verifies the complete wiring: a pipeline-based knowledge provider set on the
+`knowledge_provider` attribute flows through Agent.__call__ →
+_construct_reasoner_input → prompt feed merge → formatted template →
+reasoner input.
 
 Uses:
-- A self-contained KnowledgeProvider built from inline mock data (no external files)
+- A self-contained pipeline-based provider built from inline mock data (no external files)
 - A mock reasoner that captures the reasoner_input argument
 - A _TestablePromptBasedAgent subclass that overrides _parse_raw_response to
   immediately complete (same pattern as TestAgent in test_agent.py)
@@ -41,7 +42,9 @@ from agent_foundation.agents.prompt_based_agents.prompt_based_agent import (
     PromptBasedAgent,
     FeedConflictResolution,
 )
-from agent_foundation.knowledge import KnowledgeProvider
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
+from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
+from agent_foundation.knowledge.retrieval.provider import _default_formatter
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece, KnowledgeType
@@ -183,11 +186,21 @@ def _build_mock_kb() -> KnowledgeBase:
 
 @pytest.fixture
 def mock_knowledge_provider():
-    """KnowledgeProvider backed by inline fictional data."""
+    """Pipeline-based knowledge provider backed by inline fictional data."""
     kb = _build_mock_kb()
-    provider = KnowledgeProvider(kb=kb)
+
+    def provider(query: str):
+        post_processor = GroupedDictPostProcessor(
+            type_formatters={},
+            default_formatter=_default_formatter,
+            metadata_info_type="user_profile",
+            active_entity_id=kb.active_entity_id,
+        )
+        pipeline = RetrievalPipeline(kb=kb, post_processor=post_processor)
+        return pipeline.execute(query)
+
     yield provider
-    provider.close()
+    kb.close()
 
 
 @pytest.fixture

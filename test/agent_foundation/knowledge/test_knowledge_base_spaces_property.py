@@ -425,9 +425,13 @@ class TestNoSpaceFilterReturnsAllSpaces:
 
         result = kb.retrieve("query")
 
-        # Graph neighbor should be returned regardless of its spaces
-        assert len(result.graph_context) == 1, (
-            f"Expected 1 graph neighbor, got {len(result.graph_context)}"
+        # Graph context includes a depth-0 IDENTITY entry for the seed node
+        # plus depth-1 entries for neighbors.  Filter to depth>0 for neighbor check.
+        neighbor_entries = [
+            ctx for ctx in result.graph_context if ctx.get("depth", 0) > 0
+        ]
+        assert len(neighbor_entries) == 1, (
+            f"Expected 1 graph neighbor, got {len(neighbor_entries)}"
         )
 
 
@@ -569,8 +573,10 @@ class TestGraphTraversalSpaceFiltering:
 
         result = kb.retrieve("query", spaces=space_filter)
 
+        # Filter out depth-0 seed entries — only check neighbor nodes
         returned_ids = {
             ctx["target_node_id"] for ctx in result.graph_context
+            if ctx.get("depth", 0) > 0
         }
         assert returned_ids == expected_neighbor_ids, (
             f"Expected neighbors {expected_neighbor_ids}, got {returned_ids}. "
@@ -607,9 +613,11 @@ class TestGraphTraversalSpaceFiltering:
         result = kb.retrieve("query", spaces=space_filter)
 
         # Node without spaces property defaults to ["main"]
+        # Filter out depth-0 seed entries — only check neighbor nodes
         should_be_included = "main" in space_filter
         returned_ids = {
             ctx["target_node_id"] for ctx in result.graph_context
+            if ctx.get("depth", 0) > 0
         }
         if should_be_included:
             assert "neighbor:no_spaces" in returned_ids

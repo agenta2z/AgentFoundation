@@ -1,0 +1,12 @@
+{
+  "source_id": "user:alex-johnson",
+  "target_id": "service:whole-foods",
+  "edge_type": "SHOPS_AT",
+  "properties": {
+    "spaces": [
+      "personal",
+      "main",
+      "developmental"
+    ]
+  }
+}

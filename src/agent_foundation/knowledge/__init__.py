@@ -23,7 +23,7 @@ Advanced Retrieval
 - **Hybrid Search** — Combines vector similarity and keyword search via RRF.
 - **MMR Re-ranking** — Maximal Marginal Relevance for diversity.
 - **Temporal Decay** — Exponential decay scoring for freshness.
-- **Agentic Retrieval** — Multi-query decomposition with domain filters.
+- **Retrieval Pipeline** — Composable pipeline with pluggable query expansion and post-processing.
 - **Budget-Aware Provider** — Per-info-type token budget enforcement.
 
 Ingestion Pipeline
@@ -44,7 +44,8 @@ Data Models:
 
 Enums:
     Space, MergeStrategy, MergeAction, DedupAction, MergeType,
-    ValidationStatus, SuggestionStatus, UpdateAction, DeleteMode
+    ValidationStatus, SuggestionStatus, UpdateAction, DeleteMode,
+    ConsolidationMode
 
 Result Types:
     DedupResult, MergeCandidate, MergeResult, ValidationResult,
@@ -64,14 +65,17 @@ Data Loading:
     KnowledgeDataLoader
 
 Provider:
-    KnowledgeProvider, InfoType, BudgetAwareKnowledgeProvider
+    InfoType, BudgetAwareKnowledgeProvider
 
 Retrieval:
     HybridSearchConfig, HybridRetriever,
     MMRConfig, apply_mmr_reranking,
     TemporalDecayConfig, apply_temporal_decay,
-    SubQuery, AgenticRetrievalResult, AgenticRetriever,
-    create_domain_decomposer, create_llm_decomposer
+    SubQuery, AgenticRetrievalResult,
+    create_domain_decomposer, create_llm_decomposer,
+    RetrievalPipeline, QueryExpander, PostProcessor,
+    FlatStringPostProcessor, GroupedDictPostProcessor,
+    AggregatingPostProcessor, BudgetAwarePostProcessor
 
 Ingestion CLI:
     KnowledgeIngestionCLI
@@ -182,7 +186,10 @@ from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 
 # ── Provider ─────────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider, InfoType
+from agent_foundation.knowledge.retrieval.provider import InfoType
+
+# ── Consolidation Mode ───────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
 
 # ── Budget-Aware Provider ────────────────────────────────────────────────
 from agent_foundation.knowledge.retrieval.knowledge_provider import (
@@ -207,13 +214,25 @@ from agent_foundation.knowledge.retrieval.temporal_decay import (
     apply_temporal_decay,
 )
 
-# ── Agentic Retriever ───────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.agentic_retriever import (
+# ── Query Decomposition & Agentic Models ─────────────────────────────────
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
     SubQuery,
     AgenticRetrievalResult,
-    AgenticRetriever,
     create_domain_decomposer,
     create_llm_decomposer,
+)
+
+# ── Retrieval Pipeline ──────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+    RetrievalPipeline,
+    QueryExpander,
+    PostProcessor,
+)
+from agent_foundation.knowledge.retrieval.post_processors import (
+    FlatStringPostProcessor,
+    GroupedDictPostProcessor,
+    AggregatingPostProcessor,
+    BudgetAwarePostProcessor,
 )
 
 # ── Ingestion CLI (legacy) ──────────────────────────────────────────────
@@ -338,6 +357,7 @@ __all__ = [
     "SuggestionStatus",
     "UpdateAction",
     "DeleteMode",
+    "ConsolidationMode",
     # Result types
     "DedupResult",
     "MergeCandidate",
@@ -360,7 +380,6 @@ __all__ = [
     # Data Loading
     "KnowledgeDataLoader",
     # Provider
-    "KnowledgeProvider",
     "InfoType",
     "BudgetAwareKnowledgeProvider",
     # Hybrid Search
@@ -372,12 +391,19 @@ __all__ = [
     # Temporal Decay
     "TemporalDecayConfig",
     "apply_temporal_decay",
-    # Agentic Retriever
+    # Query Decomposition & Agentic Models
     "SubQuery",
     "AgenticRetrievalResult",
-    "AgenticRetriever",
     "create_domain_decomposer",
     "create_llm_decomposer",
+    # Retrieval Pipeline
+    "RetrievalPipeline",
+    "QueryExpander",
+    "PostProcessor",
+    "FlatStringPostProcessor",
+    "GroupedDictPostProcessor",
+    "AggregatingPostProcessor",
+    "BudgetAwarePostProcessor",
     # Ingestion CLI (legacy)
     "KnowledgeIngestionCLI",
     # Formatter

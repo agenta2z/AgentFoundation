@@ -1,0 +1,13 @@
+{
+  "source_id": "user:alex-johnson",
+  "target_id": "procedure:grocery-shopping",
+  "edge_type": "HAS_SKILL",
+  "properties": {
+    "piece_id": "grocery-store-shopping-procedure",
+    "spaces": [
+      "personal",
+      "main",
+      "developmental"
+    ]
+  }
+}

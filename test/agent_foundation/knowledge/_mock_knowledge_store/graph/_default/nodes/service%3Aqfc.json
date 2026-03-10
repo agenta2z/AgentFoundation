@@ -1,0 +1,12 @@
+{
+  "node_id": "service:qfc",
+  "node_type": "grocery_store",
+  "label": "QFC",
+  "properties": {
+    "website": "www.qfc.com",
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  }
+}

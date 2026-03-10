@@ -11,6 +11,7 @@ Used by property-based tests across the knowledge module.
 """
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Path resolution for imports
 _current_file = Path(__file__).resolve()
@@ -37,6 +38,11 @@ from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphNode,
     GraphEdge,
 )
+from rich_python_utils.service_utils.retrieval_service.document import Document
+from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
+    RetrievalServiceBase,
+)
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
 
 
 # ── Shared helper strategies ─────────────────────────────────────────────────
@@ -258,3 +264,178 @@ def graph_edge_strategy(draw):
 # to continue working during the transition period.
 entity_node_strategy = graph_node_strategy
 entity_relation_strategy = graph_edge_strategy
+
+
+# ── Shared in-memory test helpers ────────────────────────────────────────────
+
+
+class InMemoryEntityGraphStore(EntityGraphStore):
+    """Simple in-memory EntityGraphStore for testing."""
+
+    def __init__(self):
+        self._nodes: Dict[str, GraphNode] = {}
+        self._edges: List[GraphEdge] = []
+
+    def add_node(self, node: GraphNode, **kwargs) -> None:
+        self._nodes[node.node_id] = node
+
+    def get_node(self, node_id: str, **kwargs) -> Optional[GraphNode]:
+        return self._nodes.get(node_id)
+
+    def remove_node(self, node_id: str, **kwargs) -> bool:
+        if node_id in self._nodes:
+            del self._nodes[node_id]
+            self._edges = [
+                e for e in self._edges
+                if e.source_id != node_id and e.target_id != node_id
+            ]
+            return True
+        return False
+
+    def add_relation(self, relation: GraphEdge, **kwargs) -> None:
+        self._edges.append(relation)
+
+    def get_relations(self, node_id: str, relation_type=None, direction="outgoing", **kwargs) -> List[GraphEdge]:
+        results = []
+        for e in self._edges:
+            if direction in ("outgoing", "both") and e.source_id == node_id:
+                if relation_type is None or e.edge_type == relation_type:
+                    results.append(e)
+            if direction in ("incoming", "both") and e.target_id == node_id:
+                if relation_type is None or e.edge_type == relation_type:
+                    results.append(e)
+        return results
+
+    def remove_relation(self, source_id: str, target_id: str, relation_type: str, **kwargs) -> bool:
+        for i, e in enumerate(self._edges):
+            if e.source_id == source_id and e.target_id == target_id and e.edge_type == relation_type:
+                self._edges.pop(i)
+                return True
+        return False
+
+    def get_neighbors(self, node_id: str, relation_type=None, depth=1, **kwargs) -> List[Tuple[GraphNode, int]]:
+        results = []
+        visited = {node_id}
+        current_level = {node_id}
+        for d in range(1, depth + 1):
+            next_level = set()
+            for nid in current_level:
+                for e in self._edges:
+                    if e.source_id == nid:
+                        if relation_type is None or e.edge_type == relation_type:
+                            if e.target_id not in visited:
+                                next_level.add(e.target_id)
+            for nid in next_level:
+                visited.add(nid)
+                node = self._nodes.get(nid)
+                if node:
+                    results.append((node, d))
+            current_level = next_level
+        return results
+
+    def list_nodes(self, node_type=None, include_inactive=False, **kwargs) -> List[GraphNode]:
+        nodes = list(self._nodes.values())
+        if not include_inactive:
+            nodes = [n for n in nodes if n.is_active]
+        if node_type:
+            nodes = [n for n in nodes if n.node_type == node_type]
+        return nodes
+
+    def close(self):
+        pass
+
+
+class InMemoryRetrievalService(RetrievalServiceBase):
+    """Simple in-memory RetrievalServiceBase for testing."""
+
+    def __init__(self):
+        self._docs: Dict[str, Dict[str, Document]] = {}
+        self._closed = False
+
+    def _ns(self, namespace):
+        return namespace or "_default"
+
+    def add(self, doc: Document, namespace: Optional[str] = None) -> str:
+        ns = self._ns(namespace)
+        if ns not in self._docs:
+            self._docs[ns] = {}
+        if doc.doc_id in self._docs[ns]:
+            raise ValueError(f"Document {doc.doc_id} already exists in namespace {ns}")
+        self._docs[ns][doc.doc_id] = doc
+        return doc.doc_id
+
+    def get_by_id(self, doc_id: str, namespace: Optional[str] = None) -> Optional[Document]:
+        ns = self._ns(namespace)
+        return self._docs.get(ns, {}).get(doc_id)
+
+    def update(self, doc: Document, namespace: Optional[str] = None) -> bool:
+        ns = self._ns(namespace)
+        if ns in self._docs and doc.doc_id in self._docs[ns]:
+            self._docs[ns][doc.doc_id] = doc
+            return True
+        return False
+
+    def remove(self, doc_id: str, namespace: Optional[str] = None) -> bool:
+        ns = self._ns(namespace)
+        if ns in self._docs and doc_id in self._docs[ns]:
+            del self._docs[ns][doc_id]
+            return True
+        return False
+
+    def search(self, query: str, filters=None, namespace=None, top_k=5) -> List[Tuple[Document, float]]:
+        ns = self._ns(namespace)
+        docs = list(self._docs.get(ns, {}).values())
+        if filters:
+            filtered = []
+            for doc in docs:
+                match = True
+                for k, v in filters.items():
+                    if k not in doc.metadata or doc.metadata[k] != v:
+                        match = False
+                        break
+                if match:
+                    filtered.append(doc)
+            docs = filtered
+        # Simple keyword matching: score 0.8 if query appears in content, else 0.3
+        results = []
+        for doc in docs:
+            score = 0.8 if query.lower() in doc.content.lower() else 0.3
+            results.append((doc, score))
+        results.sort(key=lambda x: -x[1])
+        return results[:top_k]
+
+    def list_all(self, filters=None, namespace=None) -> List[Document]:
+        ns = self._ns(namespace)
+        return list(self._docs.get(ns, {}).values())
+
+    def size(self, namespace=None) -> int:
+        ns = self._ns(namespace)
+        return len(self._docs.get(ns, {}))
+
+    def clear(self, namespace=None) -> int:
+        ns = self._ns(namespace)
+        count = len(self._docs.get(ns, {}))
+        self._docs[ns] = {}
+        return count
+
+    def namespaces(self) -> List[str]:
+        return list(self._docs.keys())
+
+    def get_stats(self, namespace=None) -> Dict[str, Any]:
+        return {}
+
+    def ping(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def __repr__(self) -> str:
+        return "InMemoryRetrievalService()"

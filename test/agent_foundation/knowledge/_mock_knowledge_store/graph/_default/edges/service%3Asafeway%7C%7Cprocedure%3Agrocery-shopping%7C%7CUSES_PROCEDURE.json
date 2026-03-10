@@ -1,0 +1,12 @@
+{
+  "source_id": "service:safeway",
+  "target_id": "procedure:grocery-shopping",
+  "edge_type": "USES_PROCEDURE",
+  "properties": {
+    "piece_id": "grocery-store-shopping-procedure",
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "node_id": "service:whole-foods",
+  "node_type": "grocery_store",
+  "label": "Whole Foods",
+  "properties": {
+    "website": "www.wholefoodsmarket.com",
+    "spaces": [
+      "main",
+      "developmental"
+    ]
+  }
+}
