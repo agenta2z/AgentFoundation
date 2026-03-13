@@ -1,7 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, AsyncIterator, Callable, Iterator, Sequence, Type, Union
+from typing import Any, AsyncIterator, Callable, Iterable, Iterator, Sequence, Type, Union
 
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
@@ -257,6 +257,98 @@ class InferencerBase(Debuggable, ABC):
         else:
             yield from iter__(response, atom_types=self.response_types)
 
+    def parallel_infer(
+        self,
+        inference_inputs: Iterable[Any],
+        inference_config: Any = None,
+        num_workers: int = None,
+        use_threading: bool = True,
+        debug: bool = False,
+        **_inference_args,
+    ) -> list:
+        """Process multiple inputs concurrently using thread or process pool.
+
+        Dispatches each input to _infer_single() via parallel_process_by_pool,
+        enabling concurrent execution for I/O-bound workloads (API calls, etc.).
+
+        Args:
+            inference_inputs: Iterable of inputs to process concurrently.
+                Generators are supported (materialized internally).
+            inference_config: Optional configuration passed to each _infer_single call.
+            num_workers: Number of pool workers. None = auto:
+                threading (default): min(len(inputs), 32) for I/O-bound work.
+                multiprocessing: get_suggested_num_workers() respecting CPU count.
+                Always capped at len(inputs).
+            use_threading: True (default) uses ThreadPool — no pickling required.
+                False uses multiprocessing.Pool — requires picklable inferencer
+                (no lambdas in input_preprocessor, response_post_processor, etc.).
+            debug: True runs sequentially in a single process for debugging
+                (passed through to parallel_process_by_pool's debug param).
+            **_inference_args: Additional keyword arguments merged with
+                default_inference_args and passed to _infer_single().
+
+        Returns:
+            List of inference results, order-preserving (same index alignment
+            as inputs).
+
+        Note:
+            post_response_merger is NOT auto-applied. The iterator path in
+            infer() atomizes results via iter__() before merging — a different
+            input shape. Users can apply their own merging on the returned list.
+        """
+        from rich_python_utils.mp_utils.mp_target import MPTarget
+        from rich_python_utils.mp_utils.parallel_process import parallel_process_by_pool
+
+        inference_inputs = list(inference_inputs)
+        if not inference_inputs:
+            return []
+
+        num_inputs = len(inference_inputs)
+
+        if num_workers is None:
+            if use_threading:
+                num_workers = min(num_inputs, 32)
+            else:
+                from rich_python_utils.mp_utils.common import get_suggested_num_workers
+
+                num_workers = get_suggested_num_workers()
+        num_workers = min(num_workers, num_inputs)
+
+        pool_class = None
+        if use_threading:
+            from multiprocessing.pool import ThreadPool
+
+            pool_class = ThreadPool
+
+        worker = partial(
+            self._infer_single,
+            inference_config=inference_config,
+            **_inference_args,
+        )
+        mp_target = MPTarget(
+            worker,
+            pass_pid_to_target=False,
+            pass_each_data_item_to_target=True,
+        )
+
+        self.log_debug(
+            f"{num_inputs} inputs, {num_workers} workers, "
+            f"{'threading' if use_threading else 'multiprocessing'}",
+            "ParallelInfer",
+        )
+
+        results = parallel_process_by_pool(
+            num_p=num_workers,
+            data_iter=inference_inputs,
+            target=mp_target,
+            pool_object=pool_class,
+            merge_output=True,
+            mergers=["list"],
+            debug=debug,
+        )
+
+        return results
+
     def __call__(self, inference_input: Any, inference_config: Any = None, **kwargs):
         """
         Allows the instance to be called as a function, invoking the `infer` method.
@@ -450,6 +542,77 @@ class InferencerBase(Debuggable, ABC):
         else:
             for item in iter__(response, atom_types=self.response_types):
                 yield item
+
+    async def aparallel_infer(
+        self,
+        inference_inputs: Iterable[Any],
+        inference_config: Any = None,
+        max_concurrency: int = None,
+        debug: bool = False,
+        **_inference_args,
+    ) -> list:
+        """Async process multiple inputs concurrently using asyncio.gather.
+
+        Dispatches each input to _ainfer_single() with optional semaphore-based
+        concurrency control to prevent event loop/connection pool exhaustion.
+
+        Args:
+            inference_inputs: Iterable of inputs to process concurrently.
+                Generators are supported (materialized internally).
+            inference_config: Optional configuration passed to each _ainfer_single call.
+            max_concurrency: Maximum number of concurrent tasks. None defaults to
+                min(len(inputs), 32) to prevent unbounded concurrency.
+            debug: True runs sequentially via await loop (parity with sync
+                parallel_infer debug mode).
+            **_inference_args: Additional keyword arguments merged with
+                default_inference_args and passed to _ainfer_single().
+
+        Returns:
+            List of inference results, order-preserving (same index alignment
+            as inputs).
+
+        Note:
+            post_response_merger is NOT auto-applied — same rationale as
+            parallel_infer. Users can apply their own merging on the returned list.
+        """
+        inference_inputs = list(inference_inputs)
+        if not inference_inputs:
+            return []
+
+        num_inputs = len(inference_inputs)
+
+        if debug:
+            self.log_debug(
+                f"aparallel_infer debug mode: {num_inputs} inputs",
+                "ParallelInfer",
+            )
+            results = []
+            for inp in inference_inputs:
+                result = await self._ainfer_single(
+                    inp, inference_config, **_inference_args
+                )
+                results.append(result)
+            return results
+
+        if max_concurrency is None:
+            max_concurrency = min(num_inputs, 32)
+
+        self.log_debug(
+            f"{num_inputs} inputs, max_concurrency={max_concurrency}",
+            "ParallelInfer",
+        )
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _bounded_infer(inp):
+            async with semaphore:
+                return await self._ainfer_single(
+                    inp, inference_config, **_inference_args
+                )
+
+        tasks = [_bounded_infer(inp) for inp in inference_inputs]
+        results = await asyncio.gather(*tasks)
+        return list(results)
 
     # region Async Lifecycle Methods
 
