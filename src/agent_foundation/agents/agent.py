@@ -667,7 +667,8 @@ class Agent(Debuggable):
             agent_response: Union[AgentResponse, Any],
             previous_action_results,
             task_input_metadata: Dict = None,
-            attachments: Sequence = None
+            attachments: Sequence = None,
+            ongoing_sequence_actions: bool = False
     ):
         if action.type.startswith('UserInputsRequired.'):
             self.log_info(f"Detected user input required action: {action.type}")
@@ -807,7 +808,8 @@ class Agent(Debuggable):
                 raw_action_items=action,
                 task_input=task_input,
                 action_results=previous_action_results,
-                attachments=attachments
+                attachments=attachments,
+                ongoing_sequence_actions=ongoing_sequence_actions
             )
             actor_args = get_relevant_named_args(actor, **actor_args)
 
@@ -1556,12 +1558,19 @@ class Agent(Debuggable):
 
                         start_nodes = last_node = None
                         previous_action_results = list_(action_results)
-                        for next_action_group in next_actions:
+                        num_groups = len(next_actions)
+                        for group_idx, next_action_group in enumerate(next_actions):
                             # CASE 1: Sequential execution - single action in the group
                             if len(next_action_group) == 1:
                                 # Create a node that executes ONE action, then returns control
                                 # Flow: action_node → (next iteration of this agent's while loop)
                                 next_action = next_action_group[0]
+                                # For batched actions, the LLM planned all actions
+                                # against the same DOM snapshot. Mark intermediate
+                                # actions so the actor can skip post-action
+                                # housekeeping (e.g., DOM re-indexing) that would
+                                # invalidate element references for later actions.
+                                is_last_group = (group_idx == num_groups - 1)
                                 action_node = WorkGraphNode(
                                     value=partial(
                                         self._run_single_action,
@@ -1571,7 +1580,8 @@ class Agent(Debuggable):
                                         agent_response=agent_response,
                                         previous_action_results=previous_action_results,
                                         task_input_metadata=task_input_metadata,
-                                        attachments=attachments
+                                        attachments=attachments,
+                                        ongoing_sequence_actions=not is_last_group
                                     ),
                                     result_pass_down_mode=partial(
                                         self._merge_action_results_to_list,
