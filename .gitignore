@@ -130,4 +130,4 @@ src/agent_foundation/apis/metagen/_config/keys.json
 # Environment files with secrets
 .env.local
 .env.*.local
-*.env
+*.envOpenStartup/
