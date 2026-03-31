@@ -235,7 +235,7 @@ class ContentMemory:
 
         # Combine base_memory with memory elements
         if isinstance(base_memory, str):
-            return base_memory + '\n' + '\n'.join(memory_list)
+            return base_memory + '\n' + '\n'.join(str(item) for item in memory_list)
         elif isinstance(base_memory, list):
             # List content: extend
             return base_memory + memory_list

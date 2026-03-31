@@ -14,4 +14,5 @@ class PromptBasedSummaryActionAgent(PromptBasedActionAgent):
                 response = response['Response']
                 answers.append(response['Answer'])
 
-        return f"<html><body>{'\n\n'.join(answers)}</body></html>"
+        joined = '\n\n'.join(answers)
+        return f"<html><body>{joined}</body></html>"

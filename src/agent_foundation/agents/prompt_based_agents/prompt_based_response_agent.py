@@ -18,7 +18,8 @@ class PromptBasedResponseActionAgent(PromptBasedActionAgent):
                     response = response['Response']
                     answers.append(response['Answer'])
 
-            return f"<html><body>{'\n\n'.join(answers)}</body></html>"
+            joined = '\n\n'.join(answers)
+            return f"<html><body>{joined}</body></html>"
 
     def _get_agent_results(self, trigger_action, trigger_action_results, new_states):
         if self.states:

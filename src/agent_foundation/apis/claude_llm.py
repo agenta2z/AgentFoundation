@@ -20,6 +20,7 @@ class ClaudeModels(StrEnum):
     CLAUDE_37_SONNET = 'claude-3-7-sonnet-20250219'
     CLAUDE_40_SONNET = 'claude-sonnet-4-20250514'
     CLAUDE_45_SONNET = 'claude-sonnet-4-5-20250929'
+    CLAUDE_46_OPUS = 'claude-opus-4-6'
     CLAUDE_41OPUS = 'claude-opus-4-1-20250805'
     CLAUDE_3_HAIKU = 'claude-3-haiku-20240307'
 

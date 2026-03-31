@@ -8,6 +8,17 @@
 
 ## Executive Summary
 
+### Strategic Context
+
+Our AI Lab Jira initiative targets two differentiators *(see [JIRA_HYBRID_AI_AGENT_STRATEGY.md](../../../atlassian_packages/ai-lab-docs/references/ai_lab_jira_initiative/JIRA_HYBRID_AI_AGENT_STRATEGY.md))*: **(1) API-UI hybrid agents** bridging the 30-40% of Jira tasks unreachable by API, and **(2) long-haul AI employees** operating autonomously over hours/days. Current Jira agents have 1-hour in-memory sessions with no cross-session memory or skill learning — BrowserAgent's knowledge system fills this gap:
+
+- **Long-haul enablement:** Persistent multi-backend storage + entity graph for task/relationship tracking + temporal decay with evergreen exemptions → cross-session memory and state continuity
+- **Hybrid model amplification:** Auto-synthesized skills from execution history (Tempo, ScriptRunner, board config) + entity graph across Jira/Confluence/third-party tools + hybrid search for infrequent admin tasks
+- **Self-improving agents:** Skills emerge automatically, knowledge deduplicates intelligently, LLM-based validation ensures correctness — agents get better the more they execute
+- **Full compatibility:** Designed to integrate with both **OpenClaw/ClawHub** (matching all mature features at parity) and the **existing Jira agent skills system** (16 skill modules, 90+ functions), serving as a drop-in knowledge layer for either ecosystem
+
+BrowserAgent holds **6 unique capabilities**, **4 superior implementations**, and full parity with OpenClaw on all mature features:
+
 | Dimension | OpenClaw | OpenManus | BrowserAgent | BrowserAgent Advantage |
 |-----------|----------|-----------|--------------------------|----------------------|
 | **Architecture** | File-based + Vector embeddings | Stateless LLM-centric | ✅ Three-layer (Metadata + Pieces + Graph) | **UNIQUE** — Entity graph enables relationship-aware retrieval |

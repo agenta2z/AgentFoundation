@@ -36,7 +36,8 @@ class AIGatewayClaudeModels(StrEnum):
     # Claude Sonnet 4.0
     CLAUDE_40_SONNET = 'anthropic.claude-sonnet-4-20250514-v1:0'
     
-    # Claude Opus 4.1 and 4.0
+    # Claude Opus 4.6, 4.1 and 4.0
+    CLAUDE_46_OPUS = 'anthropic.claude-opus-4-6-v1'
     CLAUDE_41_OPUS = 'anthropic.claude-opus-4-1-20250805-v1:0'
     CLAUDE_40_OPUS = 'anthropic.claude-opus-4-20250514-v1:0'
     
@@ -55,6 +56,7 @@ class AIGatewayClaudeModels(StrEnum):
 DEFAULT_MAX_TOKENS = {
     f'{AIGatewayClaudeModels.CLAUDE_45_SONNET}': 8192,
     f'{AIGatewayClaudeModels.CLAUDE_40_SONNET}': 8192,
+    f'{AIGatewayClaudeModels.CLAUDE_46_OPUS}': 8192,
     f'{AIGatewayClaudeModels.CLAUDE_41_OPUS}': 8192,
     f'{AIGatewayClaudeModels.CLAUDE_40_OPUS}': 8192,
     f'{AIGatewayClaudeModels.CLAUDE_37_SONNET}': 8192,

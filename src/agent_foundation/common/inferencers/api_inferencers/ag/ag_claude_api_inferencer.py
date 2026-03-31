@@ -23,6 +23,7 @@ CLAUDE_TO_AI_GATEWAY_MODEL_MAP = {
     ClaudeModels.CLAUDE_45_SONNET: AIGatewayClaudeModels.CLAUDE_45_SONNET,
     ClaudeModels.CLAUDE_40_SONNET: AIGatewayClaudeModels.CLAUDE_40_SONNET,
     ClaudeModels.CLAUDE_37_SONNET: AIGatewayClaudeModels.CLAUDE_37_SONNET,
+    ClaudeModels.CLAUDE_46_OPUS: AIGatewayClaudeModels.CLAUDE_46_OPUS,
     ClaudeModels.CLAUDE_41OPUS: AIGatewayClaudeModels.CLAUDE_41_OPUS,
     ClaudeModels.CLAUDE_3_OPUS: AIGatewayClaudeModels.CLAUDE_40_OPUS,
     ClaudeModels.CLAUDE_35_SONNET: AIGatewayClaudeModels.CLAUDE_35_SONNET_V2,
@@ -102,6 +103,6 @@ class AgClaudeApiInferencer(ApiInferencerBase):
         self._inference_api = ai_gateway_generate_text
 
         if not self.model_id:
-            self.model_id = str(AIGatewayClaudeModels.CLAUDE_45_SONNET)
+            self.model_id = str(AIGatewayClaudeModels.CLAUDE_46_OPUS)
         else:
             self.model_id = _resolve_model_id(self.model_id)
