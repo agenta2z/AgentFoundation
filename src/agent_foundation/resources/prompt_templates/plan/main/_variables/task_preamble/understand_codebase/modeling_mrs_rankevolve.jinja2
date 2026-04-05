@@ -1,0 +1,35 @@
+Take a deep dive into {{ workflow_target_path }}. Carefully create a comprehensive, insightful and organized codebase documentation considering both {{ workflow_target_path }} and all its dependencies.
+
+Your strategy is
+
+Thoroughly investigate the target codebase covering the following topics:
+1. **Project Overview**: Purpose, goals, high-level architecture
+2. **Directory & Module Structure**: Layout, organizational principles
+3. **Core Components & Relationships**: Classes, modules, services, dependencies, data flow
+4. **Entry Points & Control Flow**: CLI entry points, API endpoints, execution flow
+5. **Key Abstractions & Design Patterns**: Patterns used, architectural abstractions
+6. **Data Models & Schema**: Key data structures, configuration objects
+7. **External Dependencies & Integrations**: Third-party and internal libraries
+8. **Configuration & Environment**: Config files, environment variables, CLI flags
+9. **Testing Infrastructure**: Test patterns, locations, utilities
+10. **Notable Implementation Details**: Complex algorithms, non-obvious decisions
+11. **Modeling Science & Efficiency Opportunities**: This is a critical topic — dedicate significant depth here. Go beyond surface-level observations; trace data flow, read model definitions, and understand what the code actually computes before proposing opportunities. Identify:
+    - **Model architecture opportunities**: Novel layer designs, attention mechanisms (e.g., flash attention, multi-query attention), feature interaction modules (e.g., DCN, DeepFM variants), sparse-to-dense bridging, architecture search opportunities. Examine how the current model layers compose — are there redundant transforms, bottleneck layers, or missing skip connections?
+    - **Training efficiency**: Distributed training strategies (FSDP, pipeline parallelism, tensor parallelism), mixed-precision training (bf16/fp8), gradient accumulation and checkpointing, data loading and preprocessing bottlenecks, optimizer choices (e.g., LAMB, AdaFactor vs Adam), learning rate scheduling. Trace the training loop to identify where wall-clock time is actually spent
+    - **Inference efficiency**: Model quantization (INT8/INT4, dynamic vs static), operator fusion, kernel optimization (custom CUDA kernels, Triton), batching strategies, embedding table sharding and lookup optimization, KV-cache for sequential models, graph compilation (torch.compile, TorchScript). Identify the latency-critical path and where compute vs memory bandwidth is the bottleneck
+    - **Feature engineering & embeddings**: Feature hashing, embedding compression (mixed-dimension, hash embeddings), feature interaction modeling, feature selection and importance analysis, multi-modal feature fusion. Examine how raw features flow through preprocessing into the model
+    - **Loss functions & optimization**: Multi-task and multi-objective learning, auxiliary losses, calibration strategies, hard negative mining, curriculum learning, label smoothing or noise handling. Analyze the current loss landscape and training dynamics
+    - **Data pipeline & sampling**: Training data sampling strategies (importance sampling, stratified sampling), negative sampling approaches, data augmentation for tabular/ranking data, online vs offline feature computation, data freshness and staleness
+    - **Evaluation & experimentation**: Offline evaluation metrics and their correlation with online metrics, A/B testing infrastructure integration, counterfactual evaluation, model debugging and interpretability tools, experiment tracking and reproducibility
+    - **Research directions**: Cutting-edge approaches from recent literature that could apply — e.g., retrieval-augmented ranking, foundation models for recommendation, self-supervised pre-training for user/item representations, neural architecture search for ranking, reinforcement learning for ranking optimization. Identify open questions specific to this codebase worth investigating
+    For each opportunity: cite concrete files/modules/functions, describe what the code currently does, the proposed direction, estimated impact on model quality or efficiency (high/medium/low), and prerequisites or risks
+
+Investigation methodology:
+- Start from entry points and trace outward
+- Follow import chains to understand module dependencies. Identify and develop deep understanding of the key modules
+- Document things that would surprise a new developer
+- Organize your documentation into subfolders, where each subfolder addressing a major topic. Make the documentation human readable, easy to onboard and tutorial like, with sufficient details and explanations. Meanwhile also maintain AI-agent friendly indexes, appendix, lists, etc. for AI-agent use.
+
+
+Additional Instructions:
+{{ additional_instructions }}

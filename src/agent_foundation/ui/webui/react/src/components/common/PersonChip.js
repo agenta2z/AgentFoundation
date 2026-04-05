@@ -18,22 +18,21 @@ import Box from '@mui/material/Box';
 import Avatar from '@mui/material/Avatar';
 import Typography from '@mui/material/Typography';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import { useTheme } from '@mui/material/styles';
 
-const AI_COLORS = ['#4a90d9', '#7c4dff', '#00bcd4', '#ff7043'];
-const HUMAN_COLORS = ['#4caf50', '#ff9800', '#e91e63', '#9c27b0'];
-
-function getAvatarColor(name, type) {
-  const colors = type === 'ai' ? AI_COLORS : HUMAN_COLORS;
+function hashString(str) {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return colors[Math.abs(hash) % colors.length];
+  return Math.abs(hash);
 }
 
 export function PersonChip({ name, role, type = 'human', avatarUrl, size = 'medium', onClick }) {
+  const theme = useTheme();
   const avatarSize = size === 'small' ? 28 : 36;
-  const bgColor = getAvatarColor(name, type);
+  const colors = theme.custom?.categorical || ['#4a90d9'];
+  const bgColor = colors[hashString(name) % colors.length];
 
   return (
     <Box

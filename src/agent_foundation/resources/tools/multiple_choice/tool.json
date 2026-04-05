@@ -1,0 +1,15 @@
+{
+  "name": "multiple_choice",
+  "tool_type": "Conversation",
+  "category": "conversation",
+  "description": "Present options and let the user pick multiple.",
+  "parameters": [
+    {"name": "prompt", "type": "string", "required": true, "description": "The question to present."},
+    {"name": "choices", "type": "string", "required": true, "description": "Array of {label, value, description} objects."},
+    {"name": "allow_custom", "type": "flag", "default": true, "description": "Allow user to provide custom input."}
+  ],
+  "usage_guidance": "Use when the user might want to select several options.",
+  "examples": [
+    "{\"tool_type\": \"multiple_choice\", \"prompt\": \"Which optimizations to apply?\", \"choices\": [{\"label\": \"Memory\", \"value\": \"memory\", \"description\": \"Reduce memory footprint\"}, {\"label\": \"Latency\", \"value\": \"latency\", \"description\": \"Reduce inference time\"}, {\"label\": \"Throughput\", \"value\": \"throughput\", \"description\": \"Increase batch throughput\"}], \"allow_custom\": true}"
+  ]
+}

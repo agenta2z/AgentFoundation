@@ -1,0 +1,13 @@
+{
+  "name": "clear",
+  "tool_type": "Action",
+  "aliases": [],
+  "category": "utility",
+  "is_bridge": false,
+  "description": "Clear the current conversation history. Resets the chat context while keeping session settings.",
+  "parameters": [],
+  "returns": "Confirmation that conversation has been cleared.",
+  "examples": [
+    "clear"
+  ]
+}

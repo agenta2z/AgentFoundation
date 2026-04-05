@@ -1,0 +1,42 @@
+{
+  "name": "understand_codebase",
+  "tool_type": "Action",
+  "aliases": ["understand-codebase", "uc"],
+  "category": "workflow",
+  "is_bridge": true,
+  "asynchronous": true,
+  "derived_from": {
+    "tool": "task",
+    "template_version": "understand_codebase",
+    "arg_mappings": {
+      "target": "request",
+      "docs_only": "no_planning",
+      "investigation_only": "no_implementation"
+    }
+  },
+  "description": "Deep-dive codebase investigation. Analyzes a target file or directory to produce comprehensive architectural documentation covering model structure, data flow, dependencies, extension points, and bottlenecks.",
+  "parameters": [
+    {
+      "name": "target",
+      "type": "path",
+      "required": true,
+      "positional": true,
+      "description": "The target file or directory to investigate."
+    },
+    {
+      "name": "--docs-only",
+      "type": "flag",
+      "description": "Skip planning, generate documentation directly."
+    },
+    {
+      "name": "--investigation-only",
+      "type": "flag",
+      "description": "Run investigation only, skip implementation/documentation phase."
+    }
+  ],
+  "returns": "Workspace path containing the codebase analysis documentation.",
+  "examples": [
+    "understand-codebase /path/to/model.py",
+    "understand-codebase /path/to/directory/"
+  ]
+}

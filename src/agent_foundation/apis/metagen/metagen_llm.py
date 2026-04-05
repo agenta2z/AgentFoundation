@@ -7,6 +7,12 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from metagen import (
     CompletionResponse,
+    Dialog,
+    DialogMessage,
+    DialogSource,
+    DialogTextContent,
+    DialogTextContentDeltaEvent,
+    DialogTextContentEndEvent,
     Message,
     MetaGenKey,
     MetaGenPlatform,
@@ -19,12 +25,28 @@ from rich_python_utils.common_utils import get_
 from rich_python_utils.console_utils import hprint_message
 
 
+class CompletionMode(StrEnum):
+    """
+    Completion API mode for MetaGen calls.
+
+    Different models may require different MetaGen API endpoints:
+    - CHAT: Uses chat_completion (legacy, has hardcoded temperature=0.6/top_p=0.9 defaults)
+    - DIALOG: Uses dialog_completion (modern, nullable temperature/top_p, required for Claude 4.6+)
+    - AUTO: Automatically selects based on model name (Claude → DIALOG, others → CHAT)
+    """
+
+    CHAT = "chat"
+    DIALOG = "dialog"
+    AUTO = "auto"
+
+
 class MetaGenModels(StrEnum):
     """
     Enumeration for major supported MetaGen models.
     """
 
     # Claude models
+    CLAUDE_4_6_OPUS = "claude-4-6-opus-genai"
     CLAUDE_4_SONNET = "claude-4-sonnet-genai"
     CLAUDE_3_7_SONNET = "claude-3-7-sonnet-20250219-us"
 
@@ -41,6 +63,9 @@ class MetaGenModels(StrEnum):
     # Gemini models
     GEMINI_2_5_PRO = "gemini-2-5-pro"
 
+
+# Models that require dialog_completion (Claude 4.6+ rejects dual temperature+top_p)
+_DIALOG_MODE_PREFIXES = {"claude"}
 
 # Path to the keys configuration file (located in _config/ relative to this file)
 _KEYS_CONFIG_PATH = Path(__file__).parent / "_config" / "keys.json"
@@ -116,6 +141,7 @@ def get_default_metagen_key() -> str:
 
 
 DEFAULT_MAX_TOKENS = {
+    f"{MetaGenModels.CLAUDE_4_6_OPUS}": 128000,
     f"{MetaGenModels.CLAUDE_4_SONNET}": 10240,
     f"{MetaGenModels.CLAUDE_3_7_SONNET}": 10240,
     f"{MetaGenModels.LLAMA_3_1_405B}": 10240,
@@ -155,6 +181,102 @@ def get_optimal_key_for_model(model: MetaGenModels) -> str:
     return available_keys if isinstance(available_keys, str) else default_key
 
 
+def _resolve_completion_mode(model: str, mode: CompletionMode) -> CompletionMode:
+    """
+    Resolve AUTO completion mode to a concrete CHAT or DIALOG mode.
+
+    Args:
+        model: The model string to check.
+        mode: The requested completion mode.
+
+    Returns:
+        CompletionMode.CHAT or CompletionMode.DIALOG
+    """
+    if mode != CompletionMode.AUTO:
+        return mode
+    model_lower = model.lower()
+    for prefix in _DIALOG_MODE_PREFIXES:
+        if prefix in model_lower:
+            return CompletionMode.DIALOG
+    return CompletionMode.CHAT
+
+
+def _build_dialog(
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+) -> Dialog:
+    """
+    Convert various input formats to a MetaGen Dialog object.
+
+    Args:
+        prompt_or_messages: Input in various formats - string, dict, or sequence.
+
+    Returns:
+        Dialog object compatible with dialog_completion API.
+    """
+    dialog_messages: list[DialogMessage] = []
+
+    source_map = {
+        "system": DialogSource.SYSTEM,
+        "user": DialogSource.USER,
+        "assistant": DialogSource.ASSISTANT,
+    }
+
+    def _make_msg(role: str, content: str) -> DialogMessage:
+        source = source_map.get(role, DialogSource.USER)
+        return DialogMessage(
+            source=source,
+            contents=[DialogTextContent(text=content)],
+        )
+
+    if isinstance(prompt_or_messages, str):
+        dialog_messages.append(_make_msg("user", prompt_or_messages))
+
+    elif isinstance(prompt_or_messages, Dict):
+        role = prompt_or_messages.get("role", "user")
+        dialog_messages.append(_make_msg(role, prompt_or_messages["content"]))
+
+    elif isinstance(prompt_or_messages, (List, Tuple)):
+        if isinstance(prompt_or_messages[0], str):
+            for i in range(0, len(prompt_or_messages) - 1, 2):
+                dialog_messages.append(_make_msg("user", prompt_or_messages[i]))
+                if i + 1 < len(prompt_or_messages):
+                    dialog_messages.append(
+                        _make_msg("assistant", prompt_or_messages[i + 1])
+                    )
+            if len(prompt_or_messages) % 2 == 1:
+                dialog_messages.append(_make_msg("user", prompt_or_messages[-1]))
+        elif isinstance(prompt_or_messages[0], Dict):
+            for turn in prompt_or_messages:
+                role = turn.get("role", "user")
+                dialog_messages.append(_make_msg(role, turn["content"]))
+    else:
+        raise ValueError(
+            "'prompt_or_messages' must be one of str, Dict, or a sequence of strs or Dicts"
+        )
+
+    return Dialog(messages=dialog_messages)
+
+
+def _extract_dialog_response_text(response) -> str:
+    """
+    Extract text from a DialogCompletionResponse.
+
+    The dialog response structure differs from chat:
+      dialog: response.choices[0].dialog.messages[-1].contents[0].text
+      chat:   response.choices[0].text
+    """
+    choice = response.choices[0]
+    if hasattr(choice, "dialog") and choice.dialog:
+        last_msg = choice.dialog.messages[-1]
+        for content in last_msg.contents:
+            if isinstance(content, DialogTextContent):
+                return content.text
+        return str(last_msg.contents[0]) if last_msg.contents else ""
+    if hasattr(choice, "text"):
+        return choice.text
+    return str(choice)
+
+
 def _prepare_completion_params(
     prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
     model: MetaGenModels,
@@ -166,13 +288,14 @@ def _prepare_completion_params(
     connect_timeout: float,
     response_timeout: float,
     verbose: bool,
+    completion_mode: CompletionMode = CompletionMode.AUTO,
     **kwargs,
-) -> Tuple[MetaGenPlatform, Dict]:
+) -> Tuple[MetaGenPlatform, Dict, CompletionMode]:
     """
     Prepare common parameters for both sync and async MetaGen completion calls.
 
     Returns:
-        Tuple of (metagen_platform, params_dict)
+        Tuple of (metagen_platform, params_dict, resolved_completion_mode)
     """
     # Auto-select optimal key if not provided
     if metagen_key is None:
@@ -183,15 +306,20 @@ def _prepare_completion_params(
     if not max_new_tokens:
         max_new_tokens = DEFAULT_MAX_TOKENS.get(model_str, 8192)
 
-    messages = _get_messages(prompt_or_messages)
+    resolved_mode = _resolve_completion_mode(model_str, completion_mode)
 
     params = {
         "model": model_str,
-        "messages": messages.build(),
         "max_tokens": max_new_tokens,
         "temperature": temperature,
         "top_p": top_p,
     }
+
+    if resolved_mode == CompletionMode.DIALOG:
+        params["dialog"] = _build_dialog(prompt_or_messages)
+    else:
+        messages = _get_messages(prompt_or_messages)
+        params["messages"] = messages.build()
 
     # Handle timeout setting
     timeout = _resolve_llm_timeout(
@@ -199,12 +327,13 @@ def _prepare_completion_params(
         connect_timeout=connect_timeout,
         response_timeout=response_timeout,
     )
-    # Note: MetaGen API timeout handling would be implemented here if supported
 
-    params.update(kwargs)  # Add any additional kwargs
+    params.update(kwargs)
 
     if verbose:
-        hprint_message({**params, "Using MetaGen key": metagen_key})
+        hprint_message(
+            {**params, "Using MetaGen key": metagen_key, "mode": resolved_mode}
+        )
 
     # Create metagen platform
     metagen_platform: MetaGenPlatform = thrift_platform_factory.create(
@@ -212,7 +341,75 @@ def _prepare_completion_params(
         auto_rate_limit=True,
     )
 
-    return metagen_platform, params
+    return metagen_platform, params, resolved_mode
+
+
+def _execute_chat_completion(
+    metagen_platform: MetaGenPlatform, params: Dict
+) -> CompletionResponse:
+    """Execute a chat_completion call (legacy API)."""
+    return metagen_platform.chat_completion(
+        messages=params["messages"],
+        model=params["model"],
+        temperature=params["temperature"],
+        top_p=params["top_p"],
+        max_tokens=params["max_tokens"],
+    )
+
+
+async def _execute_chat_completion_async(
+    metagen_platform: MetaGenPlatform, params: Dict
+) -> CompletionResponse:
+    """Execute a chat_completion_async call (legacy API)."""
+    return await metagen_platform.chat_completion_async(
+        messages=params["messages"],
+        model=params["model"],
+        temperature=params["temperature"],
+        top_p=params["top_p"],
+        max_tokens=params["max_tokens"],
+    )
+
+
+def _execute_dialog_completion(metagen_platform: MetaGenPlatform, params: Dict):
+    """
+    Execute a dialog_completion call (modern API).
+
+    Only passes temperature OR top_p (not both) since models like
+    Claude Opus 4.6 reject having both set simultaneously.
+    """
+    kwargs = {
+        "dialog": params["dialog"],
+        "model": params["model"],
+        "max_tokens": params["max_tokens"],
+    }
+    # Only pass temperature (not top_p) to avoid the dual-parameter rejection
+    if params.get("temperature") is not None:
+        kwargs["temperature"] = params["temperature"]
+    elif params.get("top_p") is not None:
+        kwargs["top_p"] = params["top_p"]
+
+    return metagen_platform.dialog_completion(**kwargs)
+
+
+async def _execute_dialog_completion_async(
+    metagen_platform: MetaGenPlatform, params: Dict
+):
+    """
+    Execute a dialog_completion_async call (modern API).
+
+    Only passes temperature OR top_p (not both).
+    """
+    kwargs = {
+        "dialog": params["dialog"],
+        "model": params["model"],
+        "max_tokens": params["max_tokens"],
+    }
+    if params.get("temperature") is not None:
+        kwargs["temperature"] = params["temperature"]
+    elif params.get("top_p") is not None:
+        kwargs["top_p"] = params["top_p"]
+
+    return await metagen_platform.dialog_completion_async(**kwargs)
 
 
 def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]]):
@@ -285,6 +482,7 @@ def generate_text(
     verbose: bool = False,
     result_array_getter: Union[str, Callable] = None,
     result_processor: Callable = None,
+    completion_mode: CompletionMode = CompletionMode.AUTO,
     **kwargs,
 ) -> str:
     """
@@ -294,29 +492,21 @@ def generate_text(
         prompt_or_messages: The prompt or messages to generate text from.
         model: The MetaGen model to use for generating text.
         max_new_tokens: The maximum number of new tokens to generate (excluding the prompt).
-        temperature: Controls the "creativity" of the generated text. A higher temperature will
-                    result in more creative responses, while a lower temperature will result in
-                    more predictable responses.
-        top_p: Nucleus sampling parameter. If set, only tokens with cumulative probability <= top_p
-               are considered for sampling. Must be between 0 and 1.
+        temperature: Controls the "creativity" of the generated text.
+        top_p: Nucleus sampling parameter.
         api_key: Your MetaGen API key. If None, automatically selects optimal key for the model.
-        timeout: Request timeout in seconds. Can be either a float (same timeout for connect and read)
-                or a tuple of (connect_timeout, read_timeout). If specified, this takes precedence
-                over connect_timeout and response_timeout parameters.
-        connect_timeout: Maximum time in seconds to wait for establishing connection to the API.
-                        Only used if timeout parameter is None. If None, uses the client's default.
+        timeout: Request timeout in seconds.
+        connect_timeout: Maximum time in seconds to wait for establishing connection.
         response_timeout: Maximum time in seconds to wait for the complete response stream.
-                         Only used if timeout parameter is None. This is the total time allowed
-                         for receiving all tokens in the response. If None, uses the client's default.
         return_raw_results: Whether to return the raw results from the API.
         verbose: True to print out parameter values.
-        result_array_getter: Custom way to extract results from the API response. Can be either:
-                           - A string representing a dot-separated path (e.g., 'choices')
-                           - A callable that takes the response object and returns a list of results
-                           If None, defaults to extracting from `response.choices`.
-        result_processor: Optional callable to process each individual result before returning.
-                         Takes a single result object (e.g., a choice from response.choices) and
-                         returns the processed value. If None, defaults to extracting the text attribute.
+        result_array_getter: Custom way to extract results from the API response.
+        result_processor: Optional callable to process each individual result.
+        completion_mode: Which MetaGen API to use. Options:
+            - CompletionMode.AUTO (default): Auto-detect based on model name.
+              Claude models use dialog_completion; others use chat_completion.
+            - CompletionMode.DIALOG: Force dialog_completion (modern API, nullable temp/top_p).
+            - CompletionMode.CHAT: Force chat_completion (legacy API, hardcoded defaults).
 
     Returns:
         The generated text, or the raw results returned by the API.
@@ -324,25 +514,20 @@ def generate_text(
     Examples:
         >>> generate_text(
         ...    prompt_or_messages='hello',
-        ...    model=MetaGenModels.CLAUDE_4_SONNET,
+        ...    model=MetaGenModels.CLAUDE_4_6_OPUS,
         ...    max_new_tokens=1024,
-        ...    temperature=0,
-        ...    return_raw_results=False
+        ...    temperature=0.7,
         ... )
         'Hello! How can I help you today?'
 
         >>> generate_text(
-        ...    prompt_or_messages=[
-        ...        {"role": "system", "content": "You are a helpful assistant."},
-        ...        {"role": "user", "content": "What is the capital of France?"}
-        ...    ],
+        ...    prompt_or_messages='hello',
         ...    model=MetaGenModels.LLAMA_3_1_405B,
-        ...    temperature=0
+        ...    completion_mode=CompletionMode.CHAT,
         ... )
-        'The capital of France is Paris.'
+        'Hi there!'
     """
-    # Prepare parameters using shared logic
-    metagen_platform, params = _prepare_completion_params(
+    metagen_platform, params, resolved_mode = _prepare_completion_params(
         prompt_or_messages=prompt_or_messages,
         model=model,
         max_new_tokens=max_new_tokens,
@@ -353,28 +538,26 @@ def generate_text(
         connect_timeout=connect_timeout,
         response_timeout=response_timeout,
         verbose=verbose,
+        completion_mode=completion_mode,
         **kwargs,
     )
 
     if verbose:
         print(f"return_raw_results: {return_raw_results}")
 
-    # Synchronous API call
-    response: CompletionResponse = metagen_platform.chat_completion(
-        messages=params["messages"],
-        model=params["model"],
-        temperature=params["temperature"],
-        top_p=params["top_p"],
-        max_tokens=params["max_tokens"],
-    )
+    if resolved_mode == CompletionMode.DIALOG:
+        response = _execute_dialog_completion(metagen_platform, params)
+    else:
+        response = _execute_chat_completion(metagen_platform, params)
 
     if return_raw_results:
         return response
 
-    # Process results using custom getters/processors if provided
     if result_array_getter is not None:
         result = get_(response, result_array_getter)[0]
     else:
+        if resolved_mode == CompletionMode.DIALOG:
+            return _extract_dialog_response_text(response)
         result = response.choices[0]
 
     if result_processor is not None:
@@ -397,6 +580,7 @@ async def generate_text_async(
     verbose: bool = False,
     result_array_getter: Union[str, Callable] = None,
     result_processor: Callable = None,
+    completion_mode: CompletionMode = CompletionMode.AUTO,
     **kwargs,
 ) -> str:
     """
@@ -405,23 +589,18 @@ async def generate_text_async(
     Args:
         prompt_or_messages: The prompt or messages to generate text from.
         model: The MetaGen model to use for generating text.
-        max_new_tokens: The maximum number of new tokens to generate (excluding the prompt).
-        temperature: Controls the "creativity" of the generated text. A higher temperature will
-                    result in more creative responses, while a lower temperature will result in
-                    more predictable responses.
-        top_p: Nucleus sampling parameter. If set, only tokens with cumulative probability <= top_p
-               are considered for sampling. Must be between 0 and 1.
-        metagen_key: Your MetaGen API key. If None, automatically selects optimal key for the model.
-        timeout: Request timeout in seconds. Can be either a float (same timeout for connect and read)
-                or a tuple of (connect_timeout, read_timeout). If specified, this takes precedence
-                over connect_timeout and response_timeout parameters.
-        connect_timeout: Maximum time in seconds to wait for establishing connection to the API.
-                        Only used if timeout parameter is None. If None, uses the client's default.
-        response_timeout: Maximum time in seconds to wait for the complete response stream.
-                         Only used if timeout parameter is None. This is the total time allowed
-                         for receiving all tokens in the response. If None, uses the client's default.
+        max_new_tokens: The maximum number of new tokens to generate.
+        temperature: Controls the "creativity" of the generated text.
+        top_p: Nucleus sampling parameter.
+        metagen_key: Your MetaGen API key. If None, automatically selects optimal key.
+        timeout: Request timeout in seconds.
+        connect_timeout: Maximum time in seconds for connection.
+        response_timeout: Maximum time in seconds for complete response.
         return_raw_results: Whether to return the raw results from the API.
         verbose: True to print out parameter values.
+        result_array_getter: Custom way to extract results.
+        result_processor: Optional callable to process each result.
+        completion_mode: Which MetaGen API to use (AUTO, DIALOG, or CHAT).
 
     Returns:
         The generated text, or the raw results returned by the API.
@@ -429,25 +608,13 @@ async def generate_text_async(
     Examples:
         >>> await generate_text_async(
         ...    prompt_or_messages='hello',
-        ...    model=MetaGenModels.CLAUDE_4_SONNET,
+        ...    model=MetaGenModels.CLAUDE_4_6_OPUS,
         ...    max_new_tokens=1024,
-        ...    temperature=0,
-        ...    return_raw_results=False
+        ...    temperature=0.7,
         ... )
         'Hello! How can I help you today?'
-
-        >>> await generate_text_async(
-        ...    prompt_or_messages=[
-        ...        {"role": "system", "content": "You are a helpful assistant."},
-        ...        {"role": "user", "content": "What is the capital of France?"}
-        ...    ],
-        ...    model=MetaGenModels.LLAMA_3_1_405B,
-        ...    temperature=0
-        ... )
-        'The capital of France is Paris.'
     """
-    # Prepare parameters using shared logic
-    metagen_platform, params = _prepare_completion_params(
+    metagen_platform, params, resolved_mode = _prepare_completion_params(
         prompt_or_messages=prompt_or_messages,
         model=model,
         max_new_tokens=max_new_tokens,
@@ -458,34 +625,101 @@ async def generate_text_async(
         connect_timeout=connect_timeout,
         response_timeout=response_timeout,
         verbose=verbose,
+        completion_mode=completion_mode,
         **kwargs,
     )
 
     if verbose:
         print(f"return_raw_results: {return_raw_results}")
 
-    # Asynchronous API call
-    response: CompletionResponse = await metagen_platform.chat_completion_async(
-        messages=params["messages"],
-        model=params["model"],
-        temperature=params["temperature"],
-        top_p=params["top_p"],
-        max_tokens=params["max_tokens"],
-    )
+    if resolved_mode == CompletionMode.DIALOG:
+        response = await _execute_dialog_completion_async(metagen_platform, params)
+    else:
+        response = await _execute_chat_completion_async(metagen_platform, params)
 
     if return_raw_results:
         return response
 
-    # Process results using custom getters/processors if provided
     if result_array_getter is not None:
         result = get_(response, result_array_getter)[0]
     else:
+        if resolved_mode == CompletionMode.DIALOG:
+            return _extract_dialog_response_text(response)
         result = response.choices[0]
 
     if result_processor is not None:
         return result_processor(result)
     else:
         return result.text
+
+
+async def generate_text_streaming(
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: MetaGenModels = MetaGenModels.CLAUDE_4_SONNET,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+    metagen_key: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    verbose: bool = False,
+    completion_mode: CompletionMode = CompletionMode.AUTO,
+    **kwargs,
+):
+    """Stream text chunks from MetaGen API via dialog_completion_stream_events_async.
+
+    Yields raw text deltas as they arrive. Forces DIALOG completion mode
+    since streaming is only available via the dialog API.
+
+    Args:
+        prompt_or_messages: The prompt or messages to generate text from.
+        model: The MetaGen model to use.
+        max_new_tokens: Maximum number of new tokens to generate.
+        temperature: Controls creativity of generated text.
+        top_p: Nucleus sampling parameter.
+        metagen_key: MetaGen API key. If None, auto-selects optimal key.
+        timeout: Request timeout in seconds.
+        connect_timeout: Maximum time for establishing connection.
+        response_timeout: Maximum time for complete response stream.
+        verbose: True to print parameter values.
+        completion_mode: Ignored — always forced to DIALOG for streaming.
+
+    Yields:
+        str: Text chunks as they arrive from the streaming API.
+    """
+    metagen_platform, params, _ = _prepare_completion_params(
+        prompt_or_messages=prompt_or_messages,
+        model=model,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        metagen_key=metagen_key,
+        timeout=timeout,
+        connect_timeout=connect_timeout,
+        response_timeout=response_timeout,
+        verbose=verbose,
+        completion_mode=CompletionMode.DIALOG,  # Force DIALOG for streaming
+        **kwargs,
+    )
+
+    # Build kwargs for the streaming call (same pattern as _execute_dialog_completion)
+    stream_kwargs = {
+        "dialog": params["dialog"],
+        "model": params["model"],
+        "max_tokens": params["max_tokens"],
+    }
+    if params.get("temperature") is not None:
+        stream_kwargs["temperature"] = params["temperature"]
+    elif params.get("top_p") is not None:
+        stream_kwargs["top_p"] = params["top_p"]
+
+    async for event in metagen_platform.dialog_completion_stream_events_async(
+        **stream_kwargs
+    ):
+        if isinstance(event, (DialogTextContentDeltaEvent, DialogTextContentEndEvent)):
+            if event.delta:
+                yield event.delta
 
 
 if __name__ == "__main__":

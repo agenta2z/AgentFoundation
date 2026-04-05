@@ -36,13 +36,13 @@ class DevmateSDKInferencer(StreamingInferencerBase):
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - ``active_session_id`` property
 
-    This class implements ``_produce_chunks()`` (the abstract primitive) and
+    This class implements ``_ainfer_streaming()`` (the abstract primitive) and
     overrides ``_ainfer()`` to support ``SDKInferencerResponse`` and session kwargs.
 
     Runtime Dependencies:
         Requires devai.devmate_sdk package. This is a soft dependency — the
         module imports successfully without it. ImportError is raised only
-        when _produce_chunks() is called.
+        when _ainfer_streaming() is called.
 
     Usage Patterns:
         # Single query:
@@ -90,7 +90,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
 
     # === Streaming Primitive ===
 
-    async def _produce_chunks(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield text deltas from Devmate SDK via event-driven model.
 
         Creates a fresh client per call. Registers event handlers that push
@@ -287,7 +287,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         Resolves session kwargs (new_session, session_id, auto_resume) into
         ``previous_session_id`` and injects into kwargs BEFORE calling
         ``super()._ainfer()``, so the value flows through
-        ``ainfer_streaming() → _produce_chunks(prompt, **kwargs) →
+        ``ainfer_streaming() → _ainfer_streaming(prompt, **kwargs) →
         client.start_session(previous_session_id=...)``.
 
         Args:

@@ -10,6 +10,9 @@
         "llama3-70b-instruct": [
             "YOUR_LLAMA_KEY_HERE"
         ],
+        "claude-4-6-opus-genai": [
+            "YOUR_CLAUDE_KEY_HERE"
+        ],
         "claude-4-sonnet-genai": [
             "YOUR_CLAUDE_KEY_HERE"
         ],

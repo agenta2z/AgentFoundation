@@ -1,0 +1,10 @@
+1. Read the latest round's {{ result_type }} results at: {{ result_path_latest }}
+2. Read the implementation report for context at: {{ implementation_output_path }}
+3. Earlier rounds are available at: {{ result_path_base }}
+   Compare key metrics across rounds to identify trends, regressions, or improvements.
+4. Focus your analysis on the latest round. Use earlier rounds only for context.
+5. For each metric, report:
+   - Latest round value
+   - Delta from previous round (if available)
+   - Whether the delta is meaningful or noise (consider GPU benchmarking variance of ±5-10%)
+6. Write a single comprehensive analysis report.

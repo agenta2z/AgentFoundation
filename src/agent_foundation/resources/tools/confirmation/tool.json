@@ -1,0 +1,14 @@
+{
+  "name": "confirmation",
+  "tool_type": "Conversation",
+  "category": "conversation",
+  "description": "Ask the user to confirm (yes/no) before executing significant or irreversible actions.",
+  "parameters": [
+    {"name": "prompt", "type": "string", "required": true, "description": "The confirmation question."},
+    {"name": "view", "type": "string", "required": false, "description": "Path to an artifact for the user to view (e.g., generated documentation). Shown as a 'View' button."}
+  ],
+  "usage_guidance": "Use before executing significant or irreversible actions.",
+  "examples": [
+    "{\"tool_type\": \"confirmation\", \"prompt\": \"Proceed with the implementation plan?\"}"
+  ]
+}

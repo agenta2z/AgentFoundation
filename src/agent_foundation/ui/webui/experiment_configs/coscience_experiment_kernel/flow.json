@@ -1,0 +1,1850 @@
+{
+  "metadata": {
+    "name": "ACE (Agent for GPU Computation Efficiency)",
+    "description": "AI agent for automating GPU computation efficiency optimization using the GemForge methodology",
+    "code_entry_point": "fbcode/hammer/v2/ops/hstu_attention_template.py",
+    "context_files_root": "fbcode/_tony_dev/ScienceModelingTools/tools/ui/chatbot_demo_react/experiment_configs/coscience_experiment_kernel",
+    "group_sections_by_step": true,
+    "default_inferencer": {
+      "type": "devmate",
+      "config": {
+        "model_name": "claude-sonnet-4.5",
+        "max_tokens": 32768
+      }
+    },
+    "iterations": [
+      {
+        "id": "iteration_1",
+        "name": "Profiling & Headroom Analysis",
+        "description": "Automated profiling, bottleneck identification, and headroom analysis for GPU efficiency optimization",
+        "start_step_index": 0,
+        "end_step_index": 7,
+        "steps": [
+          {
+            "index": 0,
+            "name": "Welcome & Mode Selection"
+          },
+          {
+            "index": 1,
+            "name": "Codebase Investigation"
+          },
+          {
+            "index": 2,
+            "name": "Model Profiling"
+          },
+          {
+            "index": 3,
+            "name": "Bottleneck Identification"
+          },
+          {
+            "index": 4,
+            "name": "Headroom Analysis"
+          },
+          {
+            "index": 5,
+            "name": "Optimization Recommendations"
+          },
+          {
+            "index": 6,
+            "name": "Model Co-Design Proposals"
+          },
+          {
+            "index": 7,
+            "name": "Iteration 1 Summary"
+          }
+        ]
+      },
+      {
+        "id": "iteration_2",
+        "name": "Kernel Generation & Validation",
+        "description": "Generate optimized kernels and validate performance improvements",
+        "start_step_index": 8,
+        "end_step_index": 15,
+        "steps": [
+          {
+            "index": 8,
+            "name": "Iteration 2 Transition"
+          },
+          {
+            "index": 9,
+            "name": "Kernel Design Planning"
+          },
+          {
+            "index": 10,
+            "name": "Triton Kernel Generation"
+          },
+          {
+            "index": 11,
+            "name": "Kernel Autotuning"
+          },
+          {
+            "index": 12,
+            "name": "Integration & Testing"
+          },
+          {
+            "index": 13,
+            "name": "Benchmarking"
+          },
+          {
+            "index": 14,
+            "name": "Performance Analysis"
+          },
+          {
+            "index": 15,
+            "name": "Final Summary"
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "step_0",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 1.5,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 1.5,
+        "max": 3.0
+      },
+      "pre_messages": [
+        {
+          "content": "🤔 Initializing ACE agent...",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [],
+      "post_messages": [
+        {
+          "content": "👋 **Welcome to ACE!**\n\nI'm your AI agent for **GPU Computation Efficiency** optimization.\nI'll guide you through the **GemForge methodology** — a systematic approach to maximize GPU utilization.\n\n---\n\n### 📁 Workflow\n\n**GemForge Optimization Cycle**\n\n1. 🔍 **Codebase Investigation** — Analyze GPU kernel implementations\n2. 📊 **Model Profiling** — Execute CB/EMS benchmarks automatically\n3. 🎯 **Bottleneck Identification** — Detect performance bottlenecks\n4. 📈 **Headroom Analysis** — Calculate MFU ceiling and optimization potential\n5. 💡 **Optimization Recommendations** — Generate actionable suggestions\n6. 🔧 **Model Co-Design** — Propose GPU-friendly architecture changes\n7. ⚡ **Kernel Generation** — Generate optimized Triton/CUDA kernels\n8. 🧪 **Benchmarking** — Validate performance improvements\n\n💡 *The GemForge methodology has improved dense MFU from 17% to 33% on GEM models. Let's apply it to your model!*\n\n---",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        },
+        {
+          "content": "### 📂 Target Codebase\n\nSpecify the GPU kernel codebase to analyze:",
+          "type": "text",
+          "delay": {
+            "min": 0.3,
+            "max": 0.5
+          },
+          "input_field": {
+            "multiline": false,
+            "optional": true,
+            "variable_name": "codebase_path",
+            "default_value": "hammer/v2/ops",
+            "collapsible": true,
+            "initially_collapsed": false
+          }
+        },
+        {
+          "content": "### ✏️ Select Optimization Mode\n\nChoose your optimization focus and customize the plan if needed:",
+          "type": "text",
+          "delay": {
+            "min": 0.3,
+            "max": 0.5
+          },
+          "input_field": {
+            "placeholder": "Add any specific optimization goals, constraints, or focus areas...",
+            "multiline": true,
+            "optional": true,
+            "variable_name": "adjusted_workflow_plan",
+            "mode_selector": {
+              "label": "Optimization Mode",
+              "default_mode": "full_gemforge",
+              "options": [
+                {
+                  "id": "full_gemforge",
+                  "label": "🎯 Full GemForge Workflow",
+                  "description": "Complete profiling-to-kernel pipeline for maximum efficiency gains",
+                  "file": "files/plans/full_gemforge_plan.md"
+                },
+                {
+                  "id": "mfu_profiling",
+                  "label": "📊 MFU Profiling Focus",
+                  "description": "Automated model profiling and bottleneck detection",
+                  "file": "files/plans/mfu_profiling_plan.md"
+                },
+                {
+                  "id": "model_codesign",
+                  "label": "🔧 Model Co-Design",
+                  "description": "GPU-friendly model architecture recommendations",
+                  "file": "files/plans/model_codesign_plan.md"
+                },
+                {
+                  "id": "kernel_optimization",
+                  "label": "⚡ Kernel Optimization",
+                  "description": "Triton/CUDA kernel generation and tuning",
+                  "file": "files/plans/kernel_optimization_plan.md"
+                }
+              ]
+            },
+            "collapsible": true,
+            "initially_collapsed": false
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🚀 **Ready to optimize?**",
+        "actions": [
+          {
+            "label": "✅ Start Optimization",
+            "user_message": "Start the GemForge optimization workflow",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "✏️ Adjust Plan",
+            "action_type": "expand_input",
+            "target_variable": "adjusted_workflow_plan",
+            "style": "secondary"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_1",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Analyzing kernel codebase...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📂 **ITERATION 1 - Step 1/8**: Investigating GPU kernel implementations...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "kernel_investigation",
+          "title": "🔍 Kernel Codebase Investigation",
+          "prompt_file": "files/prompts/codebase_documentation_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.3,
+          "messages": [
+            {
+              "content": "investigate hammer/v2/ops/hstu_attention_template.py",
+              "delay": 2.5
+            },
+            {
+              "content": "Analyzing HSTU attention kernel implementation...",
+              "delay": 1.8
+            },
+            {
+              "content": "Identifying Triton kernel patterns and configurations...",
+              "delay": 1.5
+            },
+            {
+              "content": "investigate generative-recommenders/ops/hstu/hstu_attention.py",
+              "delay": 2.0
+            },
+            {
+              "content": "Parsing attention kernel optimizations...",
+              "delay": 1.5
+            },
+            {
+              "content": "Reviewing tensor core utilization patterns...",
+              "delay": 2.0
+            },
+            {
+              "content": "Analyzing memory access patterns and coalescing...",
+              "delay": 1.8
+            },
+            {
+              "content": "Documenting block size configurations...",
+              "delay": 1.5
+            },
+            {
+              "content": "Mapping kernel launch parameters...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Kernel codebase investigation complete!",
+              "delay": 1.0
+            }
+          ]
+        },
+        {
+          "slot": "codebase_documentation",
+          "title": "📝 GPU Kernel Documentation",
+          "prompt_file": "files/prompts/codebase_documentation_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "appearance_delay": {
+            "min": 15.0,
+            "max": 25.0
+          },
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Initializing kernel documentation generator...",
+              "delay": 2.5
+            },
+            {
+              "content": "Documenting Triton kernel configurations...",
+              "delay": 2.0
+            },
+            {
+              "content": "Writing kernel architecture overview...",
+              "delay": 3.0
+            },
+            {
+              "content": "Documenting attention kernel implementations...",
+              "delay": 2.5
+            },
+            {
+              "content": "Adding memory optimization patterns...",
+              "delay": 3.0
+            },
+            {
+              "content": "Documenting autotuning configurations...",
+              "delay": 2.8
+            },
+            {
+              "content": "Writing integration guidelines...",
+              "delay": 2.5
+            },
+            {
+              "content": "✅ Kernel documentation complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Codebase Investigation Complete!**\n\n### Summary\n\n**GPU Kernel Analysis**:\n- HSTU attention kernel with Triton implementation\n- Block size configurations for H100/B200 optimization\n- Memory coalescing patterns identified\n- Tensor core utilization opportunities documented\n\n### Key Findings\n1. **Kernel Architecture**: Triton-based attention with configurable block sizes\n2. **Memory Patterns**: Sequential access for embedding lookups, strided for attention\n3. **Optimization Opportunities**: Fusion possibilities, block size tuning",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📚 **Codebase investigation complete!** Ready for model profiling.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Continue to Profiling",
+            "user_message": "Continue with model profiling",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Explore more",
+            "action_type": "inferencer",
+            "prefix": "I want to explore more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Continue to Profiling",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_2",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 3.0,
+        "max": 3.5
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Preparing profiling infrastructure...",
+          "type": "text",
+          "delay": {
+            "min": 2.0,
+            "max": 4.0
+          }
+        },
+        {
+          "content": "📊 **ITERATION 1 - Step 2/8**: Executing automated model profiling...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_header": {
+        "content": "📊 **Model Profiling**\n\nI'll execute automated benchmarks to profile GPU utilization:\n\n1. **Component Benchmarking (CB)** — Module-level performance analysis\n2. **Efficient Module Suite (EMS)** — Kernel-level profiling\n3. **MFU Calculation** — Dense MFU metrics for all components",
+        "input_field": {
+          "label": "💡 MAST Job Info (Optional)",
+          "placeholder": "Provide MAST job ID or commit hash for targeted profiling...",
+          "multiline": true,
+          "optional": true,
+          "variable_name": "mast_job_info",
+          "collapsible": true,
+          "initially_collapsed": true
+        },
+        "continue_button": {
+          "label": "🚀 Start Profiling",
+          "style": "primary"
+        }
+      },
+      "progress_sections": [
+        {
+          "slot": "profiling_execution",
+          "title": "📊 Automated Profiling",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 2.2,
+          "messages": [
+            {
+              "content": "Extracting model configuration from codebase...",
+              "delay": 2.0
+            },
+            {
+              "content": "Configuring GPU environment for H100...",
+              "delay": 2.5
+            },
+            {
+              "content": "Executing Component Benchmarking (CB)...",
+              "delay": 3.0
+            },
+            {
+              "content": "  → Profiling embedding layers...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Profiling attention mechanisms...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Profiling linear layers...",
+              "delay": 2.0
+            },
+            {
+              "content": "Running Efficient Module Suite (EMS)...",
+              "delay": 3.0
+            },
+            {
+              "content": "  → Collecting kernel-level traces...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Measuring tensor core utilization...",
+              "delay": 2.0
+            },
+            {
+              "content": "Calculating dense MFU metrics...",
+              "delay": 2.5
+            },
+            {
+              "content": "✅ Profiling complete! Generating report...",
+              "delay": 1.5
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Profiling Results**\n\n### Dense MFU Analysis\n\n| Component | MFU | Status |\n|-----------|-----|--------|\n| Embedding Lookup | 12% | ⚠️ Low |\n| HSTU Attention | 28% | 🔶 Medium |\n| Linear Layers | 35% | 🔶 Medium |\n| Output Projection | 22% | ⚠️ Low |\n| **Overall Dense MFU** | **24%** | 🔶 |\n\n### Hardware Utilization\n- Tensor Core Utilization: 45%\n- Memory Bandwidth: 72%\n- SM Occupancy: 58%",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📊 **Profiling complete!** Ready for bottleneck analysis.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Analyze Bottlenecks",
+            "user_message": "Continue with bottleneck identification",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📊 View detailed report",
+            "action_type": "inferencer",
+            "prefix": "Show me detailed profiling for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Continue to Bottleneck Analysis",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_3",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Analyzing profiling results...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "🎯 **ITERATION 1 - Step 3/8**: Identifying performance bottlenecks...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "bottleneck_analysis",
+          "title": "🎯 Bottleneck Identification",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Analyzing memory access patterns...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Detected: Strided memory access in embedding lookup",
+              "delay": 1.8
+            },
+            {
+              "content": "Analyzing compute efficiency...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Detected: Suboptimal block sizes in attention kernel",
+              "delay": 1.8
+            },
+            {
+              "content": "Analyzing kernel launch overhead...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Detected: Multiple small kernel launches",
+              "delay": 1.8
+            },
+            {
+              "content": "Ranking bottlenecks by impact...",
+              "delay": 2.5
+            },
+            {
+              "content": "✅ Bottleneck analysis complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Bottleneck Analysis Complete!**\n\n### Top Bottlenecks Identified\n\n| Rank | Bottleneck | Type | Impact | Root Cause |\n|------|------------|------|--------|------------|\n| 1 | Embedding Lookup | Memory-bound | High | Strided memory access, poor coalescing |\n| 2 | Attention Softmax | Compute-bound | Medium | Low tensor core utilization |\n| 3 | Output Projection | Memory-bound | Medium | Dimension misalignment (not 128-aligned) |\n| 4 | Kernel Launch | Latency-bound | Low | Multiple small kernels, fusion opportunity |\n\n### Estimated MFU Impact\n- Fixing #1: +8% MFU potential\n- Fixing #2: +5% MFU potential\n- Fixing #3: +4% MFU potential\n- Fixing #4: +2% MFU potential",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🎯 **Bottlenecks identified!** Ready for headroom analysis.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Continue to Headroom Analysis",
+            "user_message": "Continue with headroom analysis",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Deep dive into bottleneck",
+            "action_type": "inferencer",
+            "prefix": "Explain more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Continue to Headroom Analysis",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_4",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Calculating optimization headroom...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📈 **ITERATION 1 - Step 4/8**: Performing headroom analysis...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "headroom_calculation",
+          "title": "📈 Headroom Analysis",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Calculating theoretical MFU ceiling for H100...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Peak FP16 compute: 989.5 TFLOPS",
+              "delay": 1.5
+            },
+            {
+              "content": "  → Memory bandwidth: 3.35 TB/s",
+              "delay": 1.5
+            },
+            {
+              "content": "Estimating achievable MFU with optimizations...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → With memory optimization: 32% achievable",
+              "delay": 1.8
+            },
+            {
+              "content": "  → With compute optimization: 38% achievable",
+              "delay": 1.8
+            },
+            {
+              "content": "  → With kernel fusion: 42% achievable",
+              "delay": 1.8
+            },
+            {
+              "content": "Computing optimization ROI...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Headroom analysis complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Headroom Analysis Complete!**\n\n### MFU Headroom Summary\n\n| Metric | Current | Achievable | Theoretical Max |\n|--------|---------|------------|----------------|\n| Dense MFU | 24% | 42% | 55% |\n| Tensor Core Util | 45% | 75% | 90% |\n| Memory Efficiency | 72% | 88% | 95% |\n\n### Optimization Roadmap\n\n| Phase | Optimization | Expected Gain | Effort |\n|-------|-------------|---------------|--------|\n| 1 | Dimension alignment | +4% MFU | Low |\n| 2 | Attention kernel optimization | +6% MFU | Medium |\n| 3 | Kernel fusion | +5% MFU | Medium |\n| 4 | Custom Triton kernels | +3% MFU | High |\n\n**Total Potential Gain: +18% MFU (24% → 42%)**",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📈 **Headroom analysis complete!** Ready for optimization recommendations.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Get Recommendations",
+            "user_message": "Continue with optimization recommendations",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📊 Explore headroom details",
+            "action_type": "inferencer",
+            "prefix": "Tell me more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Continue to Recommendations",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_5",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Generating optimization recommendations...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "💡 **ITERATION 1 - Step 5/8**: Creating actionable optimization recommendations...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "recommendations_generation",
+          "title": "💡 Optimization Recommendations",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Analyzing bottleneck-to-solution mapping...",
+              "delay": 2.0
+            },
+            {
+              "content": "Generating memory optimization recommendations...",
+              "delay": 2.5
+            },
+            {
+              "content": "Generating compute optimization recommendations...",
+              "delay": 2.5
+            },
+            {
+              "content": "Generating kernel fusion recommendations...",
+              "delay": 2.5
+            },
+            {
+              "content": "Prioritizing by impact/effort ratio...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Recommendations generated!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Optimization Recommendations**\n\n### Priority 1: Dimension Alignment (Low Effort, +4% MFU)\n```python\n# Change: Align hidden dimensions to 128 for tensor core efficiency\nhidden_dim = 768  # Before: 760\nembedding_dim = 256  # Before: 250\n```\n\n### Priority 2: Attention Kernel Optimization (Medium Effort, +6% MFU)\n- Increase block size from 64 to 128\n- Enable Flash Attention 2 patterns\n- Optimize memory access for causal masking\n\n### Priority 3: Kernel Fusion (Medium Effort, +5% MFU)\n- Fuse Linear + GELU activation\n- Fuse Attention + Output projection\n- Reduce kernel launch overhead by 40%\n\n### Priority 4: Custom Triton Kernels (High Effort, +3% MFU)\n- Custom fused embedding lookup\n- Optimized softmax with online normalization",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n💡 **Recommendations ready!** Proceed to model co-design proposals.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Continue to Co-Design",
+            "user_message": "Continue with model co-design proposals",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Explore recommendation",
+            "action_type": "inferencer",
+            "prefix": "Explain implementation for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Continue to Co-Design",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_6",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Synthesizing model co-design proposals...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "🔧 **ITERATION 1 - Step 6/8**: Generating GPU-friendly architecture proposals...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "codesign_synthesis",
+          "title": "🔧 Model Co-Design Proposals",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Analyzing architecture for GPU optimization...",
+              "delay": 2.0
+            },
+            {
+              "content": "Generating dimension alignment proposal...",
+              "delay": 2.5
+            },
+            {
+              "content": "Generating attention optimization proposal...",
+              "delay": 2.5
+            },
+            {
+              "content": "Generating layer fusion proposal...",
+              "delay": 2.5
+            },
+            {
+              "content": "Validating proposals for quality preservation...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Co-design proposals ready!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Model Co-Design Proposals**\n\n### Proposal 1: Tensor Core Optimized Dimensions\n**Expected Impact: +4% MFU**\n\n| Layer | Current | Proposed | Rationale |\n|-------|---------|----------|------------|\n| Embedding | 250 | 256 | 64-aligned for H100 |\n| Hidden | 760 | 768 | 128-aligned |\n| Attention Heads | 12 | 12 | Already optimal |\n| FFN | 3040 | 3072 | 256-aligned |\n\n### Proposal 2: Flash Attention Integration\n**Expected Impact: +6% MFU**\n- Replace standard attention with Flash Attention 2\n- Enable causal masking optimization\n- Memory reduction: 4x for long sequences\n\n### Proposal 3: Operator Fusion\n**Expected Impact: +5% MFU**\n- Fuse: LayerNorm → Linear → GELU\n- Fuse: Attention → Output Projection\n- Fuse: Linear → Residual → LayerNorm",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        },
+        {
+          "content": "✅ Here is the detailed co-design proposal",
+          "type": "text",
+          "file": "files/context/iteration_1/proposals/.gitkeep",
+          "delay": {
+            "min": 0.5,
+            "max": 1.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🔧 **Co-design proposals ready!** Review iteration summary.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ View Iteration Summary",
+            "user_message": "Continue to iteration summary",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Explore proposal details",
+            "action_type": "inferencer",
+            "prefix": "Tell me more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ View Iteration Summary",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_7",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Summarizing iteration 1 findings...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📋 **ITERATION 1 - Step 7/8**: Generating iteration summary...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [],
+      "post_messages": [
+        {
+          "content": "✅ **Iteration 1 Summary: Profiling & Headroom Analysis**\n\n### 📊 Key Metrics\n| Metric | Baseline | Target | Potential |\n|--------|----------|--------|----------|\n| Dense MFU | 24% | 35% | 42% |\n| Tensor Core | 45% | 70% | 75% |\n| Memory Efficiency | 72% | 85% | 88% |\n\n### 🎯 Top Findings\n1. **Primary Bottleneck**: Memory-bound embedding lookup (strided access)\n2. **Secondary Bottleneck**: Suboptimal attention block sizes\n3. **Optimization Headroom**: +18% MFU achievable\n\n### 💡 Recommended Next Steps\n1. Implement dimension alignment (quick win: +4% MFU)\n2. Generate optimized Triton attention kernel\n3. Implement operator fusion for linear layers\n\n### 🔄 Iteration 2 Focus\n- Kernel Generation (M4)\n- Implementation & Validation\n- Performance Benchmarking",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📋 **Iteration 1 complete!** Ready to proceed to kernel generation.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Start Iteration 2",
+            "user_message": "Continue to iteration 2 for kernel generation",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📊 Export Analysis Report",
+            "action_type": "inferencer",
+            "prefix": "Generate detailed report for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Start Iteration 2",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_8",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Transitioning to kernel generation phase...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "⚡ **ITERATION 2 - Step 1/8**: Starting kernel generation workflow...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [],
+      "post_messages": [
+        {
+          "content": "🔄 **Iteration 2: Kernel Generation & Validation**\n\n### Phase Objectives\nBased on Iteration 1 analysis, we'll now:\n\n1. **Design Optimized Kernels** — Target identified bottlenecks\n2. **Generate Triton Code** — Create custom kernels\n3. **Autotune Parameters** — Optimize for H100/B200\n4. **Benchmark Performance** — Validate MFU improvements\n\n### Target Improvements\n| Optimization | Target Gain |\n|-------------|------------|\n| Attention Kernel | +6% MFU |\n| Fused Operators | +5% MFU |\n| Memory Optimization | +4% MFU |\n| Custom Activation | +3% MFU |",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n⚡ **Ready for kernel generation!**\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Start Kernel Design",
+            "user_message": "Continue with kernel design planning",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📋 Review Iteration 1 Findings",
+            "action_type": "inferencer",
+            "prefix": "Show me details about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Start Kernel Design",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_9",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Planning kernel architecture...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "🎨 **ITERATION 2 - Step 2/8**: Designing optimized kernel architecture...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "kernel_design",
+          "title": "🎨 Kernel Design Planning",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Analyzing bottleneck operations for kernel optimization...",
+              "delay": 2.0
+            },
+            {
+              "content": "Designing attention kernel architecture...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Block size: 128x128 for H100 tensor cores",
+              "delay": 1.8
+            },
+            {
+              "content": "  → Shared memory: 48KB per block",
+              "delay": 1.8
+            },
+            {
+              "content": "Designing fused linear-activation kernel...",
+              "delay": 2.5
+            },
+            {
+              "content": "Planning autotuning parameter space...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Kernel design complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Kernel Design Plan**\n\n### Kernel 1: Optimized HSTU Attention\n```\nConfiguration:\n- Block size: 128x128 (vs baseline 64x64)\n- Shared memory: 48KB\n- Tensor core layout: m16n8k16\n- Memory pattern: Tiled with double buffering\n```\n\n### Kernel 2: Fused Linear + GELU\n```\nConfiguration:\n- Block size: 256\n- Vectorized loads: float4\n- Fused computation reduces memory traffic 2x\n```\n\n### Autotuning Space\n| Parameter | Search Range |\n|-----------|-------------|\n| BLOCK_M | [64, 128, 256] |\n| BLOCK_N | [64, 128, 256] |\n| BLOCK_K | [32, 64] |\n| num_warps | [4, 8] |\n| num_stages | [2, 3, 4] |",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🎨 **Kernel design ready!** Proceed to code generation.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Generate Triton Code",
+            "user_message": "Continue with Triton kernel generation",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Explore design details",
+            "action_type": "inferencer",
+            "prefix": "Explain more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Generate Triton Code",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_10",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Generating Triton kernel code...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "⚡ **ITERATION 2 - Step 3/8**: Creating optimized Triton kernels...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "triton_generation",
+          "title": "⚡ Triton Kernel Generation",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Generating attention kernel template...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Implementing tiled matrix multiplication...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Adding online softmax computation...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Implementing causal masking...",
+              "delay": 1.8
+            },
+            {
+              "content": "Generating fused linear-activation kernel...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Implementing vectorized loads...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Fusing GELU activation...",
+              "delay": 1.8
+            },
+            {
+              "content": "Adding autotuning decorators...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Triton kernels generated!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Triton Kernels Generated!**\n\n### Generated Files\n1. `optimized_hstu_attention.py` - Flash-style attention kernel\n2. `fused_linear_gelu.py` - Fused linear + GELU kernel\n3. `autotuning_configs.py` - Autotuning parameter definitions\n\n### Key Optimizations\n- **Memory**: 4x reduction in attention memory footprint\n- **Compute**: Tensor core utilization increased to 85%\n- **Fusion**: 2x reduction in kernel launch overhead\n\n### Code Preview\n```python\n@triton.jit\ndef attention_kernel(\n    Q, K, V, Out,\n    stride_qz, stride_qh, stride_qm, stride_qk,\n    BLOCK_M: tl.constexpr = 128,\n    BLOCK_N: tl.constexpr = 128,\n    BLOCK_K: tl.constexpr = 64,\n):\n    # Optimized flash attention implementation\n    ...\n```",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n⚡ **Kernels generated!** Proceed to autotuning.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Start Autotuning",
+            "user_message": "Continue with kernel autotuning",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📝 View full kernel code",
+            "action_type": "inferencer",
+            "prefix": "Show me the full code for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Start Autotuning",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_11",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Running autotuning benchmark...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "🔧 **ITERATION 2 - Step 4/8**: Autotuning kernel parameters...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "autotuning",
+          "title": "🔧 Kernel Autotuning",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Initializing autotuning framework...",
+              "delay": 2.0
+            },
+            {
+              "content": "Searching attention kernel configurations...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Testing BLOCK_M=64, BLOCK_N=64...",
+              "delay": 1.5
+            },
+            {
+              "content": "  → Testing BLOCK_M=128, BLOCK_N=128...",
+              "delay": 1.5
+            },
+            {
+              "content": "  → Testing BLOCK_M=256, BLOCK_N=64...",
+              "delay": 1.5
+            },
+            {
+              "content": "Searching fused kernel configurations...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Testing BLOCK=128, num_warps=4...",
+              "delay": 1.5
+            },
+            {
+              "content": "  → Testing BLOCK=256, num_warps=8...",
+              "delay": 1.5
+            },
+            {
+              "content": "Selecting optimal configurations...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Autotuning complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Autotuning Results**\n\n### Optimal Configurations for H100\n\n| Kernel | Best Config | Speedup vs Baseline |\n|--------|-------------|--------------------|\n| Attention | BLOCK_M=128, BLOCK_N=128, warps=8 | 2.3x |\n| Fused Linear | BLOCK=256, warps=8 | 1.8x |\n| Softmax | BLOCK=1024 | 1.5x |\n\n### Performance Summary\n| Metric | Baseline | Optimized |\n|--------|----------|----------|\n| Attention latency | 4.2ms | 1.8ms |\n| Linear latency | 1.5ms | 0.8ms |\n| Total forward | 12.5ms | 7.2ms |",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🔧 **Autotuning complete!** Proceed to integration.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Integrate Kernels",
+            "user_message": "Continue with kernel integration",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📊 View tuning details",
+            "action_type": "inferencer",
+            "prefix": "Show me tuning results for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Integrate Kernels",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_12",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Integrating optimized kernels...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "🔗 **ITERATION 2 - Step 5/8**: Integrating kernels into model...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "integration",
+          "title": "🔗 Kernel Integration",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Creating PyTorch custom operator wrappers...",
+              "delay": 2.0
+            },
+            {
+              "content": "Implementing backward pass for attention...",
+              "delay": 2.5
+            },
+            {
+              "content": "Implementing backward pass for fused linear...",
+              "delay": 2.5
+            },
+            {
+              "content": "Running numerical stability tests...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Forward pass: ✅ Max error < 1e-5",
+              "delay": 1.5
+            },
+            {
+              "content": "  → Backward pass: ✅ Max error < 1e-4",
+              "delay": 1.5
+            },
+            {
+              "content": "Verifying gradient computation...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Integration complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Kernel Integration Complete!**\n\n### Integration Summary\n\n**Custom Operators Registered:**\n- `ace_attention_forward` / `ace_attention_backward`\n- `ace_fused_linear_gelu_forward` / `ace_fused_linear_gelu_backward`\n\n### Numerical Validation\n| Test | Status | Max Error |\n|------|--------|----------|\n| Forward pass | ✅ Pass | 8.3e-6 |\n| Backward pass | ✅ Pass | 4.2e-5 |\n| Gradient check | ✅ Pass | 1.1e-4 |\n\n### Usage Example\n```python\nfrom ace_kernels import ACEAttention, FusedLinearGELU\n\n# Drop-in replacement for standard attention\nattention = ACEAttention(dim=768, num_heads=12)\noutput = attention(query, key, value)\n```",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🔗 **Integration complete!** Proceed to benchmarking.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ Run Benchmarks",
+            "user_message": "Continue with performance benchmarking",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 View integration code",
+            "action_type": "inferencer",
+            "prefix": "Show me the integration code for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ Run Benchmarks",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_13",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Running performance benchmarks...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📊 **ITERATION 2 - Step 6/8**: Executing comprehensive benchmarks...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "benchmarking",
+          "title": "📊 Performance Benchmarking",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Running Component Benchmarking (CB)...",
+              "delay": 2.5
+            },
+            {
+              "content": "  → Benchmarking attention kernel...",
+              "delay": 2.0
+            },
+            {
+              "content": "  → Benchmarking fused linear kernel...",
+              "delay": 2.0
+            },
+            {
+              "content": "Running end-to-end model benchmark...",
+              "delay": 3.0
+            },
+            {
+              "content": "Calculating MFU metrics...",
+              "delay": 2.5
+            },
+            {
+              "content": "Measuring memory utilization...",
+              "delay": 2.0
+            },
+            {
+              "content": "Comparing against baseline...",
+              "delay": 2.0
+            },
+            {
+              "content": "✅ Benchmarking complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Benchmark Results**\n\n### MFU Comparison\n| Metric | Baseline | Optimized | Improvement |\n|--------|----------|-----------|-------------|\n| Dense MFU | 24% | 38% | **+14%** |\n| Tensor Core Util | 45% | 78% | **+33%** |\n| Memory Efficiency | 72% | 91% | **+19%** |\n\n### Latency Breakdown (ms)\n| Component | Baseline | Optimized | Speedup |\n|-----------|----------|-----------|----------|\n| Attention | 4.2 | 1.8 | 2.3x |\n| Linear Layers | 3.5 | 2.1 | 1.7x |\n| Total Forward | 12.5 | 7.2 | 1.7x |\n\n### Throughput\n| Metric | Baseline | Optimized |\n|--------|----------|----------|\n| Samples/sec | 1,250 | 2,125 |\n| Tokens/sec | 320K | 544K |",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📊 **Benchmarks complete!** Proceed to performance analysis.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ View Analysis",
+            "user_message": "Continue with performance analysis",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📈 Detailed metrics",
+            "action_type": "inferencer",
+            "prefix": "Show me detailed benchmarks for: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ View Analysis",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_14",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Analyzing performance improvements...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📈 **ITERATION 2 - Step 7/8**: Generating performance analysis...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "performance_analysis",
+          "title": "📈 Performance Analysis",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {
+              "content": "Analyzing optimization contribution...",
+              "delay": 2.0
+            },
+            {
+              "content": "Comparing against headroom predictions...",
+              "delay": 2.5
+            },
+            {
+              "content": "Identifying remaining optimization opportunities...",
+              "delay": 2.0
+            },
+            {
+              "content": "Generating recommendations for next iteration...",
+              "delay": 2.5
+            },
+            {
+              "content": "✅ Analysis complete!",
+              "delay": 1.0
+            }
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **Performance Analysis**\n\n### Optimization Contribution Analysis\n\n| Optimization | Predicted | Actual | Accuracy |\n|-------------|-----------|--------|----------|\n| Attention kernel | +6% | +7% | 117% |\n| Fused operators | +5% | +4% | 80% |\n| Dimension alignment | +4% | +3% | 75% |\n| **Total** | **+15%** | **+14%** | **93%** |\n\n### Achievement vs Targets\n| Metric | Target | Achieved | Status |\n|--------|--------|----------|--------|\n| Dense MFU | 35% | 38% | ✅ Exceeded |\n| Iteration speed | 5x | 6x | ✅ Exceeded |\n| Memory efficiency | 85% | 91% | ✅ Exceeded |\n\n### Remaining Headroom\n- Current MFU: 38%\n- Theoretical max: 55%\n- Remaining headroom: 17%\n- Primary opportunity: Memory subsystem optimization",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📈 **Analysis complete!** View final summary.\n\n👉 What would you like to do?",
+        "actions": [
+          {
+            "label": "✅ View Final Summary",
+            "user_message": "Continue to final summary",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 Explore remaining headroom",
+            "action_type": "inferencer",
+            "prefix": "Tell me more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ View Final Summary",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_15",
+      "role": "assistant",
+      "pre_delay": {
+        "min": 2.0,
+        "max": 3.0
+      },
+      "post_delay": {
+        "min": 0.8,
+        "max": 1.5
+      },
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Generating final summary...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        },
+        {
+          "content": "📋 **ITERATION 2 - Step 8/8**: Final optimization summary...",
+          "type": "text",
+          "delay": {
+            "min": 1.5,
+            "max": 2.5
+          }
+        }
+      ],
+      "progress_sections": [],
+      "post_messages": [
+        {
+          "content": "🎉 **ACE Optimization Complete!**\n\n---\n\n## 📊 Final Results Summary\n\n### MFU Improvement\n| Metric | Before | After | Improvement |\n|--------|--------|-------|-------------|\n| Dense MFU | 24% | 38% | **+58% relative** |\n| Tensor Core | 45% | 78% | **+73% relative** |\n| Throughput | 1,250 | 2,125 samples/s | **+70%** |\n\n### Key Achievements\n✅ **Automated profiling** reduced analysis time from >1 week to 30 minutes\n✅ **Headroom analysis** predicted MFU improvements with 93% accuracy\n✅ **Model co-design** enabled tensor core optimization\n✅ **Custom Triton kernels** achieved 2.3x attention speedup\n✅ **Operator fusion** reduced kernel launch overhead by 40%\n\n### Generated Artifacts\n1. `optimized_hstu_attention.py` - Flash-style attention kernel\n2. `fused_linear_gelu.py` - Fused operator kernel\n3. `ace_benchmark_report.md` - Full performance analysis\n4. `model_codesign_proposal.md` - Architecture recommendations\n\n---\n\n### 🚀 Next Steps\n1. Deploy optimized kernels to production\n2. Monitor MFU metrics via dashboard\n3. Run Iteration 3 for memory subsystem optimization\n\n*The GemForge methodology successfully improved your model's GPU efficiency by 58%!*",
+          "type": "text",
+          "delay": {
+            "min": 1.0,
+            "max": 2.0
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🎉 **Optimization workflow complete!**\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "📊 Export Full Report",
+            "action_type": "inferencer",
+            "prefix": "Generate comprehensive report with: ",
+            "style": "primary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            }
+          },
+          {
+            "label": "🔄 Start New Optimization",
+            "user_message": "Start a new optimization workflow",
+            "action_type": "restart",
+            "style": "secondary"
+          },
+          {
+            "label": "💬 Ask Questions",
+            "action_type": "inferencer",
+            "prefix": "I have a question about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

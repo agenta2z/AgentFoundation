@@ -1,0 +1,27 @@
+Can you help carefully check if we could apply the following to model data/users/zgchen/fbs_8b028c_cfr_mo_dev2/fbcode/minimal_viable_ai/models/main_feed_mtml/model_roo_v0.py or its dependencies, and help improve module efficiency during training/inference
+
+"""
+Problem: SDPA silently falls back to slow Math backend (2-4x latency degradation) without errors.
+
+⚠️ H100 Note: On Hopper GPUs, CuDNN Attention is 75% faster than FlashAttention v2. Include CuDNN in allowed backends.
+Implementation:
+from torch.nn.attention import sdpa_kernel, SDPBackend
+
+class FlashGuardContext:
+    @staticmethod
+    @contextmanager
+    def enforce_optimal_attention():
+        """Enforces optimized attention backend (CuDNN on H100, Flash on A100)."""
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
+            yield
+
+    @staticmethod
+    def verify_backend_selection(q, k, v, attn_mask=None):
+        """Pre-flight check before SDPA call."""
+        if q.dtype not in (torch.float16, torch.bfloat16):
+            raise RuntimeError(f"Flash Attention requires fp16/bf16, got {q.dtype}")
+        if q.size(-1) > 256:
+            raise RuntimeError(f"Head dim {q.size(-1)} exceeds Flash Attention limit")
+"""
+
+You need to create unit testing and a benchmark tool and run the benchmark tool to verify the code and performance improvement.

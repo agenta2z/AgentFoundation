@@ -21,6 +21,7 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { useTheme } from '@mui/material/styles';
 
 export function SectionCard({
   title,
@@ -32,13 +33,14 @@ export function SectionCard({
   subtitle,
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const theme = useTheme();
 
   return (
     <Paper
       elevation={0}
       sx={{
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid rgba(255, 255, 255, 0.06)',
+        backgroundColor: theme.custom.surfaces.cardBg,
+        border: `1px solid ${theme.custom.surfaces.cardBorder}`,
         borderRadius: 2,
         overflow: 'hidden',
       }}
@@ -53,7 +55,7 @@ export function SectionCard({
           px: 2,
           py: 1.25,
           cursor: collapsible ? 'pointer' : 'default',
-          '&:hover': collapsible ? { backgroundColor: 'rgba(255, 255, 255, 0.02)' } : {},
+          '&:hover': collapsible ? { backgroundColor: theme.custom.surfaces.hoverBg } : {},
         }}
       >
         {icon && (

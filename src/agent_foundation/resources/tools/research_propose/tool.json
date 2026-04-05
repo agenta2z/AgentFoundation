@@ -1,0 +1,89 @@
+{
+  "name": "research_propose",
+  "tool_type": "Action",
+  "aliases": [
+    "research-propose",
+    "research",
+    "propose"
+  ],
+  "category": "workflow",
+  "is_bridge": true,
+  "description": "Decompose a research question into subtasks, run parallel deep research (literature + internal knowledge), generate code-grounded individual proposals, then synthesize into a unified plan. Supports resumable checkpointing at every stage.",
+  "parameters": [
+    {
+      "name": "request",
+      "type": "string",
+      "required": true,
+      "positional": true,
+      "description": "The research task or hypothesis to investigate."
+    },
+    {
+      "name": "--workflow-target-path",
+      "type": "path",
+      "description": "Path to the codebase or file to research. Falls back to session's target_path if not provided."
+    },
+    {
+      "name": "--docs-path",
+      "type": "path",
+      "description": "Optional path to documentation directory (included in query and session context)."
+    },
+    {
+      "name": "--research-only",
+      "type": "flag",
+      "description": "Run breakdown + deep research only (skip individual proposals and unified plan)."
+    },
+    {
+      "name": "--breakdown-only",
+      "type": "flag",
+      "description": "Run only the task breakdown (decomposition), skip research and proposals."
+    },
+    {
+      "name": "--disable-unified-proposal",
+      "type": "flag",
+      "description": "Skip the final unified proposal aggregation."
+    },
+    {
+      "name": "--max-breakdown",
+      "type": "string",
+      "description": "Guidance for how many subtasks to decompose into (e.g., '5 to 20'). Passed to the LLM as a range."
+    },
+    {
+      "name": "--max-researches",
+      "type": "int",
+      "description": "Hard limit on how many research workers to run. Defaults to all subtasks."
+    },
+    {
+      "name": "--research-inferencer",
+      "type": "string",
+      "description": "Inferencer type for the research phase (e.g., metamate_cli for literature/knowledge search). Defaults to --base-inferencer."
+    },
+    {
+      "name": "--proposal-inferencer",
+      "type": "string",
+      "description": "Inferencer type for the proposal phase (e.g., devmate_cli for code reading and actionable proposals). Defaults to --base-inferencer."
+    },
+    {
+      "name": "--base-inferencer",
+      "type": "string",
+      "description": "Inferencer type for breakdown, proposals, and aggregation (e.g., devmate_cli)."
+    },
+    {
+      "name": "--model",
+      "type": "string",
+      "description": "Override the LLM model."
+    },
+    {
+      "name": "--resume",
+      "type": "path",
+      "description": "Resume from a previous workspace. Completed stages are skipped via checkpoints."
+    }
+  ],
+  "returns": "Workspace path containing: breakdown analysis, research reports, individual proposals, and unified plan.",
+  "examples": [
+    "research-propose --workflow-target-path /path/to/model.py \"Analyze the model for improvement opportunities\"",
+    "research-propose --workflow-target-path /path/to/model.py --docs-path /path/to/docs \"Analyze the model and its documentation\"",
+    "research --research-only --workflow-target-path /path/to/code --max-researches 5 --research-inferencer metamate_cli \"Investigate optimizations\"",
+    "research-propose --resume /path/to/workspace \"Continue from previous research\"",
+    "research --breakdown-only --max-breakdown '10 to 30' \"Decompose model improvement opportunities\""
+  ]
+}

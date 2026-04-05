@@ -1,0 +1,93 @@
+You are synthesizing multiple independent research-backed proposals into a
+single unified, comprehensive plan.
+{% if docs_path %}
+The target system is documented at {{ docs_path }} with implementation at
+{{ workflow_target_path }} and its direct dependencies.
+{% else %}
+The target system is at {{ workflow_target_path }} and its direct dependencies.
+{% endif %}
+
+## Individual Proposals
+
+Multiple researchers have independently investigated different aspects of the
+system and produced detailed proposals.
+
+{% if proposals_dir %}
+All individual proposal files are located under: `{{ proposals_dir }}`
+You MUST read every `worker_*_proposal.md` file in that directory. Each
+contains the full detailed analysis — do NOT rely on summaries alone.
+
+The corresponding research reports are also in that directory as
+`worker_*_research.md` — consult these if you need additional context on
+the evidence behind a proposal.
+{% endif %}
+
+Each proposal contains:
+- Problem analysis grounded in actual code
+- Proposed approach with specific file/line references
+- Impact estimates, success probabilities, and implementation complexity
+- Priority rankings and experiment ordering
+
+## Your Task: Create a Unified Plan
+
+Your job is to read ALL individual proposals, then synthesize them into a
+single cohesive plan.
+
+### Phase 1: Read & Cross-Reference All Proposals
+
+1. **Read every proposal file**{% if proposals_dir %} under
+   `{{ proposals_dir }}`{% endif %}. Each contains detailed, code-grounded
+   analysis — do NOT rely on summaries alone.
+
+2. **Identify overlaps and conflicts**: Different proposals may target the same
+   code, have conflicting approaches, or share dependencies. Map these
+   explicitly.
+
+3. **Assess cross-proposal synergies**: Some proposals may amplify each other's
+   impact when combined. Others may be mutually exclusive.
+
+### Phase 2: Create the Unified Plan
+
+Produce a single document that includes:
+
+1. **Executive Summary**: Top-level overview of the unified improvement strategy.
+   How many proposals total, how they organize into themes, and what the
+   combined expected impact is.
+
+2. **Consolidated Proposal List**: Merge, deduplicate, and re-rank all proposals
+   from all workers into a single prioritized list. For each:
+   - Unique ID (H1, H2, ... for hypotheses)
+   - Which worker proposal(s) it originated from
+   - Problem statement, proposed approach, expected impact
+   - Success probability, implementation complexity
+   - Cross-references to related proposals
+
+3. **Dependency & Conflict Analysis**: A clear map of:
+   - Which proposals must be sequenced (A before B)
+   - Which are mutually exclusive (choose A or B)
+   - Which are synergistic (A + B > A + B individually)
+   - Which are fully independent (can parallelize)
+
+4. **Unified Priority Ranking Table**:
+
+| Rank | ID | Name | Source | Impact | Probability | Complexity | Notes |
+|------|----|------|--------|--------|-------------|------------|-------|
+| 1    | H1 | ...  | W1-P3  | High   | High        | Low        | Quick win |
+
+5. **Implementation Roadmap**: Organize into phases/batches:
+   - **Phase 1 (Quick Wins)**: Low-risk, high-confidence proposals
+   - **Phase 2 (Core Improvements)**: Medium-risk, high-impact proposals
+   - **Phase 3 (Exploration)**: High-risk/high-reward or long-term proposals
+   For each phase: estimated timeline, resource requirements, success criteria.
+
+6. **Risk Register**: Consolidated risks across all proposals, with mitigations
+   and contingency plans.
+
+### Phase 3: Quality Checks
+
+Before finalizing:
+- Verify no two proposals in the same phase modify the same code path without
+  acknowledging the interaction
+- Verify the experiment order respects all stated dependencies
+- Verify quick wins are genuinely quick (Low complexity, High probability)
+- Remove or flag any proposal that lacks code-grounded evidence

@@ -29,13 +29,13 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - ``active_session_id`` property
 
-    This class implements ``_produce_chunks()`` (the abstract primitive) and
+    This class implements ``_ainfer_streaming()`` (the abstract primitive) and
     overrides ``_ainfer()`` to support ``SDKInferencerResponse``.
 
     Runtime Dependencies:
         Requires claude-agent-sdk package. This is a soft dependency — the
         module imports successfully without it. ImportError is raised only
-        when aconnect() or _produce_chunks() is called.
+        when aconnect() or _ainfer_streaming() is called.
 
     Usage Patterns:
         # Sync (simple, but pays connect cost each call):
@@ -88,7 +88,7 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
 
     # === Streaming Primitive ===
 
-    async def _produce_chunks(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield text chunks from Claude Code SDK stream.
 
         No internal idle timeout — the base class ``ainfer_streaming()`` handles

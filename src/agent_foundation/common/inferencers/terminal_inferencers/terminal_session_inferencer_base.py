@@ -6,6 +6,7 @@ Subclasses implement ``construct_command()``, ``parse_output()``, and
 """
 
 import asyncio
+import enum
 import subprocess
 from abc import abstractmethod
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
@@ -17,6 +18,30 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
     TerminalInferencerResponse,
 )
+
+
+class LargeInputMode(enum.Enum):
+    """How to pass the prompt to the CLI subprocess.
+
+    INLINE: prompt embedded in the command line (risks E2BIG for large prompts).
+    STDIN:  prompt piped via stdin (safe for any size).
+    FILE:   prompt offloaded to a temp file when it exceeds a threshold.
+    """
+
+    INLINE = "inline"
+    STDIN = "stdin"
+    FILE = "file"
+
+
+def _convert_large_input_mode(value: Any) -> LargeInputMode:
+    """Converter for ``large_input_mode`` attrib — accepts str or enum."""
+    if isinstance(value, LargeInputMode):
+        return value
+    if isinstance(value, str):
+        return LargeInputMode(value.lower())
+    raise TypeError(
+        f"large_input_mode must be LargeInputMode or str, got {type(value).__name__}"
+    )
 
 
 @attrs
@@ -89,9 +114,9 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         """
         raise NotImplementedError
 
-    # === Concrete: _produce_chunks (subprocess line streaming) ===
+    # === Concrete: _ainfer_streaming (subprocess line streaming) ===
 
-    async def _produce_chunks(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield lines from subprocess stdout.
 
         Satisfies the ``@abstractmethod`` contract from StreamingInferencerBase.
@@ -151,7 +176,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         """Execute command via streaming pipeline and return parsed output dict.
 
         Delegates to ``super()._ainfer()`` which accumulates from
-        ``ainfer_streaming()`` → ``_produce_chunks()``. This ensures:
+        ``ainfer_streaming()`` → ``_ainfer_streaming()``. This ensures:
         - Cache file writing (via ``StreamingInferencerBase.ainfer_streaming()``)
         - Per-chunk idle timeout (via ``idle_timeout_seconds``)
         - stderr capture (via ``_last_streaming_stderr``)

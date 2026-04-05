@@ -1,0 +1,59 @@
+You are analyzing a PyTorch-based recommendation model codebase for performance optimization opportunities. The codebase implements CSML (Content Science Modeling Layer) with HSTU (Hierarchical Sequential Transduction Unit) architecture.
+
+## Your Task
+
+Analyze the provided codebase and create comprehensive documentation covering:
+
+1. **Architecture Overview**
+   - Model structure and data flow
+   - Key components and their responsibilities
+   - Integration points with external systems
+
+2. **Performance-Critical Paths**
+   - Identify hot paths in inference
+   - Locate GPU-CPU synchronization points
+   - Map kernel launch patterns
+
+3. **Optimization Opportunities**
+   - Sync point elimination targets
+   - Kernel fusion candidates
+   - PT2 compilation compatibility analysis
+   - Memory optimization potential
+
+4. **Technical Deep Dive**
+   - NumCandidatesInfo pattern analysis
+   - FX-wrapping requirements
+   - @torch.no_grad() usage audit
+   - SDD Lite pipeline integration points
+
+## Key Files to Analyze
+
+Focus on these primary files:
+- `model_roo.py` - Main model definition
+- `pytorch_modules_roo.py` - PyTorch module implementations
+- `hstu_attention_template.py` - HSTU attention mechanisms
+- `model_configs.py` - Configuration structures
+
+## Expected Output Format
+
+Generate documentation in reStructuredText format with:
+- Clear section hierarchy
+- Code examples where relevant
+- Performance metrics where available
+- Cross-references to specific file locations
+
+## Specific Questions to Address
+
+1. Where are GPU-CPU sync points introduced via `.item()` calls?
+2. Which operations break torch.compile graph capture?
+3. What embedding operations can be batched?
+4. Which attention computations can be fused?
+5. Are there missing @torch.no_grad() decorators in inference paths?
+
+## Context
+
+This analysis supports the CSML optimization effort targeting 65-75% QPS improvement through:
+- Sync point elimination (target: 29.5% contribution)
+- Kernel fusion (target: 34.1% contribution)
+- PT2 compilation (target: 20.1% contribution)
+- Memory optimization (target: 10.9% contribution)

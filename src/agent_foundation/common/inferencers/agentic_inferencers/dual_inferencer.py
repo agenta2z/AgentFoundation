@@ -4,14 +4,21 @@ Models a single consensus phase: base_inferencer proposes, review_inferencer
 reviews, fixer_inferencer addresses issues, and the loop repeats until consensus
 or max_iterations. Two DualInferencer instances can be chained with swapped roles
 for a full dual-phase workflow (e.g., planning → execution).
+
+Inherits from both InferencerBase and Workflow so the inner consensus loop
+can leverage Workflow's checkpoint / loop-resume system.  When
+``enable_checkpoint=True`` and ``checkpoint_dir`` is provided, the workflow
+persists each step's result to disk and can resume from a crash.
 """
 
 import json
 import logging
+import os
 import re
 from functools import partial
 from typing import Any, Callable, List, Mapping, Optional, Union
 
+from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusAttemptRecord,
     ConsensusConfig,
@@ -32,10 +39,23 @@ from agent_foundation.common.inferencers.agentic_inferencers.constants import (
     DEFAULT_PLACEHOLDER_DUAL_PROPOSAL,
     DEFAULT_PLACEHOLDER_DUAL_REASONING,
 )
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from attr import attrib, attrs
+from agent_foundation.common.inferencers.inferencer_base import (
+    InferencerBase,
+)
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.input_and_response import InputAndResponse
+from rich_python_utils.common_objects.serializable import SerializationMode
+from rich_python_utils.common_objects.workflow.common.exceptions import (
+    WorkflowAborted,
+)
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
+    StepResultSaveOptions,
+)
+from rich_python_utils.common_objects.workflow.common.step_wrapper import StepWrapper
+from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.string_utils.formatting.template_manager import (
     TemplateManager,
 )
@@ -45,8 +65,18 @@ logger = logging.getLogger(__name__)
 
 
 @attrs
-class DualInferencer(InferencerBase):
+class DualInferencer(InferencerBase, Workflow):
     """Propose-review-fix consensus loop as a first-class inferencer.
+
+    Inherits from both ``InferencerBase`` (for ``infer()``/``ainfer()`` API)
+    and ``Workflow`` (for checkpoint/loop-resume infrastructure).
+
+    MRO: DualInferencer → InferencerBase → Workflow → WorkNodeBase →
+         Serializable → Debuggable → Identifiable → Resumable →
+         PostProcessable → ABC
+
+    Workflow-specific attrs are overridden with ``init=False`` so they
+    don't appear in the constructor API.
 
     Implements a multi-round consensus workflow:
     1. base_inferencer generates an initial proposal
@@ -73,8 +103,12 @@ class DualInferencer(InferencerBase):
             fixer_inferencer=dedicated_fixer,
         )
 
-        # Async (recommended):
-        async with DualInferencer(...) as inf:
+        # Async with checkpointing (recommended):
+        async with DualInferencer(
+            ...,
+            enable_checkpoint=True,
+            checkpoint_dir="/tmp/my_workflow",
+        ) as inf:
             result = await inf.ainfer("Design a REST API")
 
     Attributes:
@@ -96,6 +130,8 @@ class DualInferencer(InferencerBase):
         response_selector: How to select the final output from the response object.
         issue_id_format: Format string for issue IDs.
         phase: Label for this consensus phase (for logging/metadata).
+        enable_checkpoint: If True, enable Workflow checkpoint/resume.
+        checkpoint_dir: Directory for checkpoint files.
     """
 
     base_inferencer: InferencerBase = attrib(default=None)
@@ -121,6 +157,8 @@ class DualInferencer(InferencerBase):
     issue_id_format: str = attrib(default="ISS-{iteration:02d}-{index:03d}")
     phase: str = attrib(default="")
 
+    new_session_per_attempt: bool = attrib(default=True)
+
     # Placeholder keys for template variables
     placeholder_input: str = attrib(default=DEFAULT_PLACEHOLDER_DUAL_INPUT)
     placeholder_proposal: str = attrib(default=DEFAULT_PLACEHOLDER_DUAL_PROPOSAL)
@@ -129,6 +167,17 @@ class DualInferencer(InferencerBase):
     placeholder_counter_feedback: str = attrib(
         default=DEFAULT_PLACEHOLDER_DUAL_COUNTER_FEEDBACK
     )
+
+    # --- Checkpoint-specific attributes ---
+    checkpoint_dir: Optional[str] = attrib(default=None, kw_only=True)
+    enable_checkpoint: bool = attrib(default=False, kw_only=True)
+
+    # --- Suppress Workflow constructor parameters (init=False) ---
+    result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
+    unpack_single_result = attrib(default=False, init=False)
+    ignore_stop_flag_from_saved_results = attrib(default=True, init=False)
+    auto_mode = attrib(default=SerializationMode.PREFER_CLEAR_TEXT, init=False)
+    max_loop_iterations = attrib(default=10, init=False)
 
     def __attrs_post_init__(self):
         super(DualInferencer, self).__attrs_post_init__()
@@ -144,8 +193,8 @@ class DualInferencer(InferencerBase):
         if isinstance(self.prompt_formatter, TemplateManager):
             # Shared TemplateManager — initial/review/followup are template_key names
             self._prompt_tms = None
-        else:
-            # No shared TemplateManager — wrap each raw template string individually
+        elif self.prompt_formatter is not None:
+            # Custom formatter provided — wrap each raw template string individually
             custom_formatter = self.prompt_formatter
             self._prompt_tms = {}
             for role, prompt_str in [
@@ -159,6 +208,9 @@ class DualInferencer(InferencerBase):
                         template_formatter=custom_formatter,
                         enable_templated_feed=True,
                     )
+        else:
+            # No formatter — render raw Jinja2 templates directly
+            self._prompt_tms = {}
 
         # Default parsers
         if self.review_parser is None:
@@ -187,15 +239,382 @@ class DualInferencer(InferencerBase):
                 seen_ids.add(id(inf))
                 inf.set_parent_debuggable(self)
 
+    # ------------------------------------------------------------------
+    # Block WorkNodeBase.run() / arun() — callers must use infer()/ainfer()
+    # ------------------------------------------------------------------
+
+    def run(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Use infer() or ainfer() — DualInferencer.run() is disabled "
+            "because Workflow._arun() requires state setup that only "
+            "_ainfer() provides."
+        )
+
+    async def arun(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Use infer() or ainfer() — DualInferencer.arun() is disabled "
+            "because Workflow._arun() requires state setup that only "
+            "_ainfer() provides."
+        )
+
+    # ------------------------------------------------------------------
+    # Workflow abstract method implementation
+    # ------------------------------------------------------------------
+
+    def _get_result_path(self, result_id, *args, **kwargs):
+        attempt = getattr(self, "_current_attempt", 0)
+        if self.checkpoint_dir:
+            return os.path.join(
+                self.checkpoint_dir,
+                f"attempt_{attempt:02d}",
+                f"step_{result_id}.json",
+            )
+        # Child mode: _resolve_result_path will apply _result_root_override
+        # to basename.  Include attempt to avoid collisions across attempts.
+        return f"step_a{attempt:02d}_{result_id}.json"
+
+    def _save_result(self, result, output_path: str):
+        from rich_python_utils.common_utils.map_helper import dict__
+        from rich_python_utils.io_utils.json_io import write_json
+
+        # CRITICAL: jsonfy skips dict__ for Mapping types (json_io.py:477-479).
+        # Must pre-convert so nested attrs objects become plain dicts
+        # and json.dumps won't crash with TypeError.
+        write_json(dict__(result, recursive=True), output_path, indent=2)
+
+    def _load_result(self, result_id, result_path_or_preloaded_result):
+        from rich_python_utils.io_utils.json_io import read_json
+
+        if isinstance(result_path_or_preloaded_result, str):
+            return read_json(result_path_or_preloaded_result)
+        return result_path_or_preloaded_result
+
+    def _try_load_checkpoint(self, *args, **kwargs):
+        ckpt = super()._try_load_checkpoint(*args, **kwargs)
+        if ckpt is not None and "loop_counts" in ckpt:
+            # CRITICAL: JSON mandates string keys. After JSON round-trip,
+            # loop_counts keys are strings but Workflow uses int step indices.
+            ckpt["loop_counts"] = {int(k): v for k, v in ckpt["loop_counts"].items()}
+        return ckpt
+
+    def _save_loop_checkpoint(
+        self, step_index, next_step_index, last_saved_result_id, state, *args, **kwargs
+    ):
+        # Override for two reasons:
+        # 1. Skip pickle.dumps(state) validation — base class resets
+        #    _state_picklability_verified=False every _arun() call (line 551).
+        # 2. CRITICAL: Convert loop_counts int keys to strings BEFORE dict__
+        #    sees them. dict__ converts non-string-keyed dicts to list-of-pairs
+        #    format [{"key":k,"value":v}] (map_helper.py:548), which would break
+        #    _try_load_checkpoint's .items() call on resume.
+        self._save_checkpoint(
+            {
+                "version": 1,
+                "exec_seq": self._exec_seq,
+                "step_index": step_index,
+                "result_id": last_saved_result_id,
+                "next_step_index": next_step_index,
+                "loop_counts": {str(k): v for k, v in self._loop_counts.items()},
+                "state": state,
+            },
+            *args,
+            **kwargs,
+        )
+
+    def _init_state(self):
+        return getattr(self, "_pending_consensus_state", {})
+
+    def _handle_abort(self, abort_exc, step_result, state):
+        return state
+
+    # ------------------------------------------------------------------
+    # Consensus step builders
+    # ------------------------------------------------------------------
+
+    def _build_consensus_steps(
+        self, config, inference_input, total_iterations, attempt, _inference_args
+    ):
+        """Build StepWrapper steps for the Workflow-driven consensus loop.
+
+        Returns a list of StepWrappers:
+        - max_iterations <= 0: [propose] (propose-only, no review/fix)
+        - max_iterations >= 1: [propose, review, fix] with fix looping
+          back to review up to (max_iterations - 1) times
+        """
+
+        def _update_state_fn(state, result):
+            """Generic state updater — activates _uses_state in Workflow."""
+            return state
+
+        # --- Step 1: Propose ---
+        async def _step_propose_impl(*args, **kwargs):
+            state = self._state
+
+            if self.initial_prompt is not None:
+                initial_prompt = self._build_initial_prompt(
+                    state["inference_input"],
+                    getattr(self, "_current_inference_config", {}),
+                    attempt=state["attempt_record"]["attempt"],
+                )
+            else:
+                initial_prompt = state["inference_input"]
+
+            _sf = f"Round{state['total_iterations'] + 1:02d}"
+            self.log_info(
+                initial_prompt,
+                "InitialPrompt",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+
+            _raw_base = str(
+                await self.base_inferencer.ainfer(
+                    initial_prompt, **getattr(self, "_current_extra_inference_args", {})
+                )
+            )
+            _sf = f"Round{state['total_iterations'] + 1:02d}"
+            self.log_debug(
+                _raw_base,
+                "RawBaseResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+            base_output_str = self.response_parser(_raw_base)
+            base_output_str = self._maybe_replace_with_file_reference(
+                base_output_str,
+                round_index=0,
+                inference_config=getattr(self, "_current_inference_config", {}),
+            )
+            _sf = f"Round{state['total_iterations'] + 1:02d}"
+            self.log_info(
+                base_output_str,
+                "InitialResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+
+            state["base_output_str"] = base_output_str
+            state["counter_feedback_str"] = None
+            state["iteration"] = 0
+            self._state = state
+            return base_output_str
+
+        # --- Step 2: Review ---
+        async def _step_review_impl(*args, **kwargs):
+            state = self._state
+            if state is None:
+                state = dict(self._pending_consensus_state)
+                self._state = state
+            state["iteration"] = state.get("iteration", 0) + 1
+            state["total_iterations"] = state.get("total_iterations", 0) + 1
+            iteration = state["iteration"]
+            total_iters = state["total_iterations"]
+            attempt_num = state["attempt_record"]["attempt"]
+
+            logger.info(
+                "[%s] ROUND_TRACE inner_loop_top: iteration=%d, total_iterations=%d",
+                self.phase or "DualInferencer",
+                iteration,
+                total_iters,
+            )
+
+            review_prompt = self._build_review_prompt(
+                state["inference_input"],
+                state["base_output_str"],
+                state["counter_feedback_str"],
+                getattr(self, "_current_inference_config", {}),
+                iteration=iteration,
+                attempt=attempt_num,
+            )
+            _sf = f"Round{total_iters:02d}"
+            self.log_info(
+                review_prompt,
+                "ReviewPrompt",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+
+            _raw_review = str(
+                await self.review_inferencer.ainfer(
+                    review_prompt, **getattr(self, "_current_extra_inference_args", {})
+                )
+            )
+            _sf = f"Round{total_iters:02d}"
+            self.log_debug(
+                _raw_review,
+                "RawReviewResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+
+            review_output_str = self.response_parser(_raw_review)
+            parsed_review = self.review_parser(review_output_str)
+            self.log_info(
+                review_output_str,
+                "ReviewResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
+            )
+            parsed_review = self._assign_issue_ids(parsed_review, iteration)
+
+            threshold = state.get(
+                "_consensus_threshold", self.consensus_config.consensus_threshold
+            )
+            reached = self.consensus_checker(parsed_review, threshold)
+
+            logger.info(
+                "[%s] Iteration %d: severity=%s, consensus_reached=%s",
+                self.phase or "DualInferencer",
+                iteration,
+                parsed_review.get("severity", "UNKNOWN"),
+                reached,
+            )
+
+            iteration_record = ConsensusIterationRecord(
+                iteration=iteration,
+                base_output=state["base_output_str"],
+                review_input=review_prompt,
+                review_output=review_output_str,
+                review_feedback=parsed_review,
+                consensus_reached=reached,
+            )
+
+            state["parsed_review"] = parsed_review
+            state["review_output_str"] = review_output_str
+            state["review_prompt"] = review_prompt
+            state["consensus_reached"] = reached
+            self._last_iteration_record = iteration_record
+            self._state = state
+
+            if reached:
+                state["attempt_record"]["iterations"].append(iteration_record)
+                state["attempt_record"]["consensus_reached"] = True
+                state["attempt_record"]["final_output"] = state["base_output_str"]
+                state["attempt_record"]["final_feedback"] = parsed_review
+                raise WorkflowAborted()
+
+            return review_output_str
+
+        # --- Step 3: Fix ---
+        async def _step_fix_impl(*args, **kwargs):
+            state = self._state
+            iteration = state["iteration"]
+            total_iters = state["total_iterations"]
+            attempt_num = state["attempt_record"]["attempt"]
+            parsed_review = state["parsed_review"]
+
+            followup_prompt = self._build_followup_prompt(
+                state["inference_input"],
+                state["base_output_str"],
+                parsed_review,
+                getattr(self, "_current_inference_config", {}),
+                iteration=iteration,
+                attempt=attempt_num,
+                review_output=state.get("review_output_str"),
+            )
+            self.log_info(
+                followup_prompt,
+                "FollowupPrompt",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=f"Round{total_iters:02d}",
+            )
+
+            _raw_fix = str(
+                await self.fixer_inferencer.ainfer(
+                    followup_prompt,
+                    **getattr(self, "_current_extra_inference_args", {}),
+                )
+            )
+            self.log_debug(
+                _raw_fix,
+                "RawFixResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=f"Round{total_iters:02d}",
+            )
+
+            fix_output_str = self.response_parser(_raw_fix)
+            self.log_info(
+                fix_output_str,
+                "FollowupResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=f"Round{total_iters:02d}",
+            )
+            parsed_counter = self.followup_response_parser(fix_output_str)
+            counter_feedback_str = (
+                json.dumps(parsed_counter, indent=2)
+                if parsed_counter.get("items")
+                else None
+            )
+            improved_proposal = fix_output_str
+
+            iteration_record = getattr(self, "_last_iteration_record", None)
+            if iteration_record is not None:
+                iteration_record.counter_feedback = parsed_counter
+                state["attempt_record"]["iterations"].append(iteration_record)
+
+            state["counter_feedback_str"] = counter_feedback_str
+            state["base_output_str"] = self._maybe_replace_with_file_reference(
+                improved_proposal,
+                round_index=iteration,
+                inference_config=getattr(self, "_current_inference_config", {}),
+            )
+            self._state = state
+            self._pending_consensus_state = dict(state)
+            return fix_output_str
+
+        step_propose = StepWrapper(
+            _step_propose_impl,
+            name="propose",
+            update_state=_update_state_fn,
+        )
+
+        # max_iterations=0 means propose-only (no review/fix)
+        if config.max_iterations <= 0:
+            return [step_propose]
+
+        max_inner_iterations = config.max_iterations - 1
+
+        def _check_loop_condition(state, result):
+            if state is None:
+                self.log_warning(
+                    {
+                        "message": "loop_condition received None state (expected dict), "
+                        "falling back to self._state",
+                        "self_state_type": type(self._state).__name__,
+                        "self_state_keys": list((self._state or {}).keys()),
+                    },
+                    log_type="StateWarning",
+                )
+            effective_state = state if state is not None else (self._state or {})
+            return not effective_state.get("consensus_reached", False)
+
+        step_review = StepWrapper(
+            _step_review_impl,
+            name="review",
+        )
+        step_fix = StepWrapper(
+            _step_fix_impl,
+            name="fix",
+            loop_back_to="review",
+            loop_condition=_check_loop_condition,
+            max_loop_iterations=max_inner_iterations,
+        )
+
+        return [step_propose, step_review, step_fix]
+
     # region Sync/Async Bridge
 
     def _infer(self, inference_input, inference_config=None, **_inference_args):
-        """Sync bridge — delegates to _ainfer() via _run_async().
-
-        For multi-call usage, prefer the async interface:
-            async with DualInferencer(...) as inf:
-                result = await inf.ainfer("task")
-        """
+        """Sync bridge — delegates to _ainfer() via _run_async()."""
         from rich_python_utils.common_utils.async_function_helper import _run_async
 
         return _run_async(
@@ -207,13 +626,11 @@ class DualInferencer(InferencerBase):
     # region Core Consensus Loop
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
-        """Async inference — core consensus loop.
+        """Async inference — core consensus loop using Workflow steps.
 
         Args:
             inference_input: The original task/request prompt.
-            inference_config: Optional dict with overrides:
-                - "consensus_config": ConsensusConfig override.
-                - "phase": Phase label override.
+            inference_config: Optional dict with overrides.
             **_inference_args: Additional args passed to sub-inferencers.
 
         Returns:
@@ -243,201 +660,152 @@ class DualInferencer(InferencerBase):
                 attempt,
                 config.max_consensus_attempts,
             )
-            attempt_record = ConsensusAttemptRecord(attempt=attempt)
 
-            # Step 1: Build initial prompt (if initial_prompt is set)
-            if self.initial_prompt is not None:
-                initial_prompt = self._build_initial_prompt(
-                    inference_input,
-                    inference_config,
-                    attempt=attempt,
+            # Set up instance-level state (NOT in self._state — not picklable)
+            self._current_attempt = attempt
+            self._current_config = config
+
+            # Non-picklable data stays on self (re-derived on resume)
+            self._current_inference_config = inference_config
+            self._current_extra_inference_args = _inference_args
+
+            # Stash the consensus state for _init_state() to return
+            # Only picklable data here (strings, dicts, lists, ints, bools)
+            self._pending_consensus_state = {
+                "inference_input": inference_input,
+                "base_output_str": None,
+                "counter_feedback_str": None,
+                "consensus_reached": False,
+                "attempt_record": {
+                    "attempt": attempt,
+                    "iterations": [],
+                    "consensus_reached": False,
+                    "final_output": None,
+                    "final_feedback": None,
+                },
+                "total_iterations": total_iterations,
+                "iteration": 0,
+                "parsed_review": None,
+                "review_output_str": None,
+                "review_prompt": None,
+                "_consensus_threshold": config.consensus_threshold,
+            }
+
+            # Build the Workflow steps for this attempt
+            self._steps = self._build_consensus_steps(
+                config, inference_input, total_iterations, attempt, _inference_args
+            )
+
+            # Support initial_response_override: skip propose, start at review.
+            # The caller (e.g. PTI with --initial-plan) provides a pre-built
+            # response that should be reviewed directly without running the
+            # proposer inferencer.
+            initial_override = inference_config.get("initial_response_override")
+            if initial_override is not None:
+                self._pending_consensus_state["base_output_str"] = (
+                    self._maybe_replace_with_file_reference(
+                        initial_override,
+                        round_index=0,
+                        inference_config=inference_config,
+                    )
                 )
+                self._pending_consensus_state["counter_feedback_str"] = None
+                self._pending_consensus_state["iteration"] = 0
+
+                # Replace propose with a passthrough that returns the
+                # pending state so the Workflow's step chain carries the
+                # state dict (instead of None from the sentinel step).
+                pending = dict(self._pending_consensus_state)
+
+                async def _initial_plan_passthrough(*args, **kwargs):
+                    self._state = pending
+                    return pending
+
+                self._steps[0] = _initial_plan_passthrough
+
+            # Configure checkpoint if enabled
+            if config.max_iterations <= 0:
+                # Propose-only mode: no resume needed (single step)
+                self.enable_result_save = False
+                self.resume_with_saved_results = False
+            elif self.enable_checkpoint and self.checkpoint_dir:
+                self.enable_result_save = StepResultSaveOptions.Always
+                self.resume_with_saved_results = True
+            elif self._result_root_override is not None:
+                pass  # Parent already configured via _setup_child_workflows
             else:
-                initial_prompt = inference_input  # backward compatible passthrough
+                self.enable_result_save = False
+                self.resume_with_saved_results = False
 
-            self.log_info(
-                initial_prompt,
-                "InitialPrompt",
-                is_artifact=True,
-                parts_min_size=0,
-                parts_subfolder=f"Round{total_iterations + 1:02d}",
+            # Run the Workflow
+            await Workflow._arun(self, inference_input, **_inference_args)
+
+            # Extract results from self._state
+            state = self._state or {}
+            attempt_record_dict = state.get("attempt_record", {})
+
+            attempt_record = ConsensusAttemptRecord(
+                attempt=attempt_record_dict.get("attempt", attempt),
             )
-
-            # Step 2: Initial proposal from base_inferencer
-            _raw_base = str(
-                await self.base_inferencer.ainfer(initial_prompt, **_inference_args)
-            )
-            self.log_debug(
-                _raw_base,
-                "RawBaseResponse",
-                is_artifact=True,
-                parts_min_size=0,
-                parts_subfolder=f"Round{total_iterations + 1:02d}",
-            )
-            base_output_str = self.response_parser(_raw_base)
-            self.log_info(
-                base_output_str,
-                "InitialResponse",
-                is_artifact=True,
-                parts_min_size=0,
-                parts_subfolder=f"Round{total_iterations + 1:02d}",
-            )
-            counter_feedback_str = None
-
-            for iteration in range(1, config.max_iterations + 1):
-                total_iterations += 1
-
-                # Step 3: Build review prompt
-                review_prompt = self._build_review_prompt(
-                    inference_input,
-                    base_output_str,
-                    counter_feedback_str,
-                    inference_config,
-                    iteration=iteration,
-                    attempt=attempt,
-                )
-                self.log_info(
-                    review_prompt,
-                    "ReviewPrompt",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
-
-                # Step 4: Run reviewer
-                _raw_review = str(
-                    await self.review_inferencer.ainfer(
-                        review_prompt, **_inference_args
+            # Rebuild iteration records from the dict data
+            for iter_rec in attempt_record_dict.get("iterations", []):
+                if isinstance(iter_rec, ConsensusIterationRecord):
+                    attempt_record.iterations.append(iter_rec)
+                elif isinstance(iter_rec, dict):
+                    attempt_record.iterations.append(
+                        ConsensusIterationRecord(**iter_rec)
                     )
-                )
-                self.log_debug(
-                    _raw_review,
-                    "RawReviewResponse",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
-                self.log_info(
-                    _raw_review,
-                    "ReviewResponse",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
+                else:
+                    attempt_record.iterations.append(iter_rec)
 
-                # Step 5: Parse review
-                review_output_str = self.response_parser(_raw_review)
-                parsed_review = self.review_parser(review_output_str)
-                parsed_review = self._assign_issue_ids(parsed_review, iteration)
+            attempt_record.consensus_reached = attempt_record_dict.get(
+                "consensus_reached", False
+            )
+            attempt_record.final_output = attempt_record_dict.get("final_output")
+            attempt_record.final_feedback = attempt_record_dict.get("final_feedback")
 
-                # Step 6: Check consensus
-                reached = self.consensus_checker(
-                    parsed_review, config.consensus_threshold
-                )
+            total_iterations = state.get("total_iterations", total_iterations)
 
-                logger.info(
-                    "[%s] Iteration %d: severity=%s, consensus_reached=%s",
-                    phase or "DualInferencer",
-                    iteration,
-                    parsed_review.get("severity", "UNKNOWN"),
-                    reached,
-                )
-
-                iteration_record = ConsensusIterationRecord(
-                    iteration=iteration,
-                    base_output=base_output_str,
-                    review_input=review_prompt,
-                    review_output=review_output_str,
-                    review_feedback=parsed_review,
-                    consensus_reached=reached,
-                )
-
-                if reached:
-                    attempt_record.iterations.append(iteration_record)
-                    attempt_record.consensus_reached = True
-                    attempt_record.final_output = base_output_str
-                    attempt_record.final_feedback = parsed_review
-                    final_output = base_output_str
-                    final_review = InputAndResponse(
-                        input=review_prompt, response=review_output_str
-                    )
-                    consensus_achieved = True
-                    break
-
-                # Step 7: Build followup prompt
-                followup_prompt = self._build_followup_prompt(
-                    inference_input,
-                    base_output_str,
-                    parsed_review,
-                    inference_config,
-                    iteration=iteration,
-                    attempt=attempt,
-                    review_output=review_output_str,
-                )
-                self.log_info(
-                    followup_prompt,
-                    "FollowupPrompt",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
-
-                # Step 8: Run fixer
-                _raw_fix = str(
-                    await self.fixer_inferencer.ainfer(
-                        followup_prompt, **_inference_args
-                    )
-                )
-                self.log_debug(
-                    _raw_fix,
-                    "RawFixResponse",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
-                self.log_info(
-                    _raw_fix,
-                    "FollowupResponse",
-                    is_artifact=True,
-                    parts_min_size=0,
-                    parts_subfolder=f"Round{total_iterations:02d}",
-                )
-
-                # Step 9: Parse counter-feedback and extract improved proposal
-                fix_output_str = self.response_parser(_raw_fix)
-                parsed_counter = self.followup_response_parser(fix_output_str)
-                counter_feedback_str = (
-                    json.dumps(parsed_counter, indent=2)
-                    if parsed_counter.get("items")
-                    else None
-                )
-                improved_proposal = fix_output_str
-
-                iteration_record.counter_feedback = parsed_counter
-                attempt_record.iterations.append(iteration_record)
-
-                # Step 10: Update base_output for next iteration
-                base_output_str = improved_proposal
-
-            # End of inner loop
             if not attempt_record.consensus_reached:
-                attempt_record.final_output = base_output_str
-                final_output = base_output_str
+                attempt_record.final_output = state.get("base_output_str")
+                final_output = state.get("base_output_str")
+            else:
+                final_output = attempt_record.final_output
+                consensus_achieved = True
 
             all_attempt_records.append(attempt_record)
             if consensus_achieved:
                 break
 
-        # Build final review if none captured (no consensus case)
+        # Build final review if none captured
         if (
             final_review is None
             and all_attempt_records
             and all_attempt_records[-1].iterations
         ):
             last_iter = all_attempt_records[-1].iterations[-1]
-            final_review = InputAndResponse(
-                input=last_iter.review_input, response=last_iter.review_output
-            )
+            review_input = getattr(last_iter, "review_input", None)
+            review_output = getattr(last_iter, "review_output", None)
+            if review_input is not None:
+                final_review = InputAndResponse(
+                    input=review_input, response=review_output
+                )
+
+        # Check if consensus achieved via last attempt's last iteration
+        if not consensus_achieved and all_attempt_records:
+            last_attempt = all_attempt_records[-1]
+            if last_attempt.consensus_reached and last_attempt.final_output:
+                final_output = last_attempt.final_output
+                consensus_achieved = True
+                # Extract review from last iteration
+                if last_attempt.iterations:
+                    last_iter = last_attempt.iterations[-1]
+                    review_input = getattr(last_iter, "review_input", None)
+                    review_output = getattr(last_iter, "review_output", None)
+                    if review_input is not None:
+                        final_review = InputAndResponse(
+                            input=review_input, response=review_output
+                        )
 
         logger.info(
             "[%s] Consensus loop complete: achieved=%s, total_iterations=%d, attempts=%d",
@@ -463,23 +831,11 @@ class DualInferencer(InferencerBase):
     # region Prompt Builders
 
     def _render_prompt(self, role: str, feed: dict, inference_config: dict) -> str:
-        """Render a prompt template by role name.
-
-        When prompt_formatter is a TemplateManager, uses the role's prompt attr
-        as template_key. Otherwise uses the per-role wrapped TemplateManager.
-
-        Args:
-            role: One of "initial", "review", "followup".
-            feed: Template variables dict.
-            inference_config: Passed through to TemplateManager as **kwargs.
-
-        Returns:
-            Rendered prompt string.
-        """
+        """Render a prompt template by role name."""
         post_process = partial(unescape_xml, unescape_for_html=True)
 
         if self._prompt_tms is None:
-            # Shared TemplateManager — use prompt attr value as template_key
+            # Shared TemplateManager mode — prompt_formatter is a TemplateManager
             key = getattr(self, f"{role}_prompt")
             return self.prompt_formatter(
                 template_key=key,
@@ -487,13 +843,20 @@ class DualInferencer(InferencerBase):
                 post_process=post_process,
                 **inference_config,
             )
-        else:
-            # Per-role TemplateManagers (backward compatible)
+        elif self._prompt_tms:
+            # Per-role TemplateManager wrappers (custom formatter was provided)
             return self._prompt_tms[role](
                 feed=feed,
                 post_process=post_process,
                 **inference_config,
             )
+        else:
+            # No formatter at all — render raw Jinja2 template directly
+            from jinja2 import Template
+
+            template_str = getattr(self, f"{role}_prompt")
+            rendered = Template(template_str).render(**feed)
+            return post_process(rendered)
 
     def _build_initial_prompt(
         self,
@@ -501,23 +864,13 @@ class DualInferencer(InferencerBase):
         inference_config: dict,
         attempt: int = 1,
     ) -> str:
-        """Build the initial prompt from template.
-
-        Args:
-            inference_input: Raw user request text.
-            inference_config: Config dict passed through to TemplateManager.
-            attempt: Current consensus attempt (1-based).
-
-        Returns:
-            Rendered initial prompt string.
-        """
+        """Build the initial prompt from template."""
         feed = {
             self.placeholder_input: inference_input,
             "iteration": 0,
             "attempt": attempt,
             "round_index": 0,
         }
-
         return self._render_prompt("initial", feed, inference_config)
 
     def _build_review_prompt(
@@ -529,19 +882,7 @@ class DualInferencer(InferencerBase):
         iteration: int = 1,
         attempt: int = 1,
     ) -> str:
-        """Build the review prompt from template.
-
-        Args:
-            inference_input: Original user request.
-            proposal: Current proposal text.
-            counter_feedback: Serialized counter-feedback JSON, or None.
-            inference_config: Config dict passed through to TemplateManager.
-            iteration: Current iteration within the attempt (1-based).
-            attempt: Current consensus attempt (1-based).
-
-        Returns:
-            Rendered review prompt string.
-        """
+        """Build the review prompt from template."""
         feed = {
             self.placeholder_input: inference_input,
             self.placeholder_proposal: proposal,
@@ -551,7 +892,6 @@ class DualInferencer(InferencerBase):
         }
         if counter_feedback is not None:
             feed[self.placeholder_counter_feedback] = counter_feedback
-
         return self._render_prompt("review", feed, inference_config)
 
     def _build_followup_prompt(
@@ -564,20 +904,7 @@ class DualInferencer(InferencerBase):
         attempt: int = 1,
         review_output: Optional[str] = None,
     ) -> str:
-        """Build the followup prompt from template.
-
-        Args:
-            inference_input: Original user request.
-            proposal: Current proposal text.
-            parsed_review: Parsed review dict with 'issues' and 'reasoning'.
-            inference_config: Config dict passed through to TemplateManager.
-            iteration: Current iteration within the attempt (1-based).
-            attempt: Current consensus attempt (1-based).
-            review_output: Full text of the reviewer's response (optional).
-
-        Returns:
-            Rendered followup prompt string.
-        """
+        """Build the followup prompt from template."""
         issues = parsed_review.get("issues", [])
         reasoning = parsed_review.get("reasoning", "")
         config = inference_config.get("consensus_config", self.consensus_config)
@@ -594,7 +921,6 @@ class DualInferencer(InferencerBase):
         }
         if review_output is not None:
             feed["reviewer_response"] = review_output
-
         return self._render_prompt("followup", feed, inference_config)
 
     # endregion
@@ -603,20 +929,7 @@ class DualInferencer(InferencerBase):
 
     @staticmethod
     def _default_response_parser(raw: str) -> str:
-        """Extract response content from delimiter tags.
-
-        Checks ``<Response>`` and ``<ImprovedProposal>`` tags (in that order).
-        Falls back to the raw string if no tags are found.
-
-        This replaces the old ``_default_extract_proposal`` as the default for
-        ``response_parser``, applied to ALL sub-inferencer outputs.
-
-        Args:
-            raw: Raw output string from any sub-inferencer.
-
-        Returns:
-            Extracted content (stripped), or the original string.
-        """
+        """Extract response content from delimiter tags."""
         for tag in ("Response", "ImprovedProposal"):
             match = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", raw)
             if match:
@@ -625,28 +938,12 @@ class DualInferencer(InferencerBase):
 
     @staticmethod
     def _default_parse_review(raw: str) -> dict:
-        """Parse structured review JSON from raw reviewer output.
-
-        Extracts JSON from ```json ... ``` code blocks. Falls back to a
-        MAJOR-severity error if parsing fails.
-
-        Handles both naming conventions:
-        - ``approved`` / ``approve`` → normalised to ``approved``
-        - ``severity`` / ``overall_severity`` → normalised to ``severity``
-
-        Args:
-            raw: Raw reviewer output string.
-
-        Returns:
-            Dict with keys: approved, severity, issues, reasoning.
-        """
+        """Parse structured review JSON from raw reviewer output."""
         match = re.search(r"```json\s*([\s\S]*?)\s*```", raw)
         if match:
             try:
                 parsed = json.loads(match.group(1))
-                # Support both "approved" and "approve"
                 approved = parsed.get("approved", parsed.get("approve", False))
-                # Support both "severity" and "overall_severity"
                 severity = parsed.get(
                     "severity", parsed.get("overall_severity", "MAJOR")
                 )
@@ -676,17 +973,7 @@ class DualInferencer(InferencerBase):
 
     @staticmethod
     def _default_parse_counter_feedback(raw: str) -> dict:
-        """Parse counter-feedback JSON from fixer output.
-
-        Extracts JSON from ```json ... ``` code blocks. Falls back to
-        empty items if parsing fails.
-
-        Args:
-            raw: Raw fixer output string.
-
-        Returns:
-            Dict with keys: items, summary.
-        """
+        """Parse counter-feedback JSON from fixer output."""
         match = re.search(r"```json\s*([\s\S]*?)\s*```", raw)
         if match:
             try:
@@ -697,84 +984,94 @@ class DualInferencer(InferencerBase):
                 }
             except json.JSONDecodeError:
                 pass
-
         return {"items": [], "summary": ""}
 
     @staticmethod
     def _default_extract_proposal(raw: str) -> str:
-        """Extract improved proposal from fixer output.
-
-        Looks for content inside <ImprovedProposal>...</ImprovedProposal> tags.
-        Falls back to the full raw output (minus any ```json blocks) if tags
-        are not found.
-
-        Args:
-            raw: Raw fixer output string.
-
-        Returns:
-            Extracted or cleaned proposal text.
-        """
+        """Extract improved proposal from fixer output."""
         match = re.search(r"<ImprovedProposal>([\s\S]*?)</ImprovedProposal>", raw)
         if match:
             return match.group(1).strip()
-
-        # Fallback: remove ```json blocks and return the rest
         cleaned = re.sub(r"```json\s*[\s\S]*?\s*```", "", raw).strip()
         return cleaned if cleaned else raw
 
     @staticmethod
     def _default_check_consensus(parsed_review: dict, threshold: Severity) -> bool:
-        """Check if consensus is reached based on review feedback.
-
-        Consensus is reached if the reviewer approved, OR if the highest
-        severity is at or below the threshold.
-
-        Args:
-            parsed_review: Parsed review dict with 'approved' and 'severity' keys.
-            threshold: Maximum acceptable severity level.
-
-        Returns:
-            True if consensus is reached.
-        """
+        """Check if consensus is reached based on review feedback."""
         if parsed_review.get("approved", False):
             return True
-
         severity_str = parsed_review.get("severity", "MAJOR")
         try:
             review_severity = Severity(severity_str)
         except ValueError:
             return False
-
         return severity_at_most(review_severity, threshold)
 
     # endregion
 
     # region Utilities
 
-    def _assign_issue_ids(self, parsed_review: dict, iteration: int) -> dict:
-        """Assign unique IDs to each issue in the parsed review.
+    def _maybe_replace_with_file_reference(
+        self,
+        response_str: str,
+        round_index: int,
+        inference_config: dict,
+    ) -> str:
+        """Replace response with short file reference if output file exists.
 
-        Args:
-            parsed_review: Parsed review dict (modified in place).
-            iteration: Current iteration number.
-
-        Returns:
-            The same parsed_review dict with issue IDs assigned.
+        If ``output_path`` is set in inference_config but the inferencer did not
+        write the file (e.g., the inferencer lacks filesystem access), saves the
+        raw response to that path as a fallback so the output artifact always
+        exists when ``output_path`` is requested.
         """
+        output_path_template = inference_config.get("output_path", "")
+        if not output_path_template:
+            return response_str
+        resolved_path = output_path_template.replace(
+            "{{ round_index }}", str(round_index)
+        )
+        resolved_path = resolved_path.replace("{{round_index}}", str(round_index))
+        if os.path.isfile(resolved_path) and os.path.getsize(resolved_path) > 0:
+            logger.info(
+                "[DualInferencer] Output file exists and is non-empty (%d bytes), "
+                "replacing base_output_str (%d bytes) with file reference: %s",
+                os.path.getsize(resolved_path),
+                len(response_str),
+                resolved_path,
+            )
+        else:
+            # Inferencer did not write the file — save the raw response as fallback
+            try:
+                os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
+                with open(resolved_path, "w") as f:
+                    f.write(response_str)
+                logger.info(
+                    "[DualInferencer] Inferencer did not write output file; "
+                    "saved raw response (%d bytes) to: %s",
+                    len(response_str),
+                    resolved_path,
+                )
+            except OSError as e:
+                logger.warning(
+                    "[DualInferencer] Failed to save fallback output to %s: %s",
+                    resolved_path,
+                    e,
+                )
+                return response_str
+        return (
+            f"The complete output has been written to: `{resolved_path}`.\n"
+            f"Read that file for the full details."
+        )
+
+    def _assign_issue_ids(self, parsed_review: dict, iteration: int) -> dict:
+        """Assign unique IDs to each issue in the parsed review."""
         for index, issue in enumerate(parsed_review.get("issues", []), start=1):
             issue["id"] = self.issue_id_format.format(iteration=iteration, index=index)
         return parsed_review
 
     @staticmethod
     def _serialize_issues(issues: list) -> str:
-        """Serialize issues list to JSON string for template rendering.
-
-        Args:
-            issues: List of issue dicts.
-
-        Returns:
-            JSON string representation.
-        """
+        """Serialize issues list to JSON string for template rendering."""
         return json.dumps(issues, indent=2)
 
     # endregion
@@ -782,11 +1079,7 @@ class DualInferencer(InferencerBase):
     # region Lifecycle
 
     async def _areset_sub_inferencers(self):
-        """Reset all sub-inferencers by disconnecting and reconnecting.
-
-        Used between consensus attempts to get fresh state.
-        Deduplicates sub-inferencers by identity to avoid double-reset.
-        """
+        """Reset all sub-inferencers by disconnecting and reconnecting."""
         seen_ids = set()
         for inf in (
             self.base_inferencer,
@@ -795,8 +1088,14 @@ class DualInferencer(InferencerBase):
         ):
             if inf is not None and id(inf) not in seen_ids:
                 seen_ids.add(id(inf))
+                prev_session_id = getattr(inf, "active_session_id", None)
                 await inf.adisconnect()
-                await inf.aconnect()
+                if self.new_session_per_attempt:
+                    if hasattr(inf, "reset_session"):
+                        inf.reset_session()
+                    await inf.aconnect()
+                else:
+                    await inf.aconnect(session_id=prev_session_id)
 
     async def aconnect(self, **kwargs):
         """Establish connections for all sub-inferencers."""

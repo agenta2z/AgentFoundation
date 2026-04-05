@@ -1,0 +1,123 @@
+You previously implemented the following user request and received feedback from a reviewing agent.
+
+**Original User Request:**
+<UserRequest>
+{{ task_preamble }}
+{{ input }}
+</UserRequest>
+
+**Your Current Implementation:**
+<CurrentImplementation>
+{{ main_response }}
+</CurrentImplementation>
+
+**Reviewer Feedback:**
+<ReviewerFeedback>
+{{ reviewer_response }}
+</ReviewerFeedback>
+
+**Current Review Iteration Index**: {{ round_index }}
+
+---
+
+## Your Task: Evaluate Each Feedback Item & Refine the Implementation
+
+### Step 1: Critical Evaluation of Feedback
+
+The reviewer may be wrong. For **each** issue raised:
+- Verify the claim against the actual codebase — do not accept on faith.
+- Accept if the issue is real and actionable.
+- Reject with specific evidence if the reviewer is mistaken.
+
+### Step 2: Refine the Implementation
+
+For each accepted issue, carefully revise the implementation while ensuring:
+- All CRITICAL and MAJOR issues are resolved (required).
+- MINOR issues are addressed where practical (recommended).
+- No new problems are introduced by your changes.
+- The refined implementation remains internally consistent.
+
+### Efficiency: Prefer Incremental Edits
+
+Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration of code is not warranted (e.g. most fixes are local like a few lines in a few files), try to **apply targeted edits to code files** (e.g. edit_file tools, or sed command). This saves time and avoids accidental regressions in unchanged code.
+
+## Output Requirements
+
+- Write your **improved implementation report** to: `{{ output_path }}`. This is a report, not the implementation improvement itself.
+- The report should thoroughly index the implementation improvement: files created/modified, key code changes, testing status, with concise descriptions. Also report any potential concerns.
+- If the implementation report is too large for a single write, split it into smaller chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
+- If re-running benchmarks, save results to a JSON file alongside `{{ output_path }}` under `benchmarks/round{{ round_index }}/`.
+- If re-running tests with output artifacts, save them alongside `{{ output_path }}` under `tests/round{{ round_index }}/`.
+
+Meanwhile, wrap a structured response in `<Response>` tags.
+
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your official response. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
+
+<Response>
+[Concise summary of what changed and why]
+
+```json
+{
+  "items": [
+    {
+      "issue_id": "<ID from feedback>",
+      "accepted": true | false,
+      "rationale": "<if accepted: what you fixed and how> | <if rejected: evidence why the reviewer is wrong>"
+    }
+  ],
+  "summary": "<brief tally: N accepted, M rejected, with one-line reasoning>"
+}
+
+```
+</Response>
+
+---
+
+## SKILLS
+- When testing or benchmarking requires GPU operations, DO NOT assume "this environment has no GPU access":
+  1. Identify if the testing or benchmarking requires single GPU or multiple GPUs. It might be stated in the user request or any plan/design file associated with the user request.
+  2. Run `nvidia-smi` to check if GPUs are physically present (nvidia-smi bypasses CUDA_VISIBLE_DEVICES).
+     * Identify idle GPUs to use.
+     * If no GPUs are idle, choose the most available ones.
+  3. Unset CUDA_VISIBLE_DEVICES to avoid some GPUs being hidden (DO NOT set CUDA_VISIBLE_DEVICES to empty string, it means hiding all GPUs).
+
+## NOTES (Meta-specific environment):
+- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
+- Always target **specific files or narrow subdirectories**:
+  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
+  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
+  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
+- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
+
+## NOTES (on resolving dependencies):
+- Do NOT conclude a module/dependency is unavailable just because you cannot find them in the codebase.
+  * Modules and other dependencies can be managed by the environment or the build tool (e.g. BUCK).
+  * YOU MUST check the environment, look into build tool target configs (e.g. BUCK files, `python_library` targets, etc.). You may even need to test run the build tool to verify a module/dependency is truly unavailable.
+- The exception blocks in the module/dependency import code can reveal alternative paths for the same module/dependency.
+- When a specific import path is not found, search the codebase for the function/class name itself (e.g., `grep -rn "def flash_attn_func"`) — it may exist under a different module path.
+- Only dismiss a module as "unavailable" after ALL of the above checks fail.
+
+## NOTES (on accessing files outside the repo root):
+- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
+- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
+  * Read file: `cat /path/to/file.py`
+  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
+  * List directory: `ls /path/to/dir/`
+  * Search: `grep -rn "pattern" /path/to/dir/`
+
+## NOTES (emphasizing requirements):
+- Every accept/reject must cite concrete evidence (such as code lines or comments) with careful reasoning - DO NOT speculate or assume.
+- YOU MUST run real tests or benchmarking after making changes. Do not claim or mock test or benchmark results without actually executing them.
+- Prefer applying incremental targeted code edits over full code file rewrites when full code regeneration is not necessary.
+
+# NOTES (on agent behavior):
+- Deep & Focused Investigation Requirement:
+  * You MUST carefully investigate each feedback item by reading the actual code involved. Verify whether the reviewer's claims are correct with critical thinking — do not accept or reject on assumption.
+  * However, stay focused on the specific issues raised. Only read code relevant to a feedback item. DO NOT investigate the entire codebase or read files unrelated to the feedback.
+- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
+  * When verifying reviewer claims with reference code lines (e.g., lines 134-146), read only the specific lines around those referenced, and incrementally read more as needed.
+- After writing your improved implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
+  * The implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+  * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+Now start your work counter-reviewing the ReviewerFeedback and refining your implementation as needed.

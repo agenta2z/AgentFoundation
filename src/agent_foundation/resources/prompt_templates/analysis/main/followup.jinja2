@@ -1,0 +1,119 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+You previously generated an analysis of {{ result_type }} results from a plan-then-implement iteration and received feedback from a reviewing agent.
+
+<AnalysisContext>
+**Original User Request:**
+{{ input }}
+
+**Implementation Plan:** {{ implementation_plan }}
+
+**Implementation Summary:** {{ implementation_output_path }}
+
+**{{ result_type | capitalize }} Results:** {{ result_path }}
+</AnalysisContext>
+
+{% if previous_iteration_paths and "Iteration" in previous_iteration_paths %}
+<PreviousIterationContext>
+{{ previous_iteration_paths }}
+</PreviousIterationContext>
+{% endif %}
+
+**Your Current Proposed Analysis:**
+<ProposedAnalysis>
+{{ main_response }}
+</ProposedAnalysis>
+
+**Reviewer Feedback:**
+<ReviewerFeedback>
+{{ reviewer_response }}
+</ReviewerFeedback>
+
+**Current Review Round Index**: {{ round_index }}
+
+---
+
+## Your Task: Evaluate Each Feedback Item & Refine the Analysis
+
+### Step 1: Critical Evaluation of Feedback
+
+The reviewer may be wrong. For **each** issue raised, re-read the actual {{ result_type }} results, implementation plan, and implementation summary to verify:
+- **Accept** if the issue is real, backed by evidence in the source data.
+- **Reject with evidence** if the reviewer is mistaken — cite specific data from the result files.
+
+### Step 2: Refine the Analysis
+
+For each accepted issue, revise the analysis while ensuring:
+- All CRITICAL and MAJOR issues are resolved.
+- The `should_continue` decision is reconsidered in light of the feedback.
+- The `next_iteration_request` is updated if needed.
+
+### Efficiency: Prefer Incremental Edits
+
+Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration of analysis is not warranted (e.g. most fixes are local like a few lines in 1-2 sections), try to **copy the previous analysis file and apply targeted edits** (e.g. edit_file tools, or sed command). This saves time and avoids accidental regressions in unchanged sections.
+
+## Output Requirements
+
+Write your **improved analysis** in markdown format to: `{{ output_path }}`
+
+Wrap a structured response in `<Response>` tags:
+
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary.
+
+<Response>
+[Concise summary of what changed and why]
+
+```json
+{
+  "items": [
+    {
+      "issue_id": "<ID from feedback>",
+      "accepted": true | false,
+      "rationale": "<if accepted: what you fixed and how> | <if rejected: evidence why the reviewer is wrong>"
+    }
+  ],
+  "summary": "<brief tally: N accepted, M rejected, with one-line reasoning>"
+}
+```
+</Response>
+
+Now start your work counter-reviewing the ReviewerFeedback and refining your analysis as needed.
+
+---
+
+## NOTES (Meta-specific environment):
+- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
+- Always target **specific files or narrow subdirectories**:
+  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
+  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
+  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
+- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
+
+## NOTES (on accessing files outside the repo root):
+- Result files, implementation reports, and workspace artifacts are often outside the repo root.
+- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
+- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
+  * Read file: `cat /path/to/file.py`
+  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
+  * List directory: `ls /path/to/dir/`
+  * Search: `grep -rn "pattern" /path/to/dir/`
+
+## NOTES (emphasizing requirements):
+- Every accept/reject must cite concrete evidence from the actual {{ result_type }} result files — specific numbers, test names, file paths, or error messages. Do NOT speculate or assume.
+- Do NOT fabricate or hallucinate benchmark numbers. If a result file cannot be read, state that explicitly rather than guessing.
+- If the results include JSON files, read and parse them to extract actual metrics. Do not summarize based on filenames alone.
+- Prefer copying the previous version and making incremental targeted edits over full analysis regeneration when full regeneration is not necessary.
+
+## NOTES (on agent behavior):
+- Deep & Focused Investigation Requirement:
+  * You MUST carefully investigate each feedback item by reading the actual {{ result_type }} result files involved. Verify whether the reviewer's claims are correct with critical thinking — do not accept or reject on assumption.
+  * However, stay focused on the specific issues raised. Only read files relevant to a feedback item. DO NOT investigate the entire codebase or read files unrelated to the feedback.
+- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
+  * When verifying reviewer claims with referenced data, read only the specific sections needed, and incrementally read more as needed.
+- After writing your improved analysis to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
+  * The analysis output is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+  * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.

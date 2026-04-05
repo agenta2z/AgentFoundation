@@ -1,15 +1,32 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+# pyre-strict
+
 """Streaming Inferencer Base.
 
 Extracts common streaming, session management, timeout handling, and
 sync-to-async bridging logic shared by ClaudeCodeInferencer,
 DevmateSDKInferencer, and DevmateCliInferencer.
 
-Subclasses implement ``_produce_chunks()`` — the single abstract primitive
+Subclasses implement ``_ainfer_streaming()`` — the single abstract primitive
 that yields raw text chunks from the backend. All other streaming/inference
 methods derive from this.
+
+Dual-Timer Architecture:
+    ``_ainfer_streaming()`` may yield two kinds of chunks:
+
+    - **Non-empty strings** (text output): resets the standard
+      ``idle_timeout_seconds`` timer.
+    - **Empty strings** (``""`` — activity sentinels): signal that the
+      backend is busy (e.g., executing a tool) but producing no text.
+      These reset the ``tool_use_idle_timeout_seconds`` timer (if > 0).
+
+    Empty-string sentinels are **never** yielded downstream, cached, or
+    accumulated. They only serve to keep the idle timer alive during
+    tool-heavy sessions.
 """
 
 import asyncio
+import enum
 import hashlib
 import logging
 import os
@@ -25,7 +42,23 @@ from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
+
+
+class EmptyLineMode(enum.Enum):
+    """How to handle empty lines in streaming output.
+
+    PASS_THROUGH: No special treatment — all lines yielded as-is.
+    SUPPRESS_LEADING: Drop empty lines before first non-empty content.
+        After content starts, all lines (including empty) pass through.
+    BUFFER: Drop leading empties + buffer subsequent empties. Only emit
+        buffered empties when non-empty content follows. Strips trailing
+        empties at end of stream.
+    """
+
+    PASS_THROUGH = "pass_through"
+    SUPPRESS_LEADING = "suppress_leading"
+    BUFFER = "buffer"
 
 
 @attrs
@@ -39,20 +72,39 @@ class StreamingInferencerBase(InferencerBase):
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - Cache persistence: optional ``cache_folder`` for writing intermediate output
 
-    Subclasses must implement ``_produce_chunks(prompt, **kwargs)`` which yields
+    Subclasses must implement ``_ainfer_streaming(prompt, **kwargs)`` which yields
     raw text chunks from the backend.
+
+    Streaming pipeline:
+        ``ainfer_streaming()`` orchestrates a 3-stage pipeline:
+
+        1. ``_ainfer_streaming()`` — yields raw chunks from the backend
+        2. Cache — writes each chunk to disk (if ``cache_folder`` is set)
+        3. ``_yield_filter()`` — filters what reaches the consumer
 
     Timeout architecture (two layers):
         ``ainfer() → _ainfer_single() [total_timeout_seconds — caps entire operation]``
           ``→ _ainfer() [accumulates from ainfer_streaming]``
             ``→ ainfer_streaming() [idle_timeout_seconds — gaps between chunks]``
-              ``→ _produce_chunks() [abstract, subclass implements]``
+              ``→ _ainfer_streaming() [abstract, subclass implements]``
 
     Attributes:
         cache_folder: Directory for persisting intermediate streamed content.
             None (default) disables caching.
         idle_timeout_seconds: Maximum seconds to wait for the next chunk before
             considering the stream stalled. 0 disables idle timeout. Default: 600.
+        tool_use_idle_timeout_seconds: Maximum seconds to wait for the next chunk
+            when the last received chunk was an empty-string activity sentinel
+            (indicating tool use or other non-text backend activity). 0 (default)
+            means "use idle_timeout_seconds for everything" (backward compatible).
+            When > 0, the timer switches to this longer value after receiving an
+            empty sentinel, and switches back to idle_timeout_seconds after
+            receiving a non-empty text chunk.
+        empty_line_mode: How to handle empty lines in streaming output.
+            PASS_THROUGH (default): no special treatment.
+            SUPPRESS_LEADING: drop empty lines before first non-empty content.
+            BUFFER: drop leading empties + buffer subsequent empties, only emit
+            when non-empty content follows.
         auto_resume: If True, automatically resume previous session on subsequent
             infer calls. Default: True.
     """
@@ -60,12 +112,17 @@ class StreamingInferencerBase(InferencerBase):
     # Streaming configuration
     cache_folder: Optional[str] = attrib(default=None)
     idle_timeout_seconds: int = attrib(default=600)
+    tool_use_idle_timeout_seconds: int = attrib(default=0)
+    empty_line_mode: EmptyLineMode = attrib(default=EmptyLineMode.PASS_THROUGH)
 
     # Session management
     auto_resume: bool = attrib(default=True)
 
     # Internal state (not init params)
     _session_id: Optional[str] = attrib(default=None, init=False, repr=False)
+    _generator_cleanup_timeout: Optional[float] = attrib(
+        default=None, init=False, repr=False
+    )
 
     # === Properties ===
 
@@ -81,7 +138,7 @@ class StreamingInferencerBase(InferencerBase):
     # === Abstract Method ===
 
     @abstractmethod
-    async def _produce_chunks(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield raw text chunks from the backend.
 
         This is the single abstract primitive that each subclass must implement.
@@ -118,19 +175,91 @@ class StreamingInferencerBase(InferencerBase):
             return inference_input.get("prompt", str(inference_input))
         return str(inference_input)
 
+    def _resolve_timeouts(
+        self,
+        idle_timeout: float | None,
+        tool_use_timeout: float | None,
+    ) -> tuple[float | None, float | None]:
+        """Resolve effective idle and tool-use timeouts.
+
+        Base implementation returns both values unchanged, enabling the
+        dual-timer architecture (switches between idle and tool-use timeouts
+        based on empty-string sentinels from ``_ainfer_streaming()``).
+
+        Subclasses that cannot produce empty sentinels (e.g., CLI subprocess
+        inferencers) should override to pre-merge, typically returning
+        ``(max(idle, tool_use), None)``.
+        """
+        return idle_timeout, tool_use_timeout
+
+    async def _yield_filter(
+        self, chunks: AsyncIterator[str], **kwargs: Any
+    ) -> AsyncIterator[str]:
+        """Filter cached chunks before yielding to consumers.
+
+        Base implementation applies the empty-line handling policy configured
+        by ``empty_line_mode``. Override in subclasses for backend-specific
+        filtering (session headers, etc.), calling ``super()._yield_filter()``
+        to preserve empty-line handling.
+
+        Per-call override: pass ``empty_line_mode`` in kwargs.
+
+        Args:
+            chunks: Async iterator of already-cached chunks.
+            **kwargs: Same kwargs passed to ``ainfer_streaming()``.
+
+        Yields:
+            Chunks to deliver to the consumer.
+        """
+        # Resolve mode: per-call override > instance attribute
+        mode = kwargs.get("empty_line_mode", self.empty_line_mode)
+        if isinstance(mode, str):
+            mode = EmptyLineMode(mode)
+
+        if mode == EmptyLineMode.PASS_THROUGH:
+            async for chunk in chunks:
+                yield chunk
+            return
+
+        content_started = False
+        pending_empty_lines: list[str] = []
+
+        async for line in chunks:
+            stripped = line.strip()
+            if not stripped:
+                if not content_started:
+                    continue  # suppress leading empties (both modes)
+                if mode == EmptyLineMode.BUFFER:
+                    pending_empty_lines.append(line)
+                    continue  # buffer for later
+                # SUPPRESS_LEADING + content started → pass through
+                yield line
+                continue
+
+            # Non-empty content line
+            content_started = True
+            for empty_line in pending_empty_lines:
+                yield empty_line
+            pending_empty_lines = []
+            yield line
+        # End of stream: buffered empties are dropped (BUFFER mode)
+
     async def ainfer_streaming(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> AsyncIterator[str]:
-        """Async streaming inference with idle timeout and optional caching.
+        """Async streaming inference with idle timeout, caching, and filtering.
 
-        Wraps ``_produce_chunks()`` to add:
+        Pipeline: ``_ainfer_streaming() → cache → _yield_filter() → yield``
+
+        Wraps ``_ainfer_streaming()`` to add:
         1. Idle timeout — if no chunk arrives within ``idle_timeout_seconds``, stops.
         2. Cache writing — if ``cache_folder`` is set, chunks are appended to a file.
+        3. Yield filtering — ``_yield_filter()`` controls what reaches the consumer.
 
         Args:
             inference_input: Input for inference (string or dict with "prompt" key).
             inference_config: Optional configuration (unused by base).
-            **kwargs: Passed through to ``_produce_chunks()``.
+            **kwargs: Passed through to ``_ainfer_streaming()`` and ``_yield_filter()``.
 
         Yields:
             Text chunks as they arrive from the backend.
@@ -142,35 +271,130 @@ class StreamingInferencerBase(InferencerBase):
         if self.cache_folder:
             cache_file = self._open_cache_file(prompt)
 
-        idle_timeout = (
-            self.idle_timeout_seconds if self.idle_timeout_seconds > 0 else None
+        # Allow per-call idle timeout override via kwargs
+        idle_timeout_override = kwargs.pop("idle_timeout_seconds", None)
+        if idle_timeout_override is not None:
+            idle_timeout = idle_timeout_override if idle_timeout_override > 0 else None
+        else:
+            idle_timeout = (
+                self.idle_timeout_seconds if self.idle_timeout_seconds > 0 else None
+            )
+
+        # Resolve tool-use idle timeout
+        tool_use_timeout_override = kwargs.pop("tool_use_idle_timeout_seconds", None)
+        if tool_use_timeout_override is not None:
+            tool_use_timeout = (
+                tool_use_timeout_override if tool_use_timeout_override > 0 else None
+            )
+        else:
+            tool_use_timeout = (
+                self.tool_use_idle_timeout_seconds
+                if self.tool_use_idle_timeout_seconds > 0
+                else None
+            )
+
+        # Let subclasses adjust (e.g., CLI pre-merge to max)
+        idle_timeout, tool_use_timeout = self._resolve_timeouts(
+            idle_timeout, tool_use_timeout
         )
+
+        def _fmt_timeout(val: int | float | None) -> str:
+            return f"{val}s" if val is not None else "disabled"
+
+        self.log_info(
+            f"idle_timeout={_fmt_timeout(idle_timeout)}, "
+            f"tool_use_timeout={_fmt_timeout(tool_use_timeout)} "
+            f"(overrides: idle={idle_timeout_override}, "
+            f"tool_use={tool_use_timeout_override}, "
+            f"instance: idle={self.idle_timeout_seconds}, "
+            f"tool_use={self.tool_use_idle_timeout_seconds})",
+            "StreamingConfig",
+        )
+
+        # Dual-timer state: tracks which timeout to use for the next await.
+        # Starts with the text idle timeout; switches to tool_use_timeout when
+        # an empty sentinel is received, and back to idle_timeout on text.
+        current_timeout = idle_timeout
+        in_tool_use_mode = False
 
         success = False
         error = None
+
         try:
-            aiter = self._produce_chunks(prompt, **kwargs).__aiter__()
-            while True:
+            # Phase 1: Produce chunks + cache raw output
+            async def _cached_stream() -> AsyncIterator[str]:
+                nonlocal current_timeout, in_tool_use_mode, success
+                aiter = self._ainfer_streaming(prompt, **kwargs).__aiter__()
                 try:
-                    if idle_timeout is not None:
-                        chunk = await asyncio.wait_for(
-                            aiter.__anext__(), timeout=idle_timeout
-                        )
-                    else:
-                        chunk = await aiter.__anext__()
-                except StopAsyncIteration:
-                    break
+                    while True:
+                        try:
+                            if current_timeout is not None:
+                                chunk = await asyncio.wait_for(
+                                    aiter.__anext__(), timeout=current_timeout
+                                )
+                            else:
+                                chunk = await aiter.__anext__()
+                        except StopAsyncIteration:
+                            break
 
-                self._append_to_cache(cache_file, chunk)
-                yield chunk
+                        if chunk == "":
+                            # Activity sentinel: backend is busy (tool use,
+                            # etc.) but no text output.  Switch to the longer
+                            # tool-use timeout.
+                            if tool_use_timeout is not None and not in_tool_use_mode:
+                                current_timeout = tool_use_timeout
+                                in_tool_use_mode = True
+                                self.log_info(
+                                    f"Switching to tool_use_idle_timeout="
+                                    f"{tool_use_timeout}s",
+                                    "DualTimer",
+                                )
+                            # Do NOT yield, cache, or accumulate sentinels.
+                            continue
 
-            success = True
+                        # Non-empty text chunk: switch back to standard idle.
+                        if in_tool_use_mode:
+                            current_timeout = idle_timeout
+                            in_tool_use_mode = False
+                            self.log_info(
+                                f"Switching back to idle_timeout={idle_timeout}s",
+                                "DualTimer",
+                            )
+
+                        self._append_to_cache(cache_file, chunk)
+                        yield chunk
+
+                    success = True
+                finally:
+                    # Generator cleanup with optional timeout guard.
+                    # Subprocess-based inferencers set
+                    # _generator_cleanup_timeout to prevent secondary hangs
+                    # when aclose() triggers process.wait() on a running
+                    # subprocess after idle timeout.
+                    if self._generator_cleanup_timeout is not None:
+                        try:
+                            await asyncio.wait_for(
+                                aiter.aclose(),
+                                timeout=self._generator_cleanup_timeout,
+                            )
+                        except (asyncio.TimeoutError, Exception):
+                            logger.warning(
+                                "[%s] Generator cleanup timed out",
+                                self.__class__.__name__,
+                            )
+
+            # Phase 2: Filter + empty-line handling
+            async for filtered_chunk in self._yield_filter(_cached_stream(), **kwargs):
+                yield filtered_chunk
+
         except asyncio.TimeoutError as e:
             error = e
+            timeout_type = "tool_use_idle" if in_tool_use_mode else "text_idle"
             self.log_info(
-                f"No new chunk for {self.idle_timeout_seconds}s",
+                f"No new chunk for {current_timeout}s ({timeout_type} timeout)",
                 "IdleTimeout",
             )
+            raise
         except Exception as e:
             error = e
             raise
@@ -253,6 +477,19 @@ class StreamingInferencerBase(InferencerBase):
             raise error_container[0]
 
     # === Session Management Methods ===
+
+    def reset_session(self) -> None:
+        """Clear session state so the next call starts a fresh session.
+
+        This clears the stored ``_session_id`` without disconnecting the
+        underlying transport (if any).  The next ``ainfer()`` / ``infer()``
+        call will start a new session instead of resuming the previous one
+        (regardless of ``auto_resume``).
+
+        Use this when you want a clean conversational slate but don't need
+        to tear down the connection itself (which ``adisconnect()`` handles).
+        """
+        self._session_id = None
 
     def new_session(self, prompt: str, **kwargs: Any) -> Any:
         """Start a new session, clearing any previous session.

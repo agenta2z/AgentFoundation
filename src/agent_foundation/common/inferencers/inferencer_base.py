@@ -8,6 +8,11 @@ from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_utils import dict_, iter__, resolve_environ
 from rich_python_utils.common_utils.function_helper import execute_with_retry
 
+# Retry prompt mode constants
+RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
+
+_SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
+
 
 @attrs
 class InferencerBase(Debuggable, ABC):
@@ -66,6 +71,9 @@ class InferencerBase(Debuggable, ABC):
     input_preprocessor: Callable = attrib(default=None)
     response_post_processor: Callable = attrib(default=None)
     post_response_merger: Union[str, Callable] = attrib(default=None)
+
+    # State graph support — optional list of StateGraphTracker instances
+    state_graphs: list = attrib(default=None)
 
     def __attrs_post_init__(self):
         if isinstance(self.post_response_merger, str):
@@ -131,12 +139,59 @@ class InferencerBase(Debuggable, ABC):
             Exception: If all retry attempts fail and default_return_or_raise is set to
                 None or an Exception object.
         """
+        # Capture original input BEFORE preprocessing for retry_with_original mode
+        original_input = inference_input
+
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
 
         inference_args = self.default_inference_args.copy()
         if _inference_args:
             inference_args.update(_inference_args)
+
+        # Augment with state graph args
+        if self.state_graphs:
+            inference_args.update(self.get_inference_args_from_state_graphs())
+
+        # Pop runtime overrides that should not be forwarded to _infer()
+        on_retry_callback = inference_args.pop("on_retry_callback", None)
+        total_timeout = inference_args.pop(
+            "total_timeout_seconds", self.total_timeout_seconds
+        )
+        retry_prompt_mode = inference_args.pop("retry_prompt_mode", "original")
+
+        # Validate retry_prompt_mode
+        if retry_prompt_mode not in RETRY_PROMPT_MODES:
+            raise ValueError(
+                f"Invalid retry_prompt_mode={retry_prompt_mode!r}. "
+                f"Must be one of {RETRY_PROMPT_MODES}"
+            )
+
+        # Mutable args list — prompt can be swapped by the retry callback
+        retry_args = [inference_input]
+
+        # Build internal retry callback (handles prompt transformation + user callback)
+        _user_callback = on_retry_callback
+        if _user_callback is not None or retry_prompt_mode != "original":
+
+            def _internal_retry_callback(attempt, exception):
+                # Forward to user callback with local inference_args
+                if _user_callback is not None:
+                    _user_callback(attempt, exception, inference_args)
+                # Transform prompt based on retry_prompt_mode
+                if retry_prompt_mode == "simple_retry":
+                    retry_args[0] = _SIMPLE_RETRY_PROMPT
+                elif retry_prompt_mode == "retry_with_original":
+                    retry_args[0] = (
+                        _SIMPLE_RETRY_PROMPT + " The task was:\n" + str(original_input)
+                    )
+                if retry_prompt_mode != "original":
+                    self.log_info(
+                        f"Retry prompt ({retry_prompt_mode}): {str(retry_args[0])[:200]}",
+                        "RetryPrompt",
+                    )
+
+            on_retry_callback = _internal_retry_callback
 
         self.log_debug(inference_input, "InferenceInput")
         self.log_debug(inference_args, "InferenceArgs")
@@ -146,12 +201,17 @@ class InferencerBase(Debuggable, ABC):
             max_retry=self.max_retry,
             min_retry_wait=self.min_retry_wait,
             max_retry_wait=self.max_retry_wait,
-            args=[inference_input],
+            args=retry_args,
             kwargs=inference_args,
             default_return_or_raise=self.default_return_or_raise,
+            on_retry_callback=on_retry_callback,
         )
 
         self.log_debug(inference_response, "InferenceResponse")
+
+        # Update state graphs from response
+        if self.state_graphs:
+            self.update_state_graphs(inference_response)
 
         if self.response_post_processor is not None:
             processed_response = self.response_post_processor(inference_response)
@@ -159,6 +219,46 @@ class InferencerBase(Debuggable, ABC):
             return processed_response
 
         return inference_response
+
+    # -- State graph integration -------------------------------------------
+
+    def attach_state_graph(self, tracker) -> None:
+        """Attach a StateGraphTracker to this inferencer."""
+        if self.state_graphs is None:
+            self.state_graphs = []
+        self.state_graphs.append(tracker)
+
+    def get_inference_args_from_state_graphs(self) -> dict:
+        """Collect inference args from all attached state graphs.
+        Handles None check and iterates over trackers.
+        """
+        if not self.state_graphs:
+            return {}
+        merged = {}
+        for tracker in self.state_graphs:
+            merged.update(self._get_inference_args_from_state_graph(tracker))
+        return merged
+
+    def update_state_graphs(self, response) -> None:
+        """Update all attached state graphs from inference response.
+        Handles None check and iterates over trackers.
+        """
+        if not self.state_graphs:
+            return
+        for tracker in self.state_graphs:
+            self._update_state_graph(tracker, response)
+
+    def _get_inference_args_from_state_graph(self, tracker) -> dict:
+        """Override in subclasses: extract inference args from one tracker.
+        Default: empty dict (no-op).
+        """
+        return {}
+
+    def _update_state_graph(self, tracker, response) -> None:
+        """Override in subclasses: update one tracker from response.
+        Default: no-op.
+        """
+        pass
 
     def _infer_iterator(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
@@ -408,12 +508,59 @@ class InferencerBase(Debuggable, ABC):
             async_execute_with_retry,
         )
 
+        # Capture original input BEFORE preprocessing for retry_with_original mode
+        original_input = inference_input
+
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
 
         inference_args = self.default_inference_args.copy()
         if _inference_args:
             inference_args.update(_inference_args)
+
+        # Augment with state graph args
+        if self.state_graphs:
+            inference_args.update(self.get_inference_args_from_state_graphs())
+
+        # Pop runtime overrides that should not be forwarded to _ainfer()
+        on_retry_callback = inference_args.pop("on_retry_callback", None)
+        total_timeout = inference_args.pop(
+            "total_timeout_seconds", self.total_timeout_seconds
+        )
+        retry_prompt_mode = inference_args.pop("retry_prompt_mode", "original")
+
+        # Validate retry_prompt_mode
+        if retry_prompt_mode not in RETRY_PROMPT_MODES:
+            raise ValueError(
+                f"Invalid retry_prompt_mode={retry_prompt_mode!r}. "
+                f"Must be one of {RETRY_PROMPT_MODES}"
+            )
+
+        # Mutable args list — prompt can be swapped by the retry callback
+        retry_args = [inference_input]
+
+        # Build internal retry callback (handles prompt transformation + user callback)
+        _user_callback = on_retry_callback
+        if _user_callback is not None or retry_prompt_mode != "original":
+
+            def _internal_retry_callback(attempt, exception):
+                # Forward to user callback with local inference_args
+                if _user_callback is not None:
+                    _user_callback(attempt, exception, inference_args)
+                # Transform prompt based on retry_prompt_mode
+                if retry_prompt_mode == "simple_retry":
+                    retry_args[0] = _SIMPLE_RETRY_PROMPT
+                elif retry_prompt_mode == "retry_with_original":
+                    retry_args[0] = (
+                        _SIMPLE_RETRY_PROMPT + " The task was:\n" + str(original_input)
+                    )
+                if retry_prompt_mode != "original":
+                    self.log_info(
+                        f"Retry prompt ({retry_prompt_mode}): {str(retry_args[0])[:200]}",
+                        "RetryPrompt",
+                    )
+
+            on_retry_callback = _internal_retry_callback
 
         self.log_debug(inference_input, "InferenceInput")
         self.log_debug(inference_args, "InferenceArgs")
@@ -424,18 +571,19 @@ class InferencerBase(Debuggable, ABC):
                 max_retry=self.max_retry,
                 min_retry_wait=self.min_retry_wait,
                 max_retry_wait=self.max_retry_wait,
-                args=[inference_input],
+                args=retry_args,
                 default_return_or_raise=self.default_return_or_raise,
+                on_retry_callback=on_retry_callback,
             )
 
-        if self.total_timeout_seconds > 0:
+        if total_timeout > 0:
             try:
                 inference_response = await asyncio.wait_for(
-                    _do_inference(), timeout=self.total_timeout_seconds
+                    _do_inference(), timeout=total_timeout
                 )
             except asyncio.TimeoutError:
                 self.log_info(
-                    f"Total timeout after {self.total_timeout_seconds}s",
+                    f"Total timeout after {total_timeout}s",
                     "TotalTimeout",
                 )
                 raise
@@ -443,6 +591,10 @@ class InferencerBase(Debuggable, ABC):
             inference_response = await _do_inference()
 
         self.log_debug(inference_response, "InferenceResponse")
+
+        # Update state graphs from response
+        if self.state_graphs:
+            self.update_state_graphs(inference_response)
 
         if self.response_post_processor is not None:
             processed_response = self.response_post_processor(inference_response)

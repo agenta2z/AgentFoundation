@@ -1,0 +1,22 @@
+load("@fbcode_macros//build_defs:native_rules.bzl", "buck_filegroup")
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ads_ranking_for_feed")
+
+python_binary(
+    name = "sphinx",
+    main_module = "sphinx.cmd.build",
+    par_style = "xar",
+    deps = [
+        "fbsource//third-party/pypi/sphinx:sphinx",
+        "fbsource//third-party/pypi/sphinx-rtd-theme:sphinx-rtd-theme",
+    ],
+)
+
+buck_filegroup(
+    name = "source",
+    srcs = glob([
+        "**/*.rst",
+        "**/*.py",
+    ]),
+)

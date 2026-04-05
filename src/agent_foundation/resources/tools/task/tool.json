@@ -1,0 +1,145 @@
+{
+  "name": "task",
+  "tool_type": "Action",
+  "aliases": [
+    "task-plan",
+    "task-execute",
+    "task-full",
+    "task-confirm"
+  ],
+  "category": "workflow",
+  "is_bridge": true,
+  "asynchronous": true,
+  "description": "Execute a dual-agent consensus workflow for planning and/or implementation. Two AI agents (proposer + reviewer) iterate until consensus on a plan, then optionally execute it.",
+  "parameters": [
+    {
+      "name": "request",
+      "type": "string",
+      "required": true,
+      "positional": true,
+      "description": "The task description or code change request."
+    },
+    {
+      "name": "--plan",
+      "type": "flag",
+      "description": "Run planning phase only (skip implementation)."
+    },
+    {
+      "name": "--full",
+      "type": "flag",
+      "default": true,
+      "description": "Run full workflow: planning + implementation. This is the default."
+    },
+    {
+      "name": "--execute",
+      "type": "flag",
+      "description": "Skip planning, execute implementation directly."
+    },
+    {
+      "name": "--confirm",
+      "type": "flag",
+      "description": "Plan first, then wait for user approval before implementing."
+    },
+    {
+      "name": "--model",
+      "type": "string",
+      "popular": true,
+      "description": "Override the LLM model (e.g., 'opus', 'sonnet', 'claude-opus-4-6').",
+      "choices": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"]
+    },
+    {
+      "name": "--claude-only",
+      "type": "flag",
+      "popular": true,
+      "description": "Use Claude Code for both proposer and reviewer agents."
+    },
+    {
+      "name": "--analysis",
+      "type": "flag",
+      "description": "Enable post-implementation analysis phase."
+    },
+    {
+      "name": "--multi-iter",
+      "type": "flag",
+      "description": "Enable multi-iteration refinement loop."
+    },
+    {
+      "name": "--no-planning",
+      "type": "flag",
+      "description": "Skip the planning phase entirely."
+    },
+    {
+      "name": "--no-implementation",
+      "type": "flag",
+      "description": "Skip the implementation phase entirely."
+    },
+    {
+      "name": "--base-inferencer",
+      "type": "string",
+      "popular": true,
+      "description": "Planner/base agent inferencer type.",
+      "choices": [
+        "metamate_sdk",
+        "devmate_cli",
+        "claude_code"
+      ]
+    },
+    {
+      "name": "--review-inferencer",
+      "type": "string",
+      "description": "Reviewer agent inferencer type.",
+      "choices": [
+        "metamate_sdk",
+        "devmate_cli",
+        "claude_code"
+      ]
+    },
+    {
+      "name": "--resume",
+      "type": "path",
+      "description": "Resume from an existing workspace directory."
+    },
+    {
+      "name": "--analysis-only",
+      "type": "path",
+      "description": "Resume workspace and run analysis only (sets --no-planning --no-implementation --analysis)."
+    },
+    {
+      "name": "--analysis-mode",
+      "type": "string",
+      "description": "Analysis comparison mode.",
+      "choices": [
+        "last",
+        "cross-ref",
+        "all-rounds"
+      ]
+    },
+    {
+      "name": "--copy-workspace",
+      "type": "flag",
+      "description": "Force copy workspace on resume."
+    },
+    {
+      "name": "--in-place",
+      "type": "flag",
+      "description": "Don't copy workspace on resume (modify in place)."
+    },
+    {
+      "name": "--replay-streaming",
+      "type": "flag",
+      "description": "Replay streamed output from previously completed phases."
+    },
+    {
+      "name": "--initial-plan",
+      "type": "path",
+      "description": "Load initial plan from file, skip the proposal phase."
+    }
+  ],
+  "returns": "Workspace path containing plan and/or implementation outputs at _rankevolve_workspace/task_<timestamp>/.",
+  "examples": [
+    "task \"Implement flash attention v2 for HSTU model\"",
+    "task --plan \"Add unit tests for the recommendation service\"",
+    "task --analysis --resume /path/to/workspace",
+    "task --confirm \"Refactor the data pipeline to use async I/O\""
+  ]
+}

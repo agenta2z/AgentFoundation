@@ -1,0 +1,299 @@
+{
+  "name": "knowledge",
+  "tool_type": "Action",
+  "aliases": [
+    "kn"
+  ],
+  "category": "knowledge",
+  "is_bridge": false,
+  "description": "Manage the persistent knowledge base. Supports adding, searching, loading files, and maintaining knowledge pieces for context-aware assistance.",
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add a text knowledge piece to the knowledge base.",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Text content to add."
+        },
+        {
+          "name": "--space",
+          "type": "string",
+          "description": "Knowledge space to add to."
+        },
+        {
+          "name": "--spaces",
+          "type": "string",
+          "description": "Comma-separated list of spaces."
+        },
+        {
+          "name": "--no-llm",
+          "type": "flag",
+          "description": "Skip LLM-based ingestion/enrichment."
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Vector search the knowledge base.",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Search query text."
+        },
+        {
+          "name": "--domain",
+          "type": "string",
+          "description": "Filter by domain."
+        },
+        {
+          "name": "--tags",
+          "type": "string",
+          "description": "Comma-separated tag filter."
+        },
+        {
+          "name": "--limit",
+          "type": "int",
+          "description": "Maximum number of results."
+        },
+        {
+          "name": "--entity-id",
+          "type": "string",
+          "description": "Filter by entity ID."
+        },
+        {
+          "name": "--space",
+          "type": "string",
+          "description": "Filter by knowledge space."
+        }
+      ]
+    },
+    {
+      "name": "load",
+      "description": "Load knowledge from a file or directory.",
+      "parameters": [
+        {
+          "name": "path",
+          "type": "path",
+          "required": true,
+          "positional": true,
+          "description": "File or directory path to load."
+        },
+        {
+          "name": "--pattern",
+          "type": "string",
+          "default": "*.md",
+          "description": "Glob pattern for directory loading."
+        },
+        {
+          "name": "--space",
+          "type": "string",
+          "description": "Target knowledge space."
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List knowledge pieces with optional filters.",
+      "parameters": [
+        {
+          "name": "--inactive",
+          "type": "flag",
+          "description": "Include soft-deleted (inactive) pieces."
+        },
+        {
+          "name": "--domain",
+          "type": "string",
+          "description": "Filter by domain."
+        },
+        {
+          "name": "--limit",
+          "type": "int",
+          "description": "Maximum number of items."
+        },
+        {
+          "name": "--space",
+          "type": "string",
+          "description": "Filter by knowledge space."
+        }
+      ]
+    },
+    {
+      "name": "get",
+      "description": "Get full details of a specific knowledge piece.",
+      "parameters": [
+        {
+          "name": "piece_id",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Knowledge piece ID."
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update content and metadata of a knowledge piece.",
+      "parameters": [
+        {
+          "name": "piece_id",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Knowledge piece ID."
+        },
+        {
+          "name": "new_content",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "New content text."
+        },
+        {
+          "name": "--domain",
+          "type": "string",
+          "description": "Update domain classification."
+        },
+        {
+          "name": "--tags",
+          "type": "string",
+          "description": "Comma-separated replacement tags."
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete a knowledge piece by ID or by search query.",
+      "parameters": [
+        {
+          "name": "piece_id",
+          "type": "string",
+          "positional": true,
+          "description": "Knowledge piece ID (mode 1)."
+        },
+        {
+          "name": "--hard",
+          "type": "flag",
+          "description": "Permanently delete instead of soft-delete."
+        },
+        {
+          "name": "--query",
+          "type": "string",
+          "description": "Query-based deletion (mode 2, alternative to piece_id)."
+        }
+      ]
+    },
+    {
+      "name": "restore",
+      "description": "Restore a soft-deleted knowledge piece.",
+      "parameters": [
+        {
+          "name": "piece_id",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Knowledge piece ID to restore."
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Show knowledge base statistics (piece count, spaces, LLM status).",
+      "parameters": []
+    },
+    {
+      "name": "history",
+      "description": "Show recent knowledge base operations.",
+      "parameters": [
+        {
+          "name": "--since",
+          "type": "string",
+          "required": true,
+          "description": "ISO timestamp to show operations since."
+        }
+      ]
+    },
+    {
+      "name": "rollback",
+      "description": "Revert a knowledge base operation or rollback to a timestamp.",
+      "parameters": [
+        {
+          "name": "--op",
+          "type": "string",
+          "description": "Operation ID to rollback (mode 1)."
+        },
+        {
+          "name": "--to",
+          "type": "string",
+          "description": "ISO timestamp to rollback to (mode 2)."
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "description": "Export the entire knowledge base to a JSON file.",
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "path",
+          "required": true,
+          "positional": true,
+          "description": "Output file path."
+        }
+      ]
+    },
+    {
+      "name": "import",
+      "description": "Import knowledge base from a JSON file.",
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "path",
+          "required": true,
+          "positional": true,
+          "description": "Input JSON file path."
+        }
+      ]
+    },
+    {
+      "name": "spaces",
+      "description": "Review or migrate knowledge space classifications.",
+      "parameters": [
+        {
+          "name": "action",
+          "type": "string",
+          "required": true,
+          "positional": true,
+          "description": "Either 'review' or 'migrate'.",
+          "choices": [
+            "review",
+            "migrate"
+          ]
+        },
+        {
+          "name": "--confirm",
+          "type": "flag",
+          "description": "Confirm space migration (only with 'migrate' action)."
+        }
+      ]
+    },
+    {
+      "name": "clear",
+      "description": "Delete all knowledge pieces (irreversible).",
+      "parameters": []
+    }
+  ],
+  "returns": "Structured result with success status and formatted data.",
+  "examples": [
+    "kn add \"HSTU uses flash attention for the transformer layer\" --space architecture",
+    "kn search \"flash attention\" --limit 5",
+    "kn load /path/to/docs --pattern *.md --space codebase",
+    "kn status"
+  ]
+}

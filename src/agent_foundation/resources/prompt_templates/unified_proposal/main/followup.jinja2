@@ -1,0 +1,23 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+{# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. #}
+Based on the review feedback below, refine the unified proposal.
+
+**Original Task:** {{ input }}
+
+**Previous Unified Proposal:**
+{{ main_response }}
+
+**Review Feedback:**
+{{ reviewer_response }}
+
+{% if counter_feedback %}
+**Counter-Feedback:**
+{{ counter_feedback }}
+{% endif %}
+
+Provide an updated unified proposal addressing the feedback.

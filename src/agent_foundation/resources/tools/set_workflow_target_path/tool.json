@@ -1,0 +1,22 @@
+{
+  "name": "set_workflow_target_path",
+  "tool_type": "Action",
+  "aliases": ["set-workflow-target-path", "workflow-target"],
+  "category": "session",
+  "is_bridge": false,
+  "description": "Set the workflow target path — the specific subdirectory within the session root that this workflow focuses on. Must be a subpath under the session's root path.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "path",
+      "positional": true,
+      "required": true,
+      "description": "The workflow target path to set. Must be a directory and a subpath of the session's session_root_path."
+    }
+  ],
+  "returns": "Confirmation of the workflow target path, or an error if the path is invalid.",
+  "examples": [
+    "set-workflow-target-path /data/users/zgchen/fbsource/fbcode/rankevolve",
+    "set-workflow-target-path fbcode/ads/ranking"
+  ]
+}

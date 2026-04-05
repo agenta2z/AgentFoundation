@@ -1,0 +1,21 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+{# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. #}
+Review the following proposal for soundness and actionability.
+
+**Research Query:** {{ input }}
+
+**Proposed Solution:**
+{{ main_response }}
+
+## Review Criteria
+1. Is the approach technically sound?
+2. Is it actionable with clear next steps?
+3. Are the design decisions well-justified?
+4. Are risks adequately identified and mitigated?
+
+Provide your review with specific suggestions for improvement.

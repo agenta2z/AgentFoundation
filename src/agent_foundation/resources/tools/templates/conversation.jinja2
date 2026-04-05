@@ -1,0 +1,22 @@
+Available conversation tools for structured user input:
+{% for tool in tools %}
+{{ loop.index }}. **{{ tool.name }}**{% if tool.description %} — {{ tool.description }}{% endif %}
+
+{% if tool.parameters -%}
+{% for param in tool.parameters -%}
+   - `{{ param.name }}` ({{ param.type }}{% if param.required %}, required{% endif %}{% if param.default is not none %}, default: {{ param.default }}{% endif %}){% if param.description %}: {{ param.description }}{% endif %}
+
+{% endfor -%}
+{% endif -%}
+{%- endfor %}
+{% set guided = [] %}
+{%- for tool in tools if tool.usage_guidance %}{% if guided.append(tool) %}{% endif %}{% endfor %}
+{% if guided %}
+
+When to use:
+{% for tool in guided -%}
+- **{{ tool.name }}**: {{ tool.usage_guidance }}
+{% endfor -%}
+{% endif %}
+
+Only use conversation tools when you need critical user input. If the user's intent is clear, respond directly.

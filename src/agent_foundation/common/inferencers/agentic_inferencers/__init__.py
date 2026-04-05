@@ -50,14 +50,42 @@ def __getattr__(name):
         )
 
         return DevmateCliInferencer
+    elif name == "MetamateSDKInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.external.metamate import (
+            MetamateSDKInferencer,
+        )
+
+        return MetamateSDKInferencer
+    elif name == "MetamateCliInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.external.metamate import (
+            MetamateCliInferencer,
+        )
+
+        return MetamateCliInferencer
+    elif name == "PlanThenImplementInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
+            PlanThenImplementInferencer,
+        )
+
+        return PlanThenImplementInferencer
+    elif name == "BreakdownThenAggregateInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        return BreakdownThenAggregateInferencer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
+    "BreakdownThenAggregateInferencer",
     "ClaudeCodeInferencer",
     "DevmateCliInferencer",
     "DevmateSDKInferencer",
     "DualInferencer",
+    "MetamateCliInferencer",
+    "MetamateSDKInferencer",
+    "PlanThenImplementInferencer",
     "ReflectiveInferencer",
     "SDKInferencerResponse",
 ]

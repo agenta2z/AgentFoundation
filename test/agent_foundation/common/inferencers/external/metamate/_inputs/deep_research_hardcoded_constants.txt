@@ -1,0 +1,9 @@
+Deep investigation of hard-coded constants and configuration debt in model_roo_v0.py and its dependencies. Catalog every hard-coded hyperparameter (MHTA dims, PLE expert counts, LCE output nums, aux loss divisors, task weights, signal linking dims, etc.), assess which should be config-driven, and identify which constants are coupled vs. independent. This goes beyond the docs' surface-level listing to analyze the dependency graph between constants and the risk of inconsistency.
+
+Research todos:
+- Extract all numeric literals from model_roo_v0.py (lines 200-870) that serve as architectural hyperparameters vs. truly fixed constants
+- Map the dependency chain: how mhta_head_dim=1024 propagates to shortcut_weight_init, gating_module dims, and downstream OverArch input_dim
+- Identify which constants in pytorch_modules_roo.py (e.g., DenseArchROO head counts, Spindle dims) shadow or duplicate constants from model_roo_v0.py
+- Analyze the hard-coded task weights in MainFeedMTMLLoss.forward() (lines 1255-1272) — are these experimentally validated? What's the sensitivity?
+- Assess the aux loss divisors (/100 and /300 in _post_processing lines 1031-1036) — are these calibrated to current model scale or stale?
+- Propose a concrete refactored config hierarchy (e.g., MHTAConfig, PLEConfig, LossConfig) that would make these searchable without code changes

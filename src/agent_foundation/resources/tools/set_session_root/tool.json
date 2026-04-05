@@ -1,0 +1,23 @@
+{
+  "name": "set_session_root",
+  "tool_type": "Action",
+  "aliases": [
+    "set-session-root"
+  ],
+  "category": "session",
+  "is_bridge": false,
+  "description": "Set or show the session root path (root directory) for the current session.",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "path",
+      "positional": true,
+      "description": "New session root path to set. If omitted, shows the current path."
+    }
+  ],
+  "returns": "Confirmation of the new session root path, or the current path if no argument given.",
+  "examples": [
+    "set-session-root /data/users/zgchen/fbsource/fbcode/rankevolve",
+    "set-session-root"
+  ]
+}

@@ -131,3 +131,18 @@ src/agent_foundation/apis/metagen/_config/keys.json
 .env.local
 .env.*.local
 *.envOpenStartup/
+
+# Node.js
+node_modules/
+
+# Test output artifacts
+.test_output/
+test_output/
+tmp_logs.txt
+
+# Cloned external codebases in experiments (Windows long path issues)
+src/agent_foundation/ui/webui/experiment_configs/*/codebase/
+
+# Sphinx build output
+_build/
+doctrees/

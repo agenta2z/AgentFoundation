@@ -24,7 +24,7 @@ CLAUDE_TO_AI_GATEWAY_MODEL_MAP = {
     ClaudeModels.CLAUDE_40_SONNET: AIGatewayClaudeModels.CLAUDE_40_SONNET,
     ClaudeModels.CLAUDE_37_SONNET: AIGatewayClaudeModels.CLAUDE_37_SONNET,
     ClaudeModels.CLAUDE_46_OPUS: AIGatewayClaudeModels.CLAUDE_46_OPUS,
-    ClaudeModels.CLAUDE_41OPUS: AIGatewayClaudeModels.CLAUDE_41_OPUS,
+    ClaudeModels.CLAUDE_41_OPUS: AIGatewayClaudeModels.CLAUDE_41_OPUS,
     ClaudeModels.CLAUDE_3_OPUS: AIGatewayClaudeModels.CLAUDE_40_OPUS,
     ClaudeModels.CLAUDE_35_SONNET: AIGatewayClaudeModels.CLAUDE_35_SONNET_V2,
     ClaudeModels.CLAUDE_3_HAIKU: AIGatewayClaudeModels.CLAUDE_35_HAIKU,

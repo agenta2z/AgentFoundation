@@ -1,0 +1,24 @@
+{
+  "name": "set_model",
+  "tool_type": "Action",
+  "aliases": [
+    "model"
+  ],
+  "category": "session",
+  "is_bridge": false,
+  "description": "Change the LLM model used for the current session.",
+  "parameters": [
+    {
+      "name": "model_name",
+      "type": "string",
+      "required": true,
+      "positional": true,
+      "description": "Model identifier (e.g., 'claude-opus-4-6', 'claude-sonnet-4.5', 'opus', 'sonnet')."
+    }
+  ],
+  "returns": "Confirmation of the new model setting.",
+  "examples": [
+    "model claude-opus-4-6",
+    "model sonnet"
+  ]
+}

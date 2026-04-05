@@ -1,0 +1,148 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+python_library(
+    name = "backend_routes",
+    srcs = [
+        "backend/routes/__init__.py",
+        "backend/routes/chat_routes.py",
+        "backend/routes/experiment_routes.py",
+        "backend/routes/websocket_routes.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/fastapi:fastapi",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/starlette:starlette",
+    ],
+)
+
+python_library(
+    name = "experiment_engine",
+    srcs = [
+        "experiment_engine.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+)
+
+python_library(
+    name = "backend_services",
+    srcs = [
+        "backend/services/__init__.py",
+        "backend/services/experiment_service.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        ":experiment_engine",
+    ],
+)
+
+# Shared config route (no agent dependencies, included in both modes)
+python_library(
+    name = "config_routes",
+    srcs = [
+        "backend/routes/config_routes.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/fastapi:fastapi",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+    ],
+)
+
+# Demo backend: no agent deps — keeps demo binary lightweight
+python_library(
+    name = "backend_lib",
+    srcs = [
+        "backend/__init__.py",
+        "backend/main.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/fastapi:fastapi",
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
+        ":agent_routes",
+        ":backend_routes",
+        ":backend_services",
+        ":config_routes",
+    ],
+)
+
+python_binary(
+    name = "run_webui",
+    srcs = ["run_webui.py"],
+    base_module = "",
+    main_function = "run_webui.main",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
+        ":backend_lib",
+    ],
+)
+
+# --- Real agent mode targets ---
+
+python_library(
+    name = "agent_routes",
+    srcs = [
+        "backend/routes/agent_routes.py",
+        "backend/routes/agent_websocket_routes.py",
+        "backend/routes/session_store_routes.py",
+        "backend/routes/workspace_routes.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/fastapi:fastapi",
+        "fbsource//third-party/pypi/starlette:starlette",
+        "//rankevolve/src/common:common_workspace",
+        ":agent_service",
+    ],
+)
+
+python_library(
+    name = "agent_service",
+    srcs = [
+        "backend/services/agent_service_bridge.py",
+        "backend/services/session_store_service.py",
+    ],
+    base_module = "chatbot_demo_react",
+    typing = False,
+    deps = [
+        "//rankevolve/src/agentic_foundation:agentic_foundation",
+        "//rankevolve/src/common:common_streaming",
+        "//rankevolve/src/common:common_workspace",
+        "//rankevolve/src/utils:utils",
+    ],
+)
+
+# Real mode: aggregation target with no srcs of its own.
+python_library(
+    name = "backend_lib_real",
+    typing = False,
+    deps = [
+        ":agent_routes",
+        ":agent_service",
+        ":backend_lib",
+    ],
+)
+
+python_binary(
+    name = "run_webui_real",
+    srcs = ["run_webui.py"],
+    base_module = "",
+    main_function = "run_webui.main",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
+        "fbsource//third-party/pypi/websockets:websockets",  # @manual -- runtime dep for uvicorn WebSocket support
+        ":backend_lib",
+    ],
+)

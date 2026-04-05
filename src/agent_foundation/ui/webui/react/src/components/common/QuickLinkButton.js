@@ -46,8 +46,8 @@ export function QuickLinkButton({ label, url, icon }) {
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      sx={{
-        borderColor: 'rgba(255, 255, 255, 0.15)',
+      sx={(muiTheme) => ({
+        borderColor: muiTheme.custom.surfaces.inputBorder,
         color: 'text.secondary',
         fontSize: '0.75rem',
         px: 1.5,
@@ -55,9 +55,9 @@ export function QuickLinkButton({ label, url, icon }) {
         '&:hover': {
           borderColor: 'primary.main',
           color: 'primary.light',
-          backgroundColor: 'rgba(74, 144, 217, 0.08)',
+          backgroundColor: muiTheme.custom.surfaces.highlightSubtle,
         },
-      }}
+      })}
     >
       {label}
     </Button>

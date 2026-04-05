@@ -1,8 +1,9 @@
 /**
  * StatusBadge — colored chip for any status string.
  *
- * Maps status values to semantic colors. Used across all views
- * for projects, tasks, employees, and agents.
+ * Maps status values to semantic palette keys and derives colors
+ * from the active MUI theme. Used across all views for projects,
+ * tasks, employees, and agents.
  *
  * Props:
  *   status   - string (e.g. "in-progress", "active", "blocked")
@@ -12,51 +13,72 @@
 
 import React from 'react';
 import Chip from '@mui/material/Chip';
+import { useTheme, alpha } from '@mui/material/styles';
 
-const STATUS_COLORS = {
-  // Project statuses
-  'in-progress': { bg: '#1e3a5f', color: '#4a90d9', label: 'In Progress' },
-  'planning': { bg: '#3e2723', color: '#ff9800', label: 'Planning' },
-  'completed': { bg: '#1b5e20', color: '#4caf50', label: 'Completed' },
-  'on-hold': { bg: '#37474f', color: '#90a4ae', label: 'On Hold' },
-
-  // Task statuses
-  'backlog': { bg: '#37474f', color: '#90a4ae', label: 'Backlog' },
-  'in-review': { bg: '#4a148c', color: '#ce93d8', label: 'In Review' },
-  'done': { bg: '#1b5e20', color: '#4caf50', label: 'Done' },
-  'blocked': { bg: '#b71c1c', color: '#ef9a9a', label: 'Blocked' },
-
-  // Employee statuses
-  'active': { bg: '#1b5e20', color: '#4caf50', label: 'Active' },
-  'idle': { bg: '#37474f', color: '#90a4ae', label: 'Idle' },
-  'away': { bg: '#e65100', color: '#ffb74d', label: 'Away' },
-  'queued': { bg: '#f57f17', color: '#fff176', label: 'Queued' },
+// Domain → palette mapping lives IN the component, not in the theme.
+const STATUS_PALETTE = {
+  'in-progress': 'primary',
+  'planning':    'warning',
+  'completed':   'success',
+  'on-hold':     'neutral',
+  'backlog':     'neutral',
+  'in-review':   'info',
+  'done':        'success',
+  'blocked':     'error',
+  'pending':     'secondary',
+  'active':      'success',
+  'idle':        'neutral',
+  'away':        'warning',
+  'queued':      'warning',
 };
 
-function getStatusConfig(status) {
+// Human-readable labels for known statuses.
+const STATUS_LABELS = {
+  'in-progress': 'In Progress',
+  'planning':    'Planning',
+  'completed':   'Completed',
+  'on-hold':     'On Hold',
+  'backlog':     'Backlog',
+  'in-review':   'In Review',
+  'done':        'Done',
+  'blocked':     'Blocked',
+  'pending':     'Pending',
+  'active':      'Active',
+  'idle':        'Idle',
+  'away':        'Away',
+  'queued':      'Queued',
+};
+
+function getStatusLabel(status) {
   const key = status?.toLowerCase() || '';
-  return STATUS_COLORS[key] || { bg: '#37474f', color: '#90a4ae', label: status || 'Unknown' };
+  return STATUS_LABELS[key] || status || 'Unknown';
 }
 
 export function StatusBadge({ status, variant = 'filled', size = 'small' }) {
-  const config = getStatusConfig(status);
+  const theme = useTheme();
+  const key = status?.toLowerCase() || '';
+  const paletteKey = STATUS_PALETTE[key] || 'neutral';
+  const color = theme.palette[paletteKey];
+  const fg = color.main;
+  const bg = alpha(color.main, 0.15);
+  const label = getStatusLabel(status);
 
   if (variant === 'outlined') {
     return (
       <Chip
-        label={config.label}
+        label={label}
         size={size}
         variant="outlined"
-        sx={{ borderColor: config.color, color: config.color }}
+        sx={{ borderColor: fg, color: fg }}
       />
     );
   }
 
   return (
     <Chip
-      label={config.label}
+      label={label}
       size={size}
-      sx={{ backgroundColor: config.bg, color: config.color, fontWeight: 500 }}
+      sx={{ backgroundColor: bg, color: fg, fontWeight: 500 }}
     />
   );
 }

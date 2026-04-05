@@ -1,0 +1,107 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+You are tasked with analyzing the following {{ result_type }} outcome from an iterative plan-implement cycle. Every iteration might have several rounds.
+
+<AnalysisRequest>
+Here is the **Original User Request**:
+{{ input }}
+
+The **Implementation Plan** is available at:
+{{ implementation_plan }}
+
+The **Implementation Summary** is available at:
+{{ implementation_output_path }}
+
+The {{ result_type }} **Result** is available at:
+{{ result_path }}
+
+Can you help:
+{{ analysis_request }}
+</AnalysisRequest>
+
+{% if previous_iteration_paths and "Iteration" in previous_iteration_paths %}
+<PreviousIterationAnalysis>
+Here are previous iterations' plans, implementation, analyses for your cross reference. Compare metrics across iterations to verify improvement trajectory. Flag if the current iteration regressed on previously-passing criteria.
+
+{{ previous_iteration_paths }}
+</PreviousIterationAnalysis>
+{% endif %}
+---
+
+## Your Task: Analyze {{ result_type }} Results
+
+Analyze the {{ result_type }} results provided above. Take a look into the implementation as needed.
+
+### Consider:
+1. **Completeness** — Were all planned {{ result_type }} executed? Identify any missing, skipped, or partially-run items and explain why they may have been omitted.
+2. **Correctness** — Do outputs match what the implementation intended? Flag any mismatches between expected and actual results.
+3. **Performance** — If there are quantitative performance measurements, are the numbers reasonable, consistent and making sense? Flag regressions, anomalies, statistical noise, or flaky results.
+
+### If performance does not meet expectations, perform root-cause analysis on the implementation:
+- **Bugs or logic errors** — Identify specific code paths or conditions that may cause the gap.
+- **Tuning opportunities** — Are there reasonable and relevant parameters, hyperparameters, or configuration choices that could improve results? Improvements can be scenario-dependent (e.g., only at large data scale, specific distributions, edge cases).
+- **Relevant improvements** — Are there reasonable and relevant algorithmic or architectural changes that could improve correctness, performance, or stability? The changes MUST be at least conceptually related to the original user request, NOT wild goose chasing.
+
+## Output Requirements
+
+- Write your **full analysis report** in markdown format to: `{{ output_path }}`
+- The analysis should be thorough and organized into sections, including
+  * Specific findings with references
+  * Identifying solid evidence and/or strong reasoning to support running the next iteration, or if we are all good due to little chance of further improvement
+
+## Response Format
+
+In addition to above output, YOU MUST generate a **concise decision summary** (NOT the full analysis) wrapped in `<Response>` tags:
+
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your decision. If you omit them, the system defaults to `should_continue: false` and may silently skip needed iterations.
+
+<Response>
+[Your concise natural language summary of key analysis findings and whether another iteration is warranted. Do NOT repeat the full analysis here — it is already in the file above.]
+```json
+{
+  "should_continue": true or false,
+  "summary": "Your concise summary of key findings — NOT a pointer to the report file.",
+  "next_iteration_request": "if should_continue=true: what the next iteration should focus on | if false: empty string"
+}
+```
+</Response>
+
+---
+
+## NOTES (Meta-specific environment):
+- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
+- Always target **specific files or narrow subdirectories**:
+  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
+  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
+  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
+- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
+
+## NOTES (on accessing files outside the repo root):
+- Result files, implementation reports, and workspace artifacts are often outside the repo root.
+- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
+- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
+  * Read file: `cat /path/to/file.py`
+  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
+  * List directory: `ls /path/to/dir/`
+  * Search: `grep -rn "pattern" /path/to/dir/`
+
+## NOTES (emphasizing requirements):
+- Every claim in your analysis MUST cite concrete evidence from the actual result files — specific numbers, test names, file paths, or error messages. Do NOT speculate or assume results.
+- Do NOT fabricate or hallucinate benchmark numbers. If a result file cannot be read, state that explicitly rather than guessing.
+- If the results include JSON files, read and parse them to extract actual metrics. Do not summarize based on filenames alone.
+
+## NOTES (on agent behavior):
+- Deep & Focused Investigation Requirement:
+  * You MUST read the actual {{ result_type }} result files to ground your analysis in evidence. Do not analyze based solely on the implementation report's claims.
+  * However, stay focused on the result files and implementation relevant to the user request. DO NOT explore the entire codebase.
+- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
+  * For large JSON result files, read selectively — check structure first, then extract key metrics.
+- After writing your analysis to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
+  * The analysis output is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+  * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+Now start your analysis work.

@@ -1,0 +1,3 @@
+[cfr-docs]
+type = sphinx
+srcs = index.rst architecture.rst roo_architecture.rst hstu_datafm.rst training_workflow.rst configuration.rst appendices.rst

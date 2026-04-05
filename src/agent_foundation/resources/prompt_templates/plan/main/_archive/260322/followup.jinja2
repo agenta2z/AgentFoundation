@@ -1,0 +1,120 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+You previously generated a plan for the following user request and received feedback from a reviewing agent.
+
+**Original User Request:**
+<UserRequest>
+{{ input }}
+</UserRequest>
+
+**Your Current Proposed Plan:**
+<ProposedPlan>
+{{ main_response }}
+</ProposedPlan>
+
+**Reviewer Feedback:**
+<ReviewerFeedback>
+{{ reviewer_response }}
+</ReviewerFeedback>
+
+**Current Review Iteration Index**: {{ round_index }}
+
+---
+
+## Your Task: Evaluate Each Feedback Item & Refine the Plan
+
+### Step 1: Critical Evaluation of Feedback
+
+The reviewer may be wrong. For **each** issue raised:
+- Verify the claim against the actual codebase — do not accept on faith.
+- Accept if the issue is real and actionable.
+- Reject with specific evidence if the reviewer is mistaken.
+
+### Step 2: Refine the Plan
+
+For each accepted issue, carefully revise the plan while ensuring:
+- All CRITICAL and MAJOR issues are resolved (required).
+- MINOR issues are addressed where practical (recommended).
+- No new problems are introduced by your changes.
+- The refined plan remains internally consistent.
+
+### Efficiency: Prefer Incremental Edits
+
+Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration of plan is not warranted (e.g. most fixes are local like a few lines in 1-2 sections), try to **copy the previous plan file and apply targeted edits** (e.g. edit_file tools, or sed command). This saves time and avoids accidental regressions in unchanged sections.
+
+## Output Requirements
+
+Write your **improved plan** in markdown format to: `{{ output_path }}`
+- The plan should be human readable and structured with details, that another human or agent could follow to implement later.
+- For large planning, YOU MUST break the write into multiple smaller appends to avoid single-write failure when possible.
+
+Wrap a structured response in `<Response>` tags:
+- **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
+
+<Response>
+[Concise summary of what changed and why]
+
+```json
+{
+  "items": [
+    {
+      "issue_id": "<ID from feedback>",
+      "accepted": true | false,
+      "rationale": "<if accepted: what you fixed and how> | <if rejected: evidence why the reviewer is wrong>"
+    }
+  ],
+  "summary": "<brief tally: N accepted, M rejected, with one-line reasoning>"
+}
+
+```
+</Response>
+
+---
+
+## NOTES (Meta-specific environment):
+- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
+- Always target **specific files or narrow subdirectories**:
+  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
+  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
+  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
+- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
+
+## NOTES (on resolving dependencies):
+- Do NOT conclude a module/dependency is unavailable just because you cannot find them in the codebase.
+  * Modules and other dependencies can be managed by the environment or the build tool (e.g. BUCK).
+  * YOU MUST check the environment, look into build tool target configs (e.g. BUCK files, `python_library` targets, etc.). You may even need to test run the build tool to verify a module/dependency is truly unavailable.
+- The exception blocks in the module/dependency import code can reveal alternative paths for the same module/dependency.
+- When a specific import path is not found, search the codebase for the function/class name itself (e.g., `grep -rn "def flash_attn_func"`) — it may exist under a different module path.
+- Only dismiss a module as "unavailable" after ALL of the above checks fail.
+
+## NOTES (on accessing files outside the repo root):
+- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
+- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
+  * Read file: `cat /path/to/file.py`
+  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
+  * List directory: `ls /path/to/dir/`
+  * Search: `grep -rn "pattern" /path/to/dir/`
+
+## NOTES (on engineering quality):
+- Prefer elegant, well-structured solutions over hacky ones. For example, extract shared logic into a utility or separate module rather than duplicating code across multiple locations.
+- Mind the blast radius of your changes, but proceed if broader changes are genuinely beneficial and well justified.
+
+## NOTES (emphasizing requirements):
+- Every accept/reject must cite concrete evidence (such as code lines or comments) with careful reasoning - DO NOT speculate or assume.
+- If testing or benchmarking requires GPU, then plan to verify GPU availability first. Do not assume GPU availability without actually checking.
+  * If some testing or benchmarking requires multiple GPUs, YOU MUST also state this in the plan and explain why. By default, assume single-GPU testing/benchmarking.
+- Prefer copying the previous version and making incremental targeted edits over full plan regeneration when full regeneration is not necessary.
+
+# NOTES (on agent behavior):
+- Deep Investigation Requirement: You MUST conduct a careful, deep, and accurate investigation of each feedback item with critical thinking. Validate claims by reading actual code — do not assume.
+- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
+  * When verifying reviewer claims with reference code line (e.g., lines 1134-1146), then read only the specific lines around those referenced, and incrementally read more as needed.
+- You can briefly check the refined plan file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
+  * The plan output is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+  * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+Now start your work counter-reviewing the ReviewerFeedback and refining your plan as needed.

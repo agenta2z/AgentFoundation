@@ -1,0 +1,664 @@
+{
+  "metadata": {
+    "name": "CoScience Demo",
+    "description": "Demo of parallel deep research execution for ranking improvements",
+    "code_entry_point": "fbcode/minimal_viable_ai/models/main_feed_mtml/model_roo_v0.py",
+    "context_files_root": "fbcode/_tony_dev/ScienceModelingTools/tools/ui/chatbot_demo/experiment_configs/coscience_experiment",
+    "group_sections_by_step": true,
+    "default_inferencer": {
+      "type": "devmate",
+      "config": {
+        "model_name": "claude-sonnet-4.5",
+        "max_tokens": 32768
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "step_0",
+      "role": "assistant",
+      "pre_delay": {"min": 1.5, "max": 3.0},
+      "post_delay": {"min": 1.5, "max": 3.0},
+      "pre_messages": [
+        {
+          "content": "🤔 Thinking...",
+          "type": "text",
+          "delay": {"min": 1.0, "max": 2.5}
+        }
+      ],
+      "progress_sections": [],
+      "post_messages": [
+        {
+          "content": "👋 **Welcome to RankEvolve!**\n\nI'm your AI research assistant for improving ranking models. Here's the workflow we'll follow together:\n\n### 📋 Workflow Plan\n\n1. **🔍 Codebase Investigation** — Analyze your model code (`model_roo_v0.py`) and generate comprehensive documentation\n\n2. **📚 Deep Research** — Run parallel deep research using multiple AI agents (OpenAI, Gemini, Claude, Metamate) to find latest advancements in ranking systems\n\n3. **💡 Proposal Generation** — Generate specific improvement proposals based on research findings\n\n4. **🔗 Merge & Synthesize** — Merge all proposals into a unified, prioritized improvement plan\n\n5. **🔄 Experiment & Iterate** — Run experiments and iterate based on results\n\n---\n\n💡 *You can adjust this plan below, or continue with the default workflow.*",
+          "type": "text",
+          "delay": {"min": 0.5, "max": 1.0}
+        },
+        {
+          "content": "### ✏️ Customize the Plan\n\nIf you'd like to adjust the workflow, click **Adjust Plan** to edit:",
+          "type": "text",
+          "delay": {"min": 0.3, "max": 0.5},
+          "input_field": {
+            "placeholder": "Modify the workflow plan here...",
+            "multiline": true,
+            "optional": true,
+            "variable_name": "adjusted_workflow_plan",
+            "default_value": "1. Codebase Investigation - Analyze model_roo_v0.py and dependencies\n2. Deep Research - Query OpenAI, Gemini, Claude, Metamate for latest ranking improvements\n3. Proposal Generation - Create specific improvement proposals based on research\n4. Merge Proposals - Synthesize into unified improvement plan\n5. Experiment & Iterate - Run experiments and iterate based on results",
+            "collapsible": true,
+            "initially_collapsed": true
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🚀 **Ready to begin?**",
+        "actions": [
+          {
+            "label": "✅ Execute the Plan",
+            "user_message": "Start the RankEvolve workflow",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "✏️ Adjust Plan",
+            "action_type": "expand_input",
+            "target_variable": "adjusted_workflow_plan",
+            "style": "secondary"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_1",
+      "role": "assistant",
+      "pre_delay": {"min": 2.0, "max": 3.0},
+      "post_delay": {"min": 0.8, "max": 1.5},
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Thinking...",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        },
+        {
+          "content": "📂 First, let me understand the codebase by investigating the main model file and its dependencies...",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "codebase_investigation",
+          "title": "🔍 Codebase Investigation",
+          "prompt_file": "files/prompts/codebase_investigation_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.3,
+          "messages": [
+            {"content": "investigate fbcode/minimal_viable_ai/models/main_feed_mtml/model_roo_v0.py", "delay": 2.5},
+            {"content": "Analyzing MainFeedMTMLROO model class structure...", "delay": 1.8},
+            {"content": "Identifying sparse-dense network architecture patterns...", "delay": 1.5},
+            {"content": "investigate fbcode/minimal_viable_ai/models/main_feed_mtml/model_configs.py", "delay": 2.0},
+            {"content": "Parsing MainFeedMTMLModelConfig and feature configurations...", "delay": 1.5},
+            {"content": "investigate fbcode/minimal_viable_ai/models/main_feed_mtml/pytorch_modules.py", "delay": 2.2},
+            {"content": "Analyzing CGCModule, DeepCrossNet, WukongArch implementations...", "delay": 1.8},
+            {"content": "investigate fbcode/minimal_viable_ai/models/main_feed_mtml/pytorch_modules_roo.py", "delay": 2.0},
+            {"content": "Reviewing DenseArchROO, SparseDenseNetworksROO, TaskArchROOWrap...", "delay": 1.5},
+            {"content": "investigate fbcode/minimal_viable_ai/models/main_feed_mtml/dhen.py", "delay": 1.8},
+            {"content": "Understanding SlimDHEN and SlimDHENLayer architecture...", "delay": 1.2},
+            {"content": "investigate fbcode/minimal_viable_ai/models/ranking_hstu/hstu_config.py", "delay": 1.8},
+            {"content": "Parsing HSTU (Hierarchical Sequential Transduction Unit) configurations...", "delay": 1.5},
+            {"content": "investigate fbcode/minimal_viable_ai/core/model_family_api/configs.py", "delay": 1.5},
+            {"content": "Reviewing WeightedType and core API configurations...", "delay": 1.2},
+            {"content": "Mapping module dependencies and data flow paths...", "delay": 2.0},
+            {"content": "Identifying Multi-Head Talking Attention (MHTA) integration points...", "delay": 1.8},
+            {"content": "Analyzing PLE/CGC multi-task learning architecture...", "delay": 1.5},
+            {"content": "Documenting embedding generation and interaction modules...", "delay": 1.5},
+            {"content": "✅ Codebase investigation complete!", "delay": 1.0}
+          ]
+        },
+        {
+          "slot": "codebase_documentation",
+          "title": "📝 Codebase Documentation",
+          "prompt_file": "files/prompts/codebase_documentation_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "appearance_delay": {"min": 12.0, "max": 22.0},
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {"content": "Initializing Sphinx documentation generator...", "delay": 2.5},
+            {"content": "Setting up conf.py with sphinx_rtd_theme...", "delay": 2.0},
+            {"content": "Writing index.rst - CFR Models Documentation landing page...", "delay": 3.0},
+            {"content": "Adding key statistics table (5.1B params, 65+ tasks)...", "delay": 2.5},
+            {"content": "Writing architecture.rst - CFR Core Architecture...", "delay": 3.5},
+            {"content": "Documenting model architecture visualization (ASCII diagrams)...", "delay": 3.0},
+            {"content": "Writing key components: ROO, HSTU, Content Intelligence...", "delay": 3.2},
+            {"content": "Documenting PLE Expert-Gating Architecture...", "delay": 2.8},
+            {"content": "Adding loss functions (BCE, MSE, RankNet, KDLM)...", "delay": 2.5},
+            {"content": "Writing roo_architecture.rst - ROO Architecture Deep Dive...", "delay": 3.2},
+            {"content": "Documenting RO vs NRO feature split strategy...", "delay": 2.8},
+            {"content": "Adding DenseArchROO code examples...", "delay": 2.5},
+            {"content": "Writing hstu_datafm.rst - HSTU & DataFM Integration...", "delay": 3.5},
+            {"content": "Documenting HstuCintModule configuration...", "delay": 2.8},
+            {"content": "Adding DataFM public/merged features specification...", "delay": 2.5},
+            {"content": "Documenting sequence length sampling configs...", "delay": 2.2},
+            {"content": "Writing training_workflow.rst - CFR Training Workflow...", "delay": 3.5},
+            {"content": "Documenting 10-step training pipeline...", "delay": 3.0},
+            {"content": "Adding hardware options (A100_80GB, H100, MI250)...", "delay": 2.5},
+            {"content": "Writing configuration.rst - Configuration Reference...", "delay": 3.2},
+            {"content": "Documenting dense feature processing (RO/NRO)...", "delay": 2.8},
+            {"content": "Adding sparse embedding table specifications...", "delay": 2.5},
+            {"content": "Documenting hyperparameter reference table...", "delay": 2.2},
+            {"content": "Writing appendices.rst - Quick reference & troubleshooting...", "delay": 3.0},
+            {"content": "Adding complete task list (23 pred + 13 aux + 29 bias)...", "delay": 2.5},
+            {"content": "Documenting CFR vs IFR comparison table...", "delay": 2.2},
+            {"content": "Running sphinx-build -b html . _build/html...", "delay": 4.0},
+            {"content": "Generating index.html from index.rst...", "delay": 2.0},
+            {"content": "Generating architecture.html...", "delay": 1.8},
+            {"content": "Generating roo_architecture.html...", "delay": 1.5},
+            {"content": "Generating hstu_datafm.html...", "delay": 1.5},
+            {"content": "Generating training_workflow.html...", "delay": 1.5},
+            {"content": "Generating configuration.html...", "delay": 1.5},
+            {"content": "Generating appendices.html...", "delay": 1.5},
+            {"content": "Building search index (searchindex.js)...", "delay": 2.0},
+            {"content": "Copying static assets (CSS, JS, fonts)...", "delay": 1.8},
+            {"content": "✅ Sphinx documentation build complete!", "delay": 1.0}
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ **I understand the codebase!**\n\n### Summary\n\nThe `model_roo_v0.py` implements **MainFeedMTMLROO**, a sophisticated Multi-Task Multi-Tower Learning (MTML) ranking model with Request-Object-Object (ROO) architecture. Key components include:\n\n- **Sparse-Dense Architecture**: Separates Request-Object (RO) and Non-Request-Object (NRO) feature processing paths\n- **Multi-Head Talking Attention (MHTA)**: 9-head attention mechanism (3 RO + 6 mixed) with gating and residual connections\n- **WukongArch**: Feature interaction combiner with configurable layers\n- **PLE/CGC Multi-Task Layer**: Expert-based multi-task learning with 5 task groups\n- **HSTU Integration**: Optional Hierarchical Sequential Transduction Unit for user sequence modeling\n- **Loss Functions**: Supports BCE, MSE, KDLM (Knowledge Distillation Logits Matching), and pairwise ranking losses",
+          "type": "text",
+          "delay": {"min": 1.0, "max": 2.0}
+        },
+        {
+          "content": "✅ Here is the detailed codebase documentation",
+          "type": "text",
+          "file": "files/context/codebase_documentation/_build/html/index.html",
+          "delay": {"min": 0.5, "max": 1.0}
+        },
+        {
+          "content": "💡 **Would you like to share more insight on what direction we could possibly improve the model?**\n\nFeel free to provide any specific areas of focus, known issues, or improvement ideas you'd like me to consider during the deep research phase.",
+          "type": "text",
+          "delay": {"min": 0.5, "max": 1.0},
+          "input_field": {
+            "placeholder": "e.g., Focus on reducing latency, improving cold-start performance, or exploring attention mechanisms...",
+            "multiline": true,
+            "optional": true,
+            "variable_name": "user_improvement_insight"
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📚 **Codebase investigation complete!** I've analyzed the main model file and all its dependencies.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Yes, proceed with deep research",
+            "user_message": "Continue with deep research on ranking improvements",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "🔍 I want to explore the codebase more",
+            "action_type": "inferencer",
+            "prefix": "I want to explore more about: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ I am done exploring. Continue to deep research.",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_2",
+      "role": "assistant",
+      "pre_delay": {"min": 3.0, "max": 3.5},
+      "post_delay": {"min": 0.8, "max": 1.5},
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Thinking...",
+          "type": "text",
+          "delay": {"min": 2.0, "max": 4.0}
+        },
+        {
+          "content": "💡 I'll start with parallel running deep researches on latest improvements on ranking and recommendation modeling",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        }
+      ],
+      "progress_header": {
+        "content": "🔍 **Deep Research Query**\n\nBefore I begin, please consider the **coverage** of your research query. A well-crafted query helps ensure we explore the most relevant areas for model improvement.\n\n💡 **Guidance**: Based on your input, the default query below is shaped by these principles:\n- **Feature interactions matter** — especially heterogeneous interactions across different feature types\n- **Model architecture tuning** — width and depth adjustments can unlock gains\n- **Cost-effectiveness** — improvements must be practical for production deployment (model size, QPS impact)\n- **NE as success metric** — Normalized Entropy gain (negative is better) measures ranking quality\n\nYou can customize the deep research query below, or use the default:",
+        "input_field": {
+          "placeholder": "Enter your deep research query...",
+          "multiline": true,
+          "optional": true,
+          "variable_name": "deep_research_query",
+          "default_value": "What are the latest advancements in ranking and recommendation systems (2024-2025) that improve model quality while maintaining reasonable computational cost? Explore research covering: (1) Feature interaction modeling—approaches that capture heterogeneous cross-feature patterns, going beyond uniform interaction assumptions to model diverse feature relationships, (2) Model architecture optimization—techniques for tuning model width, depth, and capacity to balance expressiveness with efficiency, (3) Cost-aware model design—methods that achieve meaningful Normalized Entropy (NE) improvements with acceptable latency, memory, and compute overhead for production systems, (4) Attention and fusion mechanisms—architectures that effectively combine sparse and dense features while remaining computationally tractable, (5) Multi-task learning—strategies for optimizing shared representations across multiple prediction tasks without task interference."
+        },
+        "continue_button": {
+          "label": "🚀 Start Deep Research",
+          "style": "primary"
+        }
+      },
+      "progress_sections": [
+        {
+          "slot": "openai_research",
+          "title": "🔍 OpenAI Deep Research",
+          "prompt_file": "files/prompts/deepresearch_external_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 3.2,
+          "messages": [
+            {"content": "Establishing connection to ChatGPT Deep Research...", "delay": 4.0},
+            {"content": "Scanning RecSys '24, KDD '24, and ICML '24 proceedings...", "delay": 1.5},
+            {"content": "Filtering for 'Scalability' and 'Embedding' keywords...", "delay": 1.2},
+            {"content": "Analyzing 'Embedding Collapse' theory (Guo et al.)...", "delay": 2.0},
+            {"content": "Identifying low-rank bottlenecks in current DLRM architectures...", "delay": 2.2},
+            {"content": "Deep-diving Tencent's Multi-Embedding MoE architecture...", "delay": 2.5},
+            {"content": "Verifying GMV lift metrics (+3.9%) and statistical significance...", "delay": 1.8},
+            {"content": "Investigating LLM-based sequential recommenders (CALRec)...", "delay": 2.0},
+            {"content": "Reviewing contrastive alignment loss functions...", "delay": 1.5},
+            {"content": "Parsing LinkedIn's '360Brew' foundation model whitepaper...", "delay": 2.0},
+            {"content": "Synthesizing trends: Multi-Embedding vs. Single Foundation Model...", "delay": 2.2},
+            {"content": "Drafting summary of architectural shifts...", "delay": 1.5},
+            {"content": "✅ OpenAI research complete!", "delay": 1.0}
+          ]
+        },
+        {
+          "slot": "gemini_research",
+          "title": "🔍 Gemini Deep Research",
+          "prompt_file": "files/prompts/deepresearch_external_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 3.5,
+          "messages": [
+            {"content": "Establishing connection to Gemini Deep Research...", "delay": 5.0},
+            {"content": "Initializing parallel search on arXiv and ACM Digital Library...", "delay": 1.2},
+            {"content": "Querying for 'Graph Neural Networks' in Recommender Systems...", "delay": 1.5},
+            {"content": "Locating 'ContextGNN' (ICLR 2025) and 'Unified Graph Transformer'...", "delay": 1.8},
+            {"content": "Analyzing Two-Tower vs. Graph-based performance gaps...", "delay": 2.2},
+            {"content": "Extracting inference latency constraints from NVIDIA EMBark paper...", "delay": 2.5},
+            {"content": "Reviewing embedding table sharding strategies...", "delay": 2.0},
+            {"content": "Cross-referencing Auction-Enhanced (AIE) frameworks...", "delay": 1.8},
+            {"content": "Evaluating multi-modal cold-start approaches (Video/Text)...", "delay": 2.0},
+            {"content": "Checking reproducibility: Searching for open-source implementations...", "delay": 1.5},
+            {"content": "Performing gap analysis: Academic benchmarks vs. Production load...", "delay": 2.2},
+            {"content": "Compiling final report on System Optimization & Graph fusion...", "delay": 1.5},
+            {"content": "✅ Gemini research complete!", "delay": 0.8}
+          ]
+        },
+        {
+          "slot": "claude_research",
+          "title": "🔍 Claude Deep Research",
+          "prompt_file": "files/prompts/deepresearch_external_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 3.8,
+          "messages": [
+            {"content": "Establishing connection to Claude Deep Research...", "delay": 2.5},
+            {"content": "Scanning 2024-2025 landscape: Filtering for 'Generative' and 'Scaling Laws'...", "delay": 1.2},
+            {"content": "Analyzing Meta's HSTU (1.5T params): Verifying 12.4% production lift...", "delay": 1.8},
+            {"content": "Checking Inference Feasibility: Reviewing M-FALCON algorithm for linear-time attention...", "delay": 2.2},
+            {"content": "Deconstructing Kuaishou's OneRec: Unifying retrieval/ranking with DPO...", "delay": 1.8},
+            {"content": "Investigating ByteDance's HLLM: Separating User/Item LLMs for efficiency...", "delay": 2.0},
+            {"content": "Evaluating Two-Tower evolution: ContextGNN graph augmentation vs. standard dot-product...", "delay": 2.2},
+            {"content": "Comparing Semantic ID approaches: Google TIGER (RQ-VAE) vs. OneRec (RQ-Kmeans)...", "delay": 2.0},
+            {"content": "Analyzing Feature Interaction: DCNv3 vs. GDCN for explicit feature crossing...", "delay": 1.8},
+            {"content": "Processing Long-Sequence handling: STCA (10k) vs. TWIN V2 (100k behaviors)...", "delay": 2.0},
+            {"content": "Reviewing 'Embedding Collapse' theory and Tencent's 3.9% GMV lift...", "delay": 1.5},
+            {"content": "Evaluating Multi-Task Optimization: GradCraft vs. MultiBalance gradient strategies...", "delay": 2.0},
+            {"content": "Extracting Hardware Metrics: Meta Andromeda's 10,000x capacity gain...", "delay": 1.8},
+            {"content": "Synthesizing divergence trends: Generative (Meta) vs. Hybrid (Alibaba) architectures...", "delay": 2.0},
+            {"content": "Drafting final report on 'The Trillion-Parameter Era'...", "delay": 1.5},
+            {"content": "✅ Claude research complete!", "delay": 0.8}
+          ]
+        },
+        {
+          "slot": "metamate_research",
+          "title": "🔍 Metamate Internal Research",
+          "prompt_file": "files/prompts/deepresearch_internal_prompt.txt",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 2.4,
+          "messages": [
+            {"content": "Connecting to Metamate internal knowledge base...", "delay": 4.0},
+            {"content": "Querying RankFM foundation model documentation...", "delay": 1.5},
+            {"content": "Analyzing HSTU architecture scaling from 500B to 25T parameters...", "delay": 2.2},
+            {"content": "Reviewing semantic ID generation (RQ-VAE, RQ-KMeans)...", "delay": 2.0},
+            {"content": "Extracting MTIA hardware co-design insights...", "delay": 1.8},
+            {"content": "Analyzing knowledge distillation platform capabilities...", "delay": 2.0},
+            {"content": "Reviewing cross-domain learning and Atlas unification...", "delay": 1.8},
+            {"content": "Investigating SIM (Search-based Interest Modeling) patterns...", "delay": 2.2},
+            {"content": "Extracting Slimper V2 architecture improvements...", "delay": 1.5},
+            {"content": "Synthesizing internal best practices for ranking models...", "delay": 1.8},
+            {"content": "✅ Metamate internal research complete!", "delay": 0.8}
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "parallel": true,
+          "items": [
+            {
+              "content": "✅ Here is the collected OpenAI Deep Research result",
+              "type": "text",
+              "file": "files/context/researches/external_research_chatgpt.md"
+            },
+            {
+              "content": "✅ Here is the collected Gemini Deep Research result",
+              "type": "text",
+              "file": "files/context/researches/external_research_gemini.md"
+            },
+            {
+              "content": "✅ Here is the collected Claude Deep Research result",
+              "type": "text",
+              "file": "files/context/researches/external_research_claude.md"
+            },
+            {
+              "content": "✅ Here is the collected Metamate Deep Research result",
+              "type": "text",
+              "file": "files/context/researches/internal_research_metamate.md"
+            }
+          ],
+          "delay": {"min": 1.0, "max": 2.0}
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📋 **Research phase complete!** I've gathered insights from multiple AI research sources.\n\n👉 What would you like to do next?",
+        "actions": [
+        {
+          "label": "✅ Yes, generate improvement proposals",
+          "user_message": "Continue generating improvement proposals",
+          "action_type": "continue",
+          "style": "primary"
+        },
+        {
+          "label": "🔍 I want to investigate more",
+          "action_type": "inferencer",
+          "prefix": "I want to investigate more about: ",
+          "style": "secondary",
+          "inferencer_config": {
+            "type": "devmate",
+            "engine": "jinja",
+            "prompt": "devmate_prompt"
+          },
+          "return_to_flow": {
+            "label": "✅ I am done investigating. Continue to generate proposals.",
+            "style": "primary"
+          }
+        }
+      ]
+      }
+    },
+    {
+      "id": "step_3",
+      "role": "assistant",
+      "pre_delay": {"min": 2.0, "max": 3.0},
+      "post_delay": {"min": 0.8, "max": 1.5},
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Thinking...",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        },
+        {
+          "content": "🤔 Fetching source code and documentation...",
+          "type": "text",
+          "delay": {"min": 3.5, "max": 7.5}
+        },
+        {
+          "content": "🤔 Analyzing research findings and source code 'model_roo_v0.py'...",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        },
+        {
+          "content": "💡 I'll now jointly analyze the code and each deep research result to generate improvement proposals",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "openai_proposal",
+          "title": "💡 OpenAI Proposal Generation",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.5,
+          "messages": [
+            {"content": "Reading 'model_roo_v0.py' source code...", "delay": 1.2},
+            {"content": "Identifying current sparse feature handling logic...", "delay": 1.5},
+            {"content": "Locating EmbeddingBag definitions in the forward pass...", "delay": 1.8},
+            {"content": "Correlating code with 'Embedding Collapse' research findings...", "delay": 2.0},
+            {"content": "Drafting architecture for Multi-Embedding Tables...", "delay": 2.2},
+            {"content": "Designing Mixture-of-Experts (MoE) gating mechanism...", "delay": 2.5},
+            {"content": "Calculating expected parameter growth for auxiliary experts...", "delay": 1.8},
+            {"content": "Formulating contrastive loss addition for training loop...", "delay": 2.0},
+            {"content": "Validating proposal against LLM integration patterns...", "delay": 1.5},
+            {"content": "Finalizing code modification recommendations...", "delay": 1.2},
+            {"content": "✅ OpenAI proposal ready!", "delay": 1.0}
+          ]
+        },
+        {
+          "slot": "gemini_proposal",
+          "title": "💡 Gemini Proposal Generation",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.8,
+          "messages": [
+            {"content": "Parsing 'model_roo_v0.py' interaction layers...", "delay": 1.2},
+            {"content": "Mapping current Two-Tower dot-product implementation...", "delay": 1.5},
+            {"content": "Evaluating feasibility of ContextGNN integration...", "delay": 2.0},
+            {"content": "Designing Graph Edge Encoder for user-item pairs...", "delay": 2.2},
+            {"content": "Checking compatibility with NVIDIA EMBark sharding rules...", "delay": 1.8},
+            {"content": "Simulating inference latency impact of Graph Attention...", "delay": 2.5},
+            {"content": "Proposing auxiliary loss for Auction/Bid signal calibration...", "delay": 2.0},
+            {"content": "Refining 'cold-start' feature injection strategy...", "delay": 1.8},
+            {"content": "Optimizing proposal for production throughput...", "delay": 1.5},
+            {"content": "Structuring final technical specification...", "delay": 1.2},
+            {"content": "✅ Gemini proposal ready!", "delay": 0.8}
+          ]
+        },
+        {
+          "slot": "claude_proposal",
+          "title": "💡 Claude Proposal Generation",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.6,
+          "messages": [
+            {"content": "Analyzing model architecture patterns...", "delay": 1.3},
+            {"content": "Reviewing sparse-dense hybrid training approaches...", "delay": 1.6},
+            {"content": "Evaluating CALRec contrastive alignment applicability...", "delay": 2.0},
+            {"content": "Designing knowledge distillation integration...", "delay": 2.2},
+            {"content": "Proposing multi-task learning consolidation...", "delay": 1.8},
+            {"content": "Analyzing DNS-Rec architecture search insights...", "delay": 2.0},
+            {"content": "Formulating embedding table optimization strategy...", "delay": 1.8},
+            {"content": "Drafting incremental deployment roadmap...", "delay": 1.5},
+            {"content": "Validating against production constraints...", "delay": 1.2},
+            {"content": "✅ Claude proposal ready!", "delay": 0.8}
+          ]
+        },
+        {
+          "slot": "metamate_proposal",
+          "title": "💡 Metamate Proposal Generation",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "message_delay_multiplier": 1.4,
+          "messages": [
+            {"content": "Loading internal best practices from RankFM...", "delay": 1.2},
+            {"content": "Analyzing HSTU architecture compatibility...", "delay": 1.8},
+            {"content": "Reviewing semantic ID generation patterns...", "delay": 2.0},
+            {"content": "Evaluating MTIA hardware co-design opportunities...", "delay": 2.2},
+            {"content": "Proposing cross-domain learning integration...", "delay": 1.8},
+            {"content": "Designing SIM (Search-based Interest Modeling) layer...", "delay": 2.0},
+            {"content": "Incorporating Slimper V2 efficiency improvements...", "delay": 1.8},
+            {"content": "Aligning with Atlas unified representation...", "delay": 1.5},
+            {"content": "Finalizing internal-aligned proposal...", "delay": 1.2},
+            {"content": "✅ Metamate proposal ready!", "delay": 0.8}
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "parallel": true,
+          "items": [
+            {
+              "content": "✅ Here is the OpenAI-based improvement proposal",
+              "type": "text",
+              "file": "files/context/proposals/proposal_chatgpt.md"
+            },
+            {
+              "content": "✅ Here is the Gemini-based improvement proposal",
+              "type": "text",
+              "file": "files/context/proposals/proposal_gemini.md"
+            },
+            {
+              "content": "✅ Here is the Claude-based improvement proposal",
+              "type": "text",
+              "file": "files/context/proposals/proposal_claude.md"
+            },
+            {
+              "content": "✅ Here is the Metamate-based improvement proposal",
+              "type": "text",
+              "file": "files/context/proposals/proposal_metamate.md"
+            }
+          ],
+          "delay": {"min": 1.0, "max": 2.0}
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n📊 **Proposals generated!** I've created specific improvement proposals based on each research source.\n\n👉 What would you like to do next?",
+        "actions": [
+          {
+            "label": "✅ Merge into unified plan",
+            "user_message": "Please merge all proposals into a unified improvement plan",
+            "action_type": "continue",
+            "style": "primary"
+          },
+          {
+            "label": "📝 I want to refine the proposal",
+            "action_type": "inferencer",
+            "prefix": "Please refine the proposal to focus on: ",
+            "style": "secondary",
+            "inferencer_config": {
+              "type": "devmate",
+              "engine": "jinja",
+              "prompt": "devmate_prompt"
+            },
+            "return_to_flow": {
+              "label": "✅ I am done refining. Continue to merge proposals.",
+              "style": "primary"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_4",
+      "role": "assistant",
+      "pre_delay": {"min": 4.0, "max": 8.0},
+      "post_delay": {"min": 0.5, "max": 1.0},
+      "keep_progress_sections": true,
+      "pre_messages": [
+        {
+          "content": "🤔 Thinking...",
+          "type": "text",
+          "delay": {"min": 1.5, "max": 2.5}
+        },
+        {
+          "content": "Now I'll merge and synthesize all proposals into a unified improvement plan...",
+          "type": "text",
+          "delay": {"min": 2.0, "max": 3.0}
+        }
+      ],
+      "progress_sections": [
+        {
+          "slot": "merge_progress",
+          "title": "🔗 Merging Proposals",
+          "collapsible": true,
+          "initial_state": "expanded",
+          "show_history": true,
+          "messages": [
+            {"content": "Ingesting MoE (OpenAI) and Graph (Gemini) proposals...", "delay": 1.2},
+            {"content": "Aligning feature input layers across both architectures...", "delay": 1.5},
+            {"content": "Detecting conflict: Multi-Embedding vs. Graph Node consistency...", "delay": 2.0},
+            {"content": "Resolving conflict: Proposing Hybrid Graph-MoE layer...", "delay": 2.5},
+            {"content": "Merging training objectives: Contrastive + Calibration Loss...", "delay": 2.2},
+            {"content": "Harmonizing system optimizations (EMBark sharding)...", "delay": 1.8},
+            {"content": "Prioritizing high-ROI changes for immediate implementation...", "delay": 2.0},
+            {"content": "Estimating combined computational complexity...", "delay": 1.5},
+            {"content": "Drafting unified implementation roadmap...", "delay": 1.5},
+            {"content": "Generating final merged Markdown document...", "delay": 1.2},
+            {"content": "✅ Merge complete!", "delay": 1.0}
+          ]
+        }
+      ],
+      "post_messages": [
+        {
+          "content": "✅ Here is the final merged improvement proposal",
+          "type": "text",
+          "file": "files/context/proposals/merged_proposal.md",
+          "delay": {"min": 1.0, "max": 2.0}
+        }
+      ],
+      "wait_for_user": false
+    },
+    {
+      "id": "step_5",
+      "role": "assistant",
+      "pre_delay": {"min": 0.5, "max": 1.0},
+      "post_delay": {"min": 0.0, "max": 0.0},
+      "post_messages_only": true,
+      "post_messages": [
+        {
+          "content": "🎉 **Proposal generation complete!** The parallel deep research and proposal generation process has finished.\n\n📄 You can review all the generated files using the **View** buttons above.\n\n💡 This process featured:\n- Parallel execution of multiple AI research agents\n- Automatic proposal generation from research findings\n- Intelligent synthesis of multiple proposals into a unified plan\n\nThank you for using MRS RankEvolve!",
+          "type": "text"
+        },
+        {
+          "content": "🚧 **RankEvolve Work in Progress**\n\nAt the moment, work is still in progress to enable hypothesis selection and automated job running. However, you can manually select experiments to run from the proposals above.\n\n📋 **Paste your experiment results below** to start the next round of iterations:",
+          "type": "text",
+          "delay": {"min": 0.5, "max": 1.0},
+          "input_field": {
+            "placeholder": "Paste your experiment result document text here (e.g., metrics, observations, NE improvements, etc.)...",
+            "multiline": true,
+            "optional": false,
+            "variable_name": "experiment_results"
+          }
+        }
+      ],
+      "wait_for_user": true,
+      "suggested_actions": {
+        "message": "\n🔄 **Ready for the next iteration?**",
+        "actions": [
+          {
+            "label": "🚀 Start Next Iteration",
+            "user_message": "Start the next iteration with the experiment results",
+            "action_type": "continue",
+            "style": "primary"
+          }
+        ]
+      }
+    }
+  ]
+}

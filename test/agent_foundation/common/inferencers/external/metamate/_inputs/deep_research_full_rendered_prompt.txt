@@ -1,0 +1,114 @@
+
+
+You will now conduct thorough, in-depth research on the following focused query by systematically searching, analyzing, and synthesizing findings from both external authoritative sources AND internal knowledge bases.
+
+**User Request**:
+<UserRequest>
+
+Deep investigation of hard-coded constants and configuration debt in model_roo_v0.py and its dependencies. Catalog every hard-coded hyperparameter (MHTA dims, PLE expert counts, LCE output nums, aux loss divisors, task weights, signal linking dims, etc.), assess which should be config-driven, and identify which constants are coupled vs. independent. This goes beyond the docs' surface-level listing to analyze the dependency graph between constants and the risk of inconsistency.
+
+Research todos:
+- Extract all numeric literals from model_roo_v0.py (lines 200-870) that serve as architectural hyperparameters vs. truly fixed constants
+- Map the dependency chain: how mhta_head_dim=1024 propagates to shortcut_weight_init, gating_module dims, and downstream OverArch input_dim
+- Identify which constants in pytorch_modules_roo.py (e.g., DenseArchROO head counts, Spindle dims) shadow or duplicate constants from model_roo_v0.py
+- Analyze the hard-coded task weights in MainFeedMTMLLoss.forward() (lines 1255-1272) — are these experimentally validated? What's the sensitivity?
+- Assess the aux loss divisors (/100 and /300 in _post_processing lines 1031-1036) — are these calibrated to current model scale or stale?
+- Propose a concrete refactored config hierarchy (e.g., MHTAConfig, PLEConfig, LossConfig) that would make these searchable without code changes
+</UserRequest>
+
+---
+
+## Your Task: Deep Research
+
+### Phase 1: Search Strategy & Source Discovery
+
+Execute a comprehensive search on the research query above across TWO dimensions:
+
+**A. External Sources (Academic & Industry)**
+- **Authoritative Sources Only**: Restrict to:
+  * Top-tier peer-reviewed venues (NeurIPS, ICML, KDD, RecSys, WWW, SIGIR, etc.)
+  * Major research institutions (Stanford, MIT, CMU, Berkeley, DeepMind, etc.)
+  * Major tech companies (Meta AI, Google Research, Microsoft Research, Apple ML, OpenAI, ByteDance, etc.)
+  * Industry official tech blogs and engineering reports
+  * Well-cited arXiv preprints from recognized research groups
+- Favor work demonstrating real-world deployment at scale, statistically significant gains, or genuinely novel contributions over incremental variations.
+- DO NOT include unvetted blog posts, low-citation preprints, or publications without clear institutional affiliation or reproducibility.
+
+**B. Internal Sources (Company Knowledge Base)**
+- Search across:
+  * Design documents and technical specs (RFCs, PRDs, Tech Specs, Architecture Docs)
+  * Internal wikis, documentation portals, and team knowledge bases
+  * Internal tech blogs, engineering newsletters, and post-mortems
+  * Code repositories, README files, and inline documentation
+  * Recorded tech talks, brown bags, and internal presentations
+  * Runbooks and operational documentation
+- Favor documentation demonstrating:
+  * Production deployment at scale
+  * Clear ownership and recent updates
+  * Cross-team adoption or platform-level support
+  * Measurable impact on key metrics
+- DO NOT include:
+  * Outdated or deprecated documentation (check last-modified dates)
+  * Personal notes or unofficial drafts without team review
+  * Abandoned projects without clear deprecation notices
+
+### Phase 2: Analysis & Synthesis
+
+**For each external publication or report:**
+- **Core Contribution**: The main innovation (architecture, training method, system design, etc.)
+- **Problem Addressed**: What limitation of prior work does this solve?
+- **Key Techniques**: Technical approach summary
+- **Reported Results**: Quantitative improvements on relevant metrics
+- **Deployment Context**: If deployed at scale, note production insights
+- **Credibility Signals**: Venue tier, institutional affiliation, citation count, code availability
+- **Limitations & Open Questions**: What gaps remain? What contradicting results exist?
+
+**For each internal document or resource:**
+- **Core Contribution**: The main technical solution or pattern
+- **Problem Addressed**: What internal pain point or scaling challenge does this solve?
+- **Key Technical Approach**: Implementation summary
+- **Reported Results**: Internal metrics improvements (latency, throughput, cost, quality, etc.)
+- **Deployment Status**: Production, experimental, deprecated, or planned
+- **Ownership & Support**: Owning team and maintenance status
+- **Dependencies & Integration Points**: What systems does this depend on or connect to?
+- **Limitations & Known Issues**: Documented trade-offs or tech debt items
+
+### Phase 3: Trend Identification & Gap Analysis
+
+Synthesize across ALL discovered sources (external + internal):
+- **Converging Trends**: What techniques are multiple organizations or internal teams adopting?
+- **Diverging Approaches**: Where do researchers or teams disagree or take different paths?
+- **External vs Internal Gap**: What state-of-the-art techniques from literature are NOT yet adopted internally? What internal innovations lack external validation?
+- **Underexplored Areas**: What promising directions have limited investigation both externally and internally?
+- **Reusability Opportunities**: What existing internal solutions could be leveraged vs. rebuilt?
+- **Potential Opportunities**: Based on gaps between external literature, internal knowledge, and the research query
+
+### Phase 4: Structured Output
+
+Produce a comprehensive research report.
+
+The report should include:
+1. **Executive Summary**: Top findings and key insights across both external and internal sources
+2. **External Findings**: Organized by theme, with per-paper analysis and credibility assessment
+3. **Internal Findings**: Organized by theme, with deployment status and ownership context
+4. **Cross-Reference Analysis**: Where internal work aligns with, diverges from, or lags behind external state-of-the-art
+5. **Recommended Reading**: Ranked by relevance, credibility, and impact (both external papers and internal docs)
+6. **Research Gap Analysis**: Opportunities for novel contributions, including internal adoption gaps
+
+## Response Format
+
+YOU MUST generate a **concise summary** (NOT the full report) wrapped in `<Response>` tags:
+
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used, which may cause downstream failures.
+
+<Response>
+[Your concise summary of key findings and insights.]
+</Response>
+
+---
+
+## NOTES:
+- Prioritize depth over breadth — thorough analysis of fewer items beats shallow coverage of many.
+- Distinguish between established results and speculative directions.
+- Be specific: cite paper titles, authors, venues, and quantitative results for external sources; cite doc titles, teams, deployment status for internal sources.
+- When internal and external sources address the same topic, explicitly compare their approaches and results.

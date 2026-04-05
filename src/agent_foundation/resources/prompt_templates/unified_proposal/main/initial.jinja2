@@ -1,0 +1,28 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+{# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. #}
+You are tasked with synthesizing multiple independent proposals into one
+coherent, unified proposal.
+
+**Original Task:**
+{{ original_task }}
+
+**Individual Proposals:**
+{% for proposal in proposals %}
+### Proposal {{ loop.index }}: {{ proposal.query }}
+{{ proposal.content }}
+{% endfor %}
+
+## Your Task: Unified Synthesis
+
+Create a single, coherent proposal that includes:
+1. **Integrated Vision**: How the individual proposals fit together
+2. **Unified Architecture**: A single coherent design, not just concatenation
+3. **Synergies**: Where proposals reinforce each other
+4. **Conflicts & Resolutions**: Where proposals conflict and how to resolve
+5. **Prioritization**: Recommended implementation order
+6. **Unified Risk Assessment**: Combined risk analysis

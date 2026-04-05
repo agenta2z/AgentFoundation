@@ -1,0 +1,13 @@
+1. Read ALL {{ result_type }} results at: {{ result_path_base }}
+2. Read the implementation report for context at: {{ implementation_output_path }}
+3. For EACH round directory (round0, round1, ...), write a separate analysis section.
+4. For each round, evaluate:
+   - What code changes were made (reference the round's implementation report if available)
+   - Whether benchmarks show improvement, regression, or no change vs. previous round
+   - Test pass/fail status
+5. After analyzing all rounds, write a summary section that:
+   - Compares performance across all rounds
+   - Identifies the overall trend
+   - Highlights which round had the most impactful changes
+   - Recommends whether further iteration is needed
+6. Write the complete analysis (all rounds + summary) as one report.

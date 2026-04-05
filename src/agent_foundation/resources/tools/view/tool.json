@@ -1,0 +1,11 @@
+{
+  "name": "view",
+  "tool_type": "Action",
+  "category": "utility",
+  "description": "View generated documentation or files in a side panel.",
+  "agent_enabled": false,
+  "parameters": [
+    {"name": "target", "type": "string", "required": false, "description": "What to view: 'docs' for generated documentation, or a file path. Default: docs"}
+  ],
+  "usage_guidance": "User-only command. Type /view docs to view generated Sphinx documentation."
+}

@@ -1,0 +1,12 @@
+{
+  "name": "clarification",
+  "tool_type": "Conversation",
+  "category": "conversation",
+  "description": "Ask the user for more information when the request is ambiguous or needs more detail.",
+  "parameters": [
+    {"name": "prompt", "type": "string", "required": true, "description": "The question to ask the user."},
+    {"name": "expected_input_type", "type": "string", "description": "Input type hint for the UI. Use 'path' for filesystem paths (enables autocomplete), or 'free_text' (default) for plain text."},
+    {"name": "prefix", "type": "string", "description": "For path inputs: the base directory prefix. The user types relative to this prefix. Example: '/data/users/zgchen/fbsource260306/fbcode'."}
+  ],
+  "usage_guidance": "Use when the user's request is ambiguous or needs more detail. For path inputs, set expected_input_type to 'path' and prefix to the base directory."
+}
