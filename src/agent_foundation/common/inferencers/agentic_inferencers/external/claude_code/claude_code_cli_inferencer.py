@@ -317,7 +317,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                 else result.get("output", f"Command failed with code {return_code}")
             )
 
-        return TerminalInferencerResponse(result)
+        return TerminalInferencerResponse.from_dict(result)
 
     # === Helper Methods ===
 
@@ -514,9 +514,9 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         result = await self._ainfer_single(inference_input, inference_config, **kwargs)
 
         # Update active session from result
-        result_session_id = (
-            result.get("session_id") if isinstance(result, dict) else None
-        )
+        result_session_id = getattr(result, "session_id", None)
+        if result_session_id is None and isinstance(result, dict):
+            result_session_id = result.get("session_id")
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
             self.log_debug(
@@ -568,9 +568,9 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         result = self._infer_single(inference_input, inference_config, **kwargs)
 
         # Update active session from result
-        result_session_id = (
-            result.get("session_id") if isinstance(result, dict) else None
-        )
+        result_session_id = getattr(result, "session_id", None)
+        if result_session_id is None and isinstance(result, dict):
+            result_session_id = result.get("session_id")
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
             self.log_debug(
@@ -688,19 +688,23 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
             result["error"] = (
                 result.get("stderr") or f"Command failed with code {return_code}"
             )
-        return TerminalInferencerResponse(result)
+        return TerminalInferencerResponse.from_dict(result)
 
     def get_response_text(self, result: Any) -> str:
-        """Extract response text from result dict.
+        """Extract response text from result dict or TerminalInferencerResponse.
 
         Args:
-            result: Result dictionary from inference.
+            result: Result object or dictionary from inference.
 
         Returns:
             Response text or error message.
         """
-        if isinstance(result, dict) and result.get("success"):
-            return result.get("output", "")
+        if isinstance(result, TerminalInferencerResponse):
+            if result.success:
+                return result.output or ""
+            return result.error or "Unknown error occurred"
         if isinstance(result, dict):
+            if result.get("success"):
+                return result.get("output", "")
             return result.get("error", "Unknown error occurred")
         return str(result)
