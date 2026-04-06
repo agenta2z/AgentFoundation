@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Mock unit tests for PlanThenImplementInferencer resume detection,
 analysis-only mode, and backward compatibility.

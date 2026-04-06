@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 
 """Parse LLM responses for <tool_call> blocks interspersed with text.

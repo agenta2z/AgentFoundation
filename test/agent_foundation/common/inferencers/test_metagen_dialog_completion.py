@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Integration tests for dialog_completion mode in MetaGen API.
 

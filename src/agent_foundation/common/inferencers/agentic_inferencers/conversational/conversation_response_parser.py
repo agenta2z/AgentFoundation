@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Conversation response parser — extracts conversation tools from LLM output.
 

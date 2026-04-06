@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Plugboard LLM API — standard API module wrapping PlugboardClient.
 

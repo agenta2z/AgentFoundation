@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 
 """Common utilities for Devmate inferencers.

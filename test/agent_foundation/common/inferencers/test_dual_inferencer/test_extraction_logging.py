@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Unit tests verifying that DualInferencer logs post-extraction content
 for ReviewResponse and FollowupResponse (not the raw pre-extraction text).

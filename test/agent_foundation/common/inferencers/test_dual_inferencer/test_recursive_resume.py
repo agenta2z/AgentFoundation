@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Automated tests for recursive resume: PTI → DualInferencer child workflows.
 

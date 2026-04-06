@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Plugboard API module — standard interface for Meta's internal LLM gateway."""
 

@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Unit tests for the dual-timer (tool_use_idle_timeout_seconds) feature
 in StreamingInferencerBase.ainfer_streaming().

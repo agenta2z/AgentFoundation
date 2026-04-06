@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Unit tests for ConversationalInferencer agentic loop (mock-based).
 

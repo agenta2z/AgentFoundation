@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 
 """Unit tests for large argument file offload and system_helper utilities.

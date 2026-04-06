@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Integration test: SOP-driven prompt rotation via ConversationalInferencer.
 

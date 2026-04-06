@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 
 """Dataclasses for tool definitions — ToolDefinition, ParameterDef, SubcommandDef.

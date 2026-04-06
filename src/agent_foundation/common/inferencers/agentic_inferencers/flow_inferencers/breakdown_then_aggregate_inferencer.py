@@ -1,4 +1,4 @@
-11# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+11
 
 """BreakdownThenAggregateInferencer — diamond-shaped WorkGraph-based inferencer.
 

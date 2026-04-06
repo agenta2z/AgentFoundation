@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Tool input collector — handles __human_input__ sentinel detection and collection.
 

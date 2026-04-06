@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Unit tests for analysis mode support in PlanThenImplementInferencer.
 

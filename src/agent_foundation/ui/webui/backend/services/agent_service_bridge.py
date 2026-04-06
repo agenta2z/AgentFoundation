@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """AgentServiceBridge — thin bridge between WebSocket and file queue.
 

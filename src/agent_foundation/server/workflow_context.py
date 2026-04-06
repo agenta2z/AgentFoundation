@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 """Workflow context — session-level workflow state for prompt injection."""
 from __future__ import annotations

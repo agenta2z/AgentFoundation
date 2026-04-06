@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Comprehensive tests for DualInferencer checkpoint/resume from different
 workspace conditions.

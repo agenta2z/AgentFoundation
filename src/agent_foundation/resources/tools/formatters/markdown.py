@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 # pyre-strict
 
 """Formats ToolDefinition objects into docstring-like API markdown.

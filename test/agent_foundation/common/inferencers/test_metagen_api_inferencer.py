@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Unit tests for MetagenApiInferencer (mock-based, no API keys needed).
 

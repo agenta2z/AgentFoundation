@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
 
 """Tests for QueueInteractive.stream_token_batches task_id support.
 
