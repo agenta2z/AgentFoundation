@@ -78,6 +78,29 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     The graph is built DYNAMICALLY in _infer()/_ainfer() each time,
     similar to how DualInferencer builds self._steps in _ainfer().
+
+    Graph structure (2-layer diamond)::
+
+        Layer 1 (start_nodes):  worker_0, worker_1, ..., worker_N   (parallel fan-out)
+                                     \        |            /
+        Layer 2:                        aggregator                  (fan-in)
+
+    The breakdown step runs *before* the graph is constructed (since the number
+    of worker nodes depends on its output) and is not itself a graph node.
+
+    Concurrency control:
+        - ``ainfer()`` executes all workers concurrently via ``asyncio.gather()``.
+        - ``infer()`` executes workers sequentially in a for-loop.
+        - Set ``max_concurrency`` to limit how many workers run in parallel in the
+          async path. Uses a sliding-window ``asyncio.Semaphore`` (not batched),
+          so as soon as one worker finishes, the next one starts. ``None`` (default)
+          means unlimited parallelism.
+
+    .. warning::
+        ``max_concurrency`` with an ``aggregator_inferencer`` can deadlock because
+        the downstream aggregator propagation acquires the same semaphore while
+        start-node slots are still held. Use ``max_concurrency`` only without an
+        aggregator, or leave it as ``None``.
     """
 
     # === Breakdown ===
@@ -94,6 +117,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     # === Checkpoint ===
     checkpoint_dir: Optional[str] = attrib(default=None)
+
+    # === Concurrency ===
+    # Maximum number of worker nodes to run in parallel during the fan-out
+    # layer of the diamond graph. When set, creates an asyncio.Semaphore to
+    # throttle concurrent worker execution (sliding window, not batched).
+    # Only applies to the async path (ainfer). None means unlimited parallelism.
+    # Inherited from WorkGraph but surfaced here for discoverability.
+    #
+    # IMPORTANT: When an aggregator_inferencer is set, the semaphore is also
+    # acquired for the downstream aggregator propagation *while* the start-node
+    # semaphore slot is still held. This means the effective concurrency budget
+    # must account for the aggregator slot. In practice, with N workers and
+    # max_concurrency=M, the Mth worker to reach the aggregator will need an
+    # (M+1)th slot. To avoid deadlock, either:
+    #   - Use max_concurrency only without an aggregator, or
+    #   - Set max_concurrency >= num_workers + 1 (which effectively means
+    #     unlimited for the workers), or
+    #   - Leave max_concurrency as None (default, unlimited).
+    # A future fix could exclude the aggregator from semaphore gating.
+    max_concurrency: Optional[int] = attrib(default=None)
 
     # === Interactive support ===
     interactive: Optional[Any] = attrib(default=None)

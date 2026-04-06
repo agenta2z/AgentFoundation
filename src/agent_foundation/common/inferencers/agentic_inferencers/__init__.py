@@ -74,6 +74,18 @@ def __getattr__(name):
         )
 
         return BreakdownThenAggregateInferencer
+    elif name == "RovoDevCliInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev import (
+            RovoDevCliInferencer,
+        )
+
+        return RovoDevCliInferencer
+    elif name == "RovoDevServeInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev import (
+            RovoDevServeInferencer,
+        )
+
+        return RovoDevServeInferencer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -87,5 +99,7 @@ __all__ = [
     "MetamateSDKInferencer",
     "PlanThenImplementInferencer",
     "ReflectiveInferencer",
+    "RovoDevCliInferencer",
+    "RovoDevServeInferencer",
     "SDKInferencerResponse",
 ]
