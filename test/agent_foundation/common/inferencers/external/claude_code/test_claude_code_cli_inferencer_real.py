@@ -65,22 +65,22 @@ def test_sync_single_call(query: str) -> bool:
         elapsed = time.time() - start_time
         print(f"\n✓ Got response in {elapsed:.2f}s:")
         print(f"  Response type: {type(response)}")
-        print(f"  Success: {response.get('success')}")
-        print(f"  Session ID: {response.get('session_id', 'N/A')[:16]}...")
-        print(f"  Return code: {response.get('return_code')}")
-        output = response.get("output", "")
+        print(f"  Success: {response.success}")
+        print(f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}...")
+        print(f"  Return code: {response.return_code}")
+        output = getattr(response, "output", "")
         print(f"  Output length: {len(output)} chars")
         print("-" * 40)
         print(output[:500] if len(output) > 500 else output)
         print("-" * 40)
 
-        if response.get("success") and len(output) >= 1:
+        if response.success and len(output) >= 1:
             print("\n✅ SYNC TEST PASSED!")
             return True
         else:
-            print(f"\n❌ SYNC TEST FAILED: success={response.get('success')}")
-            if response.get("error"):
-                print(f"  Error: {response.get('error')}")
+            print(f"\n❌ SYNC TEST FAILED: success={response.success}")
+            if response.error:
+                print(f"  Error: {response.error}")
             return False
 
     except Exception as e:
@@ -117,7 +117,7 @@ def test_sync_multiple_calls() -> bool:
         start_time = time.time()
         response1 = inferencer("What is 2+2? Just give the number.")
         elapsed1 = time.time() - start_time
-        output1 = response1.get("output", "")
+        output1 = getattr(response1, "output", "")
         print(f"✓ Response 1 in {elapsed1:.2f}s: {output1[:100]}...")
 
         # Second call
@@ -125,10 +125,10 @@ def test_sync_multiple_calls() -> bool:
         start_time = time.time()
         response2 = inferencer("What is 3+3? Just give the number.")
         elapsed2 = time.time() - start_time
-        output2 = response2.get("output", "")
+        output2 = getattr(response2, "output", "")
         print(f"✓ Response 2 in {elapsed2:.2f}s: {output2[:100]}...")
 
-        if response1.get("success") and response2.get("success"):
+        if response1.success and response2.success:
             print("\n✅ SYNC MULTIPLE CALLS PASSED!")
             return True
         else:
@@ -174,19 +174,19 @@ async def test_async_single_call(query: str) -> bool:
         elapsed = time.time() - start_time
         print(f"\n✓ Got response in {elapsed:.2f}s:")
         print(f"  Response type: {type(response)}")
-        print(f"  Success: {response.get('success')}")
-        print(f"  Session ID: {response.get('session_id', 'N/A')[:16]}...")
-        output = response.get("output", "")
+        print(f"  Success: {response.success}")
+        print(f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}...")
+        output = getattr(response, "output", "")
         print(f"  Output length: {len(output)} chars")
         print("-" * 40)
         print(output[:500] if len(output) > 500 else output)
         print("-" * 40)
 
-        if response.get("success") and len(output) >= 1:
+        if response.success and len(output) >= 1:
             print("\n✅ ASYNC TEST PASSED!")
             return True
         else:
-            print(f"\n❌ ASYNC TEST FAILED: success={response.get('success')}")
+            print(f"\n❌ ASYNC TEST FAILED: success={response.success}")
             return False
 
     except Exception as e:
@@ -223,7 +223,7 @@ async def test_async_multiple_calls() -> bool:
         start_time = time.time()
         response1 = await inferencer.ainfer("What is 2+2? Just the number.")
         elapsed1 = time.time() - start_time
-        output1 = response1.get("output", "")
+        output1 = getattr(response1, "output", "")
         print(f"✓ Response 1 in {elapsed1:.2f}s: {output1[:100]}...")
 
         # Second query
@@ -231,10 +231,10 @@ async def test_async_multiple_calls() -> bool:
         start_time = time.time()
         response2 = await inferencer.ainfer("What is 3+3? Just the number.")
         elapsed2 = time.time() - start_time
-        output2 = response2.get("output", "")
+        output2 = getattr(response2, "output", "")
         print(f"✓ Response 2 in {elapsed2:.2f}s: {output2[:100]}...")
 
-        if response1.get("success") and response2.get("success"):
+        if response1.success and response2.success:
             print("\n✅ ASYNC MULTIPLE CALLS PASSED!")
             return True
         else:
@@ -278,12 +278,12 @@ async def test_response_metadata() -> bool:
         print(f"\n✓ Got response:")
         print(f"  Type: {type(response)}")
         print(f"  Keys: {list(response.keys())}")
-        print(f"  success: {response.get('success')}")
-        print(f"  session_id: {response.get('session_id', 'N/A')[:16] if response.get('session_id') else 'N/A'}...")
-        print(f"  return_code: {response.get('return_code')}")
-        print(f"  total_cost_usd: {response.get('total_cost_usd')}")
-        print(f"  num_turns: {response.get('num_turns')}")
-        print(f"  duration_ms: {response.get('duration_ms')}")
+        print(f"  success: {response.success}")
+        print(f"  session_id: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16] if response.session_id else 'N/A'}...")
+        print(f"  return_code: {response.return_code}")
+        print(f"  total_cost_usd: {getattr(response, 'total_cost_usd', None)}")
+        print(f"  num_turns: {getattr(response, 'num_turns', None)}")
+        print(f"  duration_ms: {getattr(response, 'duration_ms', None)}")
 
         # Check required fields
         has_output = "output" in response
@@ -355,8 +355,8 @@ def test_sync_streaming(query: str) -> bool:
 
         # Get streaming result for additional info
         result = inferencer.get_streaming_result()
-        print(f"  Return code: {result.get('return_code')}")
-        print(f"  Success: {result.get('success')}")
+        print(f"  Return code: {result.return_code}")
+        print(f"  Success: {result.success}")
 
         if line_count > 0 and len(full_response) >= 1:
             print("\n✅ SYNC STREAMING TEST PASSED!")
@@ -469,18 +469,18 @@ async def test_session_continuation() -> bool:
         )
         elapsed1 = time.time() - start_time
 
-        session_id = result1.get("session_id")
+        session_id = result1.session_id
         print(f"✓ Response 1 in {elapsed1:.2f}s")
         print(f"  Session ID: {session_id[:16] if session_id else 'N/A'}...")
-        print(f"  Success: {result1.get('success')}")
+        print(f"  Success: {result1.success}")
         print(f"  Active session: {inferencer.active_session_id[:16] if inferencer.active_session_id else 'N/A'}...")
-        output1 = result1.get("output", "")
+        output1 = getattr(result1, "output", "")
         print(f"  Response: {output1[:100]}...")
 
         if not session_id:
             print("\n⚠️ No session ID returned - cannot test continuation")
             # Still pass if first call worked
-            if result1.get("success"):
+            if result1.success:
                 print("\n✅ SESSION TEST PASSED (no continuation, but first call worked)")
                 return True
             return False
@@ -492,8 +492,8 @@ async def test_session_continuation() -> bool:
         elapsed2 = time.time() - start_time
 
         print(f"✓ Response 2 in {elapsed2:.2f}s")
-        print(f"  Success: {result2.get('success')}")
-        output2 = result2.get("output", "")
+        print(f"  Success: {result2.success}")
+        output2 = getattr(result2, "output", "")
         print(f"  Response: {output2[:200]}...")
 
         # Check if the model remembered "42"
@@ -504,7 +504,7 @@ async def test_session_continuation() -> bool:
             print("\n⚠️ SESSION CONTINUATION TEST WARNING: '42' not found in response")
             print("  (This may be a model behavior issue, not an inferencer issue)")
             # Still pass if we got a valid response
-            if result2.get("success"):
+            if result2.success:
                 print("\n✅ SESSION CONTINUATION TEST PASSED (with warning)")
                 return True
             return False

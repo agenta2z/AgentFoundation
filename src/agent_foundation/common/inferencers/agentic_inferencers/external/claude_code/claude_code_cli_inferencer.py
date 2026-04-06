@@ -77,13 +77,21 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     empty_line_mode: EmptyLineMode = attrib(default=EmptyLineMode.SUPPRESS_LEADING)
     target_path: Optional[str] = attrib(default=None)
     model_name: str = attrib(default="sonnet")
+    claude_command: str = attrib(default="claude")
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
     system_prompt: Optional[str] = attrib(default=None)
     append_system_prompt: Optional[str] = attrib(default=None)
     allowed_tools: Optional[List[str]] = attrib(default=None)
+    enable_shell: bool = attrib(default=True)
     permission_mode: str = attrib(default="bypassPermissions")
     max_budget_usd: Optional[float] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
+
+    # Known Node.js Claude Code CLI paths to try as fallback
+    _NODE_CLAUDE_PATHS: List[str] = [
+        "node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+        "npx @anthropic-ai/claude-code",
+    ]
 
     def __attrs_post_init__(self) -> None:
         """Initialize defaults after attrs init."""
@@ -96,15 +104,70 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         if self.working_dir is None:
             self.working_dir = self.target_path
         self.model_name = resolve_model_tag(self.model_name)
-        if self.allowed_shell_commands:
-            logger.info(
-                "[%s] allowed_shell_commands=%s specified but Claude Code CLI "
-                "does not support per-command allowlists. Commands are "
-                "controlled at the tool level via --allowedTools/--disallowedTools.",
-                self.__class__.__name__,
-                self.allowed_shell_commands,
-            )
+        self._resolve_claude_command()
         super().__attrs_post_init__()
+
+    def _resolve_claude_command(self) -> None:
+        """Verify the Claude CLI command works; fall back to Node.js if not.
+
+        The symlinked ``claude`` binary can sometimes be killed by macOS
+        (SIGKILL / return code -9). In that case, fall back to invoking
+        the Node.js CLI directly via ``node .../cli.js``.
+
+        Also checks the ``CLAUDE_CODE_COMMAND`` environment variable.
+        """
+        import subprocess as _sp
+
+        # Check env var override first
+        env_cmd = os.environ.get("CLAUDE_CODE_COMMAND")
+        if env_cmd:
+            self.claude_command = env_cmd
+            return
+
+        # If user explicitly set a non-default command, trust it
+        if self.claude_command != "claude":
+            return
+
+        # Test if the default 'claude' command works
+        try:
+            result = _sp.run(
+                f"{self.claude_command} --version",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return  # Default command works
+        except (_sp.TimeoutExpired, OSError):
+            pass
+
+        # Try Node.js fallbacks
+        for node_cmd in self._NODE_CLAUDE_PATHS:
+            try:
+                result = _sp.run(
+                    f"{node_cmd} --version",
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    logger.info(
+                        "[%s] Default 'claude' command failed; using fallback: %s",
+                        self.__class__.__name__,
+                        node_cmd,
+                    )
+                    self.claude_command = node_cmd
+                    return
+            except (_sp.TimeoutExpired, OSError):
+                continue
+
+        logger.warning(
+            "[%s] Could not find a working Claude Code CLI. "
+            "Set CLAUDE_CODE_COMMAND env var or pass claude_command parameter.",
+            self.__class__.__name__,
+        )
 
     # === Abstract Method Implementations ===
 
@@ -149,7 +212,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         output_format = kwargs.get("output_format")  # Injected by _ainfer()/_infer()
         use_stdin = kwargs.get("use_stdin", False)
 
-        command_parts = ["claude", "-p"]
+        command_parts = [self.claude_command, "-p"]
 
         if output_format:
             command_parts.append(f"--output-format {output_format}")
@@ -332,7 +395,21 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     # output_format="json" and use_stdin=True to construct_command() directly
     # with their own subprocess management.
 
-    # _resolve_subprocess_timeout() — inherited from TerminalSessionInferencerBase.
+    def _resolve_subprocess_timeout(
+        self, override: Optional[float] = None
+    ) -> float:
+        """Resolve the subprocess timeout in seconds.
+
+        Args:
+            override: Caller-specified timeout override. If provided, used as-is.
+
+        Returns:
+            Timeout in seconds: the override if given, otherwise
+            ``max(idle_timeout_seconds, 1800)``.
+        """
+        if override is not None:
+            return float(override)
+        return float(max(self.idle_timeout_seconds, 1800))
 
     # _ainfer_streaming() — inherited from TerminalSessionInferencerBase.
     # Base class now handles stdin + stderr via large_input_mode=STDIN.
