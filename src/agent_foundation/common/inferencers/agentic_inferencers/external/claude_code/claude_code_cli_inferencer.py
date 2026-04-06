@@ -210,12 +210,17 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         session_id = kwargs.get("session_id")
         is_resume = kwargs.get("resume", False)
         output_format = kwargs.get("output_format")  # Injected by _ainfer()/_infer()
+        verbose = kwargs.get("verbose", False)
         use_stdin = kwargs.get("use_stdin", False)
 
         command_parts = [self.claude_command, "-p"]
 
         if output_format:
             command_parts.append(f"--output-format {output_format}")
+        if verbose:
+            command_parts.append("--verbose")
+        if kwargs.get("include_partial_messages"):
+            command_parts.append("--include-partial-messages")
 
         command_parts.append(f"--model {self.model_name}")
 
@@ -394,6 +399,65 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     # metadata is needed without streaming, callers can pass
     # output_format="json" and use_stdin=True to construct_command() directly
     # with their own subprocess management.
+
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
+        """Yield real-time text chunks from Claude Code CLI.
+
+        Overrides the parent ``TerminalSessionInferencerBase._ainfer_streaming()``
+        to use ``--output-format stream-json --verbose`` for true real-time
+        streaming instead of buffered text output.
+
+        Each ``assistant`` event with ``content[].text`` is yielded as a chunk.
+        Non-text events (system, rate_limit_event, result) are skipped.
+
+        Args:
+            prompt: The prompt string.
+            **kwargs: Additional arguments.
+
+        Yields:
+            Text chunks as they arrive from Claude.
+        """
+        import json as _json
+
+        kwargs["output_format"] = "stream-json"
+        kwargs["verbose"] = True
+        kwargs["include_partial_messages"] = True
+
+        command = self.construct_command({"prompt": prompt}, **kwargs)
+        full_command = self._build_full_command(command)
+
+        process = await asyncio.create_subprocess_shell(
+            full_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self.working_dir,
+        )
+
+        try:
+            async for line_bytes in process.stdout:
+                line = line_bytes.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+
+                event_type = event.get("type")
+
+                # Real-time streaming: text deltas are inside
+                # stream_event → event → content_block_delta → delta.text
+                if event_type == "stream_event":
+                    inner = event.get("event", {})
+                    if inner.get("type") == "content_block_delta":
+                        delta = inner.get("delta", {})
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            yield delta["text"]
+
+        finally:
+            stderr_bytes = await process.stderr.read() if process.stderr else b""
+            self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+            await process.wait()
 
     def _resolve_subprocess_timeout(
         self, override: Optional[float] = None
