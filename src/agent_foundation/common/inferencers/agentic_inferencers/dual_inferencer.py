@@ -172,6 +172,9 @@ class DualInferencer(InferencerBase, Workflow):
     checkpoint_dir: Optional[str] = attrib(default=None, kw_only=True)
     enable_checkpoint: bool = attrib(default=False, kw_only=True)
 
+    # --- Workspace support (opt-in, overrides checkpoint_dir when set) ---
+    workspace_root: Optional[str] = attrib(default=None, kw_only=True)
+
     # --- Suppress Workflow constructor parameters (init=False) ---
     result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
     unpack_single_result = attrib(default=False, init=False)
@@ -224,6 +227,19 @@ class DualInferencer(InferencerBase, Workflow):
         if self.consensus_checker is None:
             self.consensus_checker = DualInferencer._default_check_consensus
 
+        # Workspace reconstruction from root path string.
+        # Do NOT auto-bridge from checkpoint_dir — it maps to checkpoints
+        # INSIDE workspace, not the workspace root.
+        if self.workspace_root is not None:
+            from agent_foundation.common.inferencers.inferencer_workspace import (
+                InferencerWorkspace,
+            )
+
+            self._workspace = InferencerWorkspace(root=self.workspace_root)
+            self._workspace.ensure_dirs()
+        else:
+            self._workspace = None
+
         # Set parent debuggable for nested inferencers (deduplicate by identity)
         seen_ids = set()
         for inf in (
@@ -263,6 +279,12 @@ class DualInferencer(InferencerBase, Workflow):
 
     def _get_result_path(self, result_id, *args, **kwargs):
         attempt = getattr(self, "_current_attempt", 0)
+        if self._workspace is not None:
+            return self._workspace.checkpoint_path(
+                os.path.join(
+                    f"attempt_{attempt:02d}", f"step_{result_id}.json"
+                )
+            )
         if self.checkpoint_dir:
             return os.path.join(
                 self.checkpoint_dir,
@@ -611,6 +633,29 @@ class DualInferencer(InferencerBase, Workflow):
 
         return [step_propose, step_review, step_fix]
 
+    # ------------------------------------------------------------------
+    # Finalization — copy last round artifact to outputs/
+    # ------------------------------------------------------------------
+
+    def _finalize_response(self):
+        """Copy the last round artifact to ``outputs/`` as the final deliverable.
+
+        Only runs in workspace mode (``_workspace`` set + ``output_path`` set).
+        Idempotent — safe to call on resume after crash.
+        """
+        if self._workspace is None or not self.output_path:
+            return
+        basename = self.output_path
+        artifacts = self._workspace.glob_artifacts(f"round*_{basename}")
+        if not artifacts:
+            return
+        import shutil
+
+        last_artifact = artifacts[-1]  # sorted, so highest zero-padded round
+        dst = self._workspace.output_path(basename)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(last_artifact, dst)
+
     # region Sync/Async Bridge
 
     def _infer(self, inference_input, inference_config=None, **_inference_args):
@@ -728,7 +773,9 @@ class DualInferencer(InferencerBase, Workflow):
                 # Propose-only mode: no resume needed (single step)
                 self.enable_result_save = False
                 self.resume_with_saved_results = False
-            elif self.enable_checkpoint and self.checkpoint_dir:
+            elif self.enable_checkpoint and (
+                self._workspace is not None or self.checkpoint_dir
+            ):
                 self.enable_result_save = StepResultSaveOptions.Always
                 self.resume_with_saved_results = True
             elif self._result_root_override is not None:
@@ -814,6 +861,9 @@ class DualInferencer(InferencerBase, Workflow):
             total_iterations,
             len(all_attempt_records),
         )
+
+        # Copy last round artifact to outputs/ (workspace mode only)
+        self._finalize_response()
 
         return DualInferencerResponse(
             base_response=final_output or "",
@@ -1019,11 +1069,50 @@ class DualInferencer(InferencerBase, Workflow):
     ) -> str:
         """Replace response with short file reference if output file exists.
 
-        If ``output_path`` is set in inference_config but the inferencer did not
-        write the file (e.g., the inferencer lacks filesystem access), saves the
-        raw response to that path as a fallback so the output artifact always
-        exists when ``output_path`` is requested.
+        **Workspace mode** (``_workspace`` set + ``output_path`` set):
+        Writes per-round artifacts to ``artifacts/round{NN}_{basename}``.
+
+        **Legacy mode**: Uses ``inference_config["output_path"]`` template with
+        ``{{ round_index }}`` substitution.
+
+        In both modes, if the inferencer did not write the file (e.g., lacks
+        filesystem access), saves the raw response as a fallback.
         """
+        # -- Workspace mode --
+        if self._workspace is not None and self.output_path:
+            basename = self.output_path
+            resolved_path = self._workspace.artifact_path(
+                f"round{round_index:02d}_{basename}"
+            )
+            if os.path.isfile(resolved_path) and os.path.getsize(resolved_path) > 0:
+                logger.info(
+                    "[DualInferencer] Workspace artifact exists (%d bytes): %s",
+                    os.path.getsize(resolved_path),
+                    resolved_path,
+                )
+            else:
+                try:
+                    os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
+                    with open(resolved_path, "w") as f:
+                        f.write(response_str)
+                    logger.info(
+                        "[DualInferencer] Wrote workspace artifact (%d bytes): %s",
+                        len(response_str),
+                        resolved_path,
+                    )
+                except OSError as e:
+                    logger.warning(
+                        "[DualInferencer] Failed to write artifact to %s: %s",
+                        resolved_path,
+                        e,
+                    )
+                    return response_str
+            return (
+                f"The complete output has been written to: `{resolved_path}`.\n"
+                f"Read that file for the full details."
+            )
+
+        # -- Legacy mode --
         output_path_template = inference_config.get("output_path", "")
         if not output_path_template:
             return response_str
@@ -1040,7 +1129,6 @@ class DualInferencer(InferencerBase, Workflow):
                 resolved_path,
             )
         else:
-            # Inferencer did not write the file — save the raw response as fallback
             try:
                 os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
                 with open(resolved_path, "w") as f:

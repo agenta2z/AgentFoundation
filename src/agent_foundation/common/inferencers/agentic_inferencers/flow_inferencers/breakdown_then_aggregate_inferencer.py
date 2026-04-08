@@ -118,6 +118,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # === Checkpoint ===
     checkpoint_dir: Optional[str] = attrib(default=None)
 
+    # === Workspace support (opt-in, overrides checkpoint_dir when set) ===
+    workspace_root: Optional[str] = attrib(default=None)
+
     # === Concurrency ===
     # Maximum number of worker nodes to run in parallel during the fan-out
     # layer of the diamond graph. When set, creates an asyncio.Semaphore to
@@ -147,6 +150,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # (graph is built dynamically in _infer/_ainfer)
     start_nodes = attrib(factory=list)
 
+    def __attrs_post_init__(self):
+        super().__attrs_post_init__()
+        if self.workspace_root is not None:
+            from agent_foundation.common.inferencers.inferencer_workspace import (
+                InferencerWorkspace,
+            )
+
+            self._workspace = InferencerWorkspace(root=self.workspace_root)
+            self._workspace.ensure_dirs()
+        else:
+            self._workspace = None
+
     # === MRO safety: block run()/arun() ===
 
     def run(self, *args, **kwargs):
@@ -172,8 +187,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self.start_nodes = []
 
         worker_nodes = []
+        worker_output_paths = []  # for aggregator prompt closure
         for i, sq in enumerate(sub_queries):
             worker = self.worker_factory(sub_query=sq, index=i)
+
+            # Assign child workspace to worker (full composition mode)
+            if self._workspace is not None and isinstance(worker, InferencerBase):
+                worker_ws = self._workspace.child(f"worker_{i}")
+                worker_ws.ensure_dirs()
+                worker._workspace = worker_ws
+                worker_output_paths.append(worker.resolve_output_path())
+            else:
+                worker_output_paths.append(None)
 
             # Create a callable that captures this specific sub-query.
             # It intentionally ignores args from WorkGraph (which passes
@@ -216,14 +241,33 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
         agg_node = None
         if self.aggregator_inferencer is not None:
-            # Create aggregation node that receives all worker results
+            # Create aggregation node that receives all worker results.
+            # worker_output_paths is captured by closure for single source
+            # of truth — same paths workers write to.
+            _captured_paths = list(worker_output_paths)
+
             def _build_agg_input(prompt_builder, worker_results, original_query):
                 if prompt_builder is not None:
-                    return prompt_builder(worker_results, original_query=original_query)
-                # Default: join all worker results
+                    try:
+                        return prompt_builder(
+                            worker_results,
+                            original_query=original_query,
+                            worker_output_paths=_captured_paths,
+                        )
+                    except TypeError:
+                        # Builder doesn't accept worker_output_paths
+                        return prompt_builder(
+                            worker_results, original_query=original_query
+                        )
+                # Default: join all worker results with path references
                 parts = []
                 for idx, res in enumerate(worker_results):
-                    parts.append(f"### Result {idx + 1}\n{res}")
+                    path_ref = ""
+                    if idx < len(_captured_paths) and _captured_paths[idx]:
+                        path_ref = (
+                            f"\n(Full output at: `{_captured_paths[idx]}`)"
+                        )
+                    parts.append(f"### Result {idx + 1}\n{res}{path_ref}")
                 return "\n\n".join(parts)
 
             def _make_agg_fn(agg_inf, prompt_builder, original_query, is_async):
@@ -267,9 +311,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 checkpoint_mode=self.checkpoint_mode,
                 retry_on_exceptions=(Exception,),
             )
-            if self.checkpoint_dir:
-                _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+            _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+            _agg_ckpt = None
+            if self._workspace is not None:
+                _agg_ckpt = self._workspace.checkpoint_path("aggregator_result")
+            elif self.checkpoint_dir:
                 _agg_ckpt = os.path.join(self.checkpoint_dir, "aggregator_result")
+            if _agg_ckpt:
                 agg_node._get_result_path = (
                     lambda rid, *a, _d=_agg_ckpt, _e=_ext, **kw: os.path.join(
                         _d, f"{rid}_result{_e}"
@@ -284,16 +332,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     def _get_result_path(self, result_id, *args, **kwargs):
         """Provide result path for WorkGraph-level result saving."""
+        if self._workspace is not None:
+            ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+            return self._workspace.checkpoint_path(f"{result_id}_result{ext}")
         if self.checkpoint_dir:
             ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
             return os.path.join(self.checkpoint_dir, f"{result_id}_result{ext}")
-        raise NotImplementedError("checkpoint_dir must be set for result saving")
+        raise NotImplementedError(
+            "checkpoint_dir or workspace_root must be set for result saving"
+        )
 
     def _load_breakdown_checkpoint(self):
         """Load saved breakdown result if resuming and checkpoint exists."""
-        if not self.resume_with_saved_results or not self.checkpoint_dir:
+        if not self.resume_with_saved_results:
             return None
-        ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
+        if self._workspace is not None:
+            ckpt = self._workspace.checkpoint_path("breakdown_result.json")
+        elif self.checkpoint_dir:
+            ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
+        else:
+            return None
         if not os.path.exists(ckpt):
             return None
         try:
@@ -312,9 +370,12 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     def _save_breakdown_checkpoint(self, raw_output, sub_queries):
         """Save breakdown result and parsed sub_queries to checkpoint."""
-        if not self.checkpoint_dir:
+        if self._workspace is not None:
+            ckpt = self._workspace.checkpoint_path("breakdown_result.json")
+        elif self.checkpoint_dir:
+            ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
+        else:
             return
-        ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
         os.makedirs(os.path.dirname(ckpt), exist_ok=True)
         try:
             with open(ckpt, "w") as f:
@@ -328,6 +389,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             )
         except OSError as e:
             _logger.warning("Failed to save breakdown checkpoint: %s", e)
+
+    def _finalize_response(self, result):
+        """Copy aggregator output to workspace outputs/ as final deliverable.
+
+        Only runs in workspace mode with output_path set. Idempotent.
+        """
+        if self._workspace is None or not self.output_path:
+            return
+        dst = self._workspace.output_path(self.output_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            with open(dst, "w") as f:
+                f.write(str(result))
+        except OSError as e:
+            _logger.warning("Failed to write final output to %s: %s", dst, e)
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         """Core inference: breakdown → build graph → run graph."""
@@ -347,7 +423,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             )
             result = WorkGraph._run(self, inference_input, **kwargs)
             if isinstance(result, tuple) and len(result) == 1:
-                return result[0]
+                result = result[0]
+            self._finalize_response(result)
             return result
 
         # Step 1: Breakdown
@@ -385,7 +462,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         result = WorkGraph._run(self, inference_input, **kwargs)
         # Unwrap single-element tuples from WorkGraph's post_process
         if isinstance(result, tuple) and len(result) == 1:
-            return result[0]
+            result = result[0]
+        self._finalize_response(result)
         return result
 
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
@@ -410,7 +488,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 self.use_async = old_use_async
             result = await WorkGraph._arun(self, inference_input, **kwargs)
             if isinstance(result, tuple) and len(result) == 1:
-                return result[0]
+                result = result[0]
+            self._finalize_response(result)
             return result
 
         # Step 1: Breakdown
@@ -477,7 +556,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         result = await WorkGraph._arun(self, inference_input, **kwargs)
         # Unwrap single-element tuples from WorkGraph's post_process
         if isinstance(result, tuple) and len(result) == 1:
-            return result[0]
+            result = result[0]
 
         # Step 5b: Interactive results review checkpoint
         if self.enable_checkpoint_results_review and self.interactive:
@@ -494,4 +573,5 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 # Re-run the entire graph
                 return await self._ainfer(inference_input, inference_config, **kwargs)
 
+        self._finalize_response(result)
         return result

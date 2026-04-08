@@ -1,7 +1,8 @@
 import asyncio
+import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, AsyncIterator, Callable, Iterable, Iterator, Sequence, Type, Union
+from typing import Any, AsyncIterator, Callable, Iterable, Iterator, Optional, Sequence, Type, Union
 
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
@@ -78,6 +79,11 @@ class InferencerBase(Debuggable, ABC):
     # Whether this inferencer has local file system access (e.g., can write files).
     # False for cloud API inferencers (RovoChat), True for local agents (RovoDevCli).
     has_local_access: bool = attrib(default=False)
+
+    # Default output path — when relative and a workspace is set (via _workspace
+    # on flow inferencers), resolves to workspace.outputs_dir/<output_path>.
+    # Simple API inferencers leave this as None.
+    output_path: Optional[str] = attrib(default=None)
 
     def __attrs_post_init__(self):
         if isinstance(self.post_response_merger, str):
@@ -263,6 +269,35 @@ class InferencerBase(Debuggable, ABC):
         Default: no-op.
         """
         pass
+
+    # -- Workspace output path resolution --
+
+    def resolve_output_path(
+        self, runtime_override: Optional[str] = None
+    ) -> Optional[str]:
+        """Resolve the effective output path.
+
+        Priority: *runtime_override* > ``self.output_path``.
+
+        Resolution:
+        - If the path is relative and ``_workspace`` is set (flow inferencers),
+          resolve to ``workspace.outputs_dir / path``.
+        - If the path is absolute, return as-is.
+        - If no workspace, return the path unchanged.
+
+        No side effects (no directory creation, no file I/O).
+
+        Flow inferencers set ``_workspace`` in ``__attrs_post_init__`` or when
+        assigned by a parent.  Simple API inferencers never set it, so
+        ``getattr`` returns ``None`` and this method returns the raw path.
+        """
+        path = runtime_override if runtime_override is not None else self.output_path
+        if path is None:
+            return None
+        ws = getattr(self, "_workspace", None)
+        if ws is not None and not os.path.isabs(path):
+            return ws.output_path(path)
+        return path
 
     def _infer_iterator(
         self, inference_input: Any, inference_config: Any = None, **_inference_args

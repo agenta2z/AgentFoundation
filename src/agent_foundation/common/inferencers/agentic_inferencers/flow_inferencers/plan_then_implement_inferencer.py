@@ -22,7 +22,9 @@ import glob
 import json
 import os
 import re
+import shutil
 from datetime import datetime, timezone
+from enum import Flag, auto
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from attr import attrib, attrs
@@ -216,6 +218,34 @@ _PHASE_TO_STEP_INDEX = {
 }
 
 
+class PTIOutputMode(Flag):
+    """Which child outputs PTI surfaces as its own final deliverables."""
+
+    PLAN = auto()
+    IMPLEMENTATION = auto()
+    ANALYSIS = auto()
+
+    PLAN_AND_IMPLEMENTATION = PLAN | IMPLEMENTATION
+    ALL = PLAN | IMPLEMENTATION | ANALYSIS
+
+
+_OUTPUT_MODE_MAP = {
+    PTIOutputMode.PLAN: ("planner", "plan.md"),
+    PTIOutputMode.IMPLEMENTATION: ("executor", "implementation.md"),
+    PTIOutputMode.ANALYSIS: ("analyzer", "analysis.md"),
+}
+
+# Attr name → (short workspace name, default output_path)
+_CHILD_DEFAULTS = {
+    "planner_inferencer": ("planner", "plan.md"),
+    "executor_inferencer": ("executor", "implementation.md"),
+    "analyzer_inferencer": ("analyzer", "analysis.md"),
+}
+
+# Attr name → short workspace name (for _setup_child_workflows)
+_CHILD_NAME_MAP = {k: v[0] for k, v in _CHILD_DEFAULTS.items()}
+
+
 @artifact_type(Workflow, type="json", group="workflows")
 @attrs(slots=False)
 class PlanThenImplementInferencer(InferencerBase, Workflow):
@@ -332,6 +362,10 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     workspace_path: Optional[str] = attrib(default=None)
     resume_workspace: Optional[str] = attrib(default=None)
     iteration_handoff_template: Optional[str] = attrib(default=None)
+
+    # Declarative output selection — controls which child outputs
+    # _finalize_outputs() copies to workspace root outputs/.
+    output_mode: PTIOutputMode = attrib(default=PTIOutputMode.IMPLEMENTATION)
 
     # Analysis mode config
     analysis_mode: str = attrib(default="last_with_cross_ref")
@@ -562,9 +596,13 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         workspace_path: str, iteration: int, request_text: str
     ) -> None:
         """Create workspace directory structure and write request.txt."""
-        for subdir in ("outputs", "results", "analysis", "logs", "_runtime"):
-            os.makedirs(os.path.join(workspace_path, subdir), exist_ok=True)
-        with open(os.path.join(workspace_path, "request.txt"), "w") as f:
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws = InferencerWorkspace(root=workspace_path)
+        ws.ensure_dirs("results", "analysis", "_runtime")
+        with open(ws.artifact_path("request.txt"), "w") as f:
             f.write(request_text)
 
     def _build_iteration_config(
@@ -573,27 +611,45 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         """Build a per-iteration inference_config with workspace-local output paths.
 
         Deep-copies the original config and rewrites output_path values to
-        point to the iteration's workspace directory.
+        point to the iteration's workspace directory.  Skips rewriting for
+        children that already have a workspace assigned (full composition mode).
         """
-        iter_config = copy.deepcopy(inference_config)
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
 
-        for config_key in (self.plan_config_key, self.implement_config_key):
+        iter_config = copy.deepcopy(inference_config)
+        ws = InferencerWorkspace(root=iter_workspace)
+
+        # Only rewrite output_path for children without workspace
+        planner_has_ws = getattr(self.planner_inferencer, "_workspace", None) is not None
+        executor_has_ws = getattr(self.executor_inferencer, "_workspace", None) is not None
+
+        for config_key, child_has_ws in (
+            (self.plan_config_key, planner_has_ws),
+            (self.implement_config_key, executor_has_ws),
+        ):
+            if child_has_ws:
+                continue
             sub_config = iter_config.get(config_key)
             if isinstance(sub_config, dict) and "output_path" in sub_config:
                 basename = os.path.basename(sub_config["output_path"])
-                sub_config["output_path"] = os.path.join(
-                    iter_workspace, "outputs", basename
-                )
+                sub_config["output_path"] = ws.output_path(basename)
 
-        # Set up analysis output path
-        analysis_sub = iter_config.get(self.analysis_config_key)
-        if not isinstance(analysis_sub, dict):
-            analysis_sub = {}
-            iter_config[self.analysis_config_key] = analysis_sub
-        analysis_sub["output_path"] = os.path.join(
-            iter_workspace, "analysis", f"iteration_{iteration}_analysis.md"
+        # Analyzer: skip if it has workspace; otherwise write to analysis/
+        analyzer_has_ws = (
+            self.analyzer_inferencer is not None
+            and getattr(self.analyzer_inferencer, "_workspace", None) is not None
         )
-        os.makedirs(os.path.join(iter_workspace, "analysis"), exist_ok=True)
+        if not analyzer_has_ws:
+            analysis_sub = iter_config.get(self.analysis_config_key)
+            if not isinstance(analysis_sub, dict):
+                analysis_sub = {}
+                iter_config[self.analysis_config_key] = analysis_sub
+            analysis_sub["output_path"] = ws.analysis_path(
+                f"iteration_{iteration}_analysis.md"
+            )
+            os.makedirs(os.path.dirname(analysis_sub["output_path"]), exist_ok=True)
 
         return iter_config
 
@@ -926,20 +982,40 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
     @staticmethod
     def _save_analysis_summary(
-        results_dir: str,
+        workspace_or_results_dir: str,
         should_continue: bool,
         summary: str,
         next_iteration_request: str,
         analysis_doc_path: Optional[str],
     ) -> None:
-        """Write analysis_summary.json to the results directory."""
+        """Write analysis_summary.json to artifacts/ (new) or results/ (legacy).
+
+        Accepts either a workspace root path (new callers) or a results/
+        subdirectory path (legacy callers).  Detects which by checking if
+        an ``artifacts/`` subdirectory exists or can be created at the root.
+        """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
         data = {
             "should_continue": should_continue,
             "summary": summary,
             "next_iteration_request": next_iteration_request,
             "analysis_doc_path": analysis_doc_path,
         }
-        path = os.path.join(results_dir, "analysis_summary.json")
+        # Try workspace mode: if the path has artifacts/ subdir or we can
+        # identify it as a workspace root (not ending with "results")
+        artifacts_dir = os.path.join(workspace_or_results_dir, "artifacts")
+        if os.path.isdir(artifacts_dir) or not workspace_or_results_dir.rstrip(
+            os.sep
+        ).endswith("results"):
+            ws = InferencerWorkspace(root=workspace_or_results_dir)
+            path = ws.artifact_path("analysis_summary.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        else:
+            # Legacy: caller passed the results/ subdirectory directly
+            path = os.path.join(workspace_or_results_dir, "analysis_summary.json")
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -950,24 +1026,53 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     def _load_existing_plan(self, iter_workspace: str) -> Tuple[str, Optional[str]]:
         """Load the highest-round plan file from a workspace.
 
+        Checks child workspace (``children/planner/``) first, then falls
+        back to legacy (``outputs/``).
+
         Returns:
             Tuple of (plan_text, plan_file_path). Empty string and None if
             no plan files found.
         """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws = InferencerWorkspace(root=iter_workspace)
+
+        # New: child workspace final output
+        child_final = ws.child_output("planner", "plan.md")
+        if os.path.isfile(child_final):
+            try:
+                with open(child_final) as f:
+                    return f.read(), child_final
+            except Exception:
+                pass
+
+        # New: child workspace artifacts (round files)
+        child_art_dir = os.path.join(ws.children_dir, "planner", "artifacts")
+        if os.path.isdir(child_art_dir):
+            child_files = glob.glob(
+                os.path.join(child_art_dir, "round*_plan.md")
+            )
+            if child_files:
+                best = max(child_files, key=self._extract_round)
+                try:
+                    with open(best) as f:
+                        return f.read(), best
+                except Exception:
+                    pass
+
+        # Legacy: outputs/ directly
         pattern = os.path.join(iter_workspace, "outputs", "round*_plan.md")
         matching = glob.glob(pattern)
         if not matching:
             self.log_info(
-                f"No plan files found in {iter_workspace}/outputs",
+                f"No plan files found in {iter_workspace}",
                 "LoadExistingPlanNotFound",
             )
             return "", None
 
-        def extract_round(path: str) -> int:
-            m = re.search(r"round(\d+)", os.path.basename(path))
-            return int(m.group(1)) if m else -1
-
-        best = max(matching, key=extract_round)
+        best = max(matching, key=self._extract_round)
         try:
             with open(best) as f:
                 content = f.read()
@@ -978,23 +1083,52 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     def _load_existing_implementation(self, iter_workspace: str) -> str:
         """Load the highest-round implementation file from a workspace.
 
+        Checks child workspace (``children/executor/``) first, then falls
+        back to legacy (``outputs/``).
+
         Returns:
             Implementation text. Empty string if no files found.
         """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws = InferencerWorkspace(root=iter_workspace)
+
+        # New: child workspace final output
+        child_final = ws.child_output("executor", "implementation.md")
+        if os.path.isfile(child_final):
+            try:
+                with open(child_final) as f:
+                    return f.read()
+            except Exception:
+                pass
+
+        # New: child workspace artifacts (round files)
+        child_art_dir = os.path.join(ws.children_dir, "executor", "artifacts")
+        if os.path.isdir(child_art_dir):
+            child_files = glob.glob(
+                os.path.join(child_art_dir, "round*_implementation.md")
+            )
+            if child_files:
+                best = max(child_files, key=self._extract_round)
+                try:
+                    with open(best) as f:
+                        return f.read()
+                except Exception:
+                    pass
+
+        # Legacy: outputs/ directly
         pattern = os.path.join(iter_workspace, "outputs", "round*_implementation.md")
         matching = glob.glob(pattern)
         if not matching:
             self.log_info(
-                f"No implementation files found in {iter_workspace}/outputs",
+                f"No implementation files found in {iter_workspace}",
                 "LoadExistingImplNotFound",
             )
             return ""
 
-        def extract_round(path: str) -> int:
-            m = re.search(r"round(\d+)", os.path.basename(path))
-            return int(m.group(1)) if m else -1
-
-        best = max(matching, key=extract_round)
+        best = max(matching, key=self._extract_round)
         try:
             with open(best) as f:
                 return f.read()
@@ -1028,51 +1162,107 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
     # region Resume Detection (Phase 4) — file-based, kept for backward compat
 
+    @staticmethod
+    def _extract_round(path: str) -> int:
+        """Extract round number from a filename like ``round03_plan.md``."""
+        m = re.search(r"round(\d+)", os.path.basename(path))
+        return int(m.group(1)) if m else -1
+
+    @staticmethod
+    def _find_analysis_summary(workspace_path: str) -> Optional[str]:
+        """Find analysis_summary.json in artifacts/ (new) or results/ (legacy)."""
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws = InferencerWorkspace(root=workspace_path)
+        path = ws.artifact_path("analysis_summary.json")
+        if os.path.isfile(path):
+            return path
+        legacy = os.path.join(workspace_path, "results", "analysis_summary.json")
+        return legacy if os.path.isfile(legacy) else None
+
     def _detect_workspace_state(
         self, workspace_path: str, iteration: int
     ) -> WorkspaceState:
-        """Detect the completion state of a workspace directory."""
+        """Detect the completion state of a workspace directory.
+
+        Checks both new composition locations (``children/<name>/``) and
+        legacy locations (``outputs/``) for backward compatibility.
+        Markers are checked via ``InferencerWorkspace.has_marker()`` which
+        looks in ``artifacts/`` then ``outputs/``.
+        """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
         state = WorkspaceState(workspace_path=workspace_path, iteration=iteration)
+        ws = InferencerWorkspace(root=workspace_path)
 
-        plan_pattern = os.path.join(workspace_path, "outputs", "round*_plan.md")
-        plan_files = glob.glob(plan_pattern)
-        if plan_files:
+        # -- Plan detection: child workspace then legacy --
+        plan_file = None
 
-            def _extract_round(p: str) -> int:
-                m = re.search(r"round(\d+)", os.path.basename(p))
-                return int(m.group(1)) if m else -1
+        child_plan_final = ws.child_output("planner", "plan.md")
+        if os.path.isfile(child_plan_final):
+            plan_file = child_plan_final
+        else:
+            child_art_dir = os.path.join(ws.children_dir, "planner", "artifacts")
+            if os.path.isdir(child_art_dir):
+                child_files = glob.glob(
+                    os.path.join(child_art_dir, "round*_plan.md")
+                )
+                if child_files:
+                    plan_file = max(child_files, key=self._extract_round)
 
-            state.plan_file_path = max(plan_files, key=_extract_round)
+        if plan_file is None:
+            legacy_files = glob.glob(
+                os.path.join(workspace_path, "outputs", "round*_plan.md")
+            )
+            if legacy_files:
+                plan_file = max(legacy_files, key=self._extract_round)
 
-            plan_marker = os.path.join(workspace_path, "outputs", ".plan_completed")
-            if os.path.isfile(plan_marker):
+        if plan_file is not None:
+            state.plan_file_path = plan_file
+            if ws.has_marker("plan"):
                 state.plan_done = True
                 state.plan_partial = False
             else:
-                # Plan content exists (DualInferencer wrote consensus output)
-                # but completion was never confirmed.  Keep plan_done=True
-                # for backward compat — plan IS usable.
                 state.plan_done = True
                 state.plan_partial = True
 
-        impl_pattern = os.path.join(
-            workspace_path, "outputs", "round*_implementation.md"
-        )
-        impl_files = glob.glob(impl_pattern)
-        if impl_files:
-            impl_marker = os.path.join(workspace_path, "outputs", ".impl_completed")
-            if os.path.isfile(impl_marker):
+        # -- Implementation detection: child workspace then legacy --
+        impl_file = None
+
+        child_impl_final = ws.child_output("executor", "implementation.md")
+        if os.path.isfile(child_impl_final):
+            impl_file = child_impl_final
+        else:
+            child_art_dir = os.path.join(ws.children_dir, "executor", "artifacts")
+            if os.path.isdir(child_art_dir):
+                child_files = glob.glob(
+                    os.path.join(child_art_dir, "round*_implementation.md")
+                )
+                if child_files:
+                    impl_file = max(child_files, key=self._extract_round)
+
+        if impl_file is None:
+            legacy_files = glob.glob(
+                os.path.join(workspace_path, "outputs", "round*_implementation.md")
+            )
+            if legacy_files:
+                impl_file = max(legacy_files, key=self._extract_round)
+
+        if impl_file is not None:
+            if ws.has_marker("impl"):
                 state.impl_done = True
                 state.impl_partial = False
             else:
-                # Impl output exists but completion was never confirmed.
-                # This is the critical fix: prevents the false positive
-                # that skipped re-running implementation in failed runs.
                 state.impl_done = False
                 state.impl_partial = True
 
-        summary_path = os.path.join(workspace_path, "results", "analysis_summary.json")
-        if os.path.isfile(summary_path):
+        # -- Analysis detection (artifacts/ then results/ fallback) --
+        summary_path = self._find_analysis_summary(workspace_path)
+        if summary_path is not None:
             state.analysis_done = True
             try:
                 with open(summary_path) as f:
@@ -1243,12 +1433,18 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     def _setup_child_workflows(self, state, *args, **kwargs):
         """Override to provide per-iteration child workflow directories.
 
-        Uses _current_base_workspace for stable parent paths, but injects
-        the iteration number into child subdirectories so that DualInferencer
-        checkpoints from iteration 1 don't contaminate iteration 2.
+        Workspace-mode children (``_workspace`` set by
+        ``_setup_iteration_children``) manage their own checkpoint paths,
+        so ``_result_root_override`` is set to ``None`` (the child's
+        ``_get_result_path`` returns full absolute paths).
 
-        Child paths:  <base>/checkpoints/pti/iter_<N>/<attr_name>/
+        Legacy children get manual path isolation:
+        ``<base>/checkpoints/pti/iter_<N>/<attr_name>/``
         """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
         if state is None:
             return
 
@@ -1269,11 +1465,23 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         all_children.update(self._find_child_workflows_in(state))
 
         for attr_name, (child, entry) in all_children.items():
-            child_dir = os.path.join(
-                base, "checkpoints", "pti", f"iter_{iteration}", attr_name
-            )
-            os.makedirs(child_dir, exist_ok=True)
-            child._result_root_override = child_dir
+            child_has_workspace = getattr(child, "_workspace", None) is not None
+
+            if child_has_workspace:
+                # Full composition: child manages own checkpoint paths.
+                # _resolve_result_path with None returns as-is.
+                child._result_root_override = None
+            else:
+                # Legacy: manual path for checkpoint isolation
+                ws = InferencerWorkspace(root=base)
+                child_dir = os.path.join(
+                    ws.checkpoint_path("pti"),
+                    f"iter_{iteration}",
+                    attr_name,
+                )
+                os.makedirs(child_dir, exist_ok=True)
+                child._result_root_override = child_dir
+
             child.enable_result_save = self.enable_result_save
             child.resume_with_saved_results = self.resume_with_saved_results
             child.checkpoint_mode = self.checkpoint_mode
@@ -1289,10 +1497,15 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         Step results are distinguished by ___seqN suffixes (monotonically
         increasing), so they never collide even in a single directory.
         """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
         base = getattr(self, "_current_base_workspace", None)
         if not base:
             return ""
-        return os.path.join(base, "checkpoints", "pti", f"step_{result_id}.json")
+        ws = InferencerWorkspace(root=base)
+        return ws.checkpoint_path(os.path.join("pti", f"step_{result_id}.json"))
 
     def _save_result(self, result, output_path: str):
         """Save step result as JSON with explicit dict__ pre-conversion."""
@@ -1587,25 +1800,23 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     def _write_step_completion_marker(workspace_path: str, phase_name: str) -> None:
         """Write a JSON marker confirming that a step completed successfully.
 
-        Creates ``<workspace>/outputs/.<phase>_completed`` containing a
+        Creates ``<workspace>/artifacts/.<phase>_completed`` containing a
         timestamp and step name.  Used by Tier 2 (file-based) resume
         detection in ``_detect_workspace_state`` to distinguish between
         "output file exists AND step finished" vs "output file exists but
         step may have been interrupted."
+
+        Legacy note: markers previously lived in ``outputs/``. The
+        ``InferencerWorkspace.has_marker()`` method checks both locations
+        for backward compatibility.
         """
-        outputs_dir = os.path.join(workspace_path, "outputs")
-        os.makedirs(outputs_dir, exist_ok=True)
-        marker_path = os.path.join(outputs_dir, f".{phase_name}_completed")
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
         try:
-            with open(marker_path, "w") as f:
-                json.dump(
-                    {
-                        "completed_at": datetime.now(timezone.utc).isoformat(),
-                        "step": phase_name,
-                    },
-                    f,
-                    indent=2,
-                )
+            ws = InferencerWorkspace(root=workspace_path)
+            ws.write_marker(phase_name)
         except Exception:
             pass
 
@@ -2175,6 +2386,78 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
     # endregion
 
+    # region Workspace Composition Helpers
+
+    def _setup_iteration_children(self, state):
+        """Set up child workspaces for the current iteration.
+
+        Called once per iteration before any step runs.  Uses
+        ``_CHILD_DEFAULTS`` to map attr names to short workspace names
+        and default output_path values.
+        """
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        if self._workspace is None:
+            return
+        iter_ws_path = self._get_iteration_workspace(
+            self._current_base_workspace, state["iteration"]
+        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
+
+        for attr_name, (short_name, default_output) in _CHILD_DEFAULTS.items():
+            child = getattr(self, attr_name, None)
+            if child is None or not isinstance(child, InferencerBase):
+                continue
+            child_ws = iter_ws.child(short_name)
+            child_ws.ensure_dirs()
+            child._workspace = child_ws
+            if not child.output_path:
+                child.output_path = default_output
+
+    def _finalize_outputs(self):
+        """Copy selected child outputs from LAST iteration to workspace root.
+
+        Driven by ``output_mode`` and ``_OUTPUT_MODE_MAP``.  Only runs in
+        workspace mode.  Idempotent — safe on re-run after crash.
+        """
+        if self._workspace is None:
+            return
+        state = self._state or {}
+        last_iter = state.get("iteration", 1)
+
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        iter_ws_path = self._get_iteration_workspace(
+            self._workspace.root, last_iter
+        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
+
+        os.makedirs(self._workspace.outputs_dir, exist_ok=True)
+        for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
+            if flag in self.output_mode:
+                src = iter_ws.child_output(child_name, filename)
+                dst = self._workspace.output_path(filename)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
+
+    def resolve_output_path(self, runtime_override=None):
+        """PTI override: resolve based on output_mode."""
+        if runtime_override is not None:
+            return super().resolve_output_path(runtime_override)
+        if self._workspace is None:
+            return None
+        active = [f for f in _OUTPUT_MODE_MAP if f in self.output_mode]
+        if len(active) == 1:
+            _, filename = _OUTPUT_MODE_MAP[active[0]]
+            return self._workspace.output_path(filename)
+        return self._workspace.outputs_dir
+
+    # endregion
+
     # region Core Two-Phase Flow (Phase D.5)
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
@@ -2248,6 +2531,16 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         self._current_inference_config = inference_config
         self._current_inference_args = _inference_args
 
+        # Workspace reconstruction
+        if base_workspace:
+            from agent_foundation.common.inferencers.inferencer_workspace import (
+                InferencerWorkspace,
+            )
+
+            self._workspace = InferencerWorkspace(root=base_workspace)
+        else:
+            self._workspace = None
+
         # CRITICAL: set before _arun so _setup_child_workflows gets valid paths
         self._current_iteration_workspace = (
             self._get_iteration_workspace(base_workspace, 1) if base_workspace else None
@@ -2278,6 +2571,9 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
         # Run the workflow
         await Workflow._arun(self, inference_input, **_inference_args)
+
+        # Copy selected child outputs to workspace root outputs/
+        self._finalize_outputs()
 
         return self._build_response_from_state(self._state)
 

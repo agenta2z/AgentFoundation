@@ -275,44 +275,50 @@ class TestResumability(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_resume_after_partial_workers(self):
-        """3 workers: first 2 complete and save results, crash before 3rd.
-        On resume, workers 1-2 should load from saved results."""
-        breakdown = MockInferencer(response="1. W1\n2. W2\n3. W3")
+        """Crash during workers → resume skips breakdown (loaded from checkpoint).
+
+        Worker nodes explicitly disable result saving (enable_result_save=False)
+        so that workers handle their own internal checkpointing. On resume,
+        the breakdown checkpoint IS loaded (skipping the breakdown step), but
+        all workers re-execute — this is by design, since workers (which could
+        be PTI or DualInferencer instances) manage their own resume internally.
+        """
+        breakdown_call_count = [0]
+
+        def counting_breakdown_fn(inp):
+            breakdown_call_count[0] += 1
+            return "1. W1\n2. W2\n3. W3"
+
+        breakdown = MockInferencer(response=counting_breakdown_fn)
 
         # --- First run: simulate crash on worker 3 ---
-        run1_call_counts = [0, 0, 0]
-
         def crashing_factory(sub_query, index):
             def worker_fn(inp):
-                run1_call_counts[index] += 1
                 if index == 2:
                     raise RuntimeError("Simulated crash on worker 3")
                 return f"result_{index}"
 
             return MockInferencer(response=worker_fn)
 
-        from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
-            StepResultSaveOptions,
-        )
-
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
             worker_factory=crashing_factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
-            enable_result_save=StepResultSaveOptions.OnError,
             resume_with_saved_results=False,
         )
 
         with self.assertRaises(RuntimeError):
             bta.infer("question")
 
-        # --- Second run: resume, workers 1-2 should load saved results ---
-        run2_call_counts = [0, 0, 0]
+        self.assertEqual(breakdown_call_count[0], 1, "Breakdown ran once in first run")
+
+        # --- Second run: resume, breakdown should be skipped (loaded from checkpoint) ---
+        run2_worker_calls = [0, 0, 0]
 
         def resuming_factory(sub_query, index):
             def worker_fn(inp):
-                run2_call_counts[index] += 1
+                run2_worker_calls[index] += 1
                 return f"result_{index}"
 
             return MockInferencer(response=worker_fn)
@@ -322,17 +328,22 @@ class TestResumability(unittest.TestCase):
             worker_factory=resuming_factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
-            enable_result_save=StepResultSaveOptions.Always,
             resume_with_saved_results=True,
         )
 
         result = bta_resume.infer("question")
 
-        # Workers 0 and 1 should NOT have been called again (loaded from save)
-        self.assertEqual(run2_call_counts[0], 0, "Worker 0 should load from saved")
-        self.assertEqual(run2_call_counts[1], 0, "Worker 1 should load from saved")
-        # Worker 2 should have been called (no saved result from crash)
-        self.assertEqual(run2_call_counts[2], 1, "Worker 2 should execute on resume")
+        # Breakdown should NOT run again — loaded from checkpoint
+        self.assertEqual(
+            breakdown_call_count[0], 1,
+            "Breakdown should not re-run on resume (loaded from checkpoint)"
+        )
+        # All workers re-execute (by design: worker nodes have enable_result_save=False)
+        for i in range(3):
+            self.assertEqual(
+                run2_worker_calls[i], 1,
+                f"Worker {i} should execute on resume (workers manage own checkpoints)"
+            )
 
 
 

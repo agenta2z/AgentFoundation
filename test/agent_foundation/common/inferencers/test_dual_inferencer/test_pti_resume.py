@@ -440,7 +440,7 @@ class TestPTIBlockDirectRunArun(unittest.TestCase):
             executor_inferencer=executor,
         )
         with self.assertRaises(NotImplementedError):
-            asyncio.get_event_loop().run_until_complete(pti.arun())
+            asyncio.run(pti.arun())
 
 
 class TestPTIGetResultPath(unittest.TestCase):
