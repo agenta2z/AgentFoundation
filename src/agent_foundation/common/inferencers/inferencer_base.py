@@ -75,6 +75,10 @@ class InferencerBase(Debuggable, ABC):
     # State graph support — optional list of StateGraphTracker instances
     state_graphs: list = attrib(default=None)
 
+    # Whether this inferencer has local file system access (e.g., can write files).
+    # False for cloud API inferencers (RovoChat), True for local agents (RovoDevCli).
+    has_local_access: bool = attrib(default=False)
+
     def __attrs_post_init__(self):
         if isinstance(self.post_response_merger, str):
             if self.post_response_merger == "default":

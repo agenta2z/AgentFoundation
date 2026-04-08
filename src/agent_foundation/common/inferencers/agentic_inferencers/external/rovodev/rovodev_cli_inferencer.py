@@ -97,6 +97,7 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
     """
 
     # --- Configuration ---
+    has_local_access: bool = attrib(default=True)
     acli_path: Optional[str] = attrib(default=None)
     config_file: Optional[str] = attrib(default=None)
     site_url: Optional[str] = attrib(default=None)
