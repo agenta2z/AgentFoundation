@@ -110,9 +110,6 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Development
-_dev/
-
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
 # ============================================
@@ -146,3 +143,8 @@ src/agent_foundation/ui/webui/experiment_configs/*/codebase/
 # Sphinx build output
 _build/
 doctrees/
+
+# Underscore-prefixed working directories
+_runtime/
+_tmp/
+_logs/
