@@ -85,6 +85,16 @@ class InferencerBase(Debuggable, ABC):
     # Simple API inferencers leave this as None.
     output_path: Optional[str] = attrib(default=None)
 
+    # === Template-based prompt rendering (opt-in) ===
+    # When template_manager is set, inference_input is treated as the raw
+    # user query.  Before reaching _infer(), the base class renders a Jinja2
+    # template via template_manager, binding the raw input to {{ input }}.
+    # This eliminates the need for PromptWrapperInferencer in most cases.
+    template_manager: Optional[Any] = attrib(default=None)
+    template_key: str = attrib(default="")
+    template_root_space: Optional[str] = attrib(default=None)
+    template_extra_feed: dict = attrib(factory=dict)
+
     def __attrs_post_init__(self):
         if isinstance(self.post_response_merger, str):
             if self.post_response_merger == "default":
@@ -122,6 +132,69 @@ class InferencerBase(Debuggable, ABC):
         """
         raise NotImplementedError
 
+    # -- Template rendering & output finalization -------------------------
+
+    def _build_template_feed(self, inference_input: str) -> dict:
+        """Build the template variable feed dict.
+
+        Merges ``template_extra_feed`` with ``{{ input }}`` bound to
+        ``inference_input``.  Conditionally includes ``output_path``
+        only when the inferencer has local file access.
+
+        Override this method to customize feed construction (e.g., add
+        dynamic variables from external sources).
+        """
+        feed: dict = {"input": inference_input}
+        feed.update(self.template_extra_feed)
+        resolved = self.resolve_output_path()
+        if resolved and os.path.isabs(resolved) and self.has_local_access:
+            feed["output_path"] = resolved
+        return feed
+
+    def _render_prompt(self, inference_input: Any) -> Any:
+        """Render a template-based prompt if template_manager is configured.
+
+        Called by ``_infer_single`` / ``_ainfer_single`` after
+        ``input_preprocessor`` and before ``_infer``.  When
+        ``template_manager`` is None, returns ``inference_input`` unchanged.
+        """
+        if self.template_manager is None:
+            return inference_input
+        feed = self._build_template_feed(inference_input)
+        return self.template_manager(
+            self.template_key,
+            active_template_root_space=self.template_root_space,
+            **feed,
+        )
+
+    def _finalize_output(self, response: Any) -> Any:
+        """Post-process output when template_manager is active.
+
+        When the inferencer lacks local file access but has an
+        ``output_path``, extracts ``<Response>``-delimited content from
+        the response, writes it to the resolved output path, and returns
+        the cleaned text.  This mirrors what PromptWrapperInferencer
+        previously did in ``_save_response_if_needed``.
+
+        Called by ``_infer_single`` / ``_ainfer_single`` after ``_infer``
+        returns but before ``response_post_processor``.
+        """
+        if self.template_manager is None:
+            return response
+        resolved = self.resolve_output_path()
+        if not resolved or not os.path.isabs(resolved):
+            return response
+        if self.has_local_access:
+            # Local-access inferencer writes the file itself
+            return response
+        # Non-local: extract <Response> content and save to file
+        from agent_foundation.common.response_parsers import extract_delimited
+        cleaned = extract_delimited(str(response))
+        os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(cleaned)
+        return cleaned
+
     def _infer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
@@ -154,6 +227,9 @@ class InferencerBase(Debuggable, ABC):
 
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
+
+        # Template rendering (opt-in: only when template_manager is set)
+        inference_input = self._render_prompt(inference_input)
 
         inference_args = self.default_inference_args.copy()
         if _inference_args:
@@ -218,6 +294,9 @@ class InferencerBase(Debuggable, ABC):
         )
 
         self.log_debug(inference_response, "InferenceResponse")
+
+        # Template output finalization (extract <Response>, save to file)
+        inference_response = self._finalize_output(inference_response)
 
         # Update state graphs from response
         if self.state_graphs:
@@ -553,6 +632,9 @@ class InferencerBase(Debuggable, ABC):
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
 
+        # Template rendering (opt-in: only when template_manager is set)
+        inference_input = self._render_prompt(inference_input)
+
         inference_args = self.default_inference_args.copy()
         if _inference_args:
             inference_args.update(_inference_args)
@@ -630,6 +712,9 @@ class InferencerBase(Debuggable, ABC):
             inference_response = await _do_inference()
 
         self.log_debug(inference_response, "InferenceResponse")
+
+        # Template output finalization (extract <Response>, save to file)
+        inference_response = self._finalize_output(inference_response)
 
         # Update state graphs from response
         if self.state_graphs:

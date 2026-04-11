@@ -113,6 +113,7 @@ class ToolDefinition:
     # another tool with argument translation and a template_version override.
     # Used by tool_executor for dispatch and by prompt rendering for docs.
     derived_from: dict[str, Any] | None = None
+    source_path: str = ""  # Path to the tool.json file (set by registry)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {

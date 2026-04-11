@@ -58,7 +58,7 @@ class RovoDevServeInferencer(StreamingInferencerBase):
         site_url: Atlassian site URL for billing.
         port: Serve port (auto-selected if None).
         disable_session_token: Disable auth on serve API.
-        startup_timeout: Max seconds to wait for server startup.
+startup_timeout: Max seconds to wait for server startup.
         non_interactive: Non-interactive mode.
         respect_configured_permissions: Respect config file permissions.
         agent_mode: Agent mode ("ask", "plan", or "default").

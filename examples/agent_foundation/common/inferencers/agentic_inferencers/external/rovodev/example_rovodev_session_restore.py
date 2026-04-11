@@ -5,14 +5,18 @@ Demonstrates that Rovo Dev sessions can be saved and restored by their
 UUID, enabling true multi-turn conversations across separate invocations.
 
 The Test:
-    1. **Session A**: Tell Rovo Dev a secret word ("banana")
-    2. **Session B**: Tell Rovo Dev a different secret word ("dragon")
-    3. **Resume Session A** by UUID: Ask for the secret -> should say "banana"
-    4. **Resume Session B** by UUID: Ask for the secret -> should say "dragon"
+    1. **Session A**: Tell Rovo Dev a favorite color ("blue")
+    2. **Session B**: Tell Rovo Dev a different favorite color ("green")
+    3. **Resume Session A** by UUID: Ask for the color -> should say "blue"
+    4. **Resume Session B** by UUID: Ask for the color -> should say "green"
     5. **Cross-check**: Prove sessions are truly isolated.
 
-This works because ``acli rovodev run --restore <uuid>`` (v0.13.68+)
-restores a specific session by its UUID from ``~/.rovodev/sessions/``.
+This works because ``acli rovodev legacy --restore <uuid>`` restores a
+specific session by its UUID from ``~/.rovodev/sessions/``.
+
+Note:
+    The working directory should be a git repository for session workspace
+    matching to work correctly.
 
 Prerequisites:
     - ``acli`` installed and in PATH (``brew install atlassian-cli``)
@@ -25,6 +29,7 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -59,16 +64,7 @@ def create_inferencer(working_dir: str, output_file: str):
 
 
 def send_and_print(inferencer, message: str, label: str = "") -> str:
-    """Send a message and print the response.
-
-    Args:
-        inferencer: RovoDevCliInferencer instance.
-        message: Message to send.
-        label: Label to print above the exchange.
-
-    Returns:
-        The response text.
-    """
+    """Send a message and print the response."""
     if label:
         print(f"  [{label}]")
     print(f"  You: {message}")
@@ -78,7 +74,7 @@ def send_and_print(inferencer, message: str, label: str = "") -> str:
     elapsed = time.time() - start
 
     print(f"  Rovo Dev: {result.output}")
-    print(f"  [⏱ {elapsed:.1f}s | session={inferencer.active_session_id}]")
+    print(f"  [{elapsed:.1f}s | session={inferencer.active_session_id}]")
     print()
     return result.output
 
@@ -91,72 +87,84 @@ def main():
     )
     parser.add_argument(
         "--working-dir",
-        help="Working directory for the agent (default: temp dir)",
+        help="Working directory for the agent (default: temp git repo)",
     )
     args = parser.parse_args()
 
-    working_dir = args.working_dir or tempfile.mkdtemp(prefix="rovodev_session_")
+    if args.working_dir:
+        working_dir = args.working_dir
+    else:
+        # Create a temp git repo (required for session workspace matching)
+        working_dir = tempfile.mkdtemp(prefix="rovodev_session_")
+        subprocess.run(
+            ["git", "init", "-q"], cwd=working_dir, check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-q", "--allow-empty", "-m", "init"],
+            cwd=working_dir, check=True, capture_output=True,
+        )
 
     # Verify acli is installed
     import shutil
 
     if not shutil.which("acli"):
-        print("❌ acli not found. Install with: brew install atlassian-cli")
+        print("  acli not found. Install with: brew install atlassian-cli")
         sys.exit(1)
 
     out_file = os.path.join(working_dir, "rovodev_output.txt")
 
     print()
-    print("🔐 Rovo Dev Session Save & Restore Demo")
+    print("Rovo Dev Session Save & Restore Demo")
     print(f"   Working dir: {working_dir}")
     print()
 
     try:
         # =================================================================
-        # Phase 1: Create two independent sessions with different secrets
+        # Phase 1: Create two independent sessions with different colors
         # =================================================================
 
         print("=" * 70)
-        print("Phase 1: Create two sessions with different secrets")
+        print("Phase 1: Create two sessions with different favorite colors")
         print("=" * 70)
         print()
 
         # --- Session A ---
         inferencer_a = create_inferencer(working_dir, out_file)
-        print("  📌 Creating Session A...")
+        print("  Creating Session A...")
         result_a = inferencer_a.new_session(
-            "Remember this secret word: BANANA. "
-            "Reply with: Understood, the secret is BANANA."
+            "My favorite color is BLUE. "
+            "Confirm: your favorite color is BLUE."
         )
-        print(f"  Rovo Dev: {result_a.output}")
+        print(f"  Rovo Dev: {result_a.output[:80]}")
         session_a_id = inferencer_a.active_session_id
-        print(f"  ✅ Session A ID: {session_a_id}")
+        print(f"  Session A ID: {session_a_id}")
         print()
 
         if not session_a_id:
-            print("  ❌ Failed to capture Session A ID. Aborting.")
+            print("  Failed to capture Session A ID. Aborting.")
             sys.exit(1)
 
         # --- Session B ---
         inferencer_b = create_inferencer(working_dir, out_file)
-        print("  📌 Creating Session B...")
+        print("  Creating Session B...")
         result_b = inferencer_b.new_session(
-            "Remember this secret word: DRAGON. "
-            "Reply with: Understood, the secret is DRAGON."
+            "My favorite color is GREEN. "
+            "Confirm: your favorite color is GREEN."
         )
-        print(f"  Rovo Dev: {result_b.output}")
+        print(f"  Rovo Dev: {result_b.output[:80]}")
         session_b_id = inferencer_b.active_session_id
-        print(f"  ✅ Session B ID: {session_b_id}")
+        print(f"  Session B ID: {session_b_id}")
         print()
 
         if not session_b_id:
-            print("  ❌ Failed to capture Session B ID. Aborting.")
+            print("  Failed to capture Session B ID. Aborting.")
             sys.exit(1)
 
         assert session_a_id != session_b_id, (
             f"Sessions should have different IDs! A={session_a_id}, B={session_b_id}"
         )
-        print(f"  ✅ Sessions are distinct: A={session_a_id[:12]}... B={session_b_id[:12]}...")
+        print(f"  Sessions are distinct: A={session_a_id[:12]}... B={session_b_id[:12]}...")
         print()
 
         # =================================================================
@@ -169,21 +177,20 @@ def main():
         print()
 
         recall_prompt = (
-            "What was the secret word I told you? "
-            "Reply with ONLY the word, nothing else."
+            "What is my favorite color? "
+            "Reply with ONLY the color, nothing else."
         )
 
         # --- Resume Session A ---
-        print("  📌 Resuming Session A...")
+        print("  Resuming Session A...")
         inferencer_resume_a = create_inferencer(working_dir, out_file)
-        # Manually set the session ID for restore
         inferencer_resume_a.active_session_id = session_a_id
         response_a = send_and_print(
             inferencer_resume_a, recall_prompt, label="Session A recall"
         )
 
         # --- Resume Session B ---
-        print("  📌 Resuming Session B...")
+        print("  Resuming Session B...")
         inferencer_resume_b = create_inferencer(working_dir, out_file)
         inferencer_resume_b.active_session_id = session_b_id
         response_b = send_and_print(
@@ -201,29 +208,29 @@ def main():
 
         passed = True
 
-        if "BANANA" in response_a.upper():
-            print("  ✅ Session A correctly recalled: BANANA")
+        if "BLUE" in response_a.upper():
+            print("  [PASS] Session A correctly recalled: BLUE")
         else:
-            print(f"  ❌ Session A failed! Expected BANANA, got: {response_a!r}")
+            print(f"  [FAIL] Session A: Expected BLUE, got: {response_a!r}")
             passed = False
 
-        if "DRAGON" in response_b.upper():
-            print("  ✅ Session B correctly recalled: DRAGON")
+        if "GREEN" in response_b.upper():
+            print("  [PASS] Session B correctly recalled: GREEN")
         else:
-            print(f"  ❌ Session B failed! Expected DRAGON, got: {response_b!r}")
+            print(f"  [FAIL] Session B: Expected GREEN, got: {response_b!r}")
             passed = False
 
         if session_a_id != session_b_id:
-            print(f"  ✅ Session IDs are different (isolated)")
+            print(f"  [PASS] Session IDs are different (isolated)")
         else:
-            print(f"  ❌ Session IDs are the same (not isolated!)")
+            print(f"  [FAIL] Session IDs are the same (not isolated!)")
             passed = False
 
         print()
         if passed:
-            print("🎉 All checks passed! Sessions are properly isolated and restorable.")
+            print("All checks passed! Sessions are properly isolated and restorable.")
         else:
-            print("⚠️  Some checks failed. See output above.")
+            print("Some checks failed. See output above.")
             sys.exit(1)
 
         # =================================================================
@@ -232,20 +239,20 @@ def main():
 
         print()
         print("=" * 70)
-        print("Bonus: Manual session restore commands")
+        print("Manual session restore commands")
         print("=" * 70)
         print()
         print(f"  # Resume Session A:")
-        print(f"  acli rovodev run --restore {session_a_id}")
+        print(f"  acli rovodev legacy --restore {session_a_id}")
         print()
         print(f"  # Resume Session B:")
-        print(f"  acli rovodev run --restore {session_b_id}")
+        print(f"  acli rovodev legacy --restore {session_b_id}")
         print()
 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
+        print("\n\n  Interrupted by user")
     except Exception as e:
-        print(f"\n❌ Error: {type(e).__name__}: {e}")
+        print(f"\n  Error: {type(e).__name__}: {e}")
         import traceback
 
         traceback.print_exc()

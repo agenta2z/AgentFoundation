@@ -2,7 +2,7 @@
 """Rovo Dev CLI Inferencer — Streaming Demo.
 
 Demonstrates streaming inference through the Rovo Dev CLI using
-``acli rovodev run``. Shows three modes:
+``acli rovodev legacy``. Shows three modes:
 
 1. **Sync one-shot**: Send a prompt and get the full response.
 2. **Streaming**: Stream the response token-by-token to the console.

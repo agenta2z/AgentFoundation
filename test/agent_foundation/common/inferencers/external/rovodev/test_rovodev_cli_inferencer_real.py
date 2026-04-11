@@ -7,7 +7,7 @@ These tests require:
 
 Run with:
     PYTHONPATH=src:../RichPythonUtils/src python3.11 -m pytest \
-        tests/test_rovodev_inferencer/test_rovodev_cli_integration.py -vs -m integration
+        test/agent_foundation/common/inferencers/external/rovodev/test_rovodev_cli_inferencer_real.py -vs -m integration
 """
 
 import shutil

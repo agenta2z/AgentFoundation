@@ -134,7 +134,7 @@ def clean_env_for_subprocess() -> dict:
     """Return a copy of os.environ with conflicting vars removed.
 
     When a Rovo Dev inferencer runs inside an existing Rovo Dev CLI session,
-    the child ``acli rovodev run`` process detects ``ROVODEV_CLI=1`` and
+    the child ``acli rovodev legacy`` process detects ``ROVODEV_CLI=1`` and
     exits early to prevent nesting. This function strips those vars.
     """
     import os
@@ -175,6 +175,7 @@ def find_latest_session_id(
 
     all_sessions: list[tuple[str, float]] = []
     workspace_sessions: list[tuple[str, float]] = []
+    resolved_ws = Path(workspace_path).resolve() if workspace_path else None
 
     for session_dir in sessions_path.iterdir():
         if not session_dir.is_dir():
@@ -187,15 +188,27 @@ def find_latest_session_id(
         mtime = ctx_file.stat().st_mtime
         all_sessions.append((session_dir.name, mtime))
 
-        if workspace_path:
+        if resolved_ws:
+            # Try metadata.json first, then fall back to session_context.json
+            session_ws = ""
             meta_file = session_dir / "metadata.json"
             if meta_file.exists():
                 try:
                     meta = json.loads(meta_file.read_text())
                     session_ws = meta.get("workspace_path", "")
-                    if session_ws and Path(session_ws).resolve() == Path(workspace_path).resolve():
-                        workspace_sessions.append((session_dir.name, mtime))
                 except (json.JSONDecodeError, OSError):
+                    pass
+            if not session_ws:
+                try:
+                    ctx_data = json.loads(ctx_file.read_text())
+                    session_ws = ctx_data.get("workspace_path", "")
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if session_ws:
+                try:
+                    if Path(session_ws).resolve() == resolved_ws:
+                        workspace_sessions.append((session_dir.name, mtime))
+                except (ValueError, OSError):
                     pass
 
     candidates = workspace_sessions if workspace_sessions else all_sessions
@@ -204,3 +217,45 @@ def find_latest_session_id(
 
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[0][0]
+
+
+def ensure_session_metadata(
+    session_id: str,
+    workspace_path: str | None = None,
+    sessions_dir: str = DEFAULT_SESSIONS_DIR,
+) -> None:
+    """Write a ``metadata.json`` for a session if one does not already exist.
+
+    The Rovo Dev CLI's ``--restore`` flag uses ``metadata.json`` to filter
+    sessions by workspace.  Sessions created by the CLI in non-interactive
+    (legacy) mode do not write this file, so ``--restore`` silently skips
+    them.  This helper fills the gap so that programmatically created
+    sessions can be restored.
+
+    Args:
+        session_id: The session UUID (directory name under *sessions_dir*).
+        workspace_path: Absolute path to the workspace for this session.
+        sessions_dir: Root sessions directory.
+    """
+    import json
+
+    session_dir = Path(sessions_dir) / session_id
+    meta_file = session_dir / "metadata.json"
+    if meta_file.exists():
+        return  # Already has metadata
+
+    if not session_dir.exists():
+        return  # Session directory doesn't exist
+
+    resolved_ws = str(Path(workspace_path).resolve()) if workspace_path else None
+    metadata = {
+        "title": None,
+        "is_manual_title": False,
+        "fork_data": None,
+        "workspace_path": resolved_ws,
+        "bookmarks": [],
+    }
+    try:
+        meta_file.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    except OSError:
+        pass  # Best-effort; don't crash if we can't write
