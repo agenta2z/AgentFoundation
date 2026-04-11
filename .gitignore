@@ -112,6 +112,9 @@ Thumbs.db
 
 # Development
 _dev/
+_archive/
+_docs/
+_plan/
 
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
