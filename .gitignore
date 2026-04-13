@@ -148,3 +148,6 @@ doctrees/
 _runtime/
 _tmp/
 _logs/
+
+# Dev files with hardcoded secrets
+**/bedrock_inferencers/_dev/
