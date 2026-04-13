@@ -149,3 +149,6 @@ src/agent_foundation/ui/webui/experiment_configs/*/codebase/
 # Sphinx build output
 _build/
 doctrees/
+
+# Dev files with hardcoded secrets
+**/bedrock_inferencers/_dev/
