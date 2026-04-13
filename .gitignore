@@ -150,5 +150,10 @@ src/agent_foundation/ui/webui/experiment_configs/*/codebase/
 _build/
 doctrees/
 
+# Underscore-prefixed working directories
+_runtime/
+_tmp/
+_logs/
+
 # Dev files with hardcoded secrets
 **/bedrock_inferencers/_dev/

@@ -1,0 +1,159 @@
+"""
+Queue-based Dash Interactive App with Log Debugging.
+
+This module provides a specialized version of DashInteractiveAppWithLogs that polls
+responses from a shared queue service instead of per-session queues. This is useful
+when you have a separate service managing agents and you want the UI to poll for
+responses from a shared response queue.
+"""
+from typing import Callable, Optional, Tuple
+import time
+import dash
+from dash.dependencies import Input, Output, State
+
+from agent_foundation.ui.dash_interactive.dash_interacive_app_with_logs import DashInteractiveAppWithLogs
+
+
+class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
+    """
+    Dash app that polls from a shared queue service instead of per-session queues.
+
+    This is useful when you have a separate service managing agents and you want
+    the UI to poll for responses from a shared response queue.
+
+    Example:
+        ```python
+        def check_responses():
+            # Your logic to check for responses from queue
+            # Returns: (session_id, response_text, log_collector) or (None, None, None)
+            response_data = queue_service.get(RESPONSE_QUEUE_ID, blocking=False)
+            if response_data:
+                session_id = response_data.get('session_id')
+                response = response_data.get('response', '')
+                return session_id, response, None
+            return None, None, None
+
+        app = QueueBasedDashApp(
+            title="My App",
+            response_checker=check_responses,
+            special_waiting_message="__WAITING__"
+        )
+        app.set_message_handler(my_handler)
+        app.run()
+        ```
+    """
+
+    def __init__(
+        self,
+        title: str = "Interactive Debugger with Logs",
+        port: int = 8050,
+        debug: bool = True,
+        message_handler: Optional[Callable[[str], str]] = None,
+        response_checker: Optional[Callable[[], Tuple]] = None,
+        special_waiting_message: str = "__WAITING_FOR_RESPONSE__"
+    ):
+        """
+        Initialize the queue-based Dash app.
+
+        Args:
+            title: Application title
+            port: Port number to run the server on
+            debug: Whether to run in debug mode
+            message_handler: Optional callback function to handle user messages
+            response_checker: Function that checks for responses from queue.
+                             Should return (session_id, response, log_collector) or (None, None, None)
+            special_waiting_message: Placeholder message to show while waiting for response
+        """
+        super().__init__(title, port, debug, message_handler)
+        self.response_checker = response_checker
+        self.special_waiting_message = special_waiting_message
+        self._last_visibility_timestamp = 0
+
+    def set_response_checker(self, checker: Callable[[], Tuple]):
+        """
+        Set the response checker function.
+
+        Args:
+            checker: Function that returns (session_id, response, log_collector) or (None, None, None)
+        """
+        self.response_checker = checker
+
+    def _register_polling_callback(self):
+        """Register custom polling callback that polls from shared queue."""
+        @self.app.callback(
+            [
+                Output('messages-store', 'data', allow_duplicate=True),
+                Output('main-panel-chat-window-messages', 'children', allow_duplicate=True)
+            ],
+            [
+                Input('response-poll-interval', 'n_intervals'),
+                Input('page-visibility-store', 'data')
+            ],
+            [
+                State('current-session-store', 'data'),
+                State('messages-store', 'data')
+            ],
+            prevent_initial_call=True
+        )
+        def poll_and_refresh_messages(n_intervals, visibility_data, session_id, messages_store):
+            """Poll for queue responses and refresh UI if messages changed."""
+            # Log visibility state changes for debugging (only on actual transitions)
+            if visibility_data and visibility_data.get('visible'):
+                ctx = dash.callback_context
+                if ctx.triggered and ctx.triggered[0]['prop_id'] == 'page-visibility-store.data':
+                    current_timestamp = visibility_data.get('timestamp', 0)
+                    if current_timestamp != self._last_visibility_timestamp:
+                        self._last_visibility_timestamp = current_timestamp
+
+            # Check for new response using the provided checker
+            if not self.response_checker:
+                return dash.no_update, dash.no_update
+
+            response_session_id, response, log_collector = self.response_checker()
+
+            if response is None:
+                return dash.no_update, dash.no_update
+
+            # Route response to the correct session
+            if response_session_id and response_session_id in messages_store:
+                # Create a deep copy to ensure Dash sees it as changed
+                messages_store_copy = dict(messages_store)
+                messages = list(messages_store_copy[response_session_id])
+
+                # Replace the last message if it's the "waiting" placeholder
+                if messages and messages[-1].get('role') == 'assistant':
+                    last_content = messages[-1].get('content', '')
+                    if last_content == self.special_waiting_message:
+                        # Replace placeholder with actual response
+                        messages[-1] = {
+                            'role': 'assistant',
+                            'content': response,
+                            'timestamp': time.strftime('%H:%M:%S')
+                        }
+                    else:
+                        # Add as new message
+                        messages.append({
+                            'role': 'assistant',
+                            'content': response,
+                            'timestamp': time.strftime('%H:%M:%S')
+                        })
+                else:
+                    # Add new assistant message
+                    messages.append({
+                        'role': 'assistant',
+                        'content': response,
+                        'timestamp': time.strftime('%H:%M:%S')
+                    })
+
+                # Update the copy with modified messages
+                messages_store_copy[response_session_id] = messages
+
+                # Re-render messages if this is the currently active session
+                if response_session_id == session_id:
+                    rendered_messages = self.tabbed_panel.chat_window.update_messages(messages)
+                    return messages_store_copy, rendered_messages
+                else:
+                    # Response is for a different session - only update store
+                    return messages_store_copy, dash.no_update
+
+            return dash.no_update, dash.no_update

@@ -415,7 +415,8 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         streaming instead of buffered text output.
 
         Each ``assistant`` event with ``content[].text`` is yielded as a chunk.
-        Non-text events (system, rate_limit_event, result) are skipped.
+        The final ``result`` event is captured into ``_last_stream_result`` so
+        that ``ainfer()`` can extract session_id, cost, and usage metadata.
 
         Args:
             prompt: The prompt string.
@@ -429,6 +430,8 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         kwargs["output_format"] = "stream-json"
         kwargs["verbose"] = True
         kwargs["include_partial_messages"] = True
+
+        self._last_stream_result = None  # reset before each call
 
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
@@ -460,6 +463,10 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                         delta = inner.get("delta", {})
                         if delta.get("type") == "text_delta" and delta.get("text"):
                             yield delta["text"]
+
+                # Capture result event for session_id / cost / usage metadata
+                elif event_type == "result":
+                    self._last_stream_result = event
 
         finally:
             stderr_bytes = await process.stderr.read() if process.stderr else b""
@@ -585,10 +592,19 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         # Route through _ainfer_single for retry/preprocessing/timeout
         result = await self._ainfer_single(inference_input, inference_config, **kwargs)
 
-        # Update active session from result
+        # Update active session from result (try TerminalInferencerResponse,
+        # then dict, then fall back to _last_stream_result from streaming)
         result_session_id = getattr(result, "session_id", None)
         if result_session_id is None and isinstance(result, dict):
             result_session_id = result.get("session_id")
+        if result_session_id is None and hasattr(self, "_last_stream_result"):
+            stream_result = self._last_stream_result
+            if isinstance(stream_result, dict):
+                result_session_id = stream_result.get("session_id")
+                # Also enrich the result object with stream metadata
+                if isinstance(result, TerminalInferencerResponse):
+                    if result_session_id and not result.session_id:
+                        result.session_id = result_session_id
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
             self.log_debug(
