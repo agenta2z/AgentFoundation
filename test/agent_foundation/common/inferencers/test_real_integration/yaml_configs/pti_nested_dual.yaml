@@ -1,0 +1,32 @@
+_target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer.PlanThenImplementInferencer
+planner_inferencer:
+  _target_: Dual
+  base_inferencer:
+    _target_: ClaudeCodeCLI
+    model_name: sonnet
+    target_path: "{workspace_path}"
+    permission_mode: bypassPermissions
+  review_inferencer:
+    _target_: ClaudeCodeCLI
+    model_name: sonnet
+    target_path: "{workspace_path}"
+    permission_mode: bypassPermissions
+  consensus_config:
+    _target_: ConsensusConfig
+    max_iterations: 2
+executor_inferencer:
+  _target_: Dual
+  base_inferencer:
+    _target_: ClaudeCodeCLI
+    model_name: sonnet
+    target_path: "{workspace_path}"
+    permission_mode: bypassPermissions
+  review_inferencer:
+    _target_: ClaudeCodeCLI
+    model_name: sonnet
+    target_path: "{workspace_path}"
+    permission_mode: bypassPermissions
+  consensus_config:
+    _target_: ConsensusConfig
+    max_iterations: 2
+workspace_path: "{workspace_path}"

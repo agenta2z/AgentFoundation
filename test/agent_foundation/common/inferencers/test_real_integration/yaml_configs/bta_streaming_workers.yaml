@@ -1,0 +1,12 @@
+_target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.BreakdownThenAggregateInferencer
+breakdown_inferencer:
+  _target_: ClaudeCodeCLI
+  model_name: sonnet
+  target_path: "{workspace_path}"
+  permission_mode: bypassPermissions
+aggregator_inferencer:
+  _target_: ClaudeCodeCLI
+  model_name: sonnet
+  target_path: "{workspace_path}"
+  permission_mode: bypassPermissions
+max_breakdown: 2

@@ -1,0 +1,27 @@
+_target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.LinearWorkflowInferencer
+step_configs:
+  - _target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.WorkflowStepConfig
+    name: plan
+    inferencer:
+      _target_: ClaudeCodeCLI
+      model_name: sonnet
+      target_path: "{workspace_path}"
+      permission_mode: bypassPermissions
+    output_state_key: plan_output
+  - _target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.WorkflowStepConfig
+    name: implement
+    inferencer:
+      _target_: ClaudeCodeCLI
+      model_name: sonnet
+      target_path: "{workspace_path}"
+      permission_mode: bypassPermissions
+    output_state_key: implement_output
+  - _target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.WorkflowStepConfig
+    name: review
+    inferencer:
+      _target_: ClaudeCodeCLI
+      model_name: sonnet
+      target_path: "{workspace_path}"
+      permission_mode: bypassPermissions
+    output_state_key: review_output
+workspace_path: "{workspace_path}"

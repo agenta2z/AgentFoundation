@@ -1,0 +1,14 @@
+# 04_shorthand.yaml — String shorthand for default-everything components.
+#
+# When a field's value is a registered alias (like "MockLLM"), it auto-expands
+# to { _target_: MockLLM } — instantiating the class with all defaults.
+#
+# Use shorthand when you don't need to customize the component.
+# Use full _target_ syntax when you need to override fields.
+
+_target_: ReviewerInferencer
+
+# Shorthand: "MockLLM" expands to { _target_: MockLLM } with all defaults
+base: MockLLM
+
+review_prompt: "Quick review please"

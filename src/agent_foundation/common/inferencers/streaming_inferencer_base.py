@@ -38,11 +38,20 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Iterator, Optional
 
 from attr import attrib, attrs
+import contextvars
+
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
+    _current_fallback_state,
+)
+from agent_foundation.common.inferencers.prompt_templates import (
+    DEFAULT_RECOVERY_DIR,
+    render_recovery_prompt,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_DEFAULT_RECOVERY_DIR = DEFAULT_RECOVERY_DIR
 
 
 class EmptyLineMode(enum.Enum):
@@ -59,6 +68,36 @@ class EmptyLineMode(enum.Enum):
     PASS_THROUGH = "pass_through"
     SUPPRESS_LEADING = "suppress_leading"
     BUFFER = "buffer"
+
+
+class FallbackInferMode(enum.StrEnum):
+    """How recovery uses cached partial output from a failed streaming attempt.
+
+    This is distinct from FallbackMode (in rich_python_utils.common_utils.function_helper),
+    which controls WHEN the fallback fires. The two enums are orthogonal:
+    FallbackMode picks the trigger; FallbackInferMode picks the recovery strategy.
+
+    See also: FallbackMode in rich_python_utils.common_utils.function_helper
+    """
+
+    CONTINUE = "continue"    # Feed partial back, ask model to continue. Return partial + continuation.
+    REFERENCE = "reference"  # Show partial as context, request fresh response. Return only new response.
+    RESTART = "restart"      # Ignore partial entirely. Equivalent to plain retry.
+
+
+
+def _read_partial_from_cache(cache_path: str) -> Optional[str]:
+    """Read a partial response from a cache file.
+
+    Returns the raw content if non-empty, or None if the file is
+    unreadable or contains only whitespace.
+    """
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        return raw if raw.strip() else None
+    except OSError:
+        return None
 
 
 @attrs
@@ -118,11 +157,174 @@ class StreamingInferencerBase(InferencerBase):
     # Session management
     auto_resume: bool = attrib(default=True)
 
+    # Fallback recovery configuration
+    fallback_infer_mode: FallbackInferMode = attrib(default=FallbackInferMode.REFERENCE)
+    use_default_prompt_templates: bool = attrib(default=True)
+
+    # Recovery template key root (overridable by subclasses to use custom templates)
+    fallback_recovery_template_key: str = "recovery"
+
     # Internal state (not init params)
     _session_id: Optional[str] = attrib(default=None, init=False, repr=False)
     _generator_cleanup_timeout: Optional[float] = attrib(
         default=None, init=False, repr=False
     )
+
+    def __attrs_post_init__(self):
+        super().__attrs_post_init__()
+        if self.use_default_prompt_templates and self.template_manager is not None:
+            from rich_python_utils.string_utils.formatting.template_manager import (
+                TemplateRootPriority,
+            )
+
+            self.template_manager.add_template_root(
+                _DEFAULT_RECOVERY_DIR, priority=TemplateRootPriority.LOWEST
+            )
+
+    def _render_recovery_prompt(
+        self,
+        mode: "FallbackInferMode",
+        prompt: str,
+        partial_output: str,
+    ) -> Optional[str]:
+        """Render a recovery prompt for the given fallback mode.
+
+        Returns ``None`` if no template system is available (caller should
+        fall through to RESTART).
+        """
+        key = f"{self.fallback_recovery_template_key}/{mode.value}"
+        if self.template_manager is not None:
+            # Pass active_template_type="" to bypass the type suffix.
+            # Without this, a TM with active_template_type="main" would look
+            # for "recovery/main/continue" instead of "recovery/continue".
+            return self.template_manager(
+                key,
+                active_template_type="",
+                prompt=prompt,
+                partial_output=partial_output,
+            )
+        elif self.use_default_prompt_templates:
+            return render_recovery_prompt(
+                key, prompt=prompt, partial_output=partial_output
+            )
+        else:
+            return None
+
+    # === Resumable protocol overrides ===
+
+    def _get_result_path(self, result_id, *args, **kwargs) -> str:
+        """Checkpoint path: tries ``output_path`` first, falls back to ``cache_folder``."""
+        try:
+            return super()._get_result_path(result_id, *args, **kwargs)
+        except NotImplementedError:
+            if self.cache_folder:
+                return os.path.join(self.cache_folder, f"{result_id}.pkl")
+            raise
+
+    def _find_latest_cache(self, prompt: str) -> Optional[str]:
+        """Find the most recent cache file for a given prompt.
+
+        Globs ``cache_folder/{ClassName}/*/stream_*_{prompt_hash}.txt``
+        and returns the path with the latest modification time.
+        Returns ``None`` if no cache file exists.
+
+        Note: ``self.id`` contains a random UUID and changes across process
+        restarts, so the ``{id}_{timestamp}`` directory is wildcarded with
+        ``*``.  Only ``ClassName`` and ``prompt_hash`` are deterministic anchors.
+        """
+        if not self.cache_folder:
+            return None
+        prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
+        pattern = os.path.join(
+            self.cache_folder,
+            self.__class__.__name__,
+            "*",  # {id}_{timestamp} directories — wildcarded (id has random UUID)
+            f"stream_*_{prompt_hash}.txt",
+        )
+        import glob as _glob
+        matches = _glob.glob(pattern)
+        if not matches:
+            return None
+        return max(matches, key=os.path.getmtime)
+
+    def _load_cached_or_resume(self, inference_input, inference_config=None, **kwargs):
+        """Check for a previous session's cache file and return resume action.
+
+        Returns:
+            ``('completed', full_text)`` — previous run completed, skip execution.
+            ``('partial', partial_text)`` — previous run failed mid-stream, resume
+            via recovery.
+            ``None`` — no cache found, execute from scratch.
+
+        This is the streaming inferencer's own resume logic. It is NOT
+        ``_load_result`` (which must return raw results for the Workflow
+        engine contract).
+        """
+        if not self.cache_folder or not self.resume_with_saved_results:
+            return None
+        prompt = self._extract_prompt(inference_input)
+        cache_path = self._find_latest_cache(prompt)
+        if cache_path is None:
+            return None
+        content = _read_partial_from_cache(cache_path)
+        if content is None:
+            return None
+        if "--- STREAM COMPLETED SUCCESSFULLY ---" in content:
+            idx = content.find("\n--- STREAM COMPLETED SUCCESSFULLY ---")
+            return ('completed', content[:idx].rstrip() if idx >= 0 else content)
+        if "--- STREAM FAILED:" in content:
+            partial = self._sanitize_partial(content, self.fallback_infer_mode)
+            return ('partial', partial) if partial else None
+        # No marker — crash before finalize (treat as partial)
+        stripped = content.rstrip()
+        return ('partial', stripped) if stripped else None
+
+    def _try_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+        """Sync resume hook — used by ``_infer_single``.
+
+        For completed caches, returns the cached result directly.
+        For partial caches, calls ``self._infer()`` (sync) with augmented prompt.
+        """
+        cached = self._load_cached_or_resume(inference_input, inference_config, **kwargs)
+        if cached is None:
+            return None
+        status, content = cached
+        if status == 'completed':
+            logger.info("Resume: previous run completed, returning cached result")
+            return content
+        elif status == 'partial' and content:
+            logger.info("Resume: previous run failed, triggering sync recovery from partial cache")
+            augmented = self._render_recovery_prompt(
+                self.fallback_infer_mode, self._extract_prompt(inference_input), content
+            )
+            if augmented is not None:
+                return self._infer(augmented, inference_config, **kwargs)
+        return None
+
+    async def _atry_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+        """Async resume hook — used by ``_ainfer_single``.
+
+        For completed caches, returns the cached result directly.
+        For partial caches, ``await``s ``self._ainfer()`` with augmented prompt.
+
+        No recursion risk: ``_ainfer()`` goes to ``ainfer_streaming()`` →
+        ``_ainfer_streaming()``, never re-entering ``_ainfer_single``.
+        """
+        cached = self._load_cached_or_resume(inference_input, inference_config, **kwargs)
+        if cached is None:
+            return None
+        status, content = cached
+        if status == 'completed':
+            logger.info("Resume: previous run completed, returning cached result")
+            return content
+        elif status == 'partial' and content:
+            logger.info("Resume: previous run failed, triggering async recovery from partial cache")
+            augmented = self._render_recovery_prompt(
+                self.fallback_infer_mode, self._extract_prompt(inference_input), content
+            )
+            if augmented is not None:
+                return await self._ainfer(augmented, inference_config, **kwargs)
+        return None
 
     # === Properties ===
 
@@ -270,6 +472,10 @@ class StreamingInferencerBase(InferencerBase):
         cache_file = None
         if self.cache_folder:
             cache_file = self._open_cache_file(prompt)
+            # Publish cache path to _fallback_state (if set by _ainfer_single)
+            fs = _current_fallback_state.get(None)
+            if fs is not None:
+                fs["cache_path"] = cache_file.name
 
         # Allow per-call idle timeout override via kwargs
         idle_timeout_override = kwargs.pop("idle_timeout_seconds", None)
@@ -455,9 +661,13 @@ class StreamingInferencerBase(InferencerBase):
             finally:
                 chunk_queue.put(None)
 
+        # Copy the current context so ContextVars (e.g. _current_fallback_state)
+        # propagate from the calling thread into the daemon thread.
+        ctx = contextvars.copy_context()
+
         def _run_in_thread() -> None:
             try:
-                asyncio.run(_run_async_streaming())
+                ctx.run(asyncio.run, _run_async_streaming())
             except Exception as e:
                 error_container.append(e)
                 chunk_queue.put(None)
@@ -570,6 +780,145 @@ class StreamingInferencerBase(InferencerBase):
         if self._session_id != target:
             await self.adisconnect()
         return await self.ainfer(prompt, session_id=target, **kwargs)
+
+    # === Recovery Helpers ===
+
+    def _sanitize_partial(
+        self, partial: Optional[str], mode: FallbackInferMode
+    ) -> Optional[str]:
+        """Strip the failure marker and (for CONTINUE) truncate to the last newline.
+
+        Always removes the trailing ``--- STREAM FAILED: ... ---`` marker
+        written by ``_finalize_cache``.  In CONTINUE mode, additionally
+        truncates to the last newline boundary so the model does not
+        receive a half-word.
+
+        Returns ``None`` if the result is empty after processing.
+        """
+        if not partial:
+            return None
+        text = str(partial)
+        # Always strip the trailing --- STREAM FAILED ... --- marker
+        marker_idx = text.find("\n--- STREAM FAILED:")
+        if marker_idx >= 0:
+            text = text[:marker_idx]
+        # CONTINUE mode: truncate to last newline so we don't hand the model a half-word
+        if mode == FallbackInferMode.CONTINUE:
+            last_nl = text.rfind("\n")
+            if last_nl > 0:
+                text = text[:last_nl]
+        return text.strip() or None
+
+    async def _ainfer_recovery(
+        self,
+        inference_input: Any,
+        last_exception: Optional[Exception],
+        last_partial_output: Optional[str],
+        inference_config: Optional[Any] = None,
+        **kwargs,
+    ) -> Any:
+        """Cache-aware and session-aware async recovery for streaming inferencers.
+
+        Recovery strategy precedence:
+        1. Session-based resumption (if ``_session_id`` is set)
+        2. Cache-based replay (CONTINUE or REFERENCE mode)
+        3. RESTART (delegate to ``_ainfer`` with original prompt)
+
+        Supports ``fallback_infer_mode`` as a runtime override via kwargs.
+        """
+        # Determine mode (support runtime override)
+        mode = kwargs.pop("fallback_infer_mode", self.fallback_infer_mode)
+        if isinstance(mode, str):
+            mode = FallbackInferMode(mode)
+
+        # 1. Session-based resumption (highest priority)
+        if self._session_id:
+            logger.info("Recovery via session resume (session_id=%s)", self._session_id)
+            try:
+                await self.adisconnect()
+                return await self._ainfer(
+                    inference_input, inference_config,
+                    session_id=self._session_id, **kwargs
+                )
+            except Exception as e:
+                logger.warning("Session resume failed: %s. Falling through.", e)
+                self._session_id = None
+
+        # 2. Cache-based recovery
+        cache_path = None
+        fs = _current_fallback_state.get(None)
+        if fs is not None:
+            cache_path = fs.get("cache_path")
+
+        if cache_path and mode != FallbackInferMode.RESTART:
+            partial = _read_partial_from_cache(cache_path)
+            partial = self._sanitize_partial(partial, mode)
+
+            if partial:
+                augmented = self._render_recovery_prompt(
+                    mode, self._extract_prompt(inference_input), partial
+                )
+                if augmented is not None:
+                    if mode == FallbackInferMode.CONTINUE:
+                        logger.info("Recovery via cache replay (mode=CONTINUE)")
+                        continuation = await self._ainfer(augmented, inference_config, **kwargs)
+                        return partial + str(continuation)
+                    elif mode == FallbackInferMode.REFERENCE:
+                        logger.info("Recovery via cache replay (mode=REFERENCE)")
+                        return await self._ainfer(augmented, inference_config, **kwargs)
+
+        # 3. RESTART (fallback)
+        logger.info("Recovery via restart")
+        return await self._ainfer(inference_input, inference_config, **kwargs)
+
+    def _infer_recovery(
+        self,
+        inference_input: Any,
+        last_exception: Optional[Exception],
+        last_partial_output: Optional[str],
+        inference_config: Optional[Any] = None,
+        **kwargs,
+    ) -> Any:
+        """Cache-aware sync recovery for streaming inferencers.
+
+        Mirrors ``_ainfer_recovery`` logic for the sync path. The sync
+        ``infer_streaming`` thread bridge populates the cache, so cache-based
+        recovery works identically.
+
+        Session-based resumption is NOT available on the sync path (session
+        management is async-only). Falls through directly to cache-based or
+        RESTART recovery.
+        """
+        mode = kwargs.pop("fallback_infer_mode", self.fallback_infer_mode)
+        if isinstance(mode, str):
+            mode = FallbackInferMode(mode)
+
+        # Cache-based recovery
+        cache_path = None
+        fs = _current_fallback_state.get(None)
+        if fs is not None:
+            cache_path = fs.get("cache_path")
+
+        if cache_path and mode != FallbackInferMode.RESTART:
+            partial = _read_partial_from_cache(cache_path)
+            partial = self._sanitize_partial(partial, mode)
+
+            if partial:
+                augmented = self._render_recovery_prompt(
+                    mode, self._extract_prompt(inference_input), partial
+                )
+                if augmented is not None:
+                    if mode == FallbackInferMode.CONTINUE:
+                        logger.info("Sync recovery via cache replay (mode=CONTINUE)")
+                        continuation = self._infer(augmented, inference_config, **kwargs)
+                        return partial + str(continuation)
+                    elif mode == FallbackInferMode.REFERENCE:
+                        logger.info("Sync recovery via cache replay (mode=REFERENCE)")
+                        return self._infer(augmented, inference_config, **kwargs)
+
+        # RESTART (fallback)
+        logger.info("Sync recovery via restart")
+        return self._infer(inference_input, inference_config, **kwargs)
 
     # === Cache Helper Methods ===
 

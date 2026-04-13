@@ -1,0 +1,21 @@
+# 03_chain_pipeline.yaml — A chain of 3 inferencers run in sequence.
+#
+# Each step's output becomes the next step's input:
+#   input -> translator -> generator -> reviewer -> final output
+#
+# The "steps" field is a YAML list. Each list item has its own _target_,
+# so Hydra instantiates all 3 MockLLM objects and passes them as a list.
+
+_target_: ChainInferencer
+steps:
+  - _target_: MockLLM
+    model_name: translator
+    response_prefix: "[Translated] "
+
+  - _target_: MockLLM
+    model_name: generator
+    response_prefix: "[Generated] "
+
+  - _target_: MockLLM
+    model_name: reviewer
+    response_prefix: "[Reviewed] "

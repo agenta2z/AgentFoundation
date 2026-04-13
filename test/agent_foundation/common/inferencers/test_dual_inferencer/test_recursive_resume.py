@@ -15,7 +15,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     Severity,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.dual_inferencer import (
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
@@ -207,7 +207,7 @@ class TestDualInferencerChildMode(unittest.TestCase):
 
 
 class TestPTIBuildSteps(unittest.TestCase):
-    """Test _build_iteration_steps produces correct step structure."""
+    """Test step_configs produce correct step structure via _build_steps()."""
 
     def test_step_count(self):
         plan_dual = _make_dual_inferencer("planner")
@@ -216,10 +216,7 @@ class TestPTIBuildSteps(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = "/tmp/ws"
-        pti._current_inference_config = {}
-        pti._current_inference_args = {}
-        steps = pti._build_iteration_steps()
+        steps = pti._build_steps()
         self.assertEqual(len(steps), 4)
 
     def test_step_names(self):
@@ -229,10 +226,7 @@ class TestPTIBuildSteps(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = "/tmp/ws"
-        pti._current_inference_config = {}
-        pti._current_inference_args = {}
-        steps = pti._build_iteration_steps()
+        steps = pti._build_steps()
         names = [getattr(s, "name", None) for s in steps]
         self.assertEqual(names, ["plan", "approval", "implement", "analysis"])
 
@@ -243,12 +237,9 @@ class TestPTIBuildSteps(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = "/tmp/ws"
-        pti._current_inference_config = {}
-        pti._current_inference_args = {}
-        steps = pti._build_iteration_steps()
-        analysis_step = steps[3]
-        self.assertEqual(getattr(analysis_step, "loop_back_to", None), "plan")
+        # Check step_configs directly for loop_back_to
+        analysis_config = pti.step_configs[3]
+        self.assertEqual(analysis_config.loop_back_to, "plan")
 
     def test_loop_condition_uses_state(self):
         plan_dual = _make_dual_inferencer("planner")
@@ -257,12 +248,9 @@ class TestPTIBuildSteps(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = "/tmp/ws"
-        pti._current_inference_config = {}
-        pti._current_inference_args = {}
-        steps = pti._build_iteration_steps()
-        analysis_step = steps[3]
-        cond = getattr(analysis_step, "loop_condition", None)
+        # Check step_configs directly for loop_condition
+        analysis_config = pti.step_configs[3]
+        cond = analysis_config.loop_condition
         self.assertIsNotNone(cond)
         self.assertTrue(cond({"should_continue": True}, None))
         self.assertFalse(cond({"should_continue": False}, None))

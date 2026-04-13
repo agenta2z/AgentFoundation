@@ -1,0 +1,17 @@
+# 02_nested.yaml — A reviewer that CONTAINS a base inferencer.
+#
+# The "base" field has its own _target_, so Hydra recursively instantiates
+# the inner object first, then passes it to ReviewerInferencer's constructor.
+#
+# This is equivalent to:
+#   ReviewerInferencer(
+#       base=MockLLM(model_name="sonnet", response_prefix="Draft: "),
+#       review_prompt="Check for factual errors",
+#   )
+
+_target_: ReviewerInferencer
+base:
+  _target_: MockLLM
+  model_name: sonnet
+  response_prefix: "Draft: "
+review_prompt: "Check for factual errors"

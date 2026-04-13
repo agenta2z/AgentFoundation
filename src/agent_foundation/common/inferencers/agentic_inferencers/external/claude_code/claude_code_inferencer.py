@@ -6,7 +6,8 @@ Provides both async interface (recommended) and sync bridge (for backwards compa
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, List, Optional
+import os
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
@@ -69,6 +70,14 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
         allowed_tools: List of tools Claude can use (default: Read, Write, Bash).
         include_partial_messages: Whether to include partial messages in stream.
         auto_resume: If True, automatically resume previous session (default True).
+        prefer_subscription: If True (default), clear ANTHROPIC_API_KEY from
+            the SDK subprocess so it uses the Claude subscription (Max/Pro)
+            instead of pay-per-token API billing. The CLI ignores API keys
+            automatically, but the SDK inherits the parent environment.
+            Set to False to use API key billing when ANTHROPIC_API_KEY is set.
+        sdk_env: Extra environment variables passed to the SDK subprocess.
+            Merged after prefer_subscription filtering, so explicit entries
+            here take precedence.
     """
 
     # ClaudeCode-specific attributes
@@ -78,6 +87,8 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
     system_prompt: str = attrib(default="")
     allowed_tools: List[str] = attrib(factory=lambda: ["Read", "Write", "Bash"])
     include_partial_messages: bool = attrib(default=True)
+    prefer_subscription: bool = attrib(default=True)
+    sdk_env: Dict[str, str] = attrib(factory=dict)
 
     # Internal state
     _client: Any = attrib(default=None, init=False, repr=False)
@@ -252,6 +263,15 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
                 "is in deps."
             ) from e
 
+        # Build subprocess env: prefer subscription by clearing API key
+        env: Dict[str, str] = {}
+        if self.prefer_subscription and os.environ.get("ANTHROPIC_API_KEY"):
+            env["ANTHROPIC_API_KEY"] = ""
+            logger.debug(
+                "prefer_subscription=True: clearing ANTHROPIC_API_KEY for SDK subprocess"
+            )
+        env.update(self.sdk_env)  # explicit sdk_env takes precedence
+
         options = ClaudeAgentOptions(
             model=self.model_id or None,
             cwd=str(self.root_folder) if self.root_folder else None,
@@ -259,6 +279,7 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
             include_partial_messages=self.include_partial_messages,
             allowed_tools=self.allowed_tools,
             resume=session_id,
+            env=env,
         )
 
         client = ClaudeSDKClient(options=options)

@@ -33,13 +33,13 @@ def __getattr__(name):
 
         return SDKInferencerResponse
     elif name == "DualInferencer":
-        from agent_foundation.common.inferencers.agentic_inferencers.dual_inferencer import (
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
             DualInferencer,
         )
 
         return DualInferencer
     elif name == "ReflectiveInferencer":
-        from agent_foundation.common.inferencers.agentic_inferencers.reflective_inferencer import (
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.reflective_inferencer import (
             ReflectiveInferencer,
         )
 
@@ -56,12 +56,30 @@ def __getattr__(name):
         )
 
         return MetamateSDKInferencer
+    elif name == "KiroCliInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.external.kiro import (
+            KiroCliInferencer,
+        )
+
+        return KiroCliInferencer
     elif name == "MetamateCliInferencer":
         from agent_foundation.common.inferencers.agentic_inferencers.external.metamate import (
             MetamateCliInferencer,
         )
 
         return MetamateCliInferencer
+    elif name == "LinearWorkflowInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+            LinearWorkflowInferencer,
+        )
+
+        return LinearWorkflowInferencer
+    elif name == "WorkflowStepConfig":
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+            WorkflowStepConfig,
+        )
+
+        return WorkflowStepConfig
     elif name == "PlanThenImplementInferencer":
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
             PlanThenImplementInferencer,
@@ -95,6 +113,8 @@ __all__ = [
     "DevmateCliInferencer",
     "DevmateSDKInferencer",
     "DualInferencer",
+    "KiroCliInferencer",
+    "LinearWorkflowInferencer",
     "MetamateCliInferencer",
     "MetamateSDKInferencer",
     "PlanThenImplementInferencer",
@@ -102,4 +122,5 @@ __all__ = [
     "RovoDevCliInferencer",
     "RovoDevServeInferencer",
     "SDKInferencerResponse",
+    "WorkflowStepConfig",
 ]

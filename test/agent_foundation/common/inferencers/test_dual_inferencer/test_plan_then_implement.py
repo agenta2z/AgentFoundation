@@ -55,7 +55,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     Severity,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.dual_inferencer import (
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (

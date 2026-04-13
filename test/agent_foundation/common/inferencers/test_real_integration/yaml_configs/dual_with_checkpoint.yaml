@@ -1,0 +1,20 @@
+_target_: Dual
+base_inferencer:
+  _target_: ClaudeCodeCLI
+  model_name: sonnet
+  target_path: "{workspace_path}"
+  permission_mode: bypassPermissions
+  cache_folder: "{cache_dir}"
+  resume_with_saved_results: true
+review_inferencer:
+  _target_: ClaudeCodeCLI
+  model_name: sonnet
+  target_path: "{workspace_path}"
+  permission_mode: bypassPermissions
+  cache_folder: "{cache_dir}"
+  resume_with_saved_results: true
+consensus_config:
+  _target_: ConsensusConfig
+  max_iterations: 2
+enable_checkpoint: true
+checkpoint_dir: "{checkpoint_dir}"

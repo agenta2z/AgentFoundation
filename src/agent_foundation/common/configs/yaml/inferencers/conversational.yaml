@@ -1,0 +1,9 @@
+_target_: Conversational
+base_inferencer:
+  _target_: ClaudeAPI
+  model_id: claude-sonnet-4-20250514
+context_budget:
+  _target_: ContextBudget
+  prior_context_max: 2000
+  dynamic_context_max: 4000
+max_iterations: 5

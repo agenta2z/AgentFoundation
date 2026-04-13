@@ -1,0 +1,4 @@
+_target_: ClaudeAPI
+model_id: claude-sonnet-4-20250514
+max_retry: 3
+total_timeout_seconds: 120
