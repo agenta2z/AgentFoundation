@@ -16,6 +16,7 @@ import pytest
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
     ACLI_BINARY,
     RovoDevNotFoundError,
+    extract_json_from_output,
     find_acli_binary,
     find_available_port,
     strip_ansi_codes,
@@ -403,3 +404,212 @@ class TestRegistration:
         import agent_foundation.common.inferencers.agentic_inferencers as mod
         assert "RovoDevCliInferencer" in mod.__all__
         assert "RovoDevServeInferencer" in mod.__all__
+
+
+# ============================================================================
+# Non-Legacy Mode Tests
+# ============================================================================
+
+
+@pytest.fixture
+def non_legacy_inferencer(tmp_path):
+    """Create a non-legacy (TUI) mode inferencer."""
+    return RovoDevCliInferencer(
+        acli_path="/usr/bin/acli", working_dir=str(tmp_path), enable_legacy=False
+    )
+
+
+class TestNonLegacyConstructCommand:
+    """Tests for construct_command() in non-legacy mode."""
+
+    def test_no_legacy_subcommand(self, non_legacy_inferencer):
+        """Non-legacy command omits 'legacy' subcommand."""
+        cmd = non_legacy_inferencer.construct_command("Hello")
+        assert "/usr/bin/acli rovodev" in cmd
+        assert "legacy" not in cmd
+
+    def test_auto_output_schema_injected(self, non_legacy_inferencer):
+        """--output-schema auto-injected when raw_output_to_file=True and no user schema."""
+        cmd = non_legacy_inferencer.construct_command("Hello")
+        assert "--output-schema" in cmd
+        assert '"response"' in cmd
+
+    def test_user_schema_preserved(self, tmp_path):
+        """User's output_schema is used instead of auto-injected."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, output_schema='{"type":"object","properties":{"answer":{"type":"string"}}}',
+        )
+        cmd = inf.construct_command("Hello")
+        assert "--output-schema" in cmd
+        assert "answer" in cmd
+        assert '"response"' not in cmd  # auto-injected schema NOT used
+
+    def test_no_auto_schema_when_raw_off(self, tmp_path):
+        """No auto-injection when raw_output_to_file=False."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, raw_output_to_file=False,
+        )
+        cmd = inf.construct_command("Hello")
+        assert "--output-schema" not in cmd
+
+    def test_no_output_file(self, non_legacy_inferencer):
+        """--output-file never appears in non-legacy mode."""
+        cmd = non_legacy_inferencer.construct_command("Hello")
+        assert "--output-file" not in cmd
+
+    def test_jira_skipped(self, tmp_path, caplog):
+        """--jira absent and warning logged in non-legacy mode."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, jira="https://jira/PROJ-1",
+        )
+        with caplog.at_level(logging.WARNING):
+            cmd = inf.construct_command("Hello")
+        assert "--jira" not in cmd
+        assert "jira" in caplog.text.lower()
+
+    def test_deep_plan_skipped(self, tmp_path, caplog):
+        """--enable-deep-plan absent and warning logged in non-legacy mode."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, enable_deep_plan=True,
+        )
+        with caplog.at_level(logging.WARNING):
+            cmd = inf.construct_command("Hello")
+        assert "--enable-deep-plan" not in cmd
+        assert "enable_deep_plan" in caplog.text
+
+    def test_agent_mode_skipped(self, tmp_path, caplog):
+        """--agent-mode absent and warning logged in non-legacy mode."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, agent_mode="ask",
+        )
+        with caplog.at_level(logging.WARNING):
+            cmd = inf.construct_command("Hello")
+        assert "--agent-mode" not in cmd
+        assert "agent_mode" in caplog.text
+
+    def test_yolo_present(self, non_legacy_inferencer):
+        """--yolo works in non-legacy mode."""
+        cmd = non_legacy_inferencer.construct_command("Hello")
+        assert "--yolo" in cmd
+
+    def test_xid_present(self, tmp_path):
+        """--xid works in non-legacy mode (hidden flag in TUI)."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, xid="test-xid",
+        )
+        cmd = inf.construct_command("Hello")
+        assert "--xid test-xid" in cmd
+
+    def test_restore_works(self, non_legacy_inferencer):
+        """--restore works in non-legacy mode."""
+        cmd = non_legacy_inferencer.construct_command(
+            "Hello", session_id="abc-123", resume=True
+        )
+        assert "--restore" in cmd
+        assert "abc-123" in cmd
+
+    def test_config_override(self, tmp_path):
+        """--config-override included in non-legacy mode."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, config_override='{"agent":{"modelId":"opus"}}',
+        )
+        cmd = inf.construct_command("Hello")
+        assert "--config-override" in cmd
+
+    def test_enable_legacy_default_true(self, tmp_path):
+        """Default enable_legacy is True (backward compat)."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+        )
+        assert inf.enable_legacy is True
+        cmd = inf.construct_command("Hello")
+        assert "legacy" in cmd
+
+
+# ============================================================================
+# Extract JSON Tests
+# ============================================================================
+
+
+class TestExtractJsonFromOutput:
+    """Tests for extract_json_from_output()."""
+
+    def test_valid_json(self):
+        """Parses clean JSON."""
+        assert extract_json_from_output('{"response": "4"}') == {"response": "4"}
+
+    def test_with_tui_noise(self):
+        """Parses JSON after TUI output noise."""
+        text = "Working in /tmp\n✔ Started 18 MCP servers\n\n{\n    \"response\": \"hello\"\n}\n"
+        result = extract_json_from_output(text)
+        assert result == {"response": "hello"}
+
+    def test_with_xml_tags(self):
+        """XML tags preserved inside JSON value."""
+        text = '{"response": "<Result><Value>42</Value></Result>"}'
+        result = extract_json_from_output(text)
+        assert result["response"] == "<Result><Value>42</Value></Result>"
+
+    def test_with_escaped_quotes(self):
+        """Handles escaped quotes in JSON values."""
+        text = '{"response": "He said \\"hello\\" to me"}'
+        result = extract_json_from_output(text)
+        assert result["response"] == 'He said "hello" to me'
+
+    def test_with_nested_braces(self):
+        """Handles nested braces inside string values."""
+        text = '{"response": "obj = {a: 1}"}'
+        result = extract_json_from_output(text)
+        assert result["response"] == "obj = {a: 1}"
+
+    def test_no_json(self):
+        """Returns None when no JSON present."""
+        assert extract_json_from_output("no json here") is None
+
+    def test_empty_string(self):
+        """Returns None for empty string."""
+        assert extract_json_from_output("") is None
+
+    def test_invalid_json(self):
+        """Returns None for malformed JSON."""
+        assert extract_json_from_output("{invalid json}") is None
+
+
+# ============================================================================
+# Non-Legacy Parse Output Tests
+# ============================================================================
+
+
+class TestNonLegacyParseOutput:
+    """Tests for parse_output() in non-legacy mode."""
+
+    def test_extracts_from_json(self, non_legacy_inferencer):
+        """parse_output() extracts response from trailing JSON."""
+        stdout = 'TUI noise\n\n{\n    "response": "42"\n}\n'
+        result = non_legacy_inferencer.parse_output(stdout, "", 0)
+        assert result["output"] == "42"
+        assert result["success"] is True
+
+    def test_fallback_to_ansi_strip(self, non_legacy_inferencer):
+        """Falls back to ANSI stripping when no JSON found."""
+        stdout = "\x1b[32mHello\x1b[0m world"
+        result = non_legacy_inferencer.parse_output(stdout, "", 0)
+        assert result["output"] == "Hello world"
+
+    def test_user_schema_skips_json_extraction(self, tmp_path):
+        """When user sets output_schema, JSON extraction is skipped."""
+        inf = RovoDevCliInferencer(
+            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            enable_legacy=False, output_schema='{"type":"object"}',
+        )
+        stdout = '{"response": "should not extract"}'
+        result = inf.parse_output(stdout, "", 0)
+        # Should fall through to ANSI stripping, not JSON extraction
+        assert result["output"] != "should not extract"

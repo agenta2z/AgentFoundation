@@ -259,3 +259,57 @@ def ensure_session_metadata(
         meta_file.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     except OSError:
         pass  # Best-effort; don't crash if we can't write
+
+
+def extract_json_from_output(text: str) -> dict | None:
+    """Extract the last valid JSON object from CLI output text.
+
+    When ``acli rovodev`` runs with ``--output-schema``, the structured JSON
+    output appears at the very end of stdout, after all TUI formatting noise.
+    This function scans backward from the end to find the last complete
+    ``{...}`` block and validates it with ``json.loads``.
+
+    Note:
+        The backward scan uses a heuristic for string/escape tracking that
+        is theoretically imprecise (escape chars precede the escaped char,
+        but we encounter them in reverse order). This is safe in practice
+        because ``json.loads()`` validates the final candidate string.
+
+    Args:
+        text: Raw stdout text potentially containing TUI noise + trailing JSON.
+
+    Returns:
+        Parsed dict if a valid JSON object is found at the end, else None.
+    """
+    import json
+
+    text = text.rstrip()
+    if not text.endswith("}"):
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(len(text) - 1, -1, -1):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[i:])
+                except json.JSONDecodeError:
+                    return None
+    return None

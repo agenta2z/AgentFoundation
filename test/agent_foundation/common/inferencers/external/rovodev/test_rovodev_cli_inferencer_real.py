@@ -1,4 +1,4 @@
-"""Integration tests for RovoDevCliInferencer.
+"""Integration tests for RovoDevCliInferencer (legacy and non-legacy modes).
 
 These tests require:
 1. acli binary installed and in PATH
@@ -11,6 +11,7 @@ Run with:
 """
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,11 +31,31 @@ pytestmark = [
 DEFAULT_TIMEOUT = 600
 
 
+def _init_git_repo(path):
+    """Initialize a git repo at path (required for session workspace matching)."""
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", "init"],
+        cwd=path, check=True, capture_output=True,
+    )
+
+
 def _make_inferencer(tmp_path, **kwargs):
     out_file = str(tmp_path / "rovodev_output.txt")
     defaults = dict(
         working_dir=str(tmp_path),
         output_file=out_file,
+        idle_timeout_seconds=DEFAULT_TIMEOUT,
+        tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
+    )
+    defaults.update(kwargs)
+    return RovoDevCliInferencer(**defaults)
+
+
+def _make_non_legacy_inferencer(tmp_path, **kwargs):
+    defaults = dict(
+        working_dir=str(tmp_path),
+        enable_legacy=False,
         idle_timeout_seconds=DEFAULT_TIMEOUT,
         tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
     )
@@ -122,14 +143,7 @@ class TestRealMultiTurn:
 
     def test_context_recall_across_turns(self, tmp_path):
         """Turn 1 stores a favorite color, turn 2 recalls it via --restore."""
-        import subprocess
-
-        # Initialize a git repo — required for session workspace matching
-        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=tmp_path, check=True, capture_output=True,
-        )
+        _init_git_repo(tmp_path)
 
         inf = _make_inferencer(tmp_path)
 
@@ -155,13 +169,7 @@ class TestRealMultiTurn:
 
     def test_restore_specific_session_by_id(self, tmp_path):
         """Restore a specific session by UUID, not just the most recent."""
-        import subprocess
-
-        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=tmp_path, check=True, capture_output=True,
-        )
+        _init_git_repo(tmp_path)
 
         out_file = str(tmp_path / "rovodev_output.txt")
         mk = lambda: RovoDevCliInferencer(
@@ -237,3 +245,178 @@ class TestErrorHandling:
         inf = RovoDevCliInferencer(acli_path="/nonexistent/acli", working_dir=str(tmp_path))
         cmd = inf.construct_command("hello")
         assert "/nonexistent/acli" in cmd
+
+
+# ============================================================================
+# Non-Legacy Mode Tests
+# ============================================================================
+
+
+class TestNonLegacySingleTurn:
+    """Basic non-legacy (TUI) mode inference tests."""
+
+    def test_simple_math(self, tmp_path):
+        """Non-legacy mode returns clean output via --output-schema JSON extraction."""
+        inf = _make_non_legacy_inferencer(tmp_path)
+        result = inf("What is 2+2? Reply with ONLY the number, nothing else.")
+        assert result.success, f"Failed: {result.stderr}"
+        assert "4" in result.output, f"Expected '4', got: {result.output!r}"
+
+    def test_xml_tags_preserved(self, tmp_path):
+        """XML tags are preserved in non-legacy mode (via --output-schema)."""
+        inf = _make_non_legacy_inferencer(tmp_path)
+        result = inf(
+            "Reply with exactly this XML: "
+            "<Result><Value>42</Value><Status>ok</Status></Result>"
+        )
+        assert result.success, f"Failed: {result.stderr}"
+        assert "<Result>" in result.output, (
+            f"XML tags stripped! Got: {result.output!r}"
+        )
+        assert "<Value>42</Value>" in result.output
+        assert "<Status>ok</Status>" in result.output
+
+    def test_multiline_output(self, tmp_path):
+        """Multi-line output is captured correctly."""
+        inf = _make_non_legacy_inferencer(tmp_path)
+        result = inf("List the numbers 1, 2, 3, each on its own line. Nothing else.")
+        assert result.success
+        assert "1" in result.output
+        assert "2" in result.output
+        assert "3" in result.output
+
+
+class TestNonLegacySessionRestore:
+    """Non-legacy mode session save & restore tests.
+
+    Tests multi-turn conversations across separate inferencer instances,
+    proving that ``--restore <uuid>`` correctly carries over conversation
+    context in non-legacy (TUI) mode.
+    """
+
+    def test_two_turn_context_recall(self, tmp_path):
+        """Turn 1 stores a value, turn 2 recalls it (same inferencer)."""
+        _init_git_repo(tmp_path)
+        inf = _make_non_legacy_inferencer(tmp_path)
+
+        r1 = inf.new_session(
+            "My favorite color is ORANGE. Confirm: favorite color is ORANGE."
+        )
+        assert r1.success, f"Turn 1 failed: {r1.stderr}"
+        assert inf.active_session_id is not None
+
+        r2 = inf("What is my favorite color? Reply with ONLY the color.")
+        assert r2.success, f"Turn 2 failed: {r2.stderr}"
+        assert "ORANGE" in r2.output.upper(), (
+            f"Context recall failed: expected ORANGE, got: {r2.output!r}"
+        )
+
+    def test_restore_specific_session_by_id(self, tmp_path):
+        """Create 3 sessions, restore oldest by UUID — proves specific ID targeting."""
+        _init_git_repo(tmp_path)
+        mk = lambda: _make_non_legacy_inferencer(tmp_path)
+
+        # Create 3 sessions with different values
+        inf_a = mk()
+        r_a = inf_a.new_session("My favorite color is BLUE. Confirm: favorite color is BLUE.")
+        assert r_a.success, f"Session A failed: {r_a.stderr}"
+        sid_a = inf_a.active_session_id
+
+        inf_b = mk()
+        r_b = inf_b.new_session("My favorite color is GREEN. Confirm: favorite color is GREEN.")
+        assert r_b.success, f"Session B failed: {r_b.stderr}"
+        sid_b = inf_b.active_session_id
+
+        inf_c = mk()
+        r_c = inf_c.new_session("My favorite color is RED. Confirm: favorite color is RED.")
+        assert r_c.success, f"Session C failed: {r_c.stderr}"
+        sid_c = inf_c.active_session_id
+
+        # All IDs must be unique
+        assert len({sid_a, sid_b, sid_c}) == 3, (
+            f"Expected 3 unique IDs: {sid_a}, {sid_b}, {sid_c}"
+        )
+
+        # Restore oldest (A) — proves it's not just "most recent"
+        inf_ra = mk()
+        inf_ra.active_session_id = sid_a
+        r_ra = inf_ra("What is my favorite color? Reply with ONLY the color.")
+        assert r_ra.success
+        assert "BLUE" in r_ra.output.upper(), f"A should recall BLUE, got: {r_ra.output!r}"
+
+        # Restore middle (B)
+        inf_rb = mk()
+        inf_rb.active_session_id = sid_b
+        r_rb = inf_rb("What is my favorite color? Reply with ONLY the color.")
+        assert r_rb.success
+        assert "GREEN" in r_rb.output.upper(), f"B should recall GREEN, got: {r_rb.output!r}"
+
+        # Restore newest (C)
+        inf_rc = mk()
+        inf_rc.active_session_id = sid_c
+        r_rc = inf_rc("What is my favorite color? Reply with ONLY the color.")
+        assert r_rc.success
+        assert "RED" in r_rc.output.upper(), f"C should recall RED, got: {r_rc.output!r}"
+
+    def test_multi_turn_accumulation(self, tmp_path):
+        """Multiple turns accumulate context — model remembers all prior turns."""
+        _init_git_repo(tmp_path)
+        inf = _make_non_legacy_inferencer(tmp_path)
+
+        r1 = inf.new_session("My favorite fruit is MANGO. Confirm: fruit is MANGO.")
+        assert r1.success
+        sid = inf.active_session_id
+        assert sid is not None
+
+        r2 = inf("My favorite animal is DOLPHIN. Confirm: animal is DOLPHIN.")
+        assert r2.success
+
+        # Turn 3: recall BOTH facts from turns 1 and 2
+        r3 = inf(
+            "What is my favorite fruit AND my favorite animal? "
+            "Reply in format: fruit=X, animal=Y"
+        )
+        assert r3.success
+        assert "MANGO" in r3.output.upper(), f"Missing fruit: {r3.output!r}"
+        assert "DOLPHIN" in r3.output.upper(), f"Missing animal: {r3.output!r}"
+
+    def test_session_isolation_across_workspaces(self, tmp_path):
+        """Sessions in different workspaces are isolated."""
+        ws_a = tmp_path / "workspace_a"
+        ws_b = tmp_path / "workspace_b"
+        ws_a.mkdir()
+        ws_b.mkdir()
+        _init_git_repo(ws_a)
+        _init_git_repo(ws_b)
+
+        # Create session in workspace A
+        inf_a = _make_non_legacy_inferencer(ws_a)
+        r_a = inf_a.new_session(
+            "My favorite dessert is TIRAMISU. Confirm: dessert is TIRAMISU."
+        )
+        assert r_a.success, f"Session A failed: {r_a.stderr}"
+        sid_a = inf_a.active_session_id
+
+        # Create session in workspace B
+        inf_b = _make_non_legacy_inferencer(ws_b)
+        r_b = inf_b.new_session(
+            "My favorite dessert is CHEESECAKE. Confirm: dessert is CHEESECAKE."
+        )
+        assert r_b.success, f"Session B failed: {r_b.stderr}"
+        sid_b = inf_b.active_session_id
+
+        assert sid_a != sid_b
+
+        # Restore A in workspace A
+        inf_ra = _make_non_legacy_inferencer(ws_a)
+        inf_ra.active_session_id = sid_a
+        r_ra = inf_ra("What is my favorite dessert? Reply with ONLY the dessert name.")
+        assert r_ra.success, f"Restore A failed: {r_ra.stderr}"
+        assert "TIRAMISU" in r_ra.output.upper(), f"Expected TIRAMISU, got: {r_ra.output!r}"
+
+        # Restore B in workspace B
+        inf_rb = _make_non_legacy_inferencer(ws_b)
+        inf_rb.active_session_id = sid_b
+        r_rb = inf_rb("What is my favorite dessert? Reply with ONLY the dessert name.")
+        assert r_rb.success, f"Restore B failed: {r_rb.stderr}"
+        assert "CHEESECAKE" in r_rb.output.upper(), f"Expected CHEESECAKE, got: {r_rb.output!r}"

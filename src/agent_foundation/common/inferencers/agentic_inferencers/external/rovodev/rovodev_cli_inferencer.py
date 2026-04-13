@@ -1,6 +1,7 @@
-"""Rovo Dev CLI run-mode inferencer.
+"""Rovo Dev CLI inferencer.
 
-Wraps ``acli rovodev legacy`` for single-shot and multi-turn programmatic use.
+Wraps ``acli rovodev legacy`` (default) or ``acli rovodev`` (non-legacy) for
+single-shot and multi-turn programmatic use.
 Follows the same pattern as ``ClaudeCodeCliInferencer``.
 
 Usage::
@@ -43,6 +44,7 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
     clean_env_for_subprocess,
     ensure_session_metadata,
+    extract_json_from_output,
     find_latest_session_id,
     ACLI_BINARY,
     ACLI_SUBCOMMAND,
@@ -64,40 +66,39 @@ _current_output_file: contextvars.ContextVar[str | None] = contextvars.ContextVa
     "_current_output_file", default=None
 )
 
+# Schema auto-injected in non-legacy mode to capture clean LLM output as JSON.
+# This preserves XML tags that would otherwise be eaten by Rich TUI rendering.
+_NON_LEGACY_OUTPUT_SCHEMA = '{"type":"object","properties":{"response":{"type":"string"}}}'
+
 
 @attrs
 class RovoDevCliInferencer(TerminalSessionInferencerBase):
-    """Rovo Dev CLI legacy-mode inferencer (``acli rovodev legacy``).
+    """Rovo Dev CLI inferencer (``acli rovodev legacy`` or ``acli rovodev``).
 
-    Inherits from ``TerminalSessionInferencerBase`` which provides:
-    - ``_ainfer_streaming()`` async subprocess line streaming
-    - ``_infer_streaming()`` sync subprocess line streaming
-    - ``_ainfer()`` / ``_infer()`` via subprocess with ``parse_output()``
-    - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
-    - ``active_session_id`` property
+    Supports two CLI modes controlled by ``enable_legacy``:
 
-    This class implements ``construct_command()``, ``parse_output()``, and
-    ``_build_session_args()`` (the abstract methods), and overrides ``ainfer()``
-    and ``infer()`` for Rovo Dev session management.
-
-    Session Limitation:
-        Rovo Dev's ``--restore`` is a boolean flag that resumes the most recent
-        session for the current ``working_dir``. Unlike Claude Code, it does NOT
-        support arbitrary session ID targeting. The ``active_session_id`` is set
-        to a sentinel value ``"active"`` after successful inference to enable
-        auto-resume on subsequent calls.
+    - **Legacy mode** (default, ``enable_legacy=True``): Uses ``acli rovodev legacy``.
+      Captures clean output via ``--output-file``. Supports ``--jira``,
+      ``--enable-deep-plan``, ``--agent-mode``.
+    - **Non-legacy mode** (``enable_legacy=False``): Uses ``acli rovodev`` (TUI mode,
+      non-interactive when a message is provided). Captures clean output by
+      auto-injecting ``--output-schema`` and parsing JSON from stdout.
+      Supports ``--config-override``.
 
     Attributes:
         acli_path: Path to acli binary. Auto-detected via ``shutil.which`` if None.
+        enable_legacy: Use legacy CLI mode (default True). False uses non-legacy/TUI mode.
         config_file: Path to rovodev config file.
         cloud_id: Atlassian cloud ID.
         yolo: Skip tool confirmation prompts (default True for programmatic use).
-        enable_deep_plan: Enable deep planning mode.
+        enable_deep_plan: Enable deep planning mode (legacy only).
         xid: Experience ID for analytics tagging.
         output_schema: JSON schema for structured output.
-        output_file: Path for output file capture.
-        agent_mode: Agent mode override (e.g., "ask", "plan").
-        jira: Jira ticket URL to start work on.
+        output_file: Path for output file capture (legacy only).
+        raw_output_to_file: Auto-capture clean output (legacy: temp file, non-legacy: output-schema).
+        agent_mode: Agent mode override (legacy only, e.g., "ask", "plan").
+        jira: Jira ticket URL to start work on (legacy only).
+        config_override: JSON config override string (non-legacy only).
         extra_cli_args: Additional CLI arguments to pass through.
         idle_timeout_seconds: Idle timeout between output chunks (default 30 min).
         tool_use_idle_timeout_seconds: Idle timeout during tool use (default 2 hr).
@@ -105,8 +106,10 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
 
     # --- Configuration ---
     has_local_access: bool = attrib(default=True)
+    enable_legacy: bool = attrib(default=True)
     acli_path: Optional[str] = attrib(default=None)
     config_file: Optional[str] = attrib(default=None)
+    config_override: Optional[str] = attrib(default=None)
     cloud_id: Optional[str] = attrib(default=None)
     yolo: bool = attrib(default=True)
     enable_deep_plan: bool = attrib(default=False)
@@ -141,7 +144,10 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
     # =========================================================================
 
     def construct_command(self, inference_input: Any, **kwargs: Any) -> str:
-        """Build the ``acli rovodev legacy`` command string.
+        """Build the CLI command string.
+
+        Builds ``acli rovodev legacy <prompt>`` when ``enable_legacy=True``,
+        or ``acli rovodev <prompt>`` when ``enable_legacy=False``.
 
         Session management (``session_id``/``resume``) is injected into kwargs
         by the ``ainfer()``/``infer()`` overrides.
@@ -166,37 +172,23 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         else:
             prompt = str(inference_input)
 
-        parts = [acli, ACLI_SUBCOMMAND, "legacy", shlex.quote(prompt)]
+        # --- Command stem ---
+        if self.enable_legacy:
+            parts = [acli, ACLI_SUBCOMMAND, "legacy", shlex.quote(prompt)]
+        else:
+            parts = [acli, ACLI_SUBCOMMAND, shlex.quote(prompt)]
 
+        # --- Common flags (both modes) ---
         if self.yolo:
             parts.append("--yolo")
-
-        # Output file for reliable output capture.
-        # When raw_output_to_file=True (default), always use a temp file so
-        # parse_output() gets clean LLM text (no terminal formatting, preserves
-        # XML tags like <Response>). Each call gets its own temp file to support
-        # parallel inference.
-        out_path = kwargs.get("output_file") or self.output_file
-        if not out_path and self.raw_output_to_file:
-            out_path = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
-            kwargs["_auto_output_file"] = out_path  # for parse_output cleanup
-        if out_path:
-            parts.extend(["--output-file", out_path])
-
         if self.config_file:
             parts.extend(["--config-file", self.config_file])
         if self.xid:
             parts.extend(["--xid", self.xid])
-        if self.jira:
-            parts.extend(["--jira", self.jira])
-        if self.enable_deep_plan:
-            parts.append("--enable-deep-plan")
-        if self.agent_mode:
-            parts.extend(["--agent-mode", self.agent_mode])
         if self.output_schema:
             parts.extend(["--output-schema", shlex.quote(self.output_schema)])
 
-        # Session resumption — delegated to _build_session_args()
+        # Session resumption — works in both modes via --restore
         session_id = kwargs.get("session_id")
         is_resume = kwargs.get("resume", False)
         if is_resume:
@@ -205,6 +197,51 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
             )
             if session_args:
                 parts.append(session_args)
+
+        # --- Mode-specific flags ---
+        if self.enable_legacy:
+            # Output file for reliable output capture (legacy only).
+            # Preserves XML tags that Rich TUI would strip from stdout.
+            out_path = kwargs.get("output_file") or self.output_file
+            if not out_path and self.raw_output_to_file:
+                out_path = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
+                kwargs["_auto_output_file"] = out_path
+            if out_path:
+                parts.extend(["--output-file", out_path])
+
+            # Legacy-only flags
+            if self.jira:
+                parts.extend(["--jira", self.jira])
+            if self.enable_deep_plan:
+                parts.append("--enable-deep-plan")
+            if self.agent_mode:
+                parts.extend(["--agent-mode", self.agent_mode])
+        else:
+            # Non-legacy: auto-inject --output-schema for clean output capture
+            # when user hasn't set their own schema and raw_output_to_file is on.
+            if not self.output_schema and self.raw_output_to_file:
+                parts.extend(["--output-schema", shlex.quote(_NON_LEGACY_OUTPUT_SCHEMA)])
+                kwargs["_auto_output_schema"] = True
+
+            # Non-legacy exclusive flags
+            if self.config_override:
+                parts.extend(["--config-override", shlex.quote(self.config_override)])
+
+            # Warn about legacy-only flags that were set
+            for flag_name, flag_val in [
+                ("jira", self.jira),
+                ("enable_deep_plan", self.enable_deep_plan),
+                ("agent_mode", self.agent_mode),
+            ]:
+                if flag_val:
+                    logger.warning(
+                        "'%s' is legacy-only and ignored in non-legacy mode",
+                        flag_name,
+                    )
+            if self.output_file:
+                logger.warning(
+                    "'output_file' is legacy-only and ignored in non-legacy mode"
+                )
 
         if self.extra_cli_args:
             parts.extend(self.extra_cli_args)
@@ -215,11 +252,13 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         self, stdout: str, stderr: str, return_code: int,
         output_file_path: Optional[str] = None,
     ) -> dict:
-        """Parse ``acli rovodev legacy`` output.
+        """Parse CLI output.
 
-        Strategy:
-        1. Read from output file if available (clean, no Rich formatting)
-        2. Fall back to ANSI-stripped stdout
+        Strategy (in order):
+        1. Non-legacy with auto-injected schema: extract ``response`` from
+           trailing JSON in stdout (preserves XML tags).
+        2. Read from output file if available (legacy, clean capture).
+        3. Fall back to ANSI-stripped stdout.
 
         Args:
             stdout: Standard output from the process.
@@ -231,18 +270,26 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
             Dict suitable for ``TerminalInferencerResponse.from_dict()``.
         """
         output = stdout
-        effective_output_file = output_file_path or _current_output_file.get(None) or self.output_file
 
-        # Read from output file (clean, no Rich TUI formatting)
-        if effective_output_file and Path(effective_output_file).exists():
-            try:
-                output = Path(effective_output_file).read_text(encoding="utf-8").strip()
-            except OSError:
-                logger.warning("Failed to read output file: %s", effective_output_file)
+        # Non-legacy with auto-injected schema: extract from trailing JSON
+        if not self.enable_legacy and not self.output_schema:
+            parsed = extract_json_from_output(stdout)
+            if parsed and "response" in parsed:
+                output = parsed["response"]
+            else:
+                logger.debug("JSON extraction failed, falling back to ANSI strip")
                 output = strip_ansi_codes(stdout).strip()
         else:
-            # Fall back to stdout with ANSI stripping
-            output = strip_ansi_codes(stdout).strip()
+            # Legacy mode: try output file first, then ANSI-stripped stdout
+            effective_output_file = output_file_path or _current_output_file.get(None) or self.output_file
+            if effective_output_file and Path(effective_output_file).exists():
+                try:
+                    output = Path(effective_output_file).read_text(encoding="utf-8").strip()
+                except OSError:
+                    logger.warning("Failed to read output file: %s", effective_output_file)
+                    output = strip_ansi_codes(stdout).strip()
+            else:
+                output = strip_ansi_codes(stdout).strip()
 
         # Check for auth errors in stderr
         if return_code != 0 and stderr:
@@ -262,9 +309,9 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
         """Override to handle temp output file lifecycle and clean env."""
-        # Generate per-call temp output file if raw_output_to_file is enabled
+        # Generate per-call temp output file (legacy mode only)
         auto_output_file = None
-        if not self.output_file and self.raw_output_to_file:
+        if self.enable_legacy and not self.output_file and self.raw_output_to_file:
             auto_output_file = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
             kwargs["output_file"] = auto_output_file
 
@@ -365,9 +412,9 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         Returns:
             ``TerminalInferencerResponse`` with the inference result.
         """
-        # Generate per-call temp output file if raw_output_to_file is enabled
+        # Generate per-call temp output file (legacy mode only)
         auto_output_file = None
-        if not self.output_file and self.raw_output_to_file:
+        if self.enable_legacy and not self.output_file and self.raw_output_to_file:
             auto_output_file = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
             kwargs["output_file"] = auto_output_file
             _current_output_file.set(auto_output_file)

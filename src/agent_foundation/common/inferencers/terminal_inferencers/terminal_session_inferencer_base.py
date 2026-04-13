@@ -7,6 +7,8 @@ Subclasses implement ``construct_command()``, ``parse_output()``, and
 
 import asyncio
 import enum
+import logging
+import os
 import subprocess
 from abc import abstractmethod
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
@@ -31,6 +33,9 @@ class LargeInputMode(enum.Enum):
     INLINE = "inline"
     STDIN = "stdin"
     FILE = "file"
+
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def _convert_large_input_mode(value: Any) -> LargeInputMode:
@@ -64,6 +69,17 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
     pre_exec_scripts: Optional[List[str]] = attrib(default=None)
     session_arg_name: str = attrib(default="--session-id")
     resume_arg_name: str = attrib(default="--resume")
+
+    # Timeout (seconds) for draining remaining stdout after process exit.
+    # CLI tools that spawn child processes (e.g., MCP servers) may hold
+    # stdout/stderr pipes open after the main process exits, causing
+    # ``async for line in process.stdout`` to block forever.  This timeout
+    # controls how long to wait for remaining buffered output after the
+    # main process is detected as exited.
+    subprocess_exit_drain_timeout: float = attrib(default=5.0)
+
+    # Polling interval (seconds) for checking if the subprocess has exited.
+    _subprocess_exit_poll_interval: float = attrib(default=0.5, repr=False)
 
     # Internal state for streaming result
     _last_streaming_output: str = attrib(default="", init=False, repr=False)
@@ -114,12 +130,153 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         """
         raise NotImplementedError
 
+    # === Helpers: subprocess pipe-hang prevention ===
+
+    async def _poll_process_exit(self, pid: int) -> Optional[int]:
+        """Poll for subprocess exit without relying on pipe closure.
+
+        ``asyncio.subprocess.Process.wait()`` waits for pipe transports to
+        close, which never happens when child processes (e.g., MCP servers)
+        inherit the pipes.  This helper uses ``os.waitpid(WNOHANG)`` to
+        detect the *actual* process exit.
+
+        Args:
+            pid: The process ID to monitor.
+
+        Returns:
+            Exit code, or ``None`` if the process was already reaped.
+        """
+        while True:
+            try:
+                wpid, status = os.waitpid(pid, os.WNOHANG)
+                if wpid != 0:
+                    return os.waitstatus_to_exitcode(status)
+            except ChildProcessError:
+                return None  # already reaped by asyncio
+            await asyncio.sleep(self._subprocess_exit_poll_interval)
+
+    @staticmethod
+    def _force_close_pipes(
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        """Force-close subprocess pipe transports.
+
+        After the main process exits, child processes may still hold the
+        pipes open.  Closing the transports unblocks
+        ``asyncio.subprocess.Process.wait()`` and prevents indefinite hangs
+        during ``asyncio.run()`` shutdown.
+        """
+        for stream in (process.stdout, process.stderr, process.stdin):
+            if stream is not None:
+                transport = getattr(stream, "_transport", None)
+                if transport is not None and not transport.is_closing():
+                    transport.close()
+
+    async def _safe_process_cleanup(
+        self, process: asyncio.subprocess.Process, timeout: float = 5.0
+    ) -> None:
+        """Clean up subprocess: force-close pipes and wait with timeout.
+
+        Args:
+            process: The subprocess to clean up.
+            timeout: Max seconds to wait for ``process.wait()``.
+        """
+        self._force_close_pipes(process)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[%s] process.wait() timed out after %.1fs — killing process",
+                self.__class__.__name__,
+                timeout,
+            )
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.wait()
+
+    async def _read_stdout_with_exit_detection(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> AsyncIterator[str]:
+        """Read subprocess stdout lines, racing against process exit.
+
+        Prevents the common hang where CLI tools (e.g., ``acli rovodev``)
+        spawn child processes (MCP servers) that inherit stdout/stderr
+        pipes.  When the main process exits, the children keep the pipes
+        open, causing ``async for line in process.stdout`` to block forever.
+
+        This method uses ``os.waitpid(WNOHANG)`` to poll for *actual*
+        process exit independently of pipe state, and breaks out of the
+        read loop when the process has exited.
+
+        Args:
+            process: The subprocess to read from.
+
+        Yields:
+            Decoded stdout lines.
+        """
+        exit_task = asyncio.create_task(self._poll_process_exit(process.pid))
+
+        try:
+            while True:
+                read_task = asyncio.create_task(process.stdout.readline())
+
+                done, _ = await asyncio.wait(
+                    {read_task, exit_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if read_task in done:
+                    line = read_task.result()
+                    if not line:  # EOF
+                        break
+                    yield line.decode("utf-8", errors="replace")
+
+                    # If exit also fired simultaneously, drain and break
+                    if exit_task in done:
+                        break
+                elif exit_task in done:
+                    # Process exited but readline is stuck on pipe.
+                    # Cancel the stuck read and drain buffered output.
+                    read_task.cancel()
+                    try:
+                        await read_task
+                    except asyncio.CancelledError:
+                        pass
+
+                    # Drain any remaining buffered output with timeout
+                    try:
+                        remaining = await asyncio.wait_for(
+                            process.stdout.read(),
+                            timeout=self.subprocess_exit_drain_timeout,
+                        )
+                        if remaining:
+                            yield remaining.decode("utf-8", errors="replace")
+                    except (asyncio.TimeoutError, Exception):
+                        logger.debug(
+                            "[%s] stdout drain timed out after process exit",
+                            self.__class__.__name__,
+                        )
+                    break
+        finally:
+            if not exit_task.done():
+                exit_task.cancel()
+                try:
+                    await exit_task
+                except asyncio.CancelledError:
+                    pass
+
     # === Concrete: _ainfer_streaming (subprocess line streaming) ===
 
     async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield lines from subprocess stdout.
 
         Satisfies the ``@abstractmethod`` contract from StreamingInferencerBase.
+
+        Uses ``_read_stdout_with_exit_detection()`` to prevent hangs when
+        child processes inherit stdout/stderr pipes.
 
         Args:
             prompt: The prompt string.
@@ -140,14 +297,22 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
 
         collected_stdout: list[str] = []
         try:
-            async for line_bytes in process.stdout:
-                line = line_bytes.decode("utf-8", errors="replace")
+            async for line in self._read_stdout_with_exit_detection(process):
                 collected_stdout.append(line)
                 yield line
         finally:
-            stderr_bytes = await process.stderr.read() if process.stderr else b""
+            # Read stderr with timeout (may also be held by children)
+            try:
+                stderr_bytes = await asyncio.wait_for(
+                    process.stderr.read(), timeout=self.subprocess_exit_drain_timeout
+                ) if process.stderr else b""
+            except (asyncio.TimeoutError, Exception):
+                stderr_bytes = b""
+                logger.debug(
+                    "[%s] stderr read timed out", self.__class__.__name__
+                )
             self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
-            await process.wait()
+            await self._safe_process_cleanup(process)
             self._last_streaming_output = "".join(collected_stdout)
             self._last_streaming_return_code = process.returncode
 
@@ -275,6 +440,9 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
     ) -> AsyncIterator[str]:
         """Async subprocess streaming — yields stdout lines.
 
+        Uses ``_read_stdout_with_exit_detection()`` to prevent hangs when
+        child processes inherit stdout/stderr pipes.
+
         Args:
             inference_input: Input data for inference.
             **kwargs: Additional arguments passed to ``construct_command()``.
@@ -294,11 +462,10 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
 
         collected: list[str] = []
         try:
-            async for line_bytes in process.stdout:
-                line = line_bytes.decode("utf-8", errors="replace")
+            async for line in self._read_stdout_with_exit_detection(process):
                 collected.append(line)
                 yield line
         finally:
-            await process.wait()
+            await self._safe_process_cleanup(process)
             self._last_streaming_output = "".join(collected)
             self._last_streaming_return_code = process.returncode
