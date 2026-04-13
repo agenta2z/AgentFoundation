@@ -312,3 +312,21 @@ class DualInferencerResponse(InferencerResponse):
 
 
 DEFAULT_RESPONSE_TYPES = Union[str, InferencerResponse, InputAndResponse]
+
+
+def extract_response_text(result):
+    """Extract text from various inferencer result types.
+
+    Type dispatch:
+    - DualInferencerResponse → str(result.base_response)
+    - InferencerResponse → str(result.select_response())
+    - Other → str(result)
+
+    IMPORTANT: DualInferencerResponse check must come BEFORE InferencerResponse
+    because DualInferencerResponse inherits from InferencerResponse.
+    """
+    if isinstance(result, DualInferencerResponse):
+        return str(result.base_response)
+    if isinstance(result, InferencerResponse):
+        return str(result.select_response())
+    return str(result)

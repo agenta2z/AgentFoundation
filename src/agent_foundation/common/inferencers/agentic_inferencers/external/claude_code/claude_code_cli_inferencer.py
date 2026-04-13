@@ -187,7 +187,10 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
             CLI argument string.
         """
         if is_resume and session_id:
-            return f"--resume '{session_id}'"
+            # Use double quotes for Windows cmd.exe compatibility
+            # (single quotes are not recognized by cmd.exe).
+            # Session IDs are UUIDs so quoting is defensive, not strictly needed.
+            return f'--resume "{session_id}"'
         return ""
 
     def construct_command(self, inference_input: Any, **kwargs: Any) -> str:
@@ -275,8 +278,12 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
 
     def parse_output(
         self, stdout: str, stderr: str, return_code: int
-    ) -> TerminalInferencerResponse:
-        """Parse command output into a response object.
+    ) -> Dict[str, Any]:
+        """Parse command output into a result dict.
+
+        The base class ``_ainfer()`` and ``_infer()`` wrap this dict in
+        ``TerminalInferencerResponse.from_dict()``, so return a plain dict
+        to avoid double-wrapping.
 
         Args:
             stdout: Standard output from command.
@@ -284,7 +291,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
             return_code: Process return code.
 
         Returns:
-            Response object with parsed fields.
+            Dict with parsed fields (output, session_id, success, etc.).
         """
         result: Dict[str, Any] = {
             "raw_output": stdout.strip() if stdout else "",
@@ -322,7 +329,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                 else result.get("output", f"Command failed with code {return_code}")
             )
 
-        return TerminalInferencerResponse.from_dict(result)
+        return result
 
     # === Helper Methods ===
 
@@ -529,7 +536,8 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                 timeout,
             )
             raise
-        return self.parse_output(result.stdout, result.stderr, result.returncode)
+        result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
+        return TerminalInferencerResponse.from_dict(result_dict)
 
     # === Override: ainfer() — Session-Aware ===
 

@@ -277,18 +277,16 @@ async def test_response_metadata() -> bool:
 
         print(f"\n✓ Got response:")
         print(f"  Type: {type(response)}")
-        print(f"  Keys: {list(response.keys())}")
         print(f"  success: {response.success}")
-        print(f"  session_id: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16] if response.session_id else 'N/A'}...")
+        sid = getattr(response, "session_id", None)
+        print(f"  session_id: {(sid[:16] + '...') if sid else 'N/A'}")
         print(f"  return_code: {response.return_code}")
-        print(f"  total_cost_usd: {getattr(response, 'total_cost_usd', None)}")
-        print(f"  num_turns: {getattr(response, 'num_turns', None)}")
-        print(f"  duration_ms: {getattr(response, 'duration_ms', None)}")
+        print(f"  output: {getattr(response, 'output', '')[:80]}...")
 
-        # Check required fields
-        has_output = "output" in response
-        has_success = "success" in response
-        has_return_code = "return_code" in response
+        # Check required fields (TerminalInferencerResponse attrs)
+        has_output = hasattr(response, "output") and response.output
+        has_success = hasattr(response, "success")
+        has_return_code = hasattr(response, "return_code")
 
         if has_output and has_success and has_return_code:
             print("\n✅ RESPONSE METADATA TEST PASSED!")

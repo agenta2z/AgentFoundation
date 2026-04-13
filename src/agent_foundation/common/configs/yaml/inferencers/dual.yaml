@@ -1,0 +1,5 @@
+# String shorthand: "ClaudeAPI" auto-expands to {_target_: full.path.ClaudeApiInferencer}
+# Use full nested _target_ syntax when you need to override fields.
+_target_: Dual
+base_inferencer: ClaudeAPI
+review_inferencer: ClaudeAPI

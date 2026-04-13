@@ -1,57 +1,81 @@
 import asyncio
+import logging
 import os
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from functools import partial
-from typing import Any, AsyncIterator, Callable, Iterable, Iterator, Optional, Sequence, Type, Union
+from typing import Any, AsyncIterator, Callable, Iterable, Iterator, List, Optional, Sequence, Type, Union
 
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
+from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 from rich_python_utils.common_utils import dict_, iter__, resolve_environ
-from rich_python_utils.common_utils.function_helper import execute_with_retry
+from rich_python_utils.common_utils.function_helper import FallbackMode, execute_with_retry
 
 # Retry prompt mode constants
 RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
 
+# Module-level ContextVar for per-call fallback state.
+# Each asyncio Task from aparallel_infer gets its own context copy — no race.
+# Shared with streaming_inferencer_base.py for cache path tracking.
+_current_fallback_state: ContextVar[dict | None] = ContextVar("_current_fallback_state", default=None)
+
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
+
+_logger = logging.getLogger(__name__)
 
 
 @attrs
-class InferencerBase(Debuggable, ABC):
+class InferencerBase(Debuggable, Resumable, ABC):
     merger__ = """
-    Abstract base class for implementing inference logic with retry functionality.
+    Abstract base class for implementing inference logic with retry and fallback recovery.
 
-    This class provides a framework for executing inference tasks with built-in retry mechanisms.
-    Subclasses should implement the `_infer` method
+    This class provides a framework for executing inference tasks with built-in retry mechanisms,
+    timeout support, and fallback chain recovery. Subclasses should implement the `_infer` method
     to define specific inference behavior and optionally override other methods to customize prompt
-    formatting and output validation.
+    formatting, output validation, and recovery strategies.
+
+    Retry semantics:
+        The default ``fallback_mode`` is ``ON_FIRST_FAILURE``, which means the primary ``_infer``/
+        ``_ainfer`` gets one attempt, then ``_infer_recovery``/``_ainfer_recovery`` gets ``max_retry``
+        attempts. Total attempts = ``1 + max_retry``. To restore the pre-fallback behavior (all
+        attempts call the same function), set ``fallback_mode=FallbackMode.NEVER``.
+
+        Sync path: ``execute_with_retry`` uses ``while True`` + ``attempts >= max_retry: break``
+        = initial + max_retry calls per callable.
+        Async path: ``async_execute_with_retry`` uses ``for attempt in range(max_retry)``
+        = max_retry calls per callable.
+
+    Timeout support:
+        ``total_timeout_seconds``: Wall-clock cap for the entire retry+fallback loop (sync and async).
+        ``attempt_timeout_seconds``: Per-attempt cap via ``asyncio.wait_for`` (async only).
+        Sync path raises ``NotImplementedError`` if ``attempt_timeout_seconds > 0``.
 
     Attributes:
         model_id (str): The identifier of the model to be used for inference.
         secret_key (str): Secret key for authentication, if needed. Defaults to None.
-        max_retry (int): The maximum number of retry attempts for inference if the initial call fails.
-            Retry is disabled if this number is <= 1. Defaults to 1.
+        max_retry (int): The maximum number of retry attempts. With the default
+            ``fallback_mode=ON_FIRST_FAILURE``, total attempts = 1 + max_retry.
+            With ``fallback_mode=NEVER``, total attempts = max_retry (async) or 1 + max_retry (sync).
         min_retry_wait (float): Minimum wait time in seconds between retry attempts. Defaults to 0.
-        max_retry_wait (float): Maximum wait time in seconds between retry attempts. If set to 0, no wait is applied.
-            Defaults to 0.
-        default_return_or_raise (Union[Any, Exception]): The value to return or exception to raise if all retry attempts fail.
-            If None, a generic exception will be raised after all retries fail. Defaults to None.
-        default_inference_args (dict): A dictionary of default arguments to pass to the `_infer` method during inference.
-            This can be overridden or extended by passing additional arguments via `infer` or `__call__`.
-        input_preprocessor (Callable): Optional callable for preprocessing input before inference.
-            Should take inference_input as parameter and return preprocessed input.
-            If None, input passes through unchanged. Defaults to None.
-            For multiprocessing compatibility, use module-level functions, not lambdas.
-        response_post_processor (Callable): Optional callable for post-processing inference responses.
-            Should take inference_response as parameter and return post-processed response.
-            If None, response passes through unchanged. Defaults to None.
-            For multiprocessing compatibility, use module-level functions, not lambdas.
-        post_response_merger (str, Callable): Optional callable that merges multiple post-processed responses into a single response.
-            When provided for iterator inputs, all responses are collected, post-processed, and merged instead of yielding.
-            Defaults to None. Specify "default" to use a default build-in merger.
+        max_retry_wait (float): Maximum wait time in seconds between retry attempts. Defaults to 0.
+        default_return_or_raise (Union[Any, Exception]): Value to return or exception to raise on failure.
+        total_timeout_seconds (float): Wall-clock cap in seconds. 0 = disabled. Applies to both sync and async.
+        attempt_timeout_seconds (float): Per-attempt timeout in seconds. 0.0 = disabled. Async only.
+        fallback_inferencer: External fallback inferencer(s). None = self-recovery only.
+        fallback_mode (FallbackMode): When to transition to fallback. Default: ON_FIRST_FAILURE.
+        default_inference_args (dict): Default arguments passed to ``_infer``.
+        input_preprocessor (Callable): Optional input preprocessor.
+        response_post_processor (Callable): Optional response post-processor.
+        post_response_merger (str, Callable): Optional response merger for iterator inputs.
     """
 
     model_id: str = attrib(default="")
     _secret_key: Union[str, Sequence[str]] = attrib(default=None)
+
+    # Class-level fire-once warning sets
+    _paired_override_warned: set = set()
+    _nested_retry_warned: set = set()
 
     # region retry parameters
     max_retry: int = attrib(default=1)
@@ -60,12 +84,21 @@ class InferencerBase(Debuggable, ABC):
     default_return_or_raise: Union[Any, Exception] = attrib(default=None)
     # endregion
 
-    # Total timeout for async inference (applies to _ainfer_single only).
-    # 0 = disabled (backward compatible). Caps the entire _ainfer() call
-    # including all retries. Sync _infer_single is not wrapped because
-    # sync timeout in Python is inherently complex (signal.alarm is
-    # Unix/main-thread-only).
-    total_timeout_seconds: int = attrib(default=0)
+    # Total timeout in seconds for the entire retry+fallback loop.
+    # 0 = disabled (backward compatible). Applies to both sync (_infer_single)
+    # and async (_ainfer_single) paths via the retry helpers.
+    total_timeout_seconds: float = attrib(default=0)
+
+    # Per-attempt timeout in seconds. 0.0 = disabled. Float for sub-second granularity.
+    # Async only — sync path raises NotImplementedError if > 0.
+    attempt_timeout_seconds: float = attrib(default=0.0)
+
+    # External fallback inferencer(s) to try when the primary _infer/_ainfer fails.
+    # None = no external fallback (self-recovery via _infer_recovery/_ainfer_recovery still applies).
+    fallback_inferencer: Union["InferencerBase", List["InferencerBase"], None] = attrib(default=None)
+
+    # Controls when the retry helper transitions to the next fallback callable.
+    fallback_mode: FallbackMode = attrib(default=FallbackMode.ON_FIRST_FAILURE)
 
     response_types: Sequence[Type] = attrib(default=(str,))
     default_inference_args: dict = attrib(default=None, converter=dict_)
@@ -105,6 +138,40 @@ class InferencerBase(Debuggable, ABC):
                 from rich_python_utils.mp_utils.common import get_merger
 
                 self.post_response_merger = get_merger(self.post_response_merger)
+
+        # Paired-override warning: detect subclass overriding only one of
+        # _ainfer_recovery / _infer_recovery (not both).
+        async_overridden = type(self)._ainfer_recovery is not InferencerBase._ainfer_recovery
+        sync_overridden = type(self)._infer_recovery is not InferencerBase._infer_recovery
+        if async_overridden != sync_overridden:
+            cls_name = type(self).__name__
+            if cls_name not in InferencerBase._paired_override_warned:
+                InferencerBase._paired_override_warned.add(cls_name)
+                _logger.warning(
+                    f"{cls_name} overrides only "
+                    f"{'_ainfer_recovery' if async_overridden else '_infer_recovery'} "
+                    f"but not {'_infer_recovery' if async_overridden else '_ainfer_recovery'}. "
+                    f"Override both for full sync/async recovery coverage."
+                )
+
+        # Nested-retry warning: detect fallback_inferencer with max_retry > 1.
+        if self.fallback_inferencer is not None:
+            fb_list = (
+                self.fallback_inferencer
+                if isinstance(self.fallback_inferencer, list)
+                else [self.fallback_inferencer]
+            )
+            cls_name = type(self).__name__
+            for fb in fb_list:
+                if fb.max_retry > 1 and cls_name not in InferencerBase._nested_retry_warned:
+                    InferencerBase._nested_retry_warned.add(cls_name)
+                    _logger.warning(
+                        f"{cls_name}: fallback_inferencer {type(fb).__name__} has "
+                        f"max_retry={fb.max_retry}. This creates multiplicative retries "
+                        f"(outer × inner). Consider max_retry=1 for fallbacks."
+                    )
+                    break
+
         super().__attrs_post_init__()
 
     @property
@@ -151,6 +218,16 @@ class InferencerBase(Debuggable, ABC):
             feed["output_path"] = resolved
         return feed
 
+    @property
+    def supports_prompt_rendering(self) -> bool:
+        """Whether this inferencer has prompt/template rendering capability.
+
+        Returns True when the inferencer is configured with a template_manager
+        (for base class auto-rendering) or when a subclass overrides this to
+        indicate its own prompt rendering support.
+        """
+        return self.template_manager is not None
+
     def _render_prompt(self, inference_input: Any) -> Any:
         """Render a template-based prompt if template_manager is configured.
 
@@ -195,6 +272,46 @@ class InferencerBase(Debuggable, ABC):
             f.write(cleaned)
         return cleaned
 
+    # -- Resumable protocol implementation ----------------------------------
+
+    def _get_result_path(self, result_id, *args, **kwargs) -> str:
+        """Default checkpoint path using ``output_path`` as base directory.
+
+        Raises ``NotImplementedError`` when ``output_path`` is not configured,
+        which is the safe default — workflow callers
+        (``WorkGraphNode._should_save_result``) already catch this and skip
+        checkpointing gracefully.
+        """
+        if self.output_path is None:
+            raise NotImplementedError(
+                f"{type(self).__name__}: no output_path configured. "
+                f"Set output_path to enable checkpointing."
+            )
+        resolved = self.resolve_output_path() or self.output_path
+        return os.path.join(resolved, f"{result_id}.pkl")
+
+    def _try_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+        """Sync hook for subclasses to check for resumable cached results.
+
+        Called AFTER preprocessing and template rendering, BEFORE the retry
+        loop in ``_infer_single``.  Returns the cached result to short-circuit
+        execution, or ``None`` to proceed normally.
+
+        Base implementation returns ``None`` (no caching for plain inferencers).
+        ``StreamingInferencerBase`` overrides this with cache discovery logic.
+        """
+        return None
+
+    async def _atry_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+        """Async hook — mirrors ``_try_resume_from_cache`` for ``_ainfer_single``.
+
+        Base implementation delegates to the sync version.  Streaming inferencers
+        override to ``await self._ainfer(augmented)`` for partial-cache recovery.
+        """
+        return self._try_resume_from_cache(inference_input, inference_config, **kwargs)
+
+    # -- Inference pipeline -------------------------------------------------
+
     def _infer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
@@ -231,6 +348,20 @@ class InferencerBase(Debuggable, ABC):
         # Template rendering (opt-in: only when template_manager is set)
         inference_input = self._render_prompt(inference_input)
 
+        # Resume hook: check for cached result from a previous session.
+        # Placed AFTER preprocessing/rendering so prompt hash matches cache.
+        resume_result = self._try_resume_from_cache(
+            inference_input, inference_config, **_inference_args
+        )
+        if resume_result is not None:
+            # Run the same post-processing tail as the normal path
+            resume_result = self._finalize_output(resume_result)
+            if self.state_graphs:
+                self.update_state_graphs(resume_result)
+            if self.response_post_processor is not None:
+                resume_result = self.response_post_processor(resume_result)
+            return resume_result
+
         inference_args = self.default_inference_args.copy()
         if _inference_args:
             inference_args.update(_inference_args)
@@ -244,7 +375,19 @@ class InferencerBase(Debuggable, ABC):
         total_timeout = inference_args.pop(
             "total_timeout_seconds", self.total_timeout_seconds
         )
+        attempt_timeout = inference_args.pop(
+            "attempt_timeout_seconds", self.attempt_timeout_seconds
+        )
+        fallback_mode = inference_args.pop("fallback_mode", self.fallback_mode)
+        on_fallback_callback = inference_args.pop("on_fallback_callback", None)
         retry_prompt_mode = inference_args.pop("retry_prompt_mode", "original")
+
+        # Per-attempt timeout is async-only — reject in sync path
+        if attempt_timeout and attempt_timeout > 0:
+            raise NotImplementedError(
+                "Per-attempt timeout is async-only. Use total_timeout_seconds "
+                "for sync, or call ainfer() instead."
+            )
 
         # Validate retry_prompt_mode
         if retry_prompt_mode not in RETRY_PROMPT_MODES:
@@ -282,16 +425,87 @@ class InferencerBase(Debuggable, ABC):
         self.log_debug(inference_input, "InferenceInput")
         self.log_debug(inference_args, "InferenceArgs")
 
-        inference_response = execute_with_retry(
-            func=partial(self._infer, inference_config=inference_config),
-            max_retry=self.max_retry,
-            min_retry_wait=self.min_retry_wait,
-            max_retry_wait=self.max_retry_wait,
-            args=retry_args,
-            kwargs=inference_args,
-            default_return_or_raise=self.default_return_or_raise,
-            on_retry_callback=on_retry_callback,
-        )
+        # Convert 0 → None for timeout parameters (0 = disabled)
+        effective_total_timeout = total_timeout or None
+
+        # -- Build _fallback_state and fallback chain --
+        _fallback_state = {"last_exception": None, "partial_output": None, "cache_path": None}
+
+        # Recovery wrapper — reads from closure-captured _fallback_state
+        def _recovery_wrapper(inp, **kw):
+            return self._infer_recovery(
+                inp,
+                last_exception=_fallback_state["last_exception"],
+                last_partial_output=_fallback_state["partial_output"],
+                inference_config=inference_config,
+                **inference_args,
+            )
+
+        # External fallback wrappers from fallback_inferencer list
+        external_wrappers = []
+        if self.fallback_inferencer is not None:
+            fb_list = (
+                self.fallback_inferencer
+                if isinstance(self.fallback_inferencer, list)
+                else [self.fallback_inferencer]
+            )
+            external_wrappers = [
+                lambda inp, inf=inf, **kw: inf.infer(inp, inference_config, **kw)
+                for inf in fb_list
+            ]
+
+        # Build fallback chain and mode for the retry helper
+        if fallback_mode == FallbackMode.NEVER:
+            effective_fallback_func = None
+            effective_fallback_mode = FallbackMode.NEVER
+        else:
+            effective_fallback_func = [_recovery_wrapper] + external_wrappers
+            effective_fallback_mode = fallback_mode
+
+        # Transition callback — populates _fallback_state and resets retry_args[0]
+        _user_on_fallback = on_fallback_callback
+
+        def _on_transition(from_func, to_func, exception, total_attempts):
+            _fallback_state["last_exception"] = exception
+            if _fallback_state["cache_path"]:
+                try:
+                    with open(_fallback_state["cache_path"], "r", encoding="utf-8") as f:
+                        raw = f.read()
+                    _fallback_state["partial_output"] = raw if raw.strip() else None
+                except OSError:
+                    _fallback_state["partial_output"] = None
+            # Reset retry_args[0] to original input so external fallback
+            # inferencers see the original prompt, not the mutated retry prompt
+            retry_args[0] = original_input
+            # Forward to user-provided on_fallback_callback if present
+            if _user_on_fallback is not None:
+                _user_on_fallback(from_func, to_func, exception, total_attempts)
+
+        # Set ContextVar for this call (per-thread safe for sync path)
+        token = _current_fallback_state.set(_fallback_state)
+        try:
+            inference_response = execute_with_retry(
+                func=partial(self._infer, inference_config=inference_config),
+                max_retry=self.max_retry,
+                min_retry_wait=self.min_retry_wait,
+                max_retry_wait=self.max_retry_wait,
+                args=retry_args,
+                kwargs=inference_args,
+                default_return_or_raise=self.default_return_or_raise,
+                on_retry_callback=on_retry_callback,
+                total_timeout=effective_total_timeout,
+                fallback_func=effective_fallback_func,
+                fallback_mode=effective_fallback_mode,
+                on_fallback_callback=_on_transition if effective_fallback_func else None,
+            )
+        except TimeoutError:
+            self.log_info(
+                f"Total timeout after {total_timeout}s",
+                "TotalTimeout",
+            )
+            raise
+        finally:
+            _current_fallback_state.reset(token)
 
         self.log_debug(inference_response, "InferenceResponse")
 
@@ -603,6 +817,52 @@ class InferencerBase(Debuggable, ABC):
         """
         return self._infer(inference_input, inference_config, **_inference_args)
 
+    def _infer_recovery(
+        self,
+        inference_input: Any,
+        last_exception: Optional[Exception],
+        last_partial_output: Optional[str],
+        inference_config: Optional[Any] = None,
+        **kwargs,
+    ) -> Any:
+        """Overridable sync recovery method. Default delegates to _infer.
+
+        Called as the fallback function when the primary _infer fails.
+        Subclasses (e.g., StreamingInferencerBase) can override to implement
+        cache-aware or session-aware recovery strategies.
+
+        Args:
+            inference_input: The original inference input.
+            last_exception: The exception from the failed primary attempt.
+            last_partial_output: Any partial output from the failed attempt, or None.
+            inference_config: Optional inference configuration.
+            **kwargs: Additional keyword arguments passed through to _infer.
+        """
+        return self._infer(inference_input, inference_config, **kwargs)
+
+    async def _ainfer_recovery(
+        self,
+        inference_input: Any,
+        last_exception: Optional[Exception],
+        last_partial_output: Optional[str],
+        inference_config: Optional[Any] = None,
+        **kwargs,
+    ) -> Any:
+        """Overridable async recovery method. Default delegates to _ainfer.
+
+        Called as the fallback function when the primary _ainfer fails.
+        Subclasses (e.g., StreamingInferencerBase) can override to implement
+        cache-aware or session-aware recovery strategies.
+
+        Args:
+            inference_input: The original inference input.
+            last_exception: The exception from the failed primary attempt.
+            last_partial_output: Any partial output from the failed attempt, or None.
+            inference_config: Optional inference configuration.
+            **kwargs: Additional keyword arguments passed through to _ainfer.
+        """
+        return await self._ainfer(inference_input, inference_config, **kwargs)
+
     async def _ainfer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
@@ -635,6 +895,20 @@ class InferencerBase(Debuggable, ABC):
         # Template rendering (opt-in: only when template_manager is set)
         inference_input = self._render_prompt(inference_input)
 
+        # Resume hook (async): check for cached result from a previous session.
+        # Uses _atry (async) so streaming override can await self._ainfer().
+        resume_result = await self._atry_resume_from_cache(
+            inference_input, inference_config, **_inference_args
+        )
+        if resume_result is not None:
+            # Run the same post-processing tail as the normal path
+            resume_result = self._finalize_output(resume_result)
+            if self.state_graphs:
+                self.update_state_graphs(resume_result)
+            if self.response_post_processor is not None:
+                resume_result = self.response_post_processor(resume_result)
+            return resume_result
+
         inference_args = self.default_inference_args.copy()
         if _inference_args:
             inference_args.update(_inference_args)
@@ -648,6 +922,11 @@ class InferencerBase(Debuggable, ABC):
         total_timeout = inference_args.pop(
             "total_timeout_seconds", self.total_timeout_seconds
         )
+        attempt_timeout = inference_args.pop(
+            "attempt_timeout_seconds", self.attempt_timeout_seconds
+        )
+        fallback_mode = inference_args.pop("fallback_mode", self.fallback_mode)
+        on_fallback_callback = inference_args.pop("on_fallback_callback", None)
         retry_prompt_mode = inference_args.pop("retry_prompt_mode", "original")
 
         # Validate retry_prompt_mode
@@ -686,8 +965,69 @@ class InferencerBase(Debuggable, ABC):
         self.log_debug(inference_input, "InferenceInput")
         self.log_debug(inference_args, "InferenceArgs")
 
-        async def _do_inference():
-            return await async_execute_with_retry(
+        # Convert 0 → None for timeout parameters (0 = disabled)
+        effective_total_timeout = total_timeout or None
+        effective_attempt_timeout = attempt_timeout or None
+
+        # -- Build _fallback_state and fallback chain --
+        _fallback_state = {"last_exception": None, "partial_output": None, "cache_path": None}
+
+        # Recovery wrapper — reads from closure-captured _fallback_state
+        async def _recovery_wrapper(inp, **kw):
+            return await self._ainfer_recovery(
+                inp,
+                last_exception=_fallback_state["last_exception"],
+                last_partial_output=_fallback_state["partial_output"],
+                inference_config=inference_config,
+                **inference_args,
+            )
+
+        # External fallback wrappers from fallback_inferencer list
+        external_wrappers = []
+        if self.fallback_inferencer is not None:
+            fb_list = (
+                self.fallback_inferencer
+                if isinstance(self.fallback_inferencer, list)
+                else [self.fallback_inferencer]
+            )
+            external_wrappers = [
+                lambda inp, inf=inf, **kw: inf.ainfer(inp, inference_config, **kw)
+                for inf in fb_list
+            ]
+
+        # Build fallback chain and mode for the retry helper
+        if fallback_mode == FallbackMode.NEVER:
+            effective_fallback_func = None
+            effective_fallback_mode = FallbackMode.NEVER
+        else:
+            effective_fallback_func = [_recovery_wrapper] + external_wrappers
+            effective_fallback_mode = fallback_mode
+
+        # Transition callback — populates _fallback_state and resets retry_args[0]
+        _user_on_fallback = on_fallback_callback
+
+        async def _on_transition(from_func, to_func, exception, total_attempts):
+            _fallback_state["last_exception"] = exception
+            if _fallback_state["cache_path"]:
+                try:
+                    with open(_fallback_state["cache_path"], "r", encoding="utf-8") as f:
+                        raw = f.read()
+                    _fallback_state["partial_output"] = raw if raw.strip() else None
+                except OSError:
+                    _fallback_state["partial_output"] = None
+            # Reset retry_args[0] to original input so external fallback
+            # inferencers see the original prompt, not the mutated retry prompt
+            retry_args[0] = original_input
+            # Forward to user-provided on_fallback_callback if present
+            if _user_on_fallback is not None:
+                result = _user_on_fallback(from_func, to_func, exception, total_attempts)
+                if asyncio.iscoroutine(result):
+                    await result
+
+        # Set ContextVar for this call (per-task safe under aparallel_infer)
+        token = _current_fallback_state.set(_fallback_state)
+        try:
+            inference_response = await async_execute_with_retry(
                 func=lambda inp: self._ainfer(inp, inference_config, **inference_args),
                 max_retry=self.max_retry,
                 min_retry_wait=self.min_retry_wait,
@@ -695,21 +1035,20 @@ class InferencerBase(Debuggable, ABC):
                 args=retry_args,
                 default_return_or_raise=self.default_return_or_raise,
                 on_retry_callback=on_retry_callback,
+                total_timeout=effective_total_timeout,
+                attempt_timeout=effective_attempt_timeout,
+                fallback_func=effective_fallback_func,
+                fallback_mode=effective_fallback_mode,
+                on_fallback_callback=_on_transition if effective_fallback_func else None,
             )
-
-        if total_timeout > 0:
-            try:
-                inference_response = await asyncio.wait_for(
-                    _do_inference(), timeout=total_timeout
-                )
-            except asyncio.TimeoutError:
-                self.log_info(
-                    f"Total timeout after {total_timeout}s",
-                    "TotalTimeout",
-                )
-                raise
-        else:
-            inference_response = await _do_inference()
+        except TimeoutError:
+            self.log_info(
+                f"Total timeout after {total_timeout}s",
+                "TotalTimeout",
+            )
+            raise
+        finally:
+            _current_fallback_state.reset(token)
 
         self.log_debug(inference_response, "InferenceResponse")
 

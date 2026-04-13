@@ -1,0 +1,8 @@
+# 01_simple.yaml — The simplest possible config: one object, a few fields.
+#
+# _target_ tells the system WHAT class to create.
+# Everything else becomes constructor kwargs.
+
+_target_: MockLLM
+model_name: claude-haiku
+response_prefix: "[Haiku] "

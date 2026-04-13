@@ -1,0 +1,25 @@
+# 06_deep_nesting.yaml — Three levels deep: chain -> reviewer -> base LLM.
+#
+# This shows that nesting composes arbitrarily:
+#   ChainInferencer
+#     steps[0]: ReviewerInferencer
+#                 base: MockLLM (draft writer)
+#     steps[1]: MockLLM (final polisher)
+#
+# The execution flow:
+#   input -> ReviewerInferencer(base generates draft, then reviews it) -> MockLLM polishes
+
+_target_: ChainInferencer
+steps:
+  # Step 1: a reviewer that internally uses a draft writer
+  - _target_: ReviewerInferencer
+    base:
+      _target_: MockLLM
+      model_name: draft-writer
+      response_prefix: "DRAFT: "
+    review_prompt: "Verify facts and tone"
+
+  # Step 2: a final polisher
+  - _target_: MockLLM
+    model_name: polisher
+    response_prefix: "FINAL: "

@@ -1,0 +1,4 @@
+_target_: LlmInferenceArgs
+temperature: 1.0
+max_tokens: 2000
+top_p: 0.9

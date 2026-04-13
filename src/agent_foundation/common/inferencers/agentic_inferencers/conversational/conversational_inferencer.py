@@ -122,6 +122,10 @@ class ConversationalInferencer(InferencerBase):
     _last_template_feed: dict[str, Any] = attrib(factory=dict, init=False)
     _last_template_config: dict[str, Any] = attrib(factory=dict, init=False)
 
+    @property
+    def supports_prompt_rendering(self) -> bool:
+        return self.prompt_renderer is not None
+
     # =========================================================================
     # Agentic Loop
     # =========================================================================

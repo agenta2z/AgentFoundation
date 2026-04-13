@@ -182,6 +182,10 @@ class DualInferencer(InferencerBase, Workflow):
     auto_mode = attrib(default=SerializationMode.PREFER_CLEAR_TEXT, init=False)
     max_loop_iterations = attrib(default=10, init=False)
 
+    @property
+    def supports_prompt_rendering(self) -> bool:
+        return self.prompt_formatter is not None
+
     def __attrs_post_init__(self):
         super(DualInferencer, self).__attrs_post_init__()
 
@@ -880,7 +884,7 @@ class DualInferencer(InferencerBase, Workflow):
 
     # region Prompt Builders
 
-    def _render_prompt(self, role: str, feed: dict, inference_config: dict) -> str:
+    def _render_role_prompt(self, role: str, feed: dict, inference_config: dict) -> str:
         """Render a prompt template by role name."""
         post_process = partial(unescape_xml, unescape_for_html=True)
 
@@ -921,7 +925,7 @@ class DualInferencer(InferencerBase, Workflow):
             "attempt": attempt,
             "round_index": 0,
         }
-        return self._render_prompt("initial", feed, inference_config)
+        return self._render_role_prompt("initial", feed, inference_config)
 
     def _build_review_prompt(
         self,
@@ -942,7 +946,7 @@ class DualInferencer(InferencerBase, Workflow):
         }
         if counter_feedback is not None:
             feed[self.placeholder_counter_feedback] = counter_feedback
-        return self._render_prompt("review", feed, inference_config)
+        return self._render_role_prompt("review", feed, inference_config)
 
     def _build_followup_prompt(
         self,
@@ -971,7 +975,7 @@ class DualInferencer(InferencerBase, Workflow):
         }
         if review_output is not None:
             feed["reviewer_response"] = review_output
-        return self._render_prompt("followup", feed, inference_config)
+        return self._render_role_prompt("followup", feed, inference_config)
 
     # endregion
 

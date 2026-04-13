@@ -1,0 +1,16 @@
+# 05_mixed_shorthand_and_full.yaml — Mix shorthand and full syntax freely.
+#
+# Use shorthand for components that need no customization,
+# and full _target_ syntax for those that do.
+
+_target_: ChainInferencer
+steps:
+  # Full syntax — need to set a custom prefix
+  - _target_: MockLLM
+    model_name: custom-translator
+    response_prefix: "[ES] "
+
+  # Full syntax — different model
+  - _target_: MockLLM
+    model_name: opus
+    response_prefix: "[Opus] "

@@ -13,8 +13,9 @@ default to preserving exact current behavior (two-way door).
 Both planner and executor can be any InferencerBase subclass (e.g., DualInferencer
 for consensus-based planning/execution, or a simple API inferencer).
 
-Inherits from Workflow for native checkpoint/resume with loop support
-and automatic recursive resume of child DualInferencers.
+Inherits from LinearWorkflowInferencer for native checkpoint/resume with loop
+support, iteration management, step completion markers, and automatic recursive
+resume of child DualInferencers.
 """
 
 import copy
@@ -33,6 +34,11 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     InferencerResponse,
     ReflectionStyles,
     ResponseSelectors,
+    extract_response_text,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+    LinearWorkflowInferencer,
+    WorkflowStepConfig,
 )
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
@@ -42,17 +48,12 @@ from agent_foundation.ui.interactive_base import (
     InteractiveBase,
 )
 from rich_python_utils.common_objects.debuggable import Debuggable
-from rich_python_utils.common_objects.serializable import SerializationMode
 from rich_python_utils.common_objects.workflow.common.exceptions import (
     WorkflowAborted,
-)
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
-    ResultPassDownMode,
 )
 from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
     StepResultSaveOptions,
 )
-from rich_python_utils.common_objects.workflow.common.step_wrapper import StepWrapper
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_field, artifact_type
 
@@ -246,17 +247,19 @@ _CHILD_DEFAULTS = {
 _CHILD_NAME_MAP = {k: v[0] for k, v in _CHILD_DEFAULTS.items()}
 
 
+
 @artifact_type(Workflow, type="json", group="workflows")
 @attrs(slots=False)
-class PlanThenImplementInferencer(InferencerBase, Workflow):
+class PlanThenImplementInferencer(LinearWorkflowInferencer):
     """Two-phase inferencer: plan first, then implement.
 
     Chains a planner and executor inferencer sequentially. The planner's output
     (base_response) is combined with the original input and fed to the executor.
     Optionally pauses for human approval between phases.
 
-    Inherits from Workflow for native checkpoint/resume with loop support
-    and automatic recursive resume of child DualInferencers via
+    Inherits from LinearWorkflowInferencer for native checkpoint/resume with
+    loop support, iteration management, step completion markers, and automatic
+    recursive resume of child DualInferencers via
     ``@artifact_type(Workflow, ...)`` + ``_setup_child_workflows``.
 
     Supports multi-iteration refinement loops with an analyzer phase that
@@ -359,7 +362,7 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     approve_all_iterations: bool = attrib(default=False)
 
     # Workspace config
-    workspace_path: Optional[str] = attrib(default=None)
+    # workspace_path is inherited from LinearWorkflowInferencer
     resume_workspace: Optional[str] = attrib(default=None)
     iteration_handoff_template: Optional[str] = attrib(default=None)
 
@@ -381,13 +384,6 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     enable_checkpoint_analysis_review: bool = attrib(default=False)
     enable_checkpoint_iteration_handoff: bool = attrib(default=False)
 
-    # --- Workflow params suppressed (not user-facing) ---
-    result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
-    unpack_single_result = attrib(default=False, init=False)
-    ignore_stop_flag_from_saved_results = attrib(default=True, init=False)
-    auto_mode = attrib(default=SerializationMode.PREFER_CLEAR_TEXT, init=False)
-    checkpoint_mode = attrib(default="jsonfy", init=False)
-
     # Internal state (not user-facing)
     _next_iteration_input: Optional[str] = attrib(default=None, init=False)
     _partial_iteration_history: Optional[List[MetaIterationRecord]] = attrib(
@@ -397,10 +393,9 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     _current_iteration_workspace: Optional[str] = attrib(default=None, init=False)
     _current_inference_config: Optional[dict] = attrib(default=None, init=False)
     _current_inference_args: Optional[dict] = attrib(default=None, init=False)
-    _pending_pti_state: Optional[dict] = attrib(default=None, init=False)
 
     def __attrs_post_init__(self):
-        super(PlanThenImplementInferencer, self).__attrs_post_init__()
+        # --- Domain-specific validation FIRST (before calling super) ---
 
         if (not self.response_types) or self.response_types == (str,):
             self.response_types = (str, InferencerResponse, PlanThenImplementResponse)
@@ -431,7 +426,50 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
                 "requires workspace_path or resume_workspace to be set"
             )
 
+        # --- Set checkpoint_subdir for PTI-specific checkpoint paths ---
+        self.checkpoint_subdir = "pti"
+
+        # --- Build step_configs ---
+        self.step_configs = [
+            WorkflowStepConfig(
+                name="plan",
+                step_fn=self._step_plan_impl,
+                enable_result_save=self.enable_planning,
+            ),
+            WorkflowStepConfig(
+                name="approval",
+                step_fn=self._step_approval_impl,
+                enable_result_save=True,
+            ),
+            WorkflowStepConfig(
+                name="implement",
+                step_fn=self._step_implement_impl,
+                enable_result_save=self.enable_implementation,
+            ),
+            WorkflowStepConfig(
+                name="analysis",
+                step_fn=self._step_analysis_impl,
+                loop_back_to="plan",
+                loop_condition=lambda s, r: s.get("should_continue", False),
+                max_loop_iterations=self.max_meta_iterations - 1,
+                enable_result_save=True,
+            ),
+        ]
+
+        # --- Set LWI configuration attrs ---
+        self.response_builder = self._build_response_from_state
+        self.iteration_workspace_factory = (
+            lambda base, n: PlanThenImplementInferencer._get_iteration_workspace(base, n)
+        )
+        self.reset_sessions_per_iteration = self.reset_sessions_per_meta_iteration
+        self.iteration_record_builder = self._build_iteration_record
+
+        # --- Call super().__attrs_post_init__() LAST ---
+        super(PlanThenImplementInferencer, self).__attrs_post_init__()
+
         # Set parent debuggable for nested inferencers (deduplicate by identity)
+        # (super handles step_configs inferencers, but PTI's children are in
+        # step_fn, not in step_configs.inferencer, so we wire them manually)
         seen_ids = set()
         for inf in (
             self.planner_inferencer,
@@ -445,19 +483,6 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             ):
                 seen_ids.add(id(inf))
                 inf.set_parent_debuggable(self)
-
-    # --- Block direct Workflow.run()/arun() --- use ainfer() instead ---
-
-    def run(self, *args, **kwargs):
-        raise NotImplementedError(
-            "Use ainfer() or _infer() instead of run(). "
-            "PTI manages Workflow._arun() internally."
-        )
-
-    async def arun(self, *args, **kwargs):
-        raise NotImplementedError(
-            "Use ainfer() instead of arun(). PTI manages Workflow._arun() internally."
-        )
 
     # region Static/Instance Helpers
 
@@ -501,7 +526,7 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
         if getattr(self, "_step_was_previously_attempted", False):
             base += (
-                "\n\n## \u26a0\ufe0f Resume Context\n\n"
+                "\n\n## ⚠️ Resume Context\n\n"
                 "A previous implementation attempt was interrupted before "
                 "completion. The target repository may contain partial "
                 "changes from that attempt.\n\n"
@@ -557,9 +582,8 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
     def _extract_response_text(result: Any) -> str:
         """Extract text from an inferencer result.
 
-        Handles DualInferencerResponse (uses base_response),
-        InferencerResponse (uses select_response()), and
-        other types (uses str()).
+        Delegates to the standalone ``extract_response_text()`` utility
+        from ``common.py``.
 
         Args:
             result: An inferencer response of any type.
@@ -567,12 +591,7 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         Returns:
             Extracted text string.
         """
-        if isinstance(result, DualInferencerResponse):
-            return str(result.base_response)
-        elif isinstance(result, InferencerResponse):
-            return str(result.select_response())
-        else:
-            return str(result)
+        return extract_response_text(result)
 
     # endregion
 
@@ -1486,7 +1505,7 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             child.resume_with_saved_results = self.resume_with_saved_results
             child.checkpoint_mode = self.checkpoint_mode
 
-    # region Workflow Method Overrides (Phase D.3)
+    # region Workflow Method Overrides
 
     def _get_result_path(self, result_id, *args, **kwargs):
         """Return path for checkpoint files under the STABLE base workspace.
@@ -1506,21 +1525,6 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             return ""
         ws = InferencerWorkspace(root=base)
         return ws.checkpoint_path(os.path.join("pti", f"step_{result_id}.json"))
-
-    def _save_result(self, result, output_path: str):
-        """Save step result as JSON with explicit dict__ pre-conversion."""
-        from rich_python_utils.common_utils.map_helper import dict__
-        from rich_python_utils.io_utils.json_io import write_json
-
-        write_json(dict__(result, recursive=True), output_path, indent=2)
-
-    def _load_result(self, result_id, result_path_or_preloaded_result):
-        """Load step result from JSON file."""
-        from rich_python_utils.io_utils.json_io import read_json
-
-        if isinstance(result_path_or_preloaded_result, str):
-            return read_json(result_path_or_preloaded_result)
-        return result_path_or_preloaded_result
 
     def _save_loop_checkpoint(
         self, step_index, next_step_index, last_saved_result_id, state, *args, **kwargs
@@ -1867,353 +1871,303 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
         """DISABLED for PTI — all resume goes through _try_load_checkpoint."""
         return -1, None
 
-    def _init_state(self) -> dict:
-        """Return the pending PTI state prepared in _ainfer."""
-        return self._pending_pti_state or {}
-
-    def _handle_abort(self, abort_exc, step_result, state):
-        """Handle WorkflowAborted (plan rejection) — return state."""
-        return state
-
-    def _exists_result(self, result_id, result_path):
-        """Check if a JSON result file exists."""
-        if not result_path:
-            return False
-        json_path = result_path
-        if not json_path.endswith(".json"):
-            json_path = result_path + ".json"
-        return os.path.exists(json_path) or os.path.exists(result_path)
-
     # endregion
 
-    # region Step Closures (Phase C.2 + D.4)
+    # region Step Methods (extracted from _build_iteration_steps closures)
 
-    def _build_iteration_steps(self):
-        """Build Workflow steps with native loop support."""
+    async def _step_plan_impl(self, step_input, state):
+        """Plan step: run planner inferencer and extract plan text."""
+        iteration = state["iteration"]
+        base_workspace = self._current_base_workspace
+        ws = self._get_iteration_workspace(base_workspace, iteration)
+        self._current_iteration_workspace = ws
 
-        def _update_state_fn(state, result):
-            return state
-
-        async def _step_plan_impl(*args, **kwargs):
-            state = self._state
-            iteration = state["iteration"]
-            base_workspace = self._current_base_workspace
-            ws = self._get_iteration_workspace(base_workspace, iteration)
-            self._current_iteration_workspace = ws
-            # RE-CALL to update children's _result_root_override for this iteration
-            self._setup_child_workflows(state)
-
-            if not self.enable_planning:
-                if ws:
-                    plan_str, plan_path = self._load_existing_plan(ws)
-                    state["plan_output_text"] = plan_str
-                    state["plan_file_path"] = plan_path
-                self._state = state
-                return state.get("plan_output_text", "")
-
-            inference_config = self._current_inference_config or {}
-            _inference_args = self._current_inference_args or {}
-
-            # Build iteration config
-            if base_workspace:
-                iter_config = self._build_iteration_config(
-                    inference_config, ws, iteration
-                )
-                self._setup_iteration_workspace(ws, iteration, state["current_input"])
-            else:
-                iter_config = inference_config
-
-            plan_ic = iter_config.get(self.plan_config_key, iter_config)
-
-            # Session reset on iteration > 1
-            if iteration > 1 and self.reset_sessions_per_meta_iteration:
-                await self._reset_sub_inferencers_for_meta_iteration()
-
-            # Inject initial plan file override (first iteration only)
-            if self.initial_plan_file and iteration == 1:
-                if not os.path.isfile(self.initial_plan_file):
-                    raise FileNotFoundError(
-                        f"Initial plan file not found: {self.initial_plan_file}"
-                    )
-                with open(self.initial_plan_file) as f:
-                    plan_text = f.read()
-                # Copy initial plan to workspace as round0_plan.md
-                if ws:
-                    initial_plan_output = os.path.join(ws, "outputs", "round0_plan.md")
-                    os.makedirs(os.path.dirname(initial_plan_output), exist_ok=True)
-                    with open(initial_plan_output, "w") as f:
-                        f.write(plan_text)
-                    self.log_info(
-                        f"[{self.planner_phase}] Copied initial plan to "
-                        f"{initial_plan_output}"
-                    )
-                plan_ic = {**plan_ic, "initial_response_override": plan_text}
-
-            # Resume with existing plan for review: plan_partial=True means
-            # the plan content exists but was never confirmed complete (e.g.,
-            # ran with max_iterations=0 then deleted .plan_completed).  Feed
-            # the existing plan as initial_response_override so the
-            # DualInferencer skips propose and goes directly to review.
-            if state.get("_resume_plan_for_review") and not self.initial_plan_file:
-                existing_plan = state.get("plan_output_text", "")
-                if existing_plan:
-                    plan_ic = {**plan_ic, "initial_response_override": existing_plan}
-                    self.log_info(
-                        f"[{self.planner_phase}] Resuming with existing plan "
-                        f"for review ({len(existing_plan)} chars)"
-                    )
-
-            self.log_info(f"[{self.planner_phase}] Starting planning phase")
-
-            result = await self.planner_inferencer.ainfer(
-                state["current_input"],
-                inference_config=plan_ic,
-                **_inference_args,
-            )
-            plan_str = self._extract_response_text(result)
-
-            plan_file_path = None
-            if self.planner_outputs_plan_to_file:
-                plan_file_path = self._resolve_plan_file_path(plan_ic)
-
-            state["plan_output_text"] = plan_str
-            state["plan_file_path"] = plan_file_path
-            # Store iter_config in state for implement/analysis steps
-            state["_iter_config"] = iter_config
-            state["_plan_response"] = result
-            self._state = state
-
-            # Tier 2: write file-based completion marker
-            ws = self._current_iteration_workspace
+        if not self.enable_planning:
             if ws:
-                self._write_step_completion_marker(ws, "plan")
+                plan_str, plan_path = self._load_existing_plan(ws)
+                state["plan_output_text"] = plan_str
+                state["plan_file_path"] = plan_path
+            return state.get("plan_output_text", "")
 
+        inference_config = self._current_inference_config or {}
+        _inference_args = self._current_inference_args or {}
+
+        # Build iteration config
+        if base_workspace:
+            iter_config = self._build_iteration_config(
+                inference_config, ws, iteration
+            )
+            self._setup_iteration_workspace(ws, iteration, state["current_input"])
+        else:
+            iter_config = inference_config
+
+        plan_ic = iter_config.get(self.plan_config_key, iter_config)
+
+        # Session reset on iteration > 1
+        if iteration > 1 and self.reset_sessions_per_meta_iteration:
+            await self._reset_sub_inferencers_for_meta_iteration()
+
+        # Inject initial plan file override (first iteration only)
+        if self.initial_plan_file and iteration == 1:
+            if not os.path.isfile(self.initial_plan_file):
+                raise FileNotFoundError(
+                    f"Initial plan file not found: {self.initial_plan_file}"
+                )
+            with open(self.initial_plan_file) as f:
+                plan_text = f.read()
+            # Copy initial plan to workspace as round0_plan.md
+            if ws:
+                initial_plan_output = os.path.join(ws, "outputs", "round0_plan.md")
+                os.makedirs(os.path.dirname(initial_plan_output), exist_ok=True)
+                with open(initial_plan_output, "w") as f:
+                    f.write(plan_text)
+                self.log_info(
+                    f"[{self.planner_phase}] Copied initial plan to "
+                    f"{initial_plan_output}"
+                )
+            plan_ic = {**plan_ic, "initial_response_override": plan_text}
+
+        # Resume with existing plan for review: plan_partial=True means
+        # the plan content exists but was never confirmed complete (e.g.,
+        # ran with max_iterations=0 then deleted .plan_completed).  Feed
+        # the existing plan as initial_response_override so the
+        # DualInferencer skips propose and goes directly to review.
+        if state.get("_resume_plan_for_review") and not self.initial_plan_file:
+            existing_plan = state.get("plan_output_text", "")
+            if existing_plan:
+                plan_ic = {**plan_ic, "initial_response_override": existing_plan}
+                self.log_info(
+                    f"[{self.planner_phase}] Resuming with existing plan "
+                    f"for review ({len(existing_plan)} chars)"
+                )
+
+        self.log_info(f"[{self.planner_phase}] Starting planning phase")
+
+        result = await self.planner_inferencer.ainfer(
+            state["current_input"],
+            inference_config=plan_ic,
+            **_inference_args,
+        )
+        plan_str = extract_response_text(result)
+
+        plan_file_path = None
+        if self.planner_outputs_plan_to_file:
+            plan_file_path = self._resolve_plan_file_path(plan_ic)
+
+        state["plan_output_text"] = plan_str
+        state["plan_file_path"] = plan_file_path
+        # Store iter_config in state for implement/analysis steps
+        state["_iter_config"] = iter_config
+        state["_plan_response"] = result
+
+        # Tier 2: write file-based completion marker
+        ws = self._current_iteration_workspace
+        if ws:
+            self._write_step_completion_marker(ws, "plan")
+
+        return plan_str
+
+    async def _step_approval_impl(self, step_input, state):
+        """Approval step: optionally pause for human approval of the plan."""
+        plan_str = state.get("plan_output_text", "")
+
+        if self.interactive is None:
+            state["plan_approved"] = True
             return plan_str
 
-        async def _step_approval_impl(*args, **kwargs):
-            state = self._state
-            plan_str = state.get("plan_output_text", "")
+        interactive = self.interactive
 
-            if self.interactive is None:
+        # Use enhanced checkpoint if enabled
+        if self.enable_checkpoint_plan_review:
+            # TODO: interactive_checkpoint module does not exist at agent_foundation.ui — needs separate migration
+            from agent_foundation.ui.interactive_checkpoint import (
+                checkpoint_plan_review,
+            )
+
+            plan_summary = (
+                f"{plan_str[:1000]}{'...' if len(plan_str) > 1000 else ''}"
+            )
+            result = await checkpoint_plan_review(
+                interactive, plan_summary, default_action="approve"
+            )
+
+            if result.action == "approve":
+                self.log_info(f"[{self.planner_phase}] Plan approved by human")
                 state["plan_approved"] = True
-                self._state = state
                 return plan_str
-
-            interactive = self.interactive
-
-            # Use enhanced checkpoint if enabled
-            if self.enable_checkpoint_plan_review:
-                # TODO: interactive_checkpoint module does not exist at agent_foundation.ui — needs separate migration
-                from agent_foundation.ui.interactive_checkpoint import (
-                    checkpoint_plan_review,
+            elif result.action == "modify":
+                self.log_info(
+                    f"[{self.planner_phase}] Plan modification requested: {result.user_input[:200]}",
+                    "PlanModify",
                 )
-
-                plan_summary = (
-                    f"{plan_str[:1000]}{'...' if len(plan_str) > 1000 else ''}"
+                state["plan_approved"] = False
+                state["plan_modification_request"] = result.user_input
+                raise WorkflowAborted(
+                    f"Plan modification requested: {result.user_input}"
                 )
-                result = await checkpoint_plan_review(
-                    interactive, plan_summary, default_action="approve"
-                )
-
-                if result.action == "approve":
-                    self.log_info(f"[{self.planner_phase}] Plan approved by human")
-                    state["plan_approved"] = True
-                    self._state = state
-                    return plan_str
-                elif result.action == "modify":
-                    self.log_info(
-                        f"[{self.planner_phase}] Plan modification requested: {result.user_input[:200]}",
-                        "PlanModify",
-                    )
-                    state["plan_approved"] = False
-                    state["plan_modification_request"] = result.user_input
-                    self._state = state
-                    raise WorkflowAborted(
-                        f"Plan modification requested: {result.user_input}"
-                    )
-                else:  # reject
-                    self.log_info("Plan rejected by human", "PlanRejected")
-                    state["plan_approved"] = False
-                    self._state = state
-                    raise WorkflowAborted("Plan rejected by human")
-
-            # Fallback: original y/N text prompt
-            approval_message = (
-                f"=== Plan Phase Complete ===\n\n"
-                f"Plan summary (first 500 chars):\n"
-                f"{plan_str[:500]}{'...' if len(plan_str) > 500 else ''}\n\n"
-                f"Approve this plan and proceed to implementation? (y/N)"
-            )
-            interactive.send_response(
-                approval_message,
-                flag=InteractionFlags.PendingInput,
-            )
-            user_input = interactive.get_input()
-            approved = (
-                user_input.strip().lower() in ("y", "yes", "")
-                if user_input is not None
-                else False
-            )
-
-            if not approved:
+            else:  # reject
                 self.log_info("Plan rejected by human", "PlanRejected")
                 state["plan_approved"] = False
-                self._state = state
                 raise WorkflowAborted("Plan rejected by human")
 
-            self.log_info(f"[{self.planner_phase}] Plan approved by human")
-            state["plan_approved"] = True
-            self._state = state
-            return plan_str
+        # Fallback: original y/N text prompt
+        approval_message = (
+            f"=== Plan Phase Complete ===\n\n"
+            f"Plan summary (first 500 chars):\n"
+            f"{plan_str[:500]}{'...' if len(plan_str) > 500 else ''}\n\n"
+            f"Approve this plan and proceed to implementation? (y/N)"
+        )
+        interactive.send_response(
+            approval_message,
+            flag=InteractionFlags.PendingInput,
+        )
+        user_input = interactive.get_input()
+        approved = (
+            user_input.strip().lower() in ("y", "yes", "")
+            if user_input is not None
+            else False
+        )
 
-        async def _step_implement_impl(*args, **kwargs):
-            state = self._state
+        if not approved:
+            self.log_info("Plan rejected by human", "PlanRejected")
+            state["plan_approved"] = False
+            raise WorkflowAborted("Plan rejected by human")
 
-            base_workspace = self._current_base_workspace
-            # Derive workspace (safe even on resume past plan step)
-            ws = self._get_iteration_workspace(base_workspace, state["iteration"])
-            self._current_iteration_workspace = ws
+        self.log_info(f"[{self.planner_phase}] Plan approved by human")
+        state["plan_approved"] = True
+        return plan_str
 
-            if not self.enable_implementation:
-                if ws:
-                    impl_str = self._load_existing_implementation(ws)
-                    state["executor_output_text"] = impl_str
-                self._state = state
-                return state.get("executor_output_text", "")
+    async def _step_implement_impl(self, step_input, state):
+        """Implement step: run executor inferencer with the approved plan."""
+        base_workspace = self._current_base_workspace
+        # Derive workspace (safe even on resume past plan step)
+        ws = self._get_iteration_workspace(base_workspace, state["iteration"])
+        self._current_iteration_workspace = ws
 
-            inference_config = self._current_inference_config or {}
-            _inference_args = self._current_inference_args or {}
-
-            iter_config = state.get("_iter_config")
-            if iter_config is None and base_workspace:
-                iter_config = self._build_iteration_config(
-                    inference_config, ws, state["iteration"]
-                )
-            elif iter_config is None:
-                iter_config = inference_config
-
-            impl_ic = iter_config.get(self.implement_config_key, iter_config)
-
-            # Restore Tier 2 partial-attempt flag from state dict.
-            # _synthesize_checkpoint_from_workspace() stores this in state
-            # because _arun() resets self._step_was_previously_attempted.
-            # Pop the flag so it doesn't persist across loop iterations.
-            if state.pop("_impl_was_partially_attempted", False):
-                self._step_was_previously_attempted = True
-
-            plan_str = state.get("plan_output_text", "")
-            plan_file_path = state.get("plan_file_path")
-            executor_input = self._build_executor_input(
-                state["current_input"], plan_str, plan_file_path=plan_file_path
-            )
-
-            self.log_info(f"[{self.executor_phase}] Starting execution phase")
-
-            result = await self.executor_inferencer.ainfer(
-                executor_input,
-                inference_config=impl_ic,
-                **_inference_args,
-            )
-            executor_str = self._extract_response_text(result)
-
-            state["executor_output_text"] = executor_str
-            state["_executor_response"] = result
-            self._state = state
-
-            # Tier 2: write file-based completion marker
-            ws = self._current_iteration_workspace
+        if not self.enable_implementation:
             if ws:
-                self._write_step_completion_marker(ws, "impl")
+                impl_str = self._load_existing_implementation(ws)
+                state["executor_output_text"] = impl_str
+            return state.get("executor_output_text", "")
 
-            return executor_str
+        inference_config = self._current_inference_config or {}
+        _inference_args = self._current_inference_args or {}
 
-        async def _step_analysis_impl(*args, **kwargs):
-            state = self._state
-            base_workspace = self._current_base_workspace
-            ws = self._get_iteration_workspace(base_workspace, state["iteration"])
-            self._current_iteration_workspace = ws
+        iter_config = state.get("_iter_config")
+        if iter_config is None and base_workspace:
+            iter_config = self._build_iteration_config(
+                inference_config, ws, state["iteration"]
+            )
+        elif iter_config is None:
+            iter_config = inference_config
 
-            inference_config = self._current_inference_config or {}
-            _inference_args = self._current_inference_args or {}
+        impl_ic = iter_config.get(self.implement_config_key, iter_config)
 
-            iter_config = state.get("_iter_config")
-            if iter_config is None and base_workspace:
-                iter_config = self._build_iteration_config(
-                    inference_config, ws, state["iteration"]
+        # Restore Tier 2 partial-attempt flag from state dict.
+        # _synthesize_checkpoint_from_workspace() stores this in state
+        # because _arun() resets self._step_was_previously_attempted.
+        # Pop the flag so it doesn't persist across loop iterations.
+        if state.pop("_impl_was_partially_attempted", False):
+            self._step_was_previously_attempted = True
+
+        plan_str = state.get("plan_output_text", "")
+        plan_file_path = state.get("plan_file_path")
+        executor_input = self._build_executor_input(
+            state["current_input"], plan_str, plan_file_path=plan_file_path
+        )
+
+        self.log_info(f"[{self.executor_phase}] Starting execution phase")
+
+        result = await self.executor_inferencer.ainfer(
+            executor_input,
+            inference_config=impl_ic,
+            **_inference_args,
+        )
+        executor_str = extract_response_text(result)
+
+        state["executor_output_text"] = executor_str
+        state["_executor_response"] = result
+
+        # Tier 2: write file-based completion marker
+        ws = self._current_iteration_workspace
+        if ws:
+            self._write_step_completion_marker(ws, "impl")
+
+        return executor_str
+
+    async def _step_analysis_impl(self, step_input, state):
+        """Analysis step: evaluate results and decide whether to continue."""
+        base_workspace = self._current_base_workspace
+        ws = self._get_iteration_workspace(base_workspace, state["iteration"])
+        self._current_iteration_workspace = ws
+
+        inference_config = self._current_inference_config or {}
+        _inference_args = self._current_inference_args or {}
+
+        iter_config = state.get("_iter_config")
+        if iter_config is None and base_workspace:
+            iter_config = self._build_iteration_config(
+                inference_config, ws, state["iteration"]
+            )
+        elif iter_config is None:
+            iter_config = inference_config
+
+        should_continue = False
+        if self.enable_analysis and ws:
+            outputs_dir = os.path.join(ws, "outputs")
+            has_results = self._has_results(outputs_dir)
+
+            if has_results and self.analyzer_inferencer is not None:
+                analysis_ic = iter_config.get(self.analysis_config_key, iter_config)
+                analysis_vars = self._build_analysis_config_vars(
+                    outputs_dir, state["iteration"]
                 )
-            elif iter_config is None:
-                iter_config = inference_config
+                analysis_ic = {**analysis_ic, **analysis_vars}
 
-            should_continue = False
-            if self.enable_analysis and ws:
-                outputs_dir = os.path.join(ws, "outputs")
-                has_results = self._has_results(outputs_dir)
+                analysis_result = await self.analyzer_inferencer.ainfer(
+                    state.get("original_request", state["current_input"]),
+                    inference_config=analysis_ic,
+                    **_inference_args,
+                )
+                analysis_str = extract_response_text(analysis_result)
+                state["_analysis_result_text"] = analysis_str
+                should_continue, next_request = self._parse_analysis_response(
+                    analysis_str
+                )
+                analysis_doc_path = (
+                    self._resolve_analysis_file_path(analysis_ic)
+                    if self.analyzer_outputs_to_file
+                    else None
+                )
 
-                if has_results and self.analyzer_inferencer is not None:
-                    analysis_ic = iter_config.get(self.analysis_config_key, iter_config)
-                    analysis_vars = self._build_analysis_config_vars(
-                        outputs_dir, state["iteration"]
-                    )
-                    analysis_ic = {**analysis_ic, **analysis_vars}
+                results_dir = os.path.join(ws, "results")
+                os.makedirs(results_dir, exist_ok=True)
+                self._save_analysis_summary(
+                    results_dir,
+                    should_continue,
+                    analysis_str[:500],
+                    next_request,
+                    analysis_doc_path,
+                )
 
-                    analysis_result = await self.analyzer_inferencer.ainfer(
-                        state.get("original_request", state["current_input"]),
-                        inference_config=analysis_ic,
-                        **_inference_args,
-                    )
-                    analysis_str = self._extract_response_text(analysis_result)
-                    state["_analysis_result_text"] = analysis_str
-                    should_continue, next_request = self._parse_analysis_response(
-                        analysis_str
-                    )
-                    analysis_doc_path = (
-                        self._resolve_analysis_file_path(analysis_ic)
-                        if self.analyzer_outputs_to_file
-                        else None
-                    )
+                # Record in iteration_records
+                from rich_python_utils.common_utils.map_helper import dict__
 
-                    results_dir = os.path.join(ws, "results")
-                    os.makedirs(results_dir, exist_ok=True)
-                    self._save_analysis_summary(
-                        results_dir,
-                        should_continue,
-                        analysis_str[:500],
-                        next_request,
-                        analysis_doc_path,
-                    )
-
-                    # Record in iteration_records
-                    from rich_python_utils.common_utils.map_helper import dict__
-
-                    record = MetaIterationRecord(
-                        iteration=state["iteration"],
-                        workspace_path=ws,
-                        plan_output=state.get("plan_output_text", ""),
-                        executor_output=state.get("executor_output_text", ""),
-                        plan_file_path=state.get("plan_file_path"),
-                        plan_approved=state.get("plan_approved"),
-                        analysis_output=analysis_str,
-                        analysis_doc_path=analysis_doc_path,
-                        should_continue=should_continue,
-                        test_results_found=has_results,
-                    )
-                    state.setdefault("iteration_records", []).append(
-                        dict__(record, recursive=True)
-                    )
-                else:
-                    record = MetaIterationRecord(
-                        iteration=state["iteration"],
-                        workspace_path=ws,
-                        plan_output=state.get("plan_output_text", ""),
-                        executor_output=state.get("executor_output_text", ""),
-                        plan_file_path=state.get("plan_file_path"),
-                        plan_approved=state.get("plan_approved"),
-                    )
-                    from rich_python_utils.common_utils.map_helper import dict__
-
-                    state.setdefault("iteration_records", []).append(
-                        dict__(record, recursive=True)
-                    )
+                record = MetaIterationRecord(
+                    iteration=state["iteration"],
+                    workspace_path=ws,
+                    plan_output=state.get("plan_output_text", ""),
+                    executor_output=state.get("executor_output_text", ""),
+                    plan_file_path=state.get("plan_file_path"),
+                    plan_approved=state.get("plan_approved"),
+                    analysis_output=analysis_str,
+                    analysis_doc_path=analysis_doc_path,
+                    should_continue=should_continue,
+                    test_results_found=has_results,
+                )
+                state.setdefault("iteration_records", []).append(
+                    dict__(record, recursive=True)
+                )
             else:
                 record = MetaIterationRecord(
                     iteration=state["iteration"],
@@ -2222,84 +2176,85 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
                     executor_output=state.get("executor_output_text", ""),
                     plan_file_path=state.get("plan_file_path"),
                     plan_approved=state.get("plan_approved"),
-                    analysis_output=analysis_str if "analysis_str" in dir() else None,
-                    test_results_found=has_results if "has_results" in dir() else False,
                 )
                 from rich_python_utils.common_utils.map_helper import dict__
 
                 state.setdefault("iteration_records", []).append(
                     dict__(record, recursive=True)
                 )
+        else:
+            record = MetaIterationRecord(
+                iteration=state["iteration"],
+                workspace_path=ws,
+                plan_output=state.get("plan_output_text", ""),
+                executor_output=state.get("executor_output_text", ""),
+                plan_file_path=state.get("plan_file_path"),
+                plan_approved=state.get("plan_approved"),
+                analysis_output=state.get("_analysis_result_text"),
+                test_results_found=self._has_results(os.path.join(ws, "outputs")) if ws else False,
+            )
+            from rich_python_utils.common_utils.map_helper import dict__
 
-            state["should_continue"] = should_continue
-            if should_continue:
-                next_request_text = next_request if "next_request" in dir() else ""
-                analysis_doc = (
-                    analysis_doc_path if "analysis_doc_path" in dir() else None
-                )
-                analysis_summary = analysis_str[:500] if "analysis_str" in dir() else ""
-                state["iteration"] += 1
-                state["current_input"] = self._build_iteration_handoff(
-                    state.get("original_request", ""),
-                    state["iteration"],
-                    self.max_meta_iterations,
-                    next_request_text,
-                    analysis_doc,
-                    analysis_summary,
-                )
-                state["plan_output_text"] = ""
-                state["executor_output_text"] = ""
-                state["plan_file_path"] = None
-                state["plan_approved"] = None
-                # Set up next iteration workspace
-                if base_workspace:
-                    next_ws = self._get_iteration_workspace(
-                        base_workspace, state["iteration"]
-                    )
-                    self._setup_iteration_workspace(
-                        next_ws, state["iteration"], state["current_input"]
-                    )
-
-            self._state = state
-            return state.get(
-                "_analysis_result_text", state.get("executor_output_text", "")
+            state.setdefault("iteration_records", []).append(
+                dict__(record, recursive=True)
             )
 
-        return [
-            StepWrapper(
-                _step_plan_impl,
-                name="plan",
-                update_state=_update_state_fn,
-                # Don't checkpoint disabled steps — a saved empty result
-                # blocks resume when the step is later enabled.
-                enable_result_save=(
-                    self.enable_result_save if self.enable_planning else False
-                ),
-            ),
-            StepWrapper(
-                _step_approval_impl,
-                name="approval",
-                update_state=_update_state_fn,
-            ),
-            StepWrapper(
-                _step_implement_impl,
-                name="implement",
-                update_state=_update_state_fn,
-                enable_result_save=(
-                    self.enable_result_save if self.enable_implementation else False
-                ),
-            ),
-            StepWrapper(
-                _step_analysis_impl,
-                name="analysis",
-                update_state=_update_state_fn,
-                loop_back_to="plan",
-                loop_condition=lambda state, result: state.get(
-                    "should_continue", False
-                ),
-                max_loop_iterations=self.max_meta_iterations - 1,
-            ),
-        ]
+        state["should_continue"] = should_continue
+        if should_continue:
+            next_request_text = next_request if "next_request" in dir() else ""
+            analysis_doc = (
+                analysis_doc_path if "analysis_doc_path" in dir() else None
+            )
+            analysis_summary = analysis_str[:500] if "analysis_str" in dir() else ""
+            state["iteration"] += 1
+            state["current_input"] = self._build_iteration_handoff(
+                state.get("original_request", ""),
+                state["iteration"],
+                self.max_meta_iterations,
+                next_request_text,
+                analysis_doc,
+                analysis_summary,
+            )
+            state["plan_output_text"] = ""
+            state["executor_output_text"] = ""
+            state["plan_file_path"] = None
+            state["plan_approved"] = None
+            # Set up next iteration workspace
+            if base_workspace:
+                next_ws = self._get_iteration_workspace(
+                    base_workspace, state["iteration"]
+                )
+                self._setup_iteration_workspace(
+                    next_ws, state["iteration"], state["current_input"]
+                )
+
+        return state.get(
+            "_analysis_result_text", state.get("executor_output_text", "")
+        )
+
+    # endregion
+
+    # region Iteration Record Builder
+
+    def _build_iteration_record(self, state):
+        """Build a PTI-specific iteration record from state.
+
+        Used as ``iteration_record_builder`` for LWI's ``_record_iteration``.
+        Returns a dict representation of a MetaIterationRecord.
+        """
+        from rich_python_utils.common_utils.map_helper import dict__
+
+        record = MetaIterationRecord(
+            iteration=state.get("iteration", 1),
+            workspace_path=state.get("_current_iteration_workspace"),
+            plan_output=state.get("plan_output_text", ""),
+            executor_output=state.get("executor_output_text", ""),
+            plan_file_path=state.get("plan_file_path"),
+            plan_approved=state.get("plan_approved"),
+            analysis_output=state.get("_analysis_result_text"),
+            should_continue=state.get("should_continue", False),
+        )
+        return dict__(record, recursive=True)
 
     # endregion
 
@@ -2365,23 +2320,6 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
                 self.enable_multiple_iterations
                 and len(history) >= self.max_meta_iterations
             ),
-        )
-
-    # endregion
-
-    # region Sync/Async Bridge
-
-    def _infer(self, inference_input, inference_config=None, **_inference_args):
-        """Sync bridge — delegates to _ainfer() via _run_async().
-
-        For multi-call usage, prefer the async interface:
-            async with PlanThenImplementInferencer(...) as pti:
-                result = await pti.ainfer("task")
-        """
-        from rich_python_utils.common_utils.async_function_helper import _run_async
-
-        return _run_async(
-            self._ainfer(inference_input, inference_config, **_inference_args)
         )
 
     # endregion
@@ -2458,13 +2396,13 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
 
     # endregion
 
-    # region Core Two-Phase Flow (Phase D.5)
+    # region Core Two-Phase Flow
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
         """Async inference — core plan-then-implement flow.
 
-        Now delegates to Workflow._arun() for native checkpoint/resume
-        with loop support and automatic recursive child workflow resume.
+        Performs pre-flight resume detection, then delegates to
+        LinearWorkflowInferencer._ainfer() for the actual workflow execution.
         """
         if inference_config is None:
             inference_config = {}
@@ -2526,7 +2464,7 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             except Exception:
                 pass
 
-        # Store context for closures
+        # Store context for step methods
         self._current_base_workspace = base_workspace
         self._current_inference_config = inference_config
         self._current_inference_args = _inference_args
@@ -2546,8 +2484,8 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             self._get_iteration_workspace(base_workspace, 1) if base_workspace else None
         )
 
-        # Build initial state
-        self._pending_pti_state = {
+        # Build initial state — set _pending_state for LWI's _init_state()
+        self._pending_state = {
             "iteration": 1,
             "current_input": inference_input,
             "original_request": inference_input,
@@ -2560,8 +2498,6 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             "iteration_records": [],
         }
 
-        self._steps = self._build_iteration_steps()
-
         # Enable checkpointing
         if self._result_root_override is not None:
             pass  # Parent already configured
@@ -2569,13 +2505,17 @@ class PlanThenImplementInferencer(InferencerBase, Workflow):
             self.enable_result_save = StepResultSaveOptions.Always
             self.resume_with_saved_results = True
 
-        # Run the workflow
-        await Workflow._arun(self, inference_input, **_inference_args)
+        # Delegate to LWI's _ainfer which handles:
+        # - _build_steps() from step_configs
+        # - Workflow._arun() execution
+        # - response_builder invocation
+        # - final result caching
+        result = await super()._ainfer(inference_input, inference_config, **_inference_args)
 
         # Copy selected child outputs to workspace root outputs/
         self._finalize_outputs()
 
-        return self._build_response_from_state(self._state)
+        return result
 
     # endregion
 
