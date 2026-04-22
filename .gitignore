@@ -111,10 +111,6 @@ venv.bak/
 Thumbs.db
 
 # Development
-_dev/
-_archive/
-_docs/
-_plan/
 
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
@@ -156,4 +152,3 @@ _tmp/
 _logs/
 
 # Dev files with hardcoded secrets
-**/bedrock_inferencers/_dev/
