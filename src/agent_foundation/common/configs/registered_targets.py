@@ -40,6 +40,54 @@ register_alias(
     f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer.DualInferencer",
     "inferencer",
 )
+register_alias(
+    "BTA",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.BreakdownThenAggregateInferencer",
+    "inferencer",
+)
+register_alias(
+    "RovoChat",
+    f"{_P}.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer.RovoChatInferencer",
+    "inferencer",
+)
+
+# --- Template Management ---
+register_alias(
+    "TemplateManager",
+    "rich_python_utils.string_utils.formatting.template_manager.template_manager.TemplateManager",
+    "config",
+)
+
+# --- Conflict-Aware Prompt Builder ---
+register_alias(
+    "ConflictAwarePromptBuilder",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.make_conflict_aware_prompt_builder",
+    "config",
+)
+
+# --- Workspace ---
+register_alias(
+    "InferencerWorkspace",
+    "agent_foundation.common.inferencers.inferencer_workspace.InferencerWorkspace",
+    "config",
+)
+
+# --- Mock inferencers (for /mock_task developer tool) ---
+register_alias(
+    "MockBreakdownInferencer",
+    f"{_P}.common.inferencers.mock_inferencers.mock_bta_components.MockBreakdownInferencer",
+    "inferencer",
+)
+register_alias(
+    "MockWorker",
+    f"{_P}.common.inferencers.mock_inferencers.mock_bta_components.MockWorker",
+    "inferencer",
+)
+register_alias(
+    "MockAggregator",
+    f"{_P}.common.inferencers.mock_inferencers.mock_bta_components.MockAggregator",
+    "inferencer",
+)
 
 # --- Config objects ---
 register_alias(

@@ -37,6 +37,25 @@ def load_inferencer(config_name: str, overrides: Optional[Dict[str, Any]] = None
     return instantiate(cfg)
 
 
+def load_bta(config_name: str, overrides: Optional[Dict[str, Any]] = None):
+    """Load a BTA pipeline from a named YAML config.
+
+    Resolves *config_name* to ``yaml/bta/{config_name}.yaml``
+    relative to this module's directory.
+    """
+    config_path = _YAML_DIR / "bta" / f"{config_name}.yaml"
+    if not config_path.exists():
+        available = sorted(
+            p.stem for p in (_YAML_DIR / "bta").glob("*.yaml")
+        ) if (_YAML_DIR / "bta").is_dir() else []
+        raise FileNotFoundError(
+            f"No BTA config named {config_name!r}. "
+            f"Available: {available}"
+        )
+    cfg = load_config(str(config_path), overrides=overrides)
+    return instantiate(cfg)
+
+
 def load_agent(config_name: str, overrides: Optional[Dict[str, Any]] = None):
     """Load an agent from a named YAML config.
 

@@ -23,7 +23,7 @@ import glob
 import json
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from attr import attrib, attrs
 
@@ -42,7 +42,12 @@ class InferencerWorkspace:
     ``__attrs_post_init__``.
     """
 
-    root: str = attrib()
+    root: str = attrib(default="")
+    # Controls whether a final_deliverables/ directory is created and used.
+    # False (default)   → no deliverables directory
+    # True              → uses the conventional name "final_deliverables/"
+    # str               → uses that string as the subdirectory name
+    use_final_deliverables_folder: "Union[bool, str]" = attrib(default=False)
 
     # -- Standard directory properties --
 
@@ -70,6 +75,29 @@ class InferencerWorkspace:
     def children_dir(self) -> str:
         """Child inferencer workspace roots."""
         return os.path.join(self.root, "children")
+
+    @property
+    def deliverables_dir(self) -> "Optional[str]":
+        """Final deliverables directory under outputs/, or None if use_final_deliverables_folder is False.
+
+        When ``use_final_deliverables_folder=True`` uses ``outputs/final_deliverables/``
+        by convention. When a string, uses ``outputs/<name>/``.
+        """
+        if not self.use_final_deliverables_folder:
+            return None
+        name = (
+            self.use_final_deliverables_folder
+            if isinstance(self.use_final_deliverables_folder, str)
+            else "final_deliverables"
+        )
+        return os.path.join(self.root, "outputs", name)
+
+    def deliverable_path(self, relative: str) -> "Optional[str]":
+        """Resolve a path relative to deliverables_dir, or None if not configured."""
+        d = self.deliverables_dir
+        if d is None:
+            return None
+        return os.path.join(d, relative)
 
     # -- Directory creation --
 

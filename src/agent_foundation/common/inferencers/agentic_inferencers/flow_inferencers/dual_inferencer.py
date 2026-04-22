@@ -231,14 +231,18 @@ class DualInferencer(InferencerBase, Workflow):
         if self.consensus_checker is None:
             self.consensus_checker = DualInferencer._default_check_consensus
 
-        # Workspace reconstruction from root path string.
+        # Workspace setup — workspace (InferencerWorkspace object) takes precedence
+        # over workspace_root (convenience string shorthand).
+        # InferencerBase.__attrs_post_init__ already synced workspace → _workspace.
         # Do NOT auto-bridge from checkpoint_dir — it maps to checkpoints
         # INSIDE workspace, not the workspace root.
-        if self.workspace_root is not None:
+        if self._workspace is not None:
+            # workspace was provided directly via InferencerBase.workspace — use as-is.
+            self._workspace.ensure_dirs()
+        elif self.workspace_root is not None:
             from agent_foundation.common.inferencers.inferencer_workspace import (
                 InferencerWorkspace,
             )
-
             self._workspace = InferencerWorkspace(root=self.workspace_root)
             self._workspace.ensure_dirs()
         else:

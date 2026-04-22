@@ -77,6 +77,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.c
 )
 from rich_python_utils.common_utils.map_helper import get__
 
+from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.exceptions import (
+    RovoChatConnectionError,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.common import (
     AUTO_CONTINUE_REPLY,
     DEFAULT_BASE_URL,
@@ -344,6 +347,15 @@ class RovoChatInferencer(StreamingInferencerBase):
                 agent_named_id=call_agent_named_id,
                 agent_id=call_agent_id,
             ):
+                # ``RECONNECT_SUPPORTED`` is an informational handshake event sent
+                # by the server at the start of every stream to advertise that
+                # reconnect/resume is supported. It is NOT an error — silently
+                # ignore it. (Previously we incorrectly surfaced it as response
+                # text and then raised on the same string, causing every stream
+                # to fail spuriously.)
+                if event.event_type.upper() == "RECONNECT_SUPPORTED":
+                    continue
+
                 text = extract_text_from_event(event)
                 if text:
                     if accumulated_text and text.startswith(accumulated_text):

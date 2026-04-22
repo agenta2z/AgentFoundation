@@ -20,6 +20,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
 )
+from rich_python_utils.common_utils.function_helper import FallbackMode
 
 
 @attrs
@@ -306,6 +307,11 @@ class TestResumability(unittest.TestCase):
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=False,
+            # FallbackMode.NEVER: no _infer_recovery call, so _infer (and breakdown)
+            # runs exactly once. Default ON_FIRST_FAILURE would re-call _infer via
+            # _infer_recovery, causing breakdown to run twice.
+            fallback_mode=FallbackMode.NEVER,
+            max_retry=0,
         )
 
         with self.assertRaises(RuntimeError):
@@ -673,6 +679,456 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         result2 = await bta2.ainfer("question")
         self.assertIsNotNone(result2)
         self.assertIn("aggregated2", str(result2))
+
+
+class TestPredefinedSubQueries(unittest.TestCase):
+    """Tests for predefined_sub_queries mode (skip breakdown).
+
+    Covers plan smoke tests A–H:
+    A: predefined list → workers get correct queries, no LLM call
+    B: single string, max_breakdown=5 → 5 workers with same query
+    C: single string, max_breakdown=None, max_concurrency=3 → 3 workers
+    D: single string, both None → 1 worker (fallback)
+    E: default None → existing behaviour completely unchanged
+    F: checkpoint + predefined → checkpoint wins
+    G: predefined + breakdown_only=True → warning logged, proceeds normally
+    H: predefined_sub_queries=None, breakdown_inferencer=None → clear ValueError
+    + list capping, empty list, no-aggregator, structured dict sub_queries
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_worker_factory(self):
+        """Returns a factory that records which sub_queries each worker received."""
+        received_queries = []
+
+        def factory(sub_query, index):
+            received_queries.append(sub_query)
+            return MockInferencer(response=f"result_for_{sub_query}")
+
+        factory.received_queries = received_queries
+        return factory
+
+    # ── Test A: predefined list ────────────────────────────────────────────────
+
+    def test_predefined_list_skips_breakdown(self):
+        """Test A: predefined_sub_queries list bypasses breakdown inferencer entirely."""
+        breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
+        factory = self._make_worker_factory()
+        aggregator_inputs = []
+
+        def agg_fn(inp):
+            aggregator_inputs.append(inp)
+            return "aggregated"
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=breakdown,
+            worker_factory=factory,
+            aggregator_inferencer=MockInferencer(response=agg_fn),
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["Q_alpha", "Q_beta", "Q_gamma"],
+        )
+
+        result = bta.infer("original question")
+
+        # breakdown_inferencer must NOT be called
+        self.assertEqual(breakdown._call_count, 0, "breakdown_inferencer should not be called")
+        # Workers must receive the predefined queries, not LLM output
+        self.assertEqual(factory.received_queries, ["Q_alpha", "Q_beta", "Q_gamma"])
+        # Aggregator receives results from the 3 predefined workers
+        self.assertIn("result_for_Q_alpha", aggregator_inputs[0])
+        self.assertIn("result_for_Q_beta", aggregator_inputs[0])
+        self.assertIn("result_for_Q_gamma", aggregator_inputs[0])
+        self.assertEqual(result, "aggregated")
+
+    def test_predefined_list_no_breakdown_inferencer_needed(self):
+        """predefined_sub_queries works even when breakdown_inferencer=None."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["Q1", "Q2"],
+        )
+
+        result = bta.infer("question")
+        self.assertEqual(factory.received_queries, ["Q1", "Q2"])
+        self.assertIsNotNone(result)
+
+    # ── Test B: single string + max_breakdown ─────────────────────────────────
+
+    def test_single_string_auto_repeat_uses_max_breakdown(self):
+        """Test B: single string query auto-repeated max_breakdown times."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries="repeat me",
+            max_breakdown=5,
+        )
+
+        bta.infer("question")
+
+        self.assertEqual(len(factory.received_queries), 5)
+        self.assertTrue(all(q == "repeat me" for q in factory.received_queries))
+
+    # ── Test C: single string + max_concurrency fallback ──────────────────────
+
+    def test_single_string_auto_repeat_uses_max_concurrency_when_no_max_breakdown(self):
+        """Test C: single string falls back to max_concurrency when max_breakdown=None."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries="repeat me",
+            max_breakdown=None,
+            max_concurrency=3,
+        )
+
+        bta.infer("question")
+
+        self.assertEqual(len(factory.received_queries), 3)
+        self.assertTrue(all(q == "repeat me" for q in factory.received_queries))
+
+    # ── Test D: single string + both None → 1 worker ─────────────────────────
+
+    def test_single_string_auto_repeat_fallback_to_1(self):
+        """Test D: single string with max_breakdown=None, max_concurrency=None → 1 worker."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries="just one",
+            max_breakdown=None,
+            max_concurrency=None,
+        )
+
+        bta.infer("question")
+
+        self.assertEqual(len(factory.received_queries), 1)
+        self.assertEqual(factory.received_queries[0], "just one")
+
+    # ── Test E: default None → unchanged behaviour ────────────────────────────
+
+    def test_default_none_runs_normal_breakdown(self):
+        """Test E: predefined_sub_queries=None (default) → normal breakdown runs."""
+        breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=breakdown,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            # predefined_sub_queries not set — default None
+        )
+
+        bta.infer("question")
+
+        # breakdown_inferencer MUST be called
+        self.assertEqual(breakdown._call_count, 1)
+        # Workers receive LLM-produced queries
+        self.assertEqual(factory.received_queries, ["LLM_Q1", "LLM_Q2"])
+
+    # ── Test F: checkpoint wins over predefined ────────────────────────────────
+
+    def test_checkpoint_wins_over_predefined_sub_queries(self):
+        """Test F: saved checkpoint takes priority over predefined_sub_queries."""
+        import json
+
+        # Write a fake breakdown checkpoint
+        ckpt_path = os.path.join(self.tmpdir, "breakdown_result.json")
+        with open(ckpt_path, "w") as f:
+            json.dump({"sub_queries": ["CKPT_Q1", "CKPT_Q2"], "raw_output": ""}, f)
+
+        breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=breakdown,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            resume_with_saved_results=True,
+            predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
+        )
+
+        bta.infer("question")
+
+        # Checkpoint sub_queries should be used, not predefined ones
+        self.assertEqual(factory.received_queries, ["CKPT_Q1", "CKPT_Q2"])
+        # Neither breakdown nor predefined should override checkpoint
+        self.assertEqual(breakdown._call_count, 0)
+
+    # ── Test G: breakdown_only=True with predefined → warning, proceeds ────────
+
+    def test_breakdown_only_with_predefined_logs_warning_and_proceeds(self):
+        """Test G: breakdown_only=True is ignored (with warning) when predefined set."""
+        import logging
+
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["Q1", "Q2"],
+            breakdown_only=True,
+        )
+
+        with self.assertLogs(
+            "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer",
+            level=logging.WARNING,
+        ) as cm:
+            result = bta.infer("question")
+
+        # Warning should mention breakdown_only being ignored
+        self.assertTrue(
+            any("breakdown_only" in msg for msg in cm.output),
+            f"Expected breakdown_only warning, got: {cm.output}",
+        )
+        # Should still proceed and run workers (not stop after breakdown)
+        self.assertEqual(factory.received_queries, ["Q1", "Q2"])
+
+    # ── Test H: no breakdown_inferencer + no predefined → ValueError ──────────
+
+    def test_no_breakdown_inferencer_no_predefined_raises_valueerror(self):
+        """Test H: breakdown_inferencer=None with predefined_sub_queries=None raises ValueError."""
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=lambda sub_query, index: MockInferencer(),
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            # predefined_sub_queries=None (default)
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            bta.infer("question")
+
+        self.assertIn("breakdown_inferencer", str(ctx.exception))
+        self.assertIn("predefined_sub_queries", str(ctx.exception))
+
+    # ── max_breakdown cap on predefined list ──────────────────────────────────
+
+    def test_max_breakdown_caps_predefined_list(self):
+        """max_breakdown cap is applied to predefined list (truncates to N)."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["Q1", "Q2", "Q3", "Q4", "Q5"],
+            max_breakdown=3,
+        )
+
+        bta.infer("question")
+
+        # Only the first 3 should be used
+        self.assertEqual(factory.received_queries, ["Q1", "Q2", "Q3"])
+
+    def test_max_breakdown_cap_does_not_double_truncate_single_string(self):
+        """max_breakdown=N with single string → exactly N workers, no double-cap."""
+        factory = self._make_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries="query",
+            max_breakdown=4,
+        )
+
+        bta.infer("question")
+
+        # auto-repeat creates 4 (= max_breakdown), cap checks 4 > 4 = False → keeps 4
+        self.assertEqual(len(factory.received_queries), 4)
+        self.assertTrue(all(q == "query" for q in factory.received_queries))
+
+    # ── Empty predefined list ─────────────────────────────────────────────────
+
+    def test_empty_predefined_list_returns_empty_string(self):
+        """Empty predefined_sub_queries=[] returns '' (consistent with checkpoint path)."""
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=lambda sub_query, index: MockInferencer(),
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=[],
+        )
+
+        result = bta.infer("question")
+        self.assertEqual(result, "")
+
+    # ── Structured dict sub_queries ───────────────────────────────────────────
+
+    def test_predefined_structured_dict_sub_queries(self):
+        """predefined_sub_queries as List[dict] is accepted and workers run.
+
+        _build_diamond_graph extracts the "query" key from each dict before
+        passing it to the worker factory — so workers receive the string query,
+        not the raw dict. This verifies the dict list is accepted end-to-end.
+        """
+        received = []
+
+        def factory(sub_query, index):
+            received.append(sub_query)
+            return MockInferencer(response=f"result_{index}")
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=[
+                {"query": "analyse security", "args": {}},
+                {"query": "analyse performance", "args": {}},
+            ],
+        )
+
+        bta.infer("analyse codebase")
+
+        # _build_diamond_graph extracts "query" from each dict before passing to factory
+        self.assertEqual(len(received), 2)
+        self.assertEqual(received[0], "analyse security")
+        self.assertEqual(received[1], "analyse performance")
+
+
+class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
+    """Async tests for predefined_sub_queries mode in _ainfer."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_async_worker_factory(self):
+        """Returns a factory recording which sub_queries each async worker received."""
+        received_queries = []
+
+        def factory(sub_query, index):
+            received_queries.append(sub_query)
+            return AsyncMockInferencer(response=f"result_for_{sub_query}")
+
+        factory.received_queries = received_queries
+        return factory
+
+    async def test_ainfer_predefined_list(self):
+        """predefined_sub_queries list works correctly in async path."""
+        breakdown = AsyncMockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
+        factory = self._make_async_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=breakdown,
+            worker_factory=factory,
+            aggregator_inferencer=AsyncMockInferencer(response="aggregated"),
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["async_Q1", "async_Q2"],
+        )
+
+        result = await bta.ainfer("question")
+
+        self.assertEqual(breakdown._call_count, 0, "breakdown should not be called in async path")
+        self.assertEqual(factory.received_queries, ["async_Q1", "async_Q2"])
+        self.assertIn("aggregated", str(result))
+
+    async def test_ainfer_single_string_auto_repeat(self):
+        """Single string auto-repeat works in async path with max_breakdown."""
+        factory = self._make_async_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries="async query",
+            max_breakdown=3,
+        )
+
+        await bta.ainfer("question")
+
+        self.assertEqual(len(factory.received_queries), 3)
+        self.assertTrue(all(q == "async query" for q in factory.received_queries))
+
+    async def test_ainfer_no_breakdown_inferencer_raises_valueerror(self):
+        """breakdown_inferencer=None + predefined_sub_queries=None raises ValueError in async."""
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=lambda sub_query, index: AsyncMockInferencer(),
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            await bta.ainfer("question")
+
+        self.assertIn("breakdown_inferencer", str(ctx.exception))
+
+    async def test_ainfer_checkpoint_wins_over_predefined(self):
+        """Checkpoint takes priority over predefined_sub_queries in async path."""
+        import json
+
+        ckpt_path = os.path.join(self.tmpdir, "breakdown_result.json")
+        with open(ckpt_path, "w") as f:
+            json.dump({"sub_queries": ["CKPT_Q1"], "raw_output": ""}, f)
+
+        factory = self._make_async_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            resume_with_saved_results=True,
+            predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
+        )
+
+        await bta.ainfer("question")
+
+        self.assertEqual(factory.received_queries, ["CKPT_Q1"])
+
+    async def test_ainfer_breakdown_only_warning_proceeds(self):
+        """breakdown_only=True is ignored with warning in async path."""
+        import logging
+
+        factory = self._make_async_worker_factory()
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=None,
+            worker_factory=factory,
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+            predefined_sub_queries=["Q1", "Q2"],
+            breakdown_only=True,
+        )
+
+        with self.assertLogs(
+            "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer",
+            level=logging.WARNING,
+        ) as cm:
+            await bta.ainfer("question")
+
+        self.assertTrue(any("breakdown_only" in msg for msg in cm.output))
+        self.assertEqual(factory.received_queries, ["Q1", "Q2"])
 
 
 if __name__ == "__main__":

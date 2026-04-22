@@ -84,14 +84,37 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         for c in choices_raw
     ]
 
-    # Extract optional metadata fields (e.g., view path for artifacts)
+    # Extract optional metadata fields (e.g., view path for artifacts).
+    # The LLM may put these in args directly OR in args.metadata.
     metadata: dict[str, Any] = {}
-    view_path = args.get("view")
-    if view_path:
-        metadata["view"] = view_path
+    _args_metadata = args.get("metadata", {}) if isinstance(args.get("metadata"), dict) else {}
+    for _meta_key in ("view", "view_label", "yes_label", "no_label"):
+        _val = args.get(_meta_key) or _args_metadata.get(_meta_key)
+        if _val:
+            metadata[_meta_key] = _val
+
+    # Normalize plural/singular tool type variants.
+    # LLM/SOP uses "multiple_choices" but ConversationToolType uses "multiple_choice".
+    _name = data.get("name", "clarification")
+    _TOOL_TYPE_ALIASES = {
+        "multiple_choices": "multiple_choice",
+        "single_choices": "single_choice",
+    }
+    _tool_type = _TOOL_TYPE_ALIASES.get(_name, _name)
+
+    # Auto-upgrade: clarification with "view" is semantically a confirmation-with-review.
+    # The LLM sometimes uses "clarification" when it means "confirmation with view".
+    if _tool_type == "clarification" and metadata.get("view"):
+        _tool_type = "confirmation"
+        if "widget_type" not in metadata:
+            metadata["widget_type"] = "confirmation"
+        logger.info("[parser] auto-upgraded clarification → confirmation (has view=%s)", metadata["view"])
+
+    if _tool_type != _name:
+        logger.info("[parser] tool type normalized: %s → %s", _name, _tool_type)
 
     return ConversationTool(
-        tool_type=data.get("name", "clarification"),
+        tool_type=_tool_type,
         prompt=args.get("prompt", ""),
         choices=choices,
         allow_custom=args.get("allow_custom", True),
@@ -112,6 +135,10 @@ def parse_conversation_response(response: str) -> ConversationResponse:
     Returns ConversationResponse with extracted tools and text.
     """
     result = ConversationResponse(raw_response=response)
+    logger.info(
+        "[parse_conversation_response] input: %d chars, starts_with=%.120s",
+        len(response), response[:120].replace('\n', '\\n'),
+    )
 
     # --- Path 1: Legacy <ConversationTools> tags ---
     match = _CONV_TOOLS_RE.search(response)
@@ -174,6 +201,115 @@ def parse_conversation_response(response: str) -> ConversationResponse:
 
         return result
 
+    # --- Path 2b: ```json ... ``` without ToolsToInvoke label (multi-line OK) ---
+    _PLAIN_JSON_FENCE_RE = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
+    for fence_match in _PLAIN_JSON_FENCE_RE.finditer(response):
+        block = fence_match.group(1).strip()
+        if '"type"' not in block or '"conversation"' not in block:
+            continue  # Not a tool block — skip normal code examples
+
+        text_before = response[:fence_match.start()].strip()
+        text_after = response[fence_match.end():].strip()
+        text_parts = [p for p in (text_before, text_after) if p]
+        result.text = "\n\n".join(text_parts)
+
+        _parse_tool_block(block, result)
+
+        if result.conversation_tools:
+            result.conversation_tool = result.conversation_tools[0]
+        return result
+
+    # --- Path 3: Raw JSON lines (no code fences, single-line) ---
+    _RAW_CONV_RE = re.compile(r'^\s*\{"type"\s*:\s*"(?:conversation|action)".*\}\s*$', re.MULTILINE)
+    raw_matches = list(_RAW_CONV_RE.finditer(response))
+    if raw_matches:
+        text_parts = []
+        last_end = 0
+        for m in raw_matches:
+            before = response[last_end:m.start()].strip()
+            if before:
+                text_parts.append(before)
+            last_end = m.end()
+        trailing = response[last_end:].strip()
+        if trailing:
+            text_parts.append(trailing)
+        result.text = "\n\n".join(text_parts)
+
+        for m in raw_matches:
+            line = m.group(0).strip()
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if data.get("type") == "conversation":
+                tool = _tool_invocation_to_conversation_tool(data)
+                result.conversation_tools.append(tool)
+            elif data.get("type") == "action":
+                result.action_tools.append(data)
+
+        if result.conversation_tools:
+            result.conversation_tool = result.conversation_tools[0]
+        return result
+
     # --- No tool tags found ---
     result.text = response
     return result
+
+
+def _parse_tool_block(block: str, result: ConversationResponse) -> None:
+    """Parse a block of JSON tool objects that may be multi-line (wrapped by terminal).
+
+    Uses brace-depth tracking to find top-level JSON objects, handling nested
+    braces and strings containing braces correctly.
+    """
+    normalized = " ".join(block.split())
+    json_strings = _extract_json_objects(normalized)
+
+    for js in json_strings:
+        try:
+            data = json.loads(js)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse tool JSON: %s", js[:200])
+            continue
+        if data.get("type") == "conversation":
+            tool = _tool_invocation_to_conversation_tool(data)
+            result.conversation_tools.append(tool)
+        elif data.get("type") == "action":
+            result.action_tools.append(data)
+
+
+def _extract_json_objects(text: str) -> list[str]:
+    """Extract top-level JSON objects from a string by tracking brace depth.
+
+    Handles nested braces, strings containing braces, and escaped characters.
+    Returns a list of JSON object strings.
+    """
+    objects: list[str] = []
+    depth = 0
+    start = -1
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                objects.append(text[start:i + 1])
+                start = -1
+
+    return objects

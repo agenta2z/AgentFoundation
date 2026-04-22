@@ -63,6 +63,9 @@ class ConversationTool:
     fields: list[dict[str, Any]] = field(default_factory=list)  # For tool_argument_form
     output_vars: list[str] = field(default_factory=list)  # Variable names to capture
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Multiple-choice "Select All" control — passed through to InputModeConfig
+    show_select_all: bool = True        # show "All of above" toggle (default: True)
+    select_all_text: str = "All of above"  # customisable label
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"tool_type": self.tool_type}
@@ -78,6 +81,11 @@ class ConversationTool:
             d["fields"] = self.fields
         if self.metadata:
             d["metadata"] = self.metadata
+        # Only serialise non-default select-all values
+        if not self.show_select_all:
+            d["show_select_all"] = False
+        if self.select_all_text != "All of above":
+            d["select_all_text"] = self.select_all_text
         return d
 
     @classmethod
@@ -96,4 +104,6 @@ class ConversationTool:
             fields=data.get("fields", []),
             output_vars=data.get("output_vars", data.get("output", [])),
             metadata=data.get("metadata", {}),
+            show_select_all=data.get("show_select_all", True),
+            select_all_text=data.get("select_all_text", "All of above"),
         )

@@ -32,11 +32,17 @@ class InputModeConfig:
     case_sensitive: bool = False
     options: List[ChoiceOption] = field(default_factory=list)
     allow_custom: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    # Multiple-choice "Select All" control
+    show_select_all: bool = True       # show "All of above" toggle (default: True)
+    select_all_text: str = "All of above"  # customisable label for the select-all toggle
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {'mode': self.mode.value}
         if self.prompt:
             d['prompt'] = self.prompt
+        if self.metadata:
+            d['metadata'] = self.metadata
         if self.mode == InputMode.EXACT_STRING:
             d['expected_string'] = self.expected_string
             d['case_sensitive'] = self.case_sensitive
@@ -48,6 +54,12 @@ class InputModeConfig:
                 for o in self.options
             ]
             d['allow_custom'] = self.allow_custom
+            if self.mode == InputMode.MULTIPLE_CHOICES:
+                # Only serialise non-default values to keep the dict lean
+                if not self.show_select_all:
+                    d['show_select_all'] = False
+                if self.select_all_text != "All of above":
+                    d['select_all_text'] = self.select_all_text
         return d
 
     @classmethod
@@ -67,6 +79,10 @@ class InputModeConfig:
                 for o in d.get('options', [])
             ]
             config.allow_custom = d.get('allow_custom', True)
+            if mode == InputMode.MULTIPLE_CHOICES:
+                config.show_select_all = d.get('show_select_all', True)
+                config.select_all_text = d.get('select_all_text', "All of above")
+        config.metadata = d.get('metadata', {})
         return config
 
 
@@ -85,6 +101,18 @@ def single_choice(options: List[ChoiceOption], allow_custom: bool = True, prompt
                            allow_custom=allow_custom, prompt=prompt)
 
 
-def multiple_choices(options: List[ChoiceOption], allow_custom: bool = True, prompt: str = '') -> InputModeConfig:
-    return InputModeConfig(mode=InputMode.MULTIPLE_CHOICES, options=options,
-                           allow_custom=allow_custom, prompt=prompt)
+def multiple_choices(
+    options: List[ChoiceOption],
+    allow_custom: bool = True,
+    prompt: str = '',
+    show_select_all: bool = True,
+    select_all_text: str = "All of above",
+) -> InputModeConfig:
+    return InputModeConfig(
+        mode=InputMode.MULTIPLE_CHOICES,
+        options=options,
+        allow_custom=allow_custom,
+        prompt=prompt,
+        show_select_all=show_select_all,
+        select_all_text=select_all_text,
+    )

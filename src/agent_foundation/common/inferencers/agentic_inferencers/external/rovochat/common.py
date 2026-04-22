@@ -103,6 +103,12 @@ _NON_CONTENT_EVENT_TYPES: frozenset[str] = frozenset(
         "HEART_BEAT",
         "TRACE",
         "CONVERSATION_CHANNEL_DATA",
+        # Server capability/handshake signals — informational, no user-facing text.
+        # Note: ``RECONNECT_SUPPORTED`` arrives as the *first* event on every
+        # stream to advertise that the server supports reconnect/resume. It is
+        # NOT an error and must not be surfaced as response text.
+        "RECONNECT_SUPPORTED",
+        "FOLLOW_UP_QUERIES",
     }
 )
 

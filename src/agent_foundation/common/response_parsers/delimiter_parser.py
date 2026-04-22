@@ -36,4 +36,9 @@ def extract_delimited(
     matches = list(re.finditer(pattern, raw))
     if matches:
         return matches[-1].group(1).strip()
+    # Fallback: opening tag exists but no closing tag (truncated response).
+    # Extract from the last opening tag to end of string.
+    last_open = raw.rfind(open_tag)
+    if last_open >= 0:
+        return raw[last_open + len(open_tag):].strip()
     return raw

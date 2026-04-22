@@ -218,6 +218,35 @@ class ConversationalInferencer(InferencerBase):
                 raise
             last_raw_response = raw_response
 
+            # Get clean final output if base inferencer has one (e.g., --output-file).
+            # CLI-based inferencers (streams_differ_from_final_output=True) return the
+            # clean text from --output-file or trailing JSON schema output.
+            # API-based inferencers return None (stream IS the final output).
+            clean_response = raw_response
+            if getattr(self.base_inferencer, "streams_differ_from_final_output", False):
+                _final = self.base_inferencer.get_final_output()
+                if _final:
+                    clean_response = _final
+                    logger.debug(
+                        "[ConversationalInferencer] Using clean final output "
+                        "(%d chars) instead of noisy stream (%d chars) for parsing",
+                        len(clean_response), len(raw_response),
+                    )
+                    # Notify interactive so it can send stream_correction to frontend
+                    # and store clean output for message_end.
+                    if effective_interactive and hasattr(
+                        effective_interactive, "on_clean_output_available"
+                    ):
+                        try:
+                            await effective_interactive.on_clean_output_available(
+                                clean_response
+                            )
+                        except Exception as _e:
+                            logger.warning(
+                                "[ConversationalInferencer] on_clean_output_available "
+                                "failed: %s", _e,
+                            )
+
             # Flush prompt + response artifacts to disk so "View Prompt"
             # works even while waiting for user input (confirmation, etc.).
             if False and on_prompt_rendered:  # DISABLED: debugging hang
@@ -226,12 +255,30 @@ class ConversationalInferencer(InferencerBase):
                 except Exception:
                     pass
 
-            # Add assistant response to conversation history so subsequent
-            # turns include it in the rendered prompt.
-            self.add_message("assistant", raw_response)
+            # Add CLEAN output to conversation history so subsequent turns
+            # include exact LLM text (not noisy TUI stdout).
+            self.add_message("assistant", clean_response)
 
-            # 4. Check for conversation tools
-            conv_response = parse_conversation_response(raw_response)
+            # 4. Check for conversation tools using CLEAN output (intact code fences)
+            logger.info(
+                "[agentic_loop] clean_response: source=%s, length=%d",
+                "output_file" if _final else "raw_stream",
+                len(clean_response),
+            )
+            conv_response = parse_conversation_response(clean_response)
+
+            if conv_response.has_conversation_tool:
+                logger.info(
+                    "[ConversationalInferencer] conversation tool: type=%s prompt=%.80s metadata=%s",
+                    conv_response.conversation_tool.tool_type,
+                    conv_response.conversation_tool.prompt,
+                    conv_response.conversation_tool.metadata,
+                )
+            else:
+                logger.info(
+                    "[ConversationalInferencer] no conversation tool found (text_len=%d)",
+                    len(conv_response.text),
+                )
 
             if conv_response.has_conversation_tool and effective_interactive:
                 collected = await self._handle_conversation_tools(
@@ -645,10 +692,10 @@ class ConversationalInferencer(InferencerBase):
     async def _execute_tool_call(self, tool_call: Any) -> str:
         """Execute a tool call and apply context_updates from the result.
 
-        Tools marked asynchronous=True in the tool registry are launched as
-        background asyncio tasks (fire-and-forget) so the conversation turn
-        completes immediately. The tool sends task_status notifications to
-        the frontend independently.
+        Tools marked ``asynchronous=True`` in the tool registry are awaited
+        (not fire-and-forget). Task_status and graph events flow via WebSocket
+        during the await so the UI task panel shows real-time progress.
+        The agentic loop resumes with the actual result when the tool completes.
         """
         import asyncio
 
@@ -656,22 +703,14 @@ class ConversationalInferencer(InferencerBase):
         if self.tool_executor is None:
             return f"No tool executor configured for: {canonical}"
 
-        # Check if this tool should run asynchronously (fire-and-forget)
         tool_def = self.tool_registry.get(canonical)
         is_async = tool_def and getattr(tool_def, "asynchronous", False)
 
         if is_async:
-            executor = self.tool_executor
-
-            # Update prior_context immediately so the next iteration's prompt
-            # sees the correct SOP phase as "running", preventing the LLM from
-            # retrying with stale "error" status.
-            # Use SOP-derived tool-to-phase mapping (populated from SOP at render time)
             tool_map = self.prior_context.get("tool_phase_map", {})
             sop_phase = tool_map.get(canonical, canonical)
             self.prior_context["current_phase"] = sop_phase
             self.prior_context["phase_status"] = "running"
-            # Build workflow_status with phase name from workflow_description
             phase_name = sop_phase
             try:
                 from agent_foundation.server.workflow_context import _WORKFLOW_DESC_PHASE_RE
@@ -688,22 +727,24 @@ class ConversationalInferencer(InferencerBase):
                 f"  Active task: {canonical} — {str(tool_call.arguments.get('target', ''))[:80]}"
             )
 
-            async def _run_async() -> None:
-                try:
-                    result = await executor(canonical, tool_call.arguments)
-                    if hasattr(result, "context_updates") and result.context_updates:
-                        self.update_prior_context(**result.context_updates)
-                except Exception as e:
-                    logger.error("Async tool %s failed: %s", canonical, e)
-
-            # Save strong reference to prevent GC of the background task.
-            # asyncio._all_tasks is a WeakSet, so without a strong reference
-            # the task could theoretically be collected during long I/O waits.
-            self._active_async_task = asyncio.create_task(_run_async())
-            return (
-                f"Tool '{canonical}' launched asynchronously. "
-                f"Check the task panel for progress and results."
-            )
+            try:
+                result = await self.tool_executor(canonical, tool_call.arguments)
+                if hasattr(result, "context_updates") and result.context_updates:
+                    self.update_prior_context(**result.context_updates)
+                self.prior_context["phase_status"] = "completed"
+                if hasattr(result, "result"):
+                    return result.result
+                return str(result)
+            except asyncio.CancelledError:
+                self.prior_context["phase_status"] = "cancelled"
+                raise
+            except Exception as e:
+                logger.error("Async tool %s failed: %s", canonical, e)
+                self.prior_context["phase_status"] = "error"
+                self.prior_context["workflow_status"] = (
+                    f"Current phase: Phase {sop_phase} — {phase_name} (error: {str(e)[:100]})"
+                )
+                return f"Tool '{canonical}' failed: {e}"
 
         try:
             result = await self.tool_executor(canonical, tool_call.arguments)
@@ -903,10 +944,21 @@ class ConversationalInferencer(InferencerBase):
             except Exception:
                 pass  # Non-critical — widget works without enrichment
 
+        # Pass prompt_data inline so the UI's "View Prompt" button on the
+        # widget preamble has the rendered prompt available without a REST
+        # round-trip. Server-side transports (e.g. WebSocketInteractive) read
+        # this kwarg via **kwargs; transports that don't care simply ignore it.
+        _prompt_data = {
+            "template_source": getattr(self, "_last_template_source", "") or "",
+            "template_feed": getattr(self, "_last_template_feed", {}) or {},
+            "rendered_prompt": getattr(self, "_last_rendered_prompt", "") or "",
+            "template_config": getattr(self, "_last_template_config", {}) or {},
+        }
         await active_interactive.asend_response(
             assistant_text,
             flag=InteractionFlags.PendingInput,
             input_mode=input_mode,
+            prompt_data=_prompt_data,
         )
 
         user_input = await active_interactive.aget_input()
@@ -1096,10 +1148,18 @@ class ConversationalInferencer(InferencerBase):
                 "tools": tool_configs,
             },
         )
+        # See _handle_conversation_tool above for rationale.
+        _prompt_data = {
+            "template_source": getattr(self, "_last_template_source", "") or "",
+            "template_feed": getattr(self, "_last_template_feed", {}) or {},
+            "rendered_prompt": getattr(self, "_last_rendered_prompt", "") or "",
+            "template_config": getattr(self, "_last_template_config", {}) or {},
+        }
         await active_interactive.asend_response(
             assistant_text,
             flag=InteractionFlags.PendingInput,
             input_mode=compound_mode,
+            prompt_data=_prompt_data,
         )
 
         # Wait for ONE response with all collected values
@@ -1190,8 +1250,10 @@ class ConversationalInferencer(InferencerBase):
 
 def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
     """Build an InputModeConfig from a ConversationTool."""
+    logger.info("[_build_input_mode] input: tool_type=%s metadata=%s prompt=%.60s",
+                tool.tool_type, tool.metadata, tool.prompt)
     if tool.tool_type == ConversationToolType.SINGLE_CHOICE:
-        options = [ChoiceOption(label=c.label, value=c.value, description=getattr(c, 'description', '')) for c in tool.choices]
+        options = [ChoiceOption(label=c.label, value=c.value) for c in tool.choices]
         return single_choice(
             options,
             allow_custom=tool.allow_custom,
@@ -1199,11 +1261,13 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
         )
 
     if tool.tool_type == ConversationToolType.MULTIPLE_CHOICE:
-        options = [ChoiceOption(label=c.label, value=c.value, description=getattr(c, 'description', '')) for c in tool.choices]
+        options = [ChoiceOption(label=c.label, value=c.value) for c in tool.choices]
         return multiple_choices(
             options,
             allow_custom=tool.allow_custom,
             prompt=tool.prompt,
+            show_select_all=tool.show_select_all,
+            select_all_text=tool.select_all_text,
         )
 
     if tool.tool_type == ConversationToolType.CONFIRMATION:
@@ -1235,4 +1299,6 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
             "expected_input_type": tool.expected_input_type,
             "prefix": tool.prefix,
         }
+    logger.info("[_build_input_mode] output (fallback): mode=%s metadata=%s",
+                config.mode, config.metadata)
     return config

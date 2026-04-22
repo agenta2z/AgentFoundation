@@ -35,7 +35,7 @@ import threading
 import uuid
 from abc import abstractmethod
 from datetime import datetime
-from typing import Any, AsyncIterator, Iterator, Optional
+from typing import Any, AsyncIterator, Callable, Iterator, Optional
 
 from attr import attrib, attrs
 import contextvars
@@ -163,6 +163,56 @@ class StreamingInferencerBase(InferencerBase):
 
     # Recovery template key root (overridable by subclasses to use custom templates)
     fallback_recovery_template_key: str = "recovery"
+
+    # Whether streamed chunks differ from the authoritative final output.
+    # CLI-based inferencers (e.g., RovoDevCliInferencer) set True — their stdout
+    # is noisy TUI output while --output-file has clean LLM text.
+    # API-based inferencers (Claude, GPT) leave this False — stream IS the output.
+    streams_differ_from_final_output: bool = False
+
+    # Optional streaming observer callback. When set, called with each chunk
+    # during _ainfer() accumulation. Used by graph visualization (BTA) to emit
+    # per-node streaming content to the UI without bypassing the ainfer() pipeline.
+    # Can be sync or async — async coroutines are awaited automatically.
+    # Wrapped in try/except — visualization-only, never aborts inference.
+    stream_observer: Optional[Callable] = attrib(default=None, repr=False, kw_only=True)
+
+    def get_final_output(self) -> Optional[str]:
+        """Return clean final output if it differs from concatenated stream.
+
+        Subclasses where streamed tokens (stdout) differ from the actual LLM
+        output (e.g., CLI inferencers with --output-file) override this to
+        return the clean version after streaming completes.
+
+        Must only be called AFTER ainfer_streaming() has completed (i.e., after
+        the generator is exhausted and _ainfer_single() is returning).
+        Returns None if stream == final output (default for API inferencers).
+
+        Returns:
+            Clean final output string, or None if stream == final output.
+        """
+        return None
+
+    def _get_clean_output_for_cache(self) -> Optional[str]:
+        """Read clean output for cache overwrite while source is still accessible.
+
+        Called synchronously from the base class _ainfer_streaming() finally block,
+        BEFORE the subclass's own finally block (where contextvar cleanup and file
+        deletion happen). This timing guarantee means:
+        - _current_output_file contextvar is still set (in RovoDevCliInferencer)
+        - --output-file still exists on disk (not yet deleted)
+
+        Subclasses that have a clean output source (e.g., --output-file) override
+        this to read and return it. The base class returns None (no overwrite).
+
+        Unlike get_final_output() — which is called AFTER subclass finally runs
+        (file deleted, contextvar cleared) — this method is specifically designed
+        for the cache overwrite use case where timing matters.
+
+        Returns:
+            Clean final output string for cache replacement, or None to skip overwrite.
+        """
+        return None
 
     # Internal state (not init params)
     _session_id: Optional[str] = attrib(default=None, init=False, repr=False)
@@ -605,6 +655,34 @@ class StreamingInferencerBase(InferencerBase):
             error = e
             raise
         finally:
+            # If clean final output differs from the noisy stream, overwrite the
+            # cache file with clean content so recovery inferences use correct context.
+            # We call _get_clean_output_for_cache() — a synchronous hook that subclasses
+            # override to read their clean output source (e.g. --output-file) while it
+            # is still accessible (contextvar set, file not yet deleted). This runs
+            # inside the base class finally, which is called while the subclass's own
+            # finally (where contextvar cleanup happens) hasn't run yet — so the
+            # output file is still present and contextvar is still valid.
+            if self.streams_differ_from_final_output and cache_file:
+                final = self._get_clean_output_for_cache()
+                if final:
+                    try:
+                        cache_path = getattr(cache_file, 'name', None)
+                        if cache_path:
+                            # Close the original handle FIRST to avoid stale-handle
+                            # writes after truncation by the new 'w' open below.
+                            # _finalize_cache() safely no-ops when cache_file is None.
+                            cache_file.close()
+                            cache_file = None
+                            with open(cache_path, 'w', encoding='utf-8') as _cf:
+                                _cf.write(final)
+                                _cf.write("\n--- STREAM COMPLETED SUCCESSFULLY ---\n")
+                            success = True  # marker written; _finalize_cache skips it
+                    except OSError as _e:
+                        logger.warning(
+                            "[%s] Failed to replace cache with clean output: %s",
+                            self.__class__.__name__, _e,
+                        )
             self._finalize_cache(cache_file, success, error)
 
     async def _ainfer(
@@ -625,10 +703,27 @@ class StreamingInferencerBase(InferencerBase):
             Concatenated response text.
         """
         content_parts: list[str] = []
+        # Hoist asyncio.iscoroutine out of the per-chunk loop for performance.
+        _observer = self.stream_observer
+        _iscoroutine = asyncio.iscoroutine
         async for chunk in self.ainfer_streaming(
             inference_input, inference_config, **kwargs
         ):
             content_parts.append(chunk)
+            # stream_observer: pipe chunk for live graph visualization.
+            # Visualization-only — wrapped in try/except, never aborts inference.
+            # We log at DEBUG level so failures can still be diagnosed if needed
+            # (silent pass would hide misconfiguration of the observer).
+            if _observer is not None:
+                try:
+                    _result = _observer(chunk)
+                    if _iscoroutine(_result):
+                        await _result
+                except Exception as _exc:
+                    logger.debug(
+                        "[StreamingInferencerBase] stream_observer failed (visualization only): %s",
+                        _exc,
+                    )
         return "".join(content_parts)
 
     def infer_streaming(

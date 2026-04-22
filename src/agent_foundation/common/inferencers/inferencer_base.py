@@ -103,7 +103,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
     response_types: Sequence[Type] = attrib(default=(str,))
     default_inference_args: dict = attrib(default=None, converter=dict_)
     input_preprocessor: Callable = attrib(default=None)
-    response_post_processor: Callable = attrib(default=None)
+    response_post_processor: Union[str, dict, Callable] = attrib(default=None)
     post_response_merger: Union[str, Callable] = attrib(default=None)
 
     # State graph support — optional list of StateGraphTracker instances
@@ -118,6 +118,21 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # Simple API inferencers leave this as None.
     output_path: Optional[str] = attrib(default=None)
 
+    # === Workspace (opt-in) ===
+    # Construction-time workspace. Synced to ``_workspace`` (property) in
+    # ``__attrs_post_init__``, which auto-configures cache_folder, working_dir,
+    # and logger via ``_configure_for_workspace()``.
+    #
+    # For RUNTIME workspace assignment (e.g., orchestrators assigning child
+    # workspaces), use ``child._workspace = ws`` directly — the property setter
+    # triggers auto-configuration. Do NOT assign to ``workspace`` at runtime;
+    # it's a plain attrs field with no setter side effects.
+    #
+    # Flow inferencers (BTA, Dual) also accept workspace_root: str as a
+    # convenience shorthand that creates a plain InferencerWorkspace. When
+    # both workspace and workspace_root are set, workspace takes precedence.
+    workspace: Optional[Any] = attrib(default=None)
+
     # === Template-based prompt rendering (opt-in) ===
     # When template_manager is set, inference_input is treated as the raw
     # user query.  Before reaching _infer(), the base class renders a Jinja2
@@ -127,8 +142,100 @@ class InferencerBase(Debuggable, Resumable, ABC):
     template_key: str = attrib(default="")
     template_root_space: Optional[str] = attrib(default=None)
     template_extra_feed: dict = attrib(factory=dict)
+    template_variables: dict = attrib(factory=dict)
+
+    # --- _workspace property: auto-configures on assignment ---
+
+    @property
+    def _workspace(self):
+        return getattr(self, "_InferencerBase__workspace", None)
+
+    @_workspace.setter
+    def _workspace(self, value):
+        object.__setattr__(self, "_InferencerBase__workspace", value)
+        if value is not None:
+            self._configure_for_workspace(value)
+
+    def _configure_for_workspace(self, workspace):
+        """Auto-configure infrastructure when a workspace is assigned.
+
+        Called by the ``_workspace`` setter. Sets ``working_dir`` (for terminal
+        inferencers), ``cache_folder``, and resolves deferred loggers.
+        """
+        import os
+
+        if hasattr(self, "working_dir"):
+            self.working_dir = str(workspace.root)
+
+        if hasattr(self, "cache_folder"):
+            self.cache_folder = os.path.join(
+                str(workspace.root), "_runtime", "inferencer_cache"
+            )
+
+        logger_val = getattr(self, "logger", None)
+        if isinstance(logger_val, str) and logger_val == "auto":
+            self._normalize_loggers()
+        elif isinstance(logger_val, dict):
+            self._redirect_loggers_to_workspace(workspace)
+
+    def _redirect_loggers_to_workspace(self, workspace):
+        """Redirect dict-keyed loggers to the workspace's logs/ directory."""
+        import os
+        from rich_python_utils.io_utils.json_io import JsonLogger
+
+        child_log_dir = workspace.logs_dir
+        os.makedirs(child_log_dir, exist_ok=True)
+        child_log_path = os.path.join(child_log_dir, "session.jsonl")
+        new_loggers = {}
+        for name, entry in self.logger.items():
+            if isinstance(entry, tuple) and len(entry) == 2:
+                logger_inst, config = entry
+            else:
+                logger_inst, config = entry, None
+            if isinstance(logger_inst, JsonLogger):
+                new_kwargs = dict(logger_inst.keywords)
+                new_kwargs["file_path"] = child_log_path
+                new_logger = JsonLogger(**new_kwargs)
+                new_loggers[name] = (new_logger, config) if config is not None else new_logger
+            else:
+                new_loggers[name] = entry
+        if new_loggers:
+            self.logger = new_loggers
 
     def __attrs_post_init__(self):
+        # Use property setter — triggers _configure_for_workspace if workspace is not None
+        self._workspace = self.workspace
+
+        # Resolve built-in response_post_processor by name.
+        # String: "extract_delimited" → use with default args.
+        # Dict:  {extract_delimited: {open_tag: "<Output>"}} → use with custom args.
+        # Callable: use as-is (backward compat).
+        if isinstance(self.response_post_processor, (str, dict)):
+            _builtin_post_processors = {
+                "extract_delimited": lambda: __import__(
+                    "agent_foundation.common.response_parsers.delimiter_parser",
+                    fromlist=["extract_delimited"],
+                ).extract_delimited,
+            }
+            if isinstance(self.response_post_processor, str):
+                name, kwargs = self.response_post_processor, {}
+            else:
+                # Dict with single key: {name: {arg: val, ...}}
+                name = next(iter(self.response_post_processor))
+                kwargs = self.response_post_processor[name] or {}
+            factory = _builtin_post_processors.get(name)
+            if factory:
+                func = factory()
+                import functools as _ft
+                self.response_post_processor = (
+                    _ft.partial(func, **kwargs) if kwargs else func
+                )
+            else:
+                raise ValueError(
+                    f"Unknown built-in response_post_processor: {name!r}. "
+                    f"Available: {sorted(_builtin_post_processors)}"
+                )
+
         if isinstance(self.post_response_merger, str):
             if self.post_response_merger == "default":
                 from rich_python_utils.mp_utils.common import merge_results
@@ -174,6 +281,105 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         super().__attrs_post_init__()
 
+    def _for_each_child_inferencer(self, on_instance, on_partial):
+        """Walk attrs fields and invoke callbacks for child inferencers.
+
+        Finds child inferencers in five value patterns:
+        1. Direct InferencerBase attr
+        2. functools.partial (e.g., worker factory)
+        3. dict containing InferencerBase, partial, or duck-typed callables
+        4. list/tuple containing InferencerBase or duck-typed callables
+        5. Duck-typed callable with ``template_extra_feed`` dict attribute
+
+        Args:
+            on_instance: Called for each InferencerBase or duck-typed callable.
+                Signature: ``(child, field_name, key)`` where key is None for
+                direct attrs, str for dict keys, int for list indices.
+            on_partial: Called for each functools.partial.
+                Signature: ``(partial, field_name, key) -> Optional[partial]``.
+                Return a new partial to replace the original, or None to keep it.
+        """
+        import attr
+        import functools
+
+        attr_name = TEMPLATE_EXTRA_FEED_ATTR
+
+        for field in attr.fields(type(self)):
+            try:
+                value = getattr(self, field.name)
+            except AttributeError:
+                continue
+            if value is None:
+                continue
+
+            if isinstance(value, InferencerBase):
+                on_instance(value, field.name, None)
+
+            elif isinstance(value, functools.partial):
+                new = on_partial(value, field.name, None)
+                if new is not None:
+                    setattr(self, field.name, new)
+
+            elif isinstance(value, dict):
+                new_dict = dict(value)
+                changed = False
+                for k, v in value.items():
+                    if isinstance(v, InferencerBase):
+                        on_instance(v, field.name, k)
+                    elif isinstance(v, functools.partial):
+                        new = on_partial(v, field.name, k)
+                        if new is not None:
+                            new_dict[k] = new
+                            changed = True
+                    elif callable(v) and isinstance(
+                        getattr(v, attr_name, None), dict
+                    ):
+                        on_instance(v, field.name, k)
+                if changed:
+                    setattr(self, field.name, new_dict)
+
+            elif isinstance(value, (list, tuple)):
+                for i, item in enumerate(value):
+                    if isinstance(item, InferencerBase):
+                        on_instance(item, field.name, i)
+                    elif callable(item) and isinstance(
+                        getattr(item, attr_name, None), dict
+                    ):
+                        on_instance(item, field.name, i)
+
+            elif callable(value) and isinstance(
+                getattr(value, attr_name, None), dict
+            ):
+                on_instance(value, field.name, None)
+
+    def _propagate_to_children(self):
+        """Push template_extra_feed to child inferencers found in attrs fields.
+
+        Parent's keys take precedence (update semantics) — runtime context
+        set by executor.execute() overrides yaml defaults on children.
+        Each InferencerBase does this 1 layer; recursive inference naturally
+        propagates through the full hierarchy.
+        """
+        if not self.template_extra_feed:
+            return
+
+        import functools
+
+        feed = self.template_extra_feed
+        attr_name = TEMPLATE_EXTRA_FEED_ATTR
+
+        def _on_instance(child, field_name, key):
+            child.template_extra_feed.update(feed)
+
+        def _on_partial(p, field_name, key):
+            existing = p.keywords.get(attr_name, {})
+            merged = {**existing, **feed}
+            return functools.partial(
+                p.func, **{**p.keywords, attr_name: merged}
+            )
+
+        self._for_each_child_inferencer(_on_instance, _on_partial)
+
     @property
     def secret_key(self) -> str:
         return resolve_environ(self._secret_key)
@@ -199,20 +405,84 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         raise NotImplementedError
 
+    # -- Auto-logger resolution -------------------------------------------
+
+    def _resolve_auto_logger(self):
+        """Resolve ``logger='auto'`` to a JsonLogger at workspace.logs_dir.
+
+        Called by ``Debuggable._normalize_loggers()`` when ``logger='auto'``.
+        If no workspace is available yet, returns without resolving (deferred).
+        BTA calls ``_normalize_loggers()`` again after assigning child workspaces.
+        """
+        if self._workspace is None:
+            return  # deferred — will be called again after workspace assignment
+        from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
+        from rich_python_utils.common_objects.debuggable import LoggerConfig
+        log_dir = self._workspace.logs_dir
+        os.makedirs(log_dir, exist_ok=True)
+        self.logger = [
+            (JsonLogger(
+                file_path=os.path.join(log_dir, "session.jsonl"),
+                append=True,
+                is_artifact=True,
+                parts_min_size=0,
+                space_ext_mode=SpaceExtMode.MOVE,
+            ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
+        ]
+
     # -- Template rendering & output finalization -------------------------
 
     def _build_template_feed(self, inference_input: str) -> dict:
         """Build the template variable feed dict.
 
-        Merges ``template_extra_feed`` with ``{{ input }}`` bound to
-        ``inference_input``.  Conditionally includes ``output_path``
-        only when the inferencer has local file access.
+        Merges (in priority order, lowest first):
+        1. ``template_variables`` — variant selectors resolved to file content
+           via ``template_manager.load_variable()``.  E.g.,
+           ``{"task_preamble": "skill_tool_creation"}`` loads
+           ``_variables/task_preamble/skill_tool_creation.jinja2``.
+        2. ``template_extra_feed`` — literal key-value overrides.
+        3. ``{{ input }}`` bound to ``inference_input``.
+        4. ``output_path`` (if inferencer has local file access).
 
         Override this method to customize feed construction (e.g., add
         dynamic variables from external sources).
         """
-        feed: dict = {"input": inference_input}
+        feed: dict = {}
+        # Resolve template_variables: unified file-variant + literal support.
+        #   "skill_tool_creation"   → auto: try file, fall back to literal
+        #   "@skill_tool_creation"  → force file, error if not found
+        #   "=literal text"         → force literal, skip file check
+        if self.template_variables and self.template_manager:
+            for var_name, value in self.template_variables.items():
+                if not value:
+                    feed[var_name] = ""
+                elif not isinstance(value, str):
+                    feed[var_name] = value
+                elif value.startswith("@"):
+                    variant = value[1:]
+                    if hasattr(self.template_manager, "load_variable"):
+                        loaded = self.template_manager.load_variable(
+                            var_name, variant, self.template_root_space
+                        )
+                        if loaded is None:
+                            raise FileNotFoundError(
+                                f"template_variables: no variable file for "
+                                f"@{variant} (var={var_name}, space={self.template_root_space})"
+                            )
+                        feed[var_name] = loaded
+                    else:
+                        feed[var_name] = variant
+                elif value.startswith("="):
+                    feed[var_name] = value[1:]
+                elif hasattr(self.template_manager, "load_variable"):
+                    loaded = self.template_manager.load_variable(
+                        var_name, value, self.template_root_space
+                    )
+                    feed[var_name] = loaded if loaded is not None else value
+                else:
+                    feed[var_name] = value
         feed.update(self.template_extra_feed)
+        feed["input"] = inference_input
         resolved = self.resolve_output_path()
         if resolved and os.path.isabs(resolved) and self.has_local_access:
             feed["output_path"] = resolved
@@ -339,6 +609,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             Exception: If all retry attempts fail and default_return_or_raise is set to
                 None or an Exception object.
         """
+        self._propagate_to_children()
+
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
 
@@ -359,7 +631,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(resume_result)
+                resume_result = self.response_post_processor(self._normalize_for_post_processor(resume_result))
             return resume_result
 
         inference_args = self.default_inference_args.copy()
@@ -422,8 +694,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_debug(inference_input, "InferenceInput")
-        self.log_debug(inference_args, "InferenceArgs")
+        self.log_info(inference_input, "InferenceInput")
+        self.log_info(inference_args, "InferenceArgs")
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None
@@ -517,11 +789,30 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self.update_state_graphs(inference_response)
 
         if self.response_post_processor is not None:
-            processed_response = self.response_post_processor(inference_response)
+            post_input = self._normalize_for_post_processor(inference_response)
+            processed_response = self.response_post_processor(post_input)
             self.log_debug(processed_response, "PostProcessedResponse")
             return processed_response
 
         return inference_response
+
+    def _normalize_for_post_processor(self, response: Any) -> str:
+        """Extract text from a structured response for post-processing.
+
+        Post-processors (e.g., extract_delimited) expect str input.
+        Structured response types (e.g., TerminalInferencerResponse from RovoDevCLI)
+        carry clean text in their .output attribute.
+        Falls back to str() for unknown types rather than raising, to avoid breaking
+        existing inferencers that pass custom objects through.
+        """
+        if isinstance(response, str):
+            return response
+        if hasattr(response, 'output') and isinstance(response.output, str):
+            return response.output or ""
+        raise TypeError(
+            f"response_post_processor expects str or an object with a str .output attribute, "
+            f"got {type(response).__name__}. Add a .output property or handle this type explicitly."
+        )
 
     # -- State graph integration -------------------------------------------
 
@@ -886,6 +1177,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             async_execute_with_retry,
         )
 
+        self._propagate_to_children()
+
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
 
@@ -906,7 +1199,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(resume_result)
+                resume_result = self.response_post_processor(self._normalize_for_post_processor(resume_result))
             return resume_result
 
         inference_args = self.default_inference_args.copy()
@@ -962,8 +1255,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_debug(inference_input, "InferenceInput")
-        self.log_debug(inference_args, "InferenceArgs")
+        self.log_info(inference_input, "InferenceInput")
+        self.log_info(inference_args, "InferenceArgs")
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None
@@ -1060,7 +1353,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self.update_state_graphs(inference_response)
 
         if self.response_post_processor is not None:
-            processed_response = self.response_post_processor(inference_response)
+            post_input = self._normalize_for_post_processor(inference_response)
+            processed_response = self.response_post_processor(post_input)
             self.log_debug(processed_response, "PostProcessedResponse")
             return processed_response
 
@@ -1261,3 +1555,24 @@ class InferencerBase(Debuggable, Resumable, ABC):
         return False
 
     # endregion
+
+
+# ---------------------------------------------------------------------------
+# Public protocol constants
+# ---------------------------------------------------------------------------
+# Module-level constant naming the runtime-context attribute that participates
+# in ``_propagate_to_children()`` propagation. Derived from the attrs field
+# declaration so that renaming the attrs field automatically updates the
+# constant — single source of truth, no double-truth maintenance burden.
+#
+# Use this constant whenever performing **string-key lookups** for the
+# template_extra_feed attribute (e.g., ``getattr(obj, TEMPLATE_EXTRA_FEED_ATTR)``,
+# ``partial.keywords.get(TEMPLATE_EXTRA_FEED_ATTR)``). Direct attribute access
+# (``self.template_extra_feed``) is still preferred where possible — it is more
+# readable, IDE-friendly, and compile-time validated. The constant is for code
+# that must look up the attribute by name (introspection, partial keyword
+# manipulation, duck-typed protocol checks).
+import attr as _attr
+
+TEMPLATE_EXTRA_FEED_ATTR: str = _attr.fields(InferencerBase).template_extra_feed.name
+
