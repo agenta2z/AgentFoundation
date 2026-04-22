@@ -380,6 +380,18 @@ class ConversationalInferencer(InferencerBase):
                 # Update content so the next iteration's <CurrentTurn> shows
                 # a continuation prompt instead of re-feeding the widget response.
                 content = _CONTINUE_AFTER_TOOLS
+                if getattr(self, '_async_tool_dispatched', False):
+                    self._async_tool_dispatched = False
+                    return AgenticResult(
+                        text=conv_response.text or "",
+                        raw_response=last_raw_response,
+                        completed_actions=loop_actions,
+                        iterations_used=iteration + 1,
+                        last_rendered_prompt=self._last_rendered_prompt,
+                        last_template_source=self._last_template_source,
+                        last_template_feed=self._last_template_feed,
+                        last_template_config=self._last_template_config,
+                    )
                 continue
 
             # 5a. Execute action tools from ToolsToInvoke (if any)
@@ -405,6 +417,18 @@ class ConversationalInferencer(InferencerBase):
                     combined = combined[: self.max_tool_result_chars] + "\n... (truncated)"
                 self.add_message("user", f"{_TOOL_RESULTS_PREFIX}\n{combined}")
                 content = _CONTINUE_AFTER_TOOLS
+                if getattr(self, '_async_tool_dispatched', False):
+                    self._async_tool_dispatched = False
+                    return AgenticResult(
+                        text=conv_response.text or "",
+                        raw_response=last_raw_response,
+                        completed_actions=loop_actions,
+                        iterations_used=iteration + 1,
+                        last_rendered_prompt=self._last_rendered_prompt,
+                        last_template_source=self._last_template_source,
+                        last_template_feed=self._last_template_feed,
+                        last_template_config=self._last_template_config,
+                    )
                 continue
 
             # 5b. Parse for action tool calls (legacy XML format)
@@ -447,6 +471,18 @@ class ConversationalInferencer(InferencerBase):
                 self.add_message("assistant", parsed.text)
             self.add_message("user", f"{_TOOL_RESULTS_PREFIX}\n{combined}")
             content = _CONTINUE_AFTER_TOOLS
+            if getattr(self, '_async_tool_dispatched', False):
+                self._async_tool_dispatched = False
+                return AgenticResult(
+                    text=parsed.text or "",
+                    raw_response=last_raw_response,
+                    completed_actions=loop_actions,
+                    iterations_used=iteration + 1,
+                    last_rendered_prompt=self._last_rendered_prompt,
+                    last_template_source=self._last_template_source,
+                    last_template_feed=self._last_template_feed,
+                    last_template_config=self._last_template_config,
+                )
 
         # Exhausted max iterations — return last raw response
         return AgenticResult(
@@ -692,10 +728,10 @@ class ConversationalInferencer(InferencerBase):
     async def _execute_tool_call(self, tool_call: Any) -> str:
         """Execute a tool call and apply context_updates from the result.
 
-        Tools marked ``asynchronous=True`` in the tool registry are awaited
-        (not fire-and-forget). Task_status and graph events flow via WebSocket
-        during the await so the UI task panel shows real-time progress.
-        The agentic loop resumes with the actual result when the tool completes.
+        Tools marked asynchronous=True in the tool registry are launched as
+        background asyncio tasks (fire-and-forget) so the conversation turn
+        completes immediately. The tool sends task_status notifications to
+        the frontend independently.
         """
         import asyncio
 
@@ -703,10 +739,13 @@ class ConversationalInferencer(InferencerBase):
         if self.tool_executor is None:
             return f"No tool executor configured for: {canonical}"
 
+        # Check if this tool should run asynchronously (fire-and-forget)
         tool_def = self.tool_registry.get(canonical)
         is_async = tool_def and getattr(tool_def, "asynchronous", False)
 
         if is_async:
+            executor = self.tool_executor
+
             tool_map = self.prior_context.get("tool_phase_map", {})
             sop_phase = tool_map.get(canonical, canonical)
             self.prior_context["current_phase"] = sop_phase
@@ -727,24 +766,20 @@ class ConversationalInferencer(InferencerBase):
                 f"  Active task: {canonical} — {str(tool_call.arguments.get('target', ''))[:80]}"
             )
 
-            try:
-                result = await self.tool_executor(canonical, tool_call.arguments)
-                if hasattr(result, "context_updates") and result.context_updates:
-                    self.update_prior_context(**result.context_updates)
-                self.prior_context["phase_status"] = "completed"
-                if hasattr(result, "result"):
-                    return result.result
-                return str(result)
-            except asyncio.CancelledError:
-                self.prior_context["phase_status"] = "cancelled"
-                raise
-            except Exception as e:
-                logger.error("Async tool %s failed: %s", canonical, e)
-                self.prior_context["phase_status"] = "error"
-                self.prior_context["workflow_status"] = (
-                    f"Current phase: Phase {sop_phase} — {phase_name} (error: {str(e)[:100]})"
-                )
-                return f"Tool '{canonical}' failed: {e}"
+            async def _run_async() -> None:
+                try:
+                    result = await executor(canonical, tool_call.arguments)
+                    if hasattr(result, "context_updates") and result.context_updates:
+                        self.update_prior_context(**result.context_updates)
+                except Exception as e:
+                    logger.error("Async tool %s failed: %s", canonical, e)
+
+            self._active_async_task = asyncio.create_task(_run_async())
+            self._async_tool_dispatched = True
+            return (
+                f"Tool '{canonical}' launched asynchronously. "
+                f"Check the task panel for progress and results."
+            )
 
         try:
             result = await self.tool_executor(canonical, tool_call.arguments)
