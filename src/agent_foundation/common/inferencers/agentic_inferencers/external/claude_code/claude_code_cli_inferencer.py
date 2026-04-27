@@ -431,17 +431,58 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         kwargs["verbose"] = True
         kwargs["include_partial_messages"] = True
 
+        # Honor large_input_mode=STDIN to avoid Windows ARG_MAX (8191 chars
+        # on CMD.EXE) and Linux E2BIG. construct_command() will skip inlining
+        # the prompt when use_stdin=True; we then pipe it through stdin.
+        use_stdin = self.large_input_mode == LargeInputMode.STDIN
+        if use_stdin:
+            kwargs["use_stdin"] = True
+
         self._last_stream_result = None  # reset before each call
 
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
 
+        # Bump StreamReader line limit from the asyncio default (64KB) to
+        # 16MB. Claude's stream-json events with tool_use input can carry
+        # the entire generated document on a single line, easily exceeding
+        # 64KB and triggering "Separator is not found, and chunk exceed
+        # the limit" on readline.
         process = await asyncio.create_subprocess_shell(
             full_command,
+            stdin=asyncio.subprocess.PIPE if use_stdin else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.working_dir,
+            limit=16 * 1024 * 1024,
         )
+
+        # Drain stdin/stderr concurrently with stdout so OS pipe buffers
+        # (~64KB on Windows) never fill — that would block claude.exe and
+        # deadlock the whole chain (observed with 73KB prompts: all 18
+        # claude.exe threads stuck in Wait, 0% CPU, no API connection).
+        # Mirrors what subprocess.communicate() does internally.
+        async def _send_stdin() -> None:
+            if not use_stdin or process.stdin is None:
+                return
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # process may have exited; stderr will surface error
+            finally:
+                try:
+                    process.stdin.close()
+                except Exception:
+                    pass
+
+        async def _drain_stderr() -> bytes:
+            if process.stderr is None:
+                return b""
+            return await process.stderr.read()
+
+        stdin_task = asyncio.create_task(_send_stdin())
+        stderr_task = asyncio.create_task(_drain_stderr())
 
         try:
             async for line_bytes in process.stdout:
@@ -463,14 +504,41 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                         delta = inner.get("delta", {})
                         if delta.get("type") == "text_delta" and delta.get("text"):
                             yield delta["text"]
+                            continue
+                    # Any other stream activity (thinking_delta,
+                    # input_json_delta, content_block_start, message_start,
+                    # ping, etc.) — emit an empty sentinel so the parent
+                    # class's dual-timer extends to tool_use_idle_timeout
+                    # (default 7200s for ClaudeCodeCli) instead of cutting
+                    # off the request mid-thinking on idle_timeout (300s).
+                    yield ""
 
                 # Capture result event for session_id / cost / usage metadata
                 elif event_type == "result":
                     self._last_stream_result = event
+                    yield ""  # also a sign of activity
+                else:
+                    # system, rate_limit_event, assistant (non-stream), etc.
+                    yield ""
 
         finally:
-            stderr_bytes = await process.stderr.read() if process.stderr else b""
+            try:
+                await stdin_task
+            except Exception:
+                pass
+            try:
+                stderr_bytes = await stderr_task
+            except Exception:
+                stderr_bytes = b""
             self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+            # If cleanup ran due to timeout/cancellation, the subprocess may
+            # still be alive — terminate it so process.wait() doesn't block
+            # forever waiting on a hung claude.exe.
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except (ProcessLookupError, OSError):
+                    pass
             await process.wait()
 
     def _resolve_subprocess_timeout(

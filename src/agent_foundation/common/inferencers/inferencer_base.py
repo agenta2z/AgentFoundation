@@ -384,6 +384,97 @@ class InferencerBase(Debuggable, Resumable, ABC):
     def secret_key(self) -> str:
         return resolve_environ(self._secret_key)
 
+    # ------------------------------------------------------------------
+    # Generic parent→child iteration + recursive pre_retry hook
+    #
+    # `_iter_child_inferencers` is the single canonical iteration mechanism
+    # for any parent→child operation: aconnect / adisconnect / lifecycle
+    # resets / pre_retry propagation. Subclasses override to declare their
+    # children. Default: empty.
+    #
+    # Relationship to `_for_each_child_inferencer` (above): that walker
+    # auto-discovers children via attrs.fields and is designed for
+    # `template_extra_feed` propagation (with side-effect callbacks for
+    # mutating partials and duck-typed callables). The two primitives
+    # serve different lifetimes and have incompatible signatures —
+    # deliberately not unified.
+    # ------------------------------------------------------------------
+
+    def _iter_child_inferencers(self) -> Iterator["InferencerBase"]:
+        """Yield this inferencer's direct child inferencers (one level only).
+
+        Override in subclasses to enumerate children. Default: empty iterator.
+
+        Contract:
+          - Yield direct children only. Recursive walks (e.g., `pre_retry`)
+            invoke each child's own `_iter_child_inferencers` for transitive
+            coverage.
+          - Subclasses SHOULD dedup their own yields when the same instance
+            may appear in multiple slots (e.g., fixer aliased to base).
+          - Consumers performing recursive walks should additionally dedup
+            across the whole tree using id-based seen sets (cycle safety).
+
+        Used by lifecycle methods (``aconnect`` / ``adisconnect`` /
+        ``_areset_sub_inferencers``) and the ``pre_retry`` hook below.
+        """
+        return iter(())
+
+    async def pre_retry(
+        self,
+        attempt: int,
+        exception: BaseException,
+        _seen: Optional[set] = None,
+    ) -> None:
+        """Public retry-cleanup hook called by the retry helper between attempts.
+
+        Calls ``_pre_retry`` on self (subclass-supplied own-state cleanup),
+        then propagates recursively to every direct child yielded by
+        ``_iter_child_inferencers``. Cycles broken by id-based seen set.
+        Child failures are caught and logged at WARNING — cleanup is
+        best-effort; one bad sibling must not block the rest.
+
+        Override ``_pre_retry`` to clean up your own state. Override
+        ``_iter_child_inferencers`` to declare your children (also reused
+        by aconnect/adisconnect). Do NOT normally override this method
+        itself — the propagation contract is fixed.
+
+        The ``_seen`` parameter is an internal implementation detail for
+        cycle safety; top-level callers omit it.
+        """
+        if _seen is None:
+            _seen = set()
+        if id(self) in _seen:
+            return
+        _seen.add(id(self))
+        try:
+            await self._pre_retry(attempt, exception)
+        except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+            _logger.warning(
+                "%s._pre_retry raised: %s", type(self).__name__, exc
+            )
+        for child in self._iter_child_inferencers():
+            if child is None or id(child) in _seen:
+                continue
+            try:
+                await child.pre_retry(attempt, exception, _seen=_seen)
+            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                _logger.warning(
+                    "%s.pre_retry (child of %s) raised: %s",
+                    type(child).__name__, type(self).__name__, exc,
+                )
+
+    async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
+        """Subclass override hook for own-state cleanup before next retry.
+
+        Default is a no-op. Subclasses with transient per-attempt state
+        (sessions, cached connections, in-memory buffers) override to reset.
+
+        Note: only fires on the ASYNC retry path. Sync inferencers in this
+        codebase are rare; sync `pre_retry` propagation is not currently
+        wired (sync `_internal_retry_callback` stays as-is).
+        """
+        pass
+
     @abstractmethod
     def _infer(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
@@ -1232,15 +1323,33 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # Mutable args list — prompt can be swapped by the retry callback
         retry_args = [inference_input]
 
-        # Build internal retry callback (handles prompt transformation + user callback)
+        # Build internal retry callback (handles pre_retry propagation,
+        # prompt transformation, and user callback). The async path
+        # additionally fires `self.pre_retry` when subclasses opt in via
+        # `_pre_retry` or `_iter_child_inferencers` overrides — detected
+        # via the standard override-detection pattern. Zero cost when
+        # not overridden.
         _user_callback = on_retry_callback
-        if _user_callback is not None or retry_prompt_mode != "original":
-
-            def _internal_retry_callback(attempt, exception):
-                # Forward to user callback with local inference_args
+        pre_retry_active = (
+            type(self)._pre_retry is not InferencerBase._pre_retry
+            or type(self)._iter_child_inferencers
+                is not InferencerBase._iter_child_inferencers
+        )
+        if (
+            _user_callback is not None
+            or retry_prompt_mode != "original"
+            or pre_retry_active
+        ):
+            async def _internal_retry_callback(attempt, exception):
+                # 1. Subclass hook + recursive child propagation — fires
+                #    first so subsequent steps see clean state.
+                if pre_retry_active:
+                    await self.pre_retry(attempt, exception)
+                # 2. Forward to user callback with local inference_args
+                #    (preserves prior sync semantics).
                 if _user_callback is not None:
                     _user_callback(attempt, exception, inference_args)
-                # Transform prompt based on retry_prompt_mode
+                # 3. Transform prompt based on retry_prompt_mode
                 if retry_prompt_mode == "simple_retry":
                     retry_args[0] = _SIMPLE_RETRY_PROMPT
                 elif retry_prompt_mode == "retry_with_original":

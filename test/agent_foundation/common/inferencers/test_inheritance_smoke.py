@@ -38,8 +38,9 @@ def test_pti_is_subclass_of_lwi():
 # ── Task 7.2: Unrelated inferencers NOT subclasses of LWI ──────────
 
 
-def test_dual_inferencer_not_subclass_of_lwi():
-    assert not issubclass(DualInferencer, LinearWorkflowInferencer)
+def test_dual_inferencer_is_subclass_of_lwi():
+    """After dynamic-linear-workflow refactor, DualInferencer inherits from LWI."""
+    assert issubclass(DualInferencer, LinearWorkflowInferencer)
 
 
 def test_bta_not_subclass_of_lwi():

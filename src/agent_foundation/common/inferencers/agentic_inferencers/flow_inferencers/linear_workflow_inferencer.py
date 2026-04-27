@@ -26,6 +26,7 @@ from rich_python_utils.common_objects.serializable import SerializationMode
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
     ResultPassDownMode,
 )
+from rich_python_utils.common_objects.workflow.common.expansion import ExpansionResult
 from rich_python_utils.common_objects.workflow.common.step_wrapper import StepWrapper
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
@@ -52,6 +53,7 @@ class WorkflowStepConfig:
         max_loop_iterations: Max loop iterations before exhaustion.
         on_loop_exhausted: Callable(state, result) called when loop limit hit.
         enable_result_save: Whether to checkpoint this step's result.
+            None means fall back to the Workflow-level setting.
         config_key: Key in inference_config for step-specific config.
         pass_inference_args: Whether to forward **_inference_args to the child.
         enabled: Whether this step is active (False = no-op placeholder).
@@ -68,10 +70,45 @@ class WorkflowStepConfig:
     loop_condition: Optional[Callable] = attrib(default=None)
     max_loop_iterations: int = attrib(default=5)
     on_loop_exhausted: Optional[Callable] = attrib(default=None)
-    enable_result_save: bool = attrib(default=True)
+    enable_result_save: Optional[bool] = attrib(default=None)
     config_key: Optional[str] = attrib(default=None)
     pass_inference_args: bool = attrib(default=False)
     enabled: bool = attrib(default=True)
+
+
+class _DynamicStepRegistry(dict):
+    """Dict-like registry that matches ``dynamic_step_N`` expansion IDs.
+
+    Workflow's ``_reconstruct_expansions`` does ``expansion_id in registry``
+    and ``registry[expansion_id]``.  This class intercepts both so that
+    any expansion_id starting with ``"dynamic_step_"`` resolves to a
+    factory that rebuilds the correct step wrapper via the captured LWI
+    instance.
+    """
+
+    def __init__(self, lwi):
+        super().__init__()
+        self._lwi = lwi
+
+    def __contains__(self, key):
+        if isinstance(key, str) and key.startswith("dynamic_step_"):
+            return True
+        return super().__contains__(key)
+
+    def __getitem__(self, key):
+        if isinstance(key, str) and key.startswith("dynamic_step_"):
+            lwi = self._lwi
+
+            def _factory(exp_id):
+                step_index = int(exp_id.split("_")[-1])
+                return [
+                    lwi._build_dynamic_step_wrapper(
+                        lwi.default_followup_inferencer, step_index
+                    )
+                ]
+
+            return _factory
+        return super().__getitem__(key)
 
 
 @artifact_type(Workflow, type="json", group="workflows")
@@ -119,6 +156,15 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     iteration_record_builder: Optional[Callable[[dict], dict]] = attrib(default=None)
     checkpoint_subdir: Optional[str] = attrib(default=None)
 
+    # --- Dynamic Mode (Requirements 1-9) ---
+    dynamic_mode: bool = attrib(default=False)
+    default_initial_inferencer: Optional[InferencerBase] = attrib(default=None)
+    default_followup_inferencer: Optional[InferencerBase] = attrib(default=None)
+    end_condition: Optional[Callable[[dict, Any], bool]] = attrib(default=None)
+    max_dynamic_steps: int = attrib(default=10)
+    inferencer_factory: Optional[Callable] = attrib(default=None)
+    dynamic_input_builder: Optional[Callable[[dict, Any], Any]] = attrib(default=None)
+
     # --- Suppress Workflow constructor parameters (init=False) ---
     result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
     unpack_single_result = attrib(default=False, init=False)
@@ -154,6 +200,13 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             ):
                 seen_ids.add(id(inf))
                 inf.set_parent_debuggable(self)
+
+        # Dynamic mode: register expansion_step_registry for resume support
+        if self.dynamic_mode:
+            # Use a prefix-matching dict so that expansion_ids like
+            # "dynamic_step_1", "dynamic_step_2", etc. all match the
+            # single "dynamic_step" prefix and route to the same factory.
+            self.expansion_step_registry = _DynamicStepRegistry(self)
 
     # ------------------------------------------------------------------
     # Iteration workspace helpers
@@ -295,13 +348,20 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         write_json(dict__(state, recursive=True), path, indent=2)
 
     def _auto_enable_checkpointing(self):
-        """Enable checkpoint/resume when workspace is available and no override is set."""
+        """Enable checkpoint/resume when workspace is available and no override is set.
+
+        In dynamic mode, ``resume_with_saved_results`` is left disabled because
+        Workflow's backward resume scan iterates ``self._steps[i]`` in
+        ``range(resume_with_saved_results_int, -1, -1)``, which IndexErrors
+        when ``len(self._steps) == 1`` (the initial dynamic-mode step list).
+        Dynamic mode has its own resume path via ``expansion_step_registry``.
+        """
         if self._result_root_override is None and self._workspace is not None:
             from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
                 StepResultSaveOptions,
             )
             self.enable_result_save = StepResultSaveOptions.Always
-            self.resume_with_saved_results = True
+            self.resume_with_saved_results = not self.dynamic_mode
 
     def _load_final_result(self):
         """Load cached final result from ``final_result.json``.
@@ -378,6 +438,167 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             "disabled because Workflow._arun() requires state setup that "
             "only _ainfer() provides."
         )
+
+    # ------------------------------------------------------------------
+    # Dynamic mode helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_next_inferencer(self, raw_result):
+        """Unpack a dynamic step result into (actual_result, next_inferencer).
+
+        If *raw_result* is a 2-tuple ``(result, next_inferencer)``, returns
+        both.  Otherwise returns ``(raw_result, self.default_followup_inferencer)``.
+
+        Raises :class:`ValueError` when no next inferencer can be determined
+        (non-tuple result AND ``default_followup_inferencer`` is None).
+        """
+        if isinstance(raw_result, tuple) and len(raw_result) == 2:
+            actual_result, next_inf = raw_result
+            # Fall back to default if tuple explicitly contains None
+            if next_inf is None:
+                next_inf = self.default_followup_inferencer
+            if next_inf is None:
+                raise ValueError(
+                    "Dynamic step returned (result, None) but "
+                    "default_followup_inferencer is also None"
+                )
+            return actual_result, next_inf
+
+        if self.default_followup_inferencer is None:
+            raise ValueError(
+                "Dynamic step did not specify next inferencer and "
+                "default_followup_inferencer is None"
+            )
+        return raw_result, self.default_followup_inferencer
+
+    def _instantiate_inferencer(self, inferencer):
+        """Return a ready-to-use inferencer instance.
+
+        If *inferencer* is already an instance, return it directly.
+        If it is a class (type), create a new instance via
+        ``inferencer_factory`` (if provided) or by calling the class
+        with no arguments.
+        """
+        if not isinstance(inferencer, type):
+            return inferencer
+        if self.inferencer_factory is not None:
+            return self.inferencer_factory(inferencer)
+        return inferencer()
+
+    def _build_dynamic_step_wrapper(self, inferencer, step_index):
+        """Build a step wrapper closure for dynamic mode.
+
+        The returned async callable has signature ``(step_input, state)``
+        matching the ``step_fn`` convention used by
+        :class:`WorkflowStepConfig`.  It captures *self* via closure so
+        it can access dynamic-mode configuration and shared state.
+
+        Behaviour:
+        1. Build input from state (``original_input`` for step 0,
+           previous result for step N) or via ``dynamic_input_builder``.
+        2. Call ``inferencer.ainfer(input)``.
+        3. Unpack result tuple ``(result, next_inferencer)`` if
+           applicable; use ``default_followup_inferencer`` otherwise.
+        4. Update state: append to ``dynamic_step_results``, increment
+           ``dynamic_step_count``.
+        5. Check ``end_condition(state, result)`` and
+           ``max_dynamic_steps``.
+        6. If continuing: return an :class:`ExpansionResult` with the
+           next step wrapper.
+        7. If done: return the actual result (no expansion).
+        """
+        inf_instance = self._instantiate_inferencer(inferencer)
+
+        async def _dynamic_step(*args, **kwargs):
+            state = self._state
+            step_input = args[0] if args else None
+            # 1. Build input
+            if step_index == 0:
+                inp = state.get("original_input", step_input)
+            else:
+                prev_results = state.get("dynamic_step_results", [])
+                prev = prev_results[-1] if prev_results else step_input
+                if self.dynamic_input_builder is not None:
+                    inp = self.dynamic_input_builder(state, prev)
+                else:
+                    inp = prev
+
+            # 2. Execute inferencer — forward inference_config and _inference_args
+            # (stored by _ainfer at lines 742-743) to match static-mode behavior.
+            extra_kwargs = {}
+            if self._inference_config:
+                extra_kwargs["inference_config"] = self._inference_config
+            if self._inference_args:
+                extra_kwargs.update(self._inference_args)
+            raw_result = await inf_instance.ainfer(inp, **extra_kwargs)
+
+            # 3. Unpack result tuple
+            actual_result, next_inferencer = self._resolve_next_inferencer(raw_result)
+
+            # 4. Update state
+            if "dynamic_step_results" not in state:
+                state["dynamic_step_results"] = []
+            state["dynamic_step_results"].append(actual_result)
+            state["dynamic_step_count"] = len(state["dynamic_step_results"])
+
+            # 5. Check termination
+            should_stop = False
+            if self.end_condition is not None and self.end_condition(state, actual_result):
+                should_stop = True
+            if state["dynamic_step_count"] >= self.max_dynamic_steps:
+                should_stop = True
+
+            # 6/7. Continue or finish
+            if should_stop:
+                return actual_result
+
+            # Build next step wrapper and return ExpansionResult
+            next_inf_instance = self._instantiate_inferencer(next_inferencer)
+            next_wrapper = self._build_dynamic_step_wrapper(
+                next_inf_instance, step_index + 1
+            )
+
+            return ExpansionResult(
+                result=actual_result,
+                new_steps=[next_wrapper],
+                expansion_id=f"dynamic_step_{step_index + 1}",
+                seed=None,
+                reconstruct_from_seed=None,
+            )
+
+        return _dynamic_step
+
+    def _build_dynamic_initial_steps(self) -> List[StepWrapper]:
+        """Build the initial step list for dynamic mode.
+
+        Creates a single :class:`StepWrapper` wrapping the dynamic step
+        closure for step 0 (using ``default_initial_inferencer``).  Also
+        sets ``max_expansion_events`` on the Workflow so that the
+        expansion infrastructure is enabled for subsequent steps.
+
+        Returns:
+            A one-element list containing the initial dynamic step
+            wrapped in a :class:`StepWrapper`.
+        """
+        # Enable expansion on Workflow for up to max_dynamic_steps expansions
+        self.max_expansion_events = self.max_dynamic_steps
+
+        # Build the step 0 closure using default_initial_inferencer
+        step_fn = self._build_dynamic_step_wrapper(
+            self.default_initial_inferencer, 0
+        )
+
+        def _sync_state(state, result):
+            """Keep Workflow's local state variable pointing at self._state."""
+            return self._state
+
+        wrapper = StepWrapper(
+            step_fn,
+            name="dynamic_step_0",
+            update_state=_sync_state,
+            enable_result_save=False,
+        )
+        return [wrapper]
 
     # ------------------------------------------------------------------
     # Step builder
@@ -509,8 +730,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             wrapper_kwargs: Dict[str, Any] = {
                 "name": sc.name,
                 "update_state": _sync_state,
-                "enable_result_save": sc.enable_result_save,
             }
+            if sc.enable_result_save is not None:
+                wrapper_kwargs["enable_result_save"] = sc.enable_result_save
             if loop_back_to_idx is not None:
                 wrapper_kwargs["loop_back_to"] = loop_back_to_idx
             if sc.loop_condition is not None:
@@ -570,8 +792,28 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             self._pending_state["iteration_records"] = []
         self._pending_state["_prev_iteration"] = self._pending_state["iteration"]
 
-        # Build steps
-        self._steps = self._build_steps()
+        # Dynamic mode branch
+        if self.dynamic_mode:
+            # Validate dynamic mode configuration
+            if self.default_initial_inferencer is None:
+                raise ValueError(
+                    "dynamic_mode=True requires default_initial_inferencer"
+                )
+
+            # Initialize dynamic-mode state keys
+            if "dynamic_step_results" not in self._pending_state:
+                self._pending_state["dynamic_step_results"] = []
+            if "dynamic_step_count" not in self._pending_state:
+                self._pending_state["dynamic_step_count"] = 0
+
+            # Build initial step (single step using default_initial_inferencer)
+            self._steps = self._build_dynamic_initial_steps()
+
+            # Enable expansion on Workflow
+            self.max_expansion_events = self.max_dynamic_steps
+        else:
+            # Existing static mode
+            self._steps = self._build_steps()
 
         # Enable checkpointing when workspace is available
         self._auto_enable_checkpointing()

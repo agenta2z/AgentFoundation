@@ -1,0 +1,29 @@
+# bta_interactive_breakdown.yaml
+#
+# Example: BTA with a conversational breakdown phase.
+#
+# D1 dispatch: The outer `_target_: Conversational` resolves to
+#   ConversationalFlowNodeAdapter (not ConversationalInferencer) because
+#   the `conversational_inferencer` field is a unique discriminator for
+#   the adapter class.
+#
+# D2 inference: The nested `conversational_inferencer:` block omits
+#   `_target_` — it is inferred from the adapter's
+#   `__yaml_default_nested__` mapping as `Conversational`
+#   (→ ConversationalInferencer).
+#
+# Interpolation references (${...}) are placeholders — this is a
+# reference example, not a runnable config.
+
+_target_: BTA
+breakdown_inferencer:
+  _target_: Conversational                     # D1 dispatches to adapter via conversational_inferencer field
+  template_manager: ${breakdown_templates}
+  template_key: breakdown/interactive
+  conversational_inferencer:                   # D2 infers _target_ from __yaml_default_nested__
+    base_inferencer: ${llm}
+    prompt_renderer: ${conv_renderer}
+    max_iterations: 5
+  session_timeout: 300
+  fallback_inferencer: ${plain_breakdown_llm}
+aggregator_inferencer: ${bta_aggregator}

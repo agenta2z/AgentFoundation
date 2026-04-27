@@ -796,6 +796,27 @@ class StreamingInferencerBase(InferencerBase):
         """
         self._session_id = None
 
+    async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
+        """When this inferencer (or its parent's recursion) is retried,
+        reset in-memory session state so the next attempt does not resume
+        a session that may have been corrupted by the failed attempt.
+
+        Note on lifetimes: the reset takes effect on **subsequent**
+        ``ainfer()`` calls. Within ONE ``ainfer()`` call, kwargs
+        (``session_id``, ``resume``) are typically locked at the top of
+        ``ainfer`` (see ``ClaudeCodeCliInferencer.ainfer`` and similar
+        paths) before ``_ainfer_single`` is entered, so inner retry
+        attempts use those locked kwargs regardless of what
+        ``active_session_id`` is set to here. This hook is load-bearing
+        for **cross-layer recursive propagation** — when a parent
+        inferencer's retry triggers child ``pre_retry``s (via
+        ``InferencerBase.pre_retry``'s recursion through
+        ``_iter_child_inferencers``), this clears the child's session_id
+        so the parent's NEXT attempt — which will issue a fresh
+        ``child.ainfer()`` call — starts from a clean slate.
+        """
+        self.reset_session()
+
     def new_session(self, prompt: str, **kwargs: Any) -> Any:
         """Start a new session, clearing any previous session.
 

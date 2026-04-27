@@ -32,8 +32,13 @@ register_alias(
 )
 register_alias(
     "Conversational",
-    f"{_P}.common.inferencers.agentic_inferencers.conversational.conversational_inferencer.ConversationalInferencer",
+    f"{_P}.common.inferencers.agentic_inferencers.conversational"
+    ".conversational_inferencer.ConversationalInferencer",
     "inferencer",
+    alternatives=[
+        f"{_P}.common.inferencers.agentic_inferencers.conversational"
+        ".flow_node_adapter.ConversationalFlowNodeAdapter",
+    ],
 )
 register_alias(
     "Dual",
@@ -43,6 +48,16 @@ register_alias(
 register_alias(
     "BTA",
     f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.BreakdownThenAggregateInferencer",
+    "inferencer",
+)
+register_alias(
+    "MultiFlow",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer.MultiFlowInferencer",
+    "inferencer",
+)
+register_alias(
+    "MultiFlowDual",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer.MultiFlowDualInferencer",
     "inferencer",
 )
 register_alias(

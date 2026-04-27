@@ -137,8 +137,12 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
 
         ``asyncio.subprocess.Process.wait()`` waits for pipe transports to
         close, which never happens when child processes (e.g., MCP servers)
-        inherit the pipes.  This helper uses ``os.waitpid(WNOHANG)`` to
-        detect the *actual* process exit.
+        inherit the pipes.
+
+        On POSIX we use ``os.waitpid(WNOHANG)`` to detect the actual exit.
+        On Windows ``os.waitpid`` blocks (no ``WNOHANG``) — we fall back to
+        ``OpenProcess`` + ``GetExitCodeProcess`` via ctypes, which gives us
+        the same non-blocking semantics.
 
         Args:
             pid: The process ID to monitor.
@@ -146,14 +150,42 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         Returns:
             Exit code, or ``None`` if the process was already reaped.
         """
-        while True:
-            try:
-                wpid, status = os.waitpid(pid, os.WNOHANG)
-                if wpid != 0:
-                    return os.waitstatus_to_exitcode(status)
-            except ChildProcessError:
-                return None  # already reaped by asyncio
-            await asyncio.sleep(self._subprocess_exit_poll_interval)
+        if hasattr(os, "WNOHANG"):
+            # POSIX path
+            while True:
+                try:
+                    wpid, status = os.waitpid(pid, os.WNOHANG)
+                    if wpid != 0:
+                        return os.waitstatus_to_exitcode(status)
+                except ChildProcessError:
+                    return None  # already reaped by asyncio
+                await asyncio.sleep(self._subprocess_exit_poll_interval)
+
+        # Windows path — poll via Win32 API
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        SYNCHRONIZE = 0x00100000
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
+        handle = kernel32.OpenProcess(
+            SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return None  # process not found / already reaped
+
+        try:
+            exit_code = wintypes.DWORD()
+            while True:
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return None
+                if exit_code.value != STILL_ACTIVE:
+                    return int(exit_code.value)
+                await asyncio.sleep(self._subprocess_exit_poll_interval)
+        finally:
+            kernel32.CloseHandle(handle)
 
     @staticmethod
     def _force_close_pipes(

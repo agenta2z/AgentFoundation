@@ -215,8 +215,8 @@ class InferencerWorkspace:
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "step": name,
         }
-        with open(marker_path, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
     def has_marker(self, name: str) -> bool:
         """Check ``artifacts/`` first, then ``outputs/`` (legacy fallback)."""

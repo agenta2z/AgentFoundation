@@ -34,14 +34,19 @@ def pytest_configure(config):
 # CLI availability detection
 # ---------------------------------------------------------------------------
 def _cli_available(command: str) -> bool:
-    """Check if a CLI tool is available and functional via ``--version``."""
+    """Check if a CLI tool is available and functional via ``--version``.
+
+    Uses a generous 30-second timeout because some CLIs (e.g., ``kiro-cli``
+    on Windows) can take >10s to start cold; falsely marking them
+    unavailable would silently skip integration tests.
+    """
     try:
         result = subprocess.run(
             f"{command} --version",
             shell=True,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, OSError):

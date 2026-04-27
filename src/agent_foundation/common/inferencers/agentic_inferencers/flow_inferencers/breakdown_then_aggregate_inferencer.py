@@ -1,5 +1,3 @@
-11
-
 """BreakdownThenAggregateInferencer — diamond-shaped WorkGraph-based inferencer.
 
 Breaks a query into sub-queries, runs workers in parallel via WorkGraph,
@@ -7,6 +5,7 @@ and optionally aggregates results. Uses dual inheritance pattern
 (InferencerBase, WorkGraph) following DualInferencer/PTI precedent.
 """
 
+import asyncio
 import functools
 import json
 import logging
@@ -32,6 +31,18 @@ from rich_python_utils.common_objects.workflow.workgraph import (
 
 
 _logger = logging.getLogger(__name__)
+
+
+# Transient errors worth retrying for BTA WorkGraph nodes (breakdown, workers,
+# aggregator). Programming errors (TypeError, AttributeError, ValueError from
+# parsers, etc.) deliberately fall through and surface immediately so they're
+# not masked by retry storms. See plan Fix 4.
+TRANSIENT_RETRY_EXCEPTIONS = (
+    TimeoutError,           # built-in (also raised by retry helper itself)
+    asyncio.TimeoutError,   # asyncio's own (subclass of TimeoutError on 3.11+; listed for safety)
+    ConnectionError,        # covers BrokenPipeError, ConnectionResetError, ConnectionRefusedError
+    OSError,                # covers EPIPE, ECONNRESET, file-descriptor issues from CLI subprocesses
+)
 
 
 def parse_numbered_list(text: str) -> List[str]:
@@ -253,17 +264,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     MRO: InferencerBase.__call__() -> infer() wins over WorkNodeBase.__call__() -> run().
     run()/arun() are blocked — callers must use infer()/ainfer().
 
-    The graph is built DYNAMICALLY in _infer()/_ainfer() each time,
-    similar to how DualInferencer builds self._steps in _ainfer().
+    Uses expansion-driven graph construction: a single "breakdown" start
+    node returns a ``GraphExpansionResult`` that dynamically attaches
+    worker and aggregator nodes at runtime.
 
-    Graph structure (2-layer diamond)::
+    Graph structure (expansion-driven diamond)::
 
-        Layer 1 (start_nodes):  worker_0, worker_1, ..., worker_N   (parallel fan-out)
-                                     \        |            /
-        Layer 2:                        aggregator                  (fan-in)
-
-    The breakdown step runs *before* the graph is constructed (since the number
-    of worker nodes depends on its output) and is not itself a graph node.
+        start_node:   breakdown                                     (sole start node)
+                         ↓ GraphExpansionResult
+        expanded:     worker_0, worker_1, ..., worker_N             (parallel fan-out)
+                         \\        |            /
+                            aggregator                              (fan-in)
 
     Concurrency control:
         - ``ainfer()`` executes all workers concurrently via ``asyncio.gather()``.
@@ -386,8 +397,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # Protocol: must implement on_graph_topology(event), on_node_status(node_id, status, error).
     # Set by the executor after instantiation. BTA never imports WebSocket code directly.
     graph_reporter: Optional[Any] = attrib(default=None, kw_only=True)
-    # Guard: _build_diamond_graph() is called from 6+ paths — emit topology only once per call.
-    # Reset at the top of _build_diamond_graph so reused BTA instances work correctly.
+    # Guard: emit topology only once per _ainfer() call.
+    # Reset at the top of _infer/_ainfer so reused BTA instances work correctly.
     _graph_topology_emitted: bool = attrib(default=False, init=False, repr=False)
 
     # Suppress WorkGraph's start_nodes requirement at construction time
@@ -438,6 +449,19 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # Keep template_manager set so _finalize_output can write the BTA's
         # output file (e.g., role_document.md) to workspace/outputs/.
         self.template_key = ""
+
+        # --- Expansion-driven (new) implementation support ---
+        # Cache for sub-queries used by subgraph_registry on resume.
+        # Populated by _make_breakdown_fn before returning GraphExpansionResult.
+        self._cached_sub_queries = None
+
+        # Register subgraph factories for WorkGraph's registry-based expansion
+        # reconstruction. On resume, _reconstruct_graph_expansions() looks up
+        # expansion_id in subgraph_registry and calls the factory. The closure
+        # captures `self` so it can access worker_factory, aggregator_inferencer, etc.
+        self.subgraph_registry = self.subgraph_registry or {}
+        self.subgraph_registry["bta_diamond"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
+        self.subgraph_registry["bta_workers"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
 
     def _render_prompt(self, inference_input: Any) -> Any:
         """BTA is an orchestrator — it never renders its own inference_input.
@@ -537,13 +561,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     async def _emit_pending_graph_topology(self) -> None:
         """Emit the pending graph topology and wire status callbacks to all nodes.
 
-        Called from _ainfer() after _build_diamond_graph() for ALL 3 execution paths:
-        1. Checkpoint-resume path
-        2. Predefined sub-queries path
-        3. Normal breakdown path (the main first-run case)
-
-        Previously only called in path 1 — that was the critical bug causing graph
-        visualization to never appear on normal runs.
+        Called from _ainfer() after the expansion-driven graph construction
+        completes and the full diamond topology is available.
         """
         pending_topo = getattr(self, '_pending_topology', None)
         _logger.info(
@@ -630,485 +649,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             _log.getLogger(__name__).warning(
                 "[BTA] graph topology emit failed (visualization only): %s", _e
             )
-
-    def _build_diamond_graph(self, sub_queries, inference_config=None, **kwargs):
-        """Build the diamond-shaped WorkGraph dynamically from sub-queries.
-
-        Creates N worker nodes (one per sub-query) and optionally an
-        aggregation node that collects all worker results.
-        """
-        # Reset topology emission guard — allows reused BTA instances to re-emit
-        # correctly when called again with different sub-queries.
-        self._graph_topology_emitted = False
-        # Clear stale graph state from any prior _infer() call (must come after flag reset)
-        self._clear_all_node_queues()
-        self.start_nodes = []
-
-        # Pre-process: expand sub_queries with todos into individual worker queries
-        expanded_queries = []
-        for sq in sub_queries:
-            if isinstance(sq, dict):
-                sq_args = sq.get("args", {})
-                query_str = sq.get("query", str(sq))
-            else:
-                sq_args = {}
-                query_str = sq
-
-            # Determine if this task type should expand todos
-            task_type = None
-            if isinstance(self.worker_factory, dict) and self.task_type_arg_name:
-                task_type = sq_args.get(self.task_type_arg_name, "__default__")
-
-            # expand_todos_to_workers: bool applies to all, dict gives per-type control
-            if isinstance(self.expand_todos_to_workers, dict):
-                should_expand = self.expand_todos_to_workers.get(task_type, False) if task_type else False
-            else:
-                should_expand = self.expand_todos_to_workers
-
-            # Legacy: per-type override from dict-style factory entry
-            factory_entry = None
-            if task_type and isinstance(self.worker_factory, dict):
-                factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("__default__")
-                )
-                if isinstance(factory_entry, dict):
-                    should_expand = factory_entry.get("expand_todos", should_expand)
-
-            todos = sq_args.get("todos") if isinstance(sq, dict) else None
-            if should_expand and todos and len(todos) > 1:
-                # Expand: one worker per todo
-                desc = sq_args.get("description", query_str)
-                for todo in todos:
-                    expanded_sq = dict(sq) if isinstance(sq, dict) else {"query": sq}
-                    expanded_sq["query"] = f"**Description**: {desc}\n\n**Todo**:\n- {todo}"
-                    expanded_sq["args"] = dict(sq_args)  # preserve task_preamble etc.
-                    expanded_queries.append(expanded_sq)
-            else:
-                expanded_queries.append(sq)
-
-        if len(expanded_queries) != len(sub_queries):
-            _logger.info(
-                "Expanded %d sub_queries → %d workers (expand_todos_to_workers)",
-                len(sub_queries), len(expanded_queries),
-            )
-
-        worker_nodes = []
-        worker_output_paths = []  # for aggregator prompt closure
-        _bta_prefix = f"{self.name}." if getattr(self, "name", None) else ""
-        for i, sq in enumerate(expanded_queries):
-            # Extract query string and args (backward compat: sq can be str or dict)
-            if isinstance(sq, dict):
-                query_str = sq.get("query", str(sq))
-                sq_args = sq.get("args", {})
-            else:
-                query_str = sq
-                sq_args = {}
-
-            # Select and invoke worker factory
-            task_type = None
-            if isinstance(self.worker_factory, dict):
-                # Heterogeneous workers: look up factory by task type
-                task_type = (
-                    sq_args.get(self.task_type_arg_name, "__default__")
-                    if self.task_type_arg_name
-                    else "__default__"
-                )
-                factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("__default__")
-                )
-                # Resolve __default__ string references (e.g., "__default__": "research")
-                if isinstance(factory_entry, str):
-                    factory_entry = self.worker_factory.get(factory_entry)
-                if factory_entry is None:
-                    raise ValueError(
-                        f"No worker factory for task type '{task_type}' "
-                        f"and no '__default__' fallback"
-                    )
-                # Support: dict with "factory" key, functools.partial, or callable
-                if isinstance(factory_entry, dict) and "factory" in factory_entry:
-                    factory = factory_entry["factory"]
-                else:
-                    factory = factory_entry
-                # Partials create fresh instances with no extra args
-                if isinstance(factory, functools.partial):
-                    worker = factory()
-                else:
-                    worker = factory(sub_query=query_str, index=i)
-            else:
-                # Homogeneous workers
-                if isinstance(self.worker_factory, functools.partial):
-                    worker = self.worker_factory()
-                else:
-                    worker = self.worker_factory(sub_query=query_str, index=i)
-
-            # Assign child workspace to worker (full composition mode)
-            if self._workspace is not None and isinstance(worker, InferencerBase):
-                prev_ws = getattr(worker, "_workspace", None)
-                use_fdl = (
-                    getattr(prev_ws, "use_final_deliverables_folder", False)
-                    if prev_ws
-                    else False
-                )
-                worker_ws = self._workspace.child(f"worker_{i}")
-                if use_fdl:
-                    from agent_foundation.common.inferencers.inferencer_workspace import (
-                        InferencerWorkspace,
-                    )
-                    worker_ws = InferencerWorkspace(
-                        root=worker_ws.root,
-                        use_final_deliverables_folder=use_fdl,
-                    )
-                worker_ws.ensure_dirs()
-                worker._workspace = worker_ws  # setter auto-configures
-                worker_output_paths.append(worker.resolve_output_path())
-            else:
-                worker_output_paths.append(None)
-
-            # Hierarchical naming: prefix worker node names with BTA name
-            # so nested BTAs produce e.g. "outer_bta.worker_0.worker_3"
-            _node_name = f"{_bta_prefix}worker_{i}"
-            if isinstance(worker, BreakdownThenAggregateInferencer):
-                worker.name = _node_name
-
-            # Create a callable that captures this specific sub-query.
-            # It intentionally ignores args from WorkGraph (which passes
-            # the same args to all start nodes).
-            # When the worker supports ainfer() AND the graph is in async mode,
-            # returns an async coroutine for true parallel I/O.
-            # NOTE: uses query_str (not sq) so ainfer always receives a string.
-            use_async = getattr(self, "use_async", False)
-
-            # Detect if the worker manages its own resume (e.g., PTI, nested BTA).
-            from rich_python_utils.common_objects.workflow.common.resumable import Resumable
-            _worker_manages_resume = isinstance(worker, Resumable) and bool(
-                getattr(worker, "resume_with_saved_results", False)
-            )
-
-            def _make_worker_fn(w, q, is_async, manages_resume, _reporter=None, _node_id=None):
-                """Create a WorkGraphNode function for a single worker.
-
-                _reporter and _node_id: graph visualization hooks (Fix 3).
-                After w.ainfer() completes, emit result as node_stream so
-                clicking the node in TaskPanel shows its output.
-                NOTE: _reporter is captured as a parameter (not via `self`) because
-                this function is NOT a method — `self` would be unbound here.
-                """
-                def _try_load_from_output():
-                    """Backup resume: if worker is non-resumable and has no
-                    checkpoint, check if its output file/dir already exists."""
-                    if manages_resume:
-                        return None
-                    output_path = (
-                        w.resolve_output_path()
-                        if hasattr(w, "resolve_output_path") else None
-                    )
-                    if not output_path:
-                        return None
-                    try:
-                        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
-                            with open(output_path, "r", encoding="utf-8") as f:
-                                content = f.read()
-                            _logger.info(
-                                "Backup resume: output file exists, skipping worker: %s (%d bytes)",
-                                output_path, len(content),
-                            )
-                            return content
-                        if os.path.isdir(output_path) and os.listdir(output_path):
-                            _logger.info(
-                                "Backup resume: output dir exists, skipping worker: %s",
-                                output_path,
-                            )
-                            return output_path
-                    except OSError:
-                        pass
-                    return None
-
-                if is_async and hasattr(w, "ainfer"):
-
-                    async def async_worker_fn(*_args, **_kwargs):
-                        cached = _try_load_from_output()
-                        if cached is not None:
-                            # Emit cached output so NodeDetailPanel shows it on click
-                            if _reporter is not None and _node_id is not None:
-                                try:
-                                    await _reporter.on_node_stream(
-                                        _node_id, str(cached), is_final=True
-                                    )
-                                except Exception:
-                                    pass
-                            return cached
-                        result = await w.ainfer(q, inference_config=inference_config)
-                        # Fix 3: Emit result as node_stream after completion.
-                        # RovoChatInferencer doesn't stream through interactive, so this
-                        # is the only way to get content into NodeDetailPanel.
-                        if _reporter is not None and _node_id is not None:
-                            try:
-                                await _reporter.on_node_stream(
-                                    _node_id, str(result) if result else "", is_final=True
-                                )
-                            except Exception:
-                                pass
-                        return result
-
-                    return async_worker_fn
-                else:
-
-                    def worker_fn(*_args, **_kwargs):
-                        cached = _try_load_from_output()
-                        if cached is not None:
-                            return cached
-                        if hasattr(w, "infer"):
-                            return w.infer(q, inference_config=inference_config)
-                        return w(q)
-
-                    return worker_fn
-
-            # Determine group for per-group concurrency limiting
-            worker_group = task_type if isinstance(self.worker_factory, dict) else None
-
-            # Graph visualization: inject per-node interactive BEFORE _make_worker_fn
-            # captures `worker` in a closure. w.interactive is read at call time by
-            # w.ainfer(q) — so setting it here (before closure creation) ensures correct routing.
-            # NOTE: RovoChatInferencer doesn't use self.interactive for streaming,
-            # so NodeStreamInteractive won't intercept live tokens. Instead we emit the
-            # final result via the worker function wrapper below (Fix 3).
-            if self.graph_reporter is not None:
-                worker.interactive = self.graph_reporter.node_interactive(_node_name)
-                if hasattr(worker, 'stream_observer'):
-                    worker.stream_observer = self.graph_reporter.node_stream_observer(_node_name)
-                # Propagate graph_reporter to nested WorkGraph-based inferencers
-                # so their internal topology is visible in the UI as a sub-graph.
-                if hasattr(worker, 'graph_reporter') and worker.graph_reporter is None:
-                    worker.graph_reporter = self.graph_reporter.child_reporter(_node_name)
-                    # Clear name to prevent double-prefixing: _bta_prefix (dot-based)
-                    # would conflict with NamespacedGraphReporter (slash-based).
-                    if isinstance(worker, BreakdownThenAggregateInferencer):
-                        worker.name = None
-
-            _is_container = (
-                self.graph_reporter is not None
-                and hasattr(worker, 'graph_reporter')
-                and worker.graph_reporter is not None
-            )
-            _w_reporter = self.graph_reporter if self.graph_reporter is not None else None
-            node = WorkGraphNode(
-                name=_node_name,
-                value=_make_worker_fn(
-                    worker, query_str, use_async, _worker_manages_resume,
-                    _reporter=_w_reporter, _node_id=_node_name,
-                ),
-                result_pass_down_mode=ResultPassDownMode.ResultAsFirstArg,
-                group=worker_group,
-                enable_result_save=StepResultSaveOptions.SkipResumable,
-                resume_with_saved_results=ResumeMode.SkipResumable,
-                worker_manages_resume=_worker_manages_resume,
-                retry_on_exceptions=(Exception,),
-            )
-            # Store subtask description as display label for graph visualization UI.
-            # _viz_label is read by GraphTopologyEvent.from_work_graph() via node_map.
-            # Strip markdown bold markers (**text**, __text__) and common prefixes
-            # from labels for clean graph node display.
-            # Some breakdown JSON formats include "Description: Define the..." as the label.
-            _raw_label = (
-                str(query_str)[:120] if isinstance(query_str, str)
-                else query_str.get("description", query_str.get("query", f"worker_{i}"))[:120]
-                if isinstance(query_str, dict) else f"worker_{i}"
-            )
-            _raw_label = _raw_label.replace("**", "").replace("__", "").strip()
-            # Strip common field prefixes added by some LLM breakdown formats
-            for _prefix in ("Description:", "description:", "Task:", "task:", "Query:", "query:"):
-                if _raw_label.startswith(_prefix):
-                    _raw_label = _raw_label[len(_prefix):].strip()
-                    break
-            node._viz_label = _raw_label[:80]  # cap after stripping
-            if _is_container:
-                node._is_container = True
-
-            worker_nodes.append(node)
-
-        agg_node = None
-        if self.disable_aggregator or self.aggregator_inferencer is None:
-            # No aggregation — workers are terminal nodes
-            self.start_nodes = worker_nodes
-            return
-
-        if self.aggregator_inferencer is not None:
-            # Create aggregation node that receives all worker results.
-            # worker_output_paths is captured by closure for single source
-            # of truth — same paths workers write to.
-            _captured_paths = list(worker_output_paths)
-
-            _bta_self = self  # capture for closure
-
-            def _build_agg_input(prompt_builder, worker_results, original_query):
-                if prompt_builder is not None:
-                    try:
-                        return prompt_builder(
-                            worker_results,
-                            original_query=original_query,
-                            worker_output_paths=_captured_paths,
-                            bta=_bta_self,
-                        )
-                    except TypeError:
-                        try:
-                            return prompt_builder(
-                                worker_results,
-                                original_query=original_query,
-                                worker_output_paths=_captured_paths,
-                            )
-                        except TypeError:
-                            return prompt_builder(
-                                worker_results, original_query=original_query
-                            )
-                # Default: if aggregator has local file access, pass paths only
-                # (avoids sending 100K+ of worker text inline).
-                # Otherwise embed full worker text.
-                agg_has_local = getattr(agg_inf, "has_local_access", False)
-                parts = []
-                for idx, res in enumerate(worker_results):
-                    path = (
-                        _captured_paths[idx]
-                        if idx < len(_captured_paths)
-                        else None
-                    )
-                    if agg_has_local and path:
-                        # Aggregator can read files directly — pass path only
-                        parts.append(
-                            f"### Result {idx + 1}\n(See file: `{path}`)"
-                        )
-                    else:
-                        # No local access — embed full text with path hint
-                        path_ref = (
-                            f"\n(Full output at: `{path}`)" if path else ""
-                        )
-                        parts.append(
-                            f"### Result {idx + 1}\n{res}{path_ref}"
-                        )
-                return "\n\n".join(parts)
-
-            def _make_agg_fn(agg_inf, prompt_builder, original_query, is_async, _reporter=None):
-                """Create the aggregator function for the WorkGraph.
-
-                _reporter: graph visualization hook (Fix 4).
-                After agg_inf.ainfer() completes, emit result as node_stream so
-                clicking "Aggregator" in TaskPanel shows the synthesized output.
-                NOTE: _reporter captured as parameter (not via `self`) — not a method.
-                """
-                if is_async and hasattr(agg_inf, "ainfer"):
-
-                    async def async_agg_fn(*worker_results, **_kwargs):
-                        agg_input = _build_agg_input(
-                            prompt_builder, worker_results, original_query
-                        )
-                        result = await agg_inf.ainfer(
-                            agg_input, inference_config=inference_config
-                        )
-                        # Fix 4: Emit aggregator output as node_stream on completion.
-                        if _reporter is not None:
-                            try:
-                                await _reporter.on_node_stream(
-                                    "aggregator", str(result) if result else "", is_final=True
-                                )
-                            except Exception:
-                                pass
-                        return result
-
-                    return async_agg_fn
-                else:
-
-                    def agg_fn(*worker_results, **_kwargs):
-                        agg_input = _build_agg_input(
-                            prompt_builder, worker_results, original_query
-                        )
-                        if hasattr(agg_inf, "infer"):
-                            return agg_inf.infer(
-                                agg_input, inference_config=inference_config
-                            )
-                        return agg_inf(agg_input)
-
-                    return agg_fn
-
-            original_query = kwargs.get("_original_query", "")
-
-            # Give the aggregator its own child workspace so its logs,
-            # outputs, and artifacts are organized under children/aggregator/
-            # (same pattern as workers get children/worker_*/).
-            agg_inf = self.aggregator_inferencer
-            if callable(agg_inf) and not isinstance(agg_inf, InferencerBase):
-                agg_inf = agg_inf()
-                self.aggregator_inferencer = agg_inf
-            if self._workspace is not None and isinstance(agg_inf, InferencerBase):
-                agg_ws = self._workspace.child("aggregator")
-                agg_ws.ensure_dirs()
-                agg_inf._workspace = agg_ws  # setter auto-configures
-
-            # Wire stream_observer for live aggregator streaming in graph visualization
-            _agg_node_name = f"{_bta_prefix}aggregator" if _bta_prefix else "aggregator"
-            if self.graph_reporter is not None and hasattr(agg_inf, 'stream_observer'):
-                agg_inf.stream_observer = self.graph_reporter.node_stream_observer(_agg_node_name)
-
-            agg_node = WorkGraphNode(
-                name=_agg_node_name,
-                value=_make_agg_fn(
-                    agg_inf,
-                    self.aggregator_prompt_builder,
-                    original_query,
-                    use_async,
-                    _reporter=self.graph_reporter,  # Fix 4: emit aggregator result as node_stream
-                ),
-                result_pass_down_mode=ResultPassDownMode.NoPassDown,
-                enable_result_save=self.enable_result_save,
-                resume_with_saved_results=self.resume_with_saved_results,
-                checkpoint_mode=self.checkpoint_mode,
-                retry_on_exceptions=(Exception,),
-            )
-            _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
-            _agg_ckpt = None
-            if self._workspace is not None:
-                _agg_ckpt = self._workspace.checkpoint_path("aggregator_result")
-            elif self.checkpoint_dir:
-                _agg_ckpt = os.path.join(self.checkpoint_dir, "aggregator_result")
-            if _agg_ckpt:
-                agg_node._get_result_path = (
-                    lambda rid, *a, _d=_agg_ckpt, _e=_ext, **kw: os.path.join(
-                        _d, f"{rid}_result{_e}"
-                    )
-                )
-
-            # Wire all workers → aggregation
-            for wn in worker_nodes:
-                wn.add_next(agg_node)
-
-        self.start_nodes = worker_nodes
-
-        # Graph visualization: store topology for async emit in _ainfer().
-        # _build_diamond_graph is sync — we can't await here, so defer to _ainfer.
-        # Use getattr/None pattern (safer than hasattr after exceptions).
-        if self.graph_reporter is not None and not self._graph_topology_emitted:
-            self._graph_topology_emitted = True
-            try:
-                from agent_foundation.common.inferencers.graph_events import (
-                    GraphTopologyEvent, NodeStatus,
-                )
-                # Build topology from the actual WorkGraph nodes (workers + aggregator).
-                # Breakdown runs BEFORE this graph is built — manually prepend it as virtual node.
-                worker_agg_topology = GraphTopologyEvent.from_work_graph(self)
-                breakdown_node = {
-                    "id": "breakdown", "label": "Breakdown",
-                    "group": None, "status": NodeStatus.COMPLETED,
-                }
-                worker_agg_topology.nodes.insert(0, breakdown_node)
-                for wn in worker_nodes:
-                    worker_agg_topology.edges.insert(
-                        0, {"source": "breakdown", "target": wn.name}
-                    )
-                self._pending_topology = worker_agg_topology
-            except Exception as _e:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    "graph topology build failed: %s", _e, exc_info=True
-                )
-                self._pending_topology = None
 
     @staticmethod
     def _configure_child_workspace(inferencer, workspace):
@@ -1205,16 +745,20 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             return
         os.makedirs(os.path.dirname(ckpt), exist_ok=True)
         try:
-            with open(ckpt, "w") as f:
+            # Explicit utf-8 + ensure_ascii=False: raw_output may contain
+            # LLM-generated Unicode (arrows, em-dashes). Default encoding
+            # is cp1252 on Windows which would raise UnicodeEncodeError.
+            with open(ckpt, "w", encoding="utf-8") as f:
                 json.dump(
                     {"raw_output": str(raw_output), "sub_queries": sub_queries},
                     f,
                     indent=2,
+                    ensure_ascii=False,
                 )
             _logger.info(
                 "Saved breakdown checkpoint with %d sub_queries", len(sub_queries)
             )
-        except OSError as e:
+        except (OSError, UnicodeEncodeError) as e:
             _logger.warning("Failed to save breakdown checkpoint: %s", e)
 
     async def _emit_graph_reconcile(self):
@@ -1322,10 +866,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     text = result.text or ""
                 else:
                     text = str(result)
-                with open(report_dst, "w") as f:
+                # Explicit utf-8 encoding required: on Windows the default
+                # file encoding is cp1252 which can't encode common Unicode
+                # characters (e.g., the arrow '→' that LLMs frequently produce
+                # in architectural docs). A UnicodeEncodeError here would
+                # propagate up through the retry layers and look like a
+                # "transient" failure when it's actually a determinstic
+                # encoding bug.
+                with open(report_dst, "w", encoding="utf-8") as f:
                     f.write(text)
-                _logger.info("Wrote pipeline report → %s", report_dst)
-            except OSError as e:
+                _logger.info("Wrote pipeline report -> %s", report_dst)
+            except (OSError, UnicodeEncodeError) as e:
                 _logger.warning(
                     "Failed to write pipeline report to %s: %s", report_dst, e
                 )
@@ -1335,107 +886,98 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             return response
         return super()._finalize_output(response)
 
-    def _infer(self, inference_input, inference_config=None, **kwargs):
-        """Core inference: breakdown → build graph → run graph."""
-        # Step 0: Check for saved breakdown checkpoint
-        sub_queries = self._load_breakdown_checkpoint()
-        if sub_queries is not None:
-            # Skip breakdown, jump to cap + graph
-            if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-                sub_queries = sub_queries[: self.max_breakdown]
-            if not sub_queries:
-                return ""
-            self._build_diamond_graph(
-                sub_queries,
-                inference_config=inference_config,
-                _original_query=inference_input,
-                **kwargs,
-            )
-            result = WorkGraph._run(self, inference_input, **kwargs)
-            if isinstance(result, tuple) and len(result) == 1:
-                result = result[0]
-            self._finalize_response(result)
-            return result
+    def _iter_child_inferencers(self):
+        """The aggregator inferencer.
 
-        # Step 0b: Predefined sub-queries — skip breakdown entirely
-        if self.predefined_sub_queries is not None:
-            if self.breakdown_only:
-                _logger.warning(
-                    "predefined_sub_queries is set but breakdown_only=True — "
-                    "breakdown_only ignored (no LLM breakdown to stop after)."
-                )
-            sub_queries = self._resolve_predefined_sub_queries()
-            # Apply max_breakdown cap (consistent with checkpoint resume path)
-            if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-                sub_queries = sub_queries[: self.max_breakdown]
-            if not sub_queries:
-                return ""
-            self._build_diamond_graph(
-                sub_queries,
-                inference_config=inference_config,
-                _original_query=inference_input,
-                **kwargs,
-            )
-            result = WorkGraph._run(self, inference_input, **kwargs)
-            if isinstance(result, tuple) and len(result) == 1:
-                result = result[0]
-            self._finalize_response(result)
-            return result
+        Workers are factory-created per-run in generic BTA (via
+        ``worker_factory``), so this base implementation does not yield
+        them — subclasses with declarative worker references (e.g.,
+        :class:`MultiFlowInferencer`) extend this to include them.
+        """
+        if self.aggregator_inferencer is not None:
+            yield self.aggregator_inferencer
 
-        # Step 1: Breakdown
-        if self.breakdown_inferencer is None:
-            raise ValueError(
-                "breakdown_inferencer must be set when predefined_sub_queries is None. "
-                "Either provide a breakdown_inferencer or set predefined_sub_queries."
-            )
-        raw_output = self.breakdown_inferencer.infer(
-            inference_input, inference_config=inference_config
-        )
+    @staticmethod
+    def _unwrap_workgraph_result(result):
+        """Unwrap expansion-driven WorkGraph results.
 
-        # Step 2: Parse breakdown output
-        if self.breakdown_parser is not None:
-            sub_queries = self.breakdown_parser(raw_output)
-        elif self.breakdown_format == "json_subtasks":
-            sub_queries = self._parse_json_subtasks(raw_output)
-        elif self.breakdown_format == "numbered_list":
-            sub_queries = parse_numbered_list(str(raw_output))
-        elif isinstance(raw_output, list):
-            sub_queries = raw_output
-        else:
-            sub_queries = parse_numbered_list(str(raw_output))
-
-        # Step 2b: Save breakdown checkpoint
-        self._save_breakdown_checkpoint(raw_output, sub_queries)
-
-        # Step 3: Apply max_breakdown cap
-        if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-            sub_queries = sub_queries[: self.max_breakdown]
-
-        if not sub_queries:
-            return raw_output  # No sub-queries, return breakdown output as-is
-
-        # Step 4: Build diamond graph
-        self._build_diamond_graph(
-            sub_queries,
-            inference_config=inference_config,
-            _original_query=inference_input,
-            **kwargs,
-        )
-
-        # Step 5: Run the diamond via WorkGraph._run
-        result = WorkGraph._run(self, inference_input, **kwargs)
-        # Unwrap single-element tuples from WorkGraph's post_process
+        WorkGraph returns a tuple of start-node results. In the expansion-driven
+        implementation, the breakdown node is the sole start node, so the outer
+        tuple is always length-1. The inner value may be a tuple of worker results
+        with None entries. Unwrap both levels and filter out Nones.
+        """
         if isinstance(result, tuple) and len(result) == 1:
             result = result[0]
+        if isinstance(result, tuple):
+            non_none = tuple(x for x in result if x is not None)
+            if len(non_none) == 1:
+                result = non_none[0]
+            elif len(non_none) == 0:
+                result = None
+            else:
+                result = non_none
+        return result
+
+    def _infer(self, inference_input, inference_config=None, **kwargs):
+        """Expansion-driven sync inference: single breakdown node → GraphExpansionResult → diamond."""
+        # Reset per-call state to prevent cross-run leakage on reused instances
+        self._cached_sub_queries = None
+        # Bootstrap _cached_sub_queries on resume
+        if self._cached_sub_queries is None:
+            saved = self._load_breakdown_checkpoint()
+            if saved is not None:
+                if self.max_breakdown is not None and len(saved) > self.max_breakdown:
+                    saved = saved[: self.max_breakdown]
+                self._cached_sub_queries = saved
+
+        # Reset topology emission guard
+        self._graph_topology_emitted = False
+        self._clear_all_node_queues()
+
+        # Create the breakdown node as the sole start node
+        breakdown_node = WorkGraphNode(
+            name="breakdown",
+            value=self._make_breakdown_fn(inference_input, inference_config, **kwargs),
+            result_pass_down_mode=ResultPassDownMode.NoPassDown,
+            enable_result_save=self.enable_result_save,
+            resume_with_saved_results=self.resume_with_saved_results,
+            retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
+        )
+        # Assign _get_result_path so expansion infrastructure can persist records
+        _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+        _bd_ckpt = None
+        if self._workspace is not None:
+            _bd_ckpt = self._workspace.checkpoint_path("breakdown")
+        elif self.checkpoint_dir:
+            _bd_ckpt = os.path.join(self.checkpoint_dir, "breakdown")
+        if _bd_ckpt:
+            breakdown_node._get_result_path = (
+                lambda rid, *a, _d=_bd_ckpt, _e=_ext, **kw: os.path.join(
+                    _d, f"{rid}_result{_e}"
+                )
+            )
+        self.start_nodes = [breakdown_node]
+
+        # Configure expansion on WorkGraph
+        self.max_expansion_depth = 1
+        self.max_total_nodes = max(self.max_breakdown or 100, 100) + 2
+
+        # Propagate expansion settings to the breakdown node.
+        self._propagate_expansion_settings()
+
+        # Run the graph — expansion handles the rest
+        result = WorkGraph._run(self, inference_input, **kwargs)
+
+        result = self._unwrap_workgraph_result(result)
+
         self._finalize_response(result)
         return result
 
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
-        """Async core inference: breakdown → build graph → run graph."""
-        # Fix 1: Emit initial single-node "Breakdown: Running" topology immediately.
+        """Expansion-driven async inference: single breakdown node → GraphExpansionResult → diamond."""
+        # Emit initial single-node "Breakdown: Running" topology immediately.
         # This shows the user that something is happening before breakdown completes
-        # (which can take 30-60s). The full diamond topology replaces it later via
-        # _emit_pending_graph_topology() (which overrides task.graph in the UI).
+        # (which can take 30-60s). The full diamond topology replaces it later.
         if self.graph_reporter is not None:
             try:
                 from agent_foundation.common.inferencers.graph_events import (
@@ -1451,211 +993,736 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             except Exception as _e:
                 _logger.warning("[BTA] initial topology emit failed: %s", _e)
 
-        # Step 0: Check for saved breakdown checkpoint
-        sub_queries = self._load_breakdown_checkpoint()
-        if sub_queries is not None:
-            if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-                sub_queries = sub_queries[: self.max_breakdown]
-            if not sub_queries:
-                return ""
-            old_use_async = getattr(self, "use_async", False)
-            self.use_async = True
-            try:
-                self._build_diamond_graph(
-                    sub_queries,
-                    inference_config=inference_config,
-                    _original_query=inference_input,
-                    **kwargs,
-                )
-            finally:
-                self.use_async = old_use_async
-            # Graph visualization: emit topology + wire status callbacks (async, safe here)
-            await self._emit_pending_graph_topology()
-            result = await WorkGraph._arun(self, inference_input, **kwargs)
-            if isinstance(result, tuple) and len(result) == 1:
-                result = result[0]
-            await self._emit_graph_reconcile()
-            self._finalize_response(result)
-            return result
+        # Reset per-call state to prevent cross-run leakage on reused instances
+        self._cached_sub_queries = None
+        # Bootstrap _cached_sub_queries on resume: load breakdown_result.json
+        # BEFORE WorkGraph._arun() because _reconstruct_graph_expansions() runs
+        # BEFORE start_nodes execute, and the subgraph_registry lambda calls
+        # self._build_subgraph_spec(self._cached_sub_queries).
+        if self._cached_sub_queries is None:
+            saved = self._load_breakdown_checkpoint()
+            if saved is not None:
+                if self.max_breakdown is not None and len(saved) > self.max_breakdown:
+                    saved = saved[: self.max_breakdown]
+                self._cached_sub_queries = saved
 
-        # Step 0b: Predefined sub-queries — skip breakdown entirely
-        if self.predefined_sub_queries is not None:
-            if self.breakdown_only:
-                _logger.warning(
-                    "predefined_sub_queries is set but breakdown_only=True — "
-                    "breakdown_only ignored (no LLM breakdown to stop after)."
-                )
-            sub_queries = self._resolve_predefined_sub_queries()
-            # Apply max_breakdown cap (consistent with checkpoint resume path)
-            if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-                sub_queries = sub_queries[: self.max_breakdown]
-            if not sub_queries:
-                return ""
-            # NOTE: skip enable_checkpoint_sub_query_selection — user already chose sub-queries.
-            # CRITICAL: set use_async=True so _build_diamond_graph creates async worker fns
-            old_use_async = getattr(self, "use_async", False)
-            self.use_async = True
-            try:
-                self._build_diamond_graph(
-                    sub_queries,
-                    inference_config=inference_config,
-                    _original_query=inference_input,
-                    **kwargs,
-                )
-            finally:
-                self.use_async = old_use_async
-            await self._emit_pending_graph_topology()  # Fix: was missing in predefined path
-            result = await WorkGraph._arun(self, inference_input, **kwargs)
-            if isinstance(result, tuple) and len(result) == 1:
-                result = result[0]
-            # Step 5b: Interactive results review — keep this even in predefined mode.
-            # A re-run will correctly re-use the same predefined_sub_queries.
-            if self.enable_checkpoint_results_review and self.interactive:
-                # TODO: interactive_checkpoint module does not exist at agent_foundation.ui — needs separate migration
-                from agent_foundation.ui.interactive_checkpoint import (
-                    checkpoint_results_review,
-                )
-                result_str = str(result)[:2000]
-                cp_result = await checkpoint_results_review(
-                    self.interactive, result_str, default_action="approve"
-                )
-                if cp_result.action == "rerun":
-                    return await self._ainfer(inference_input, inference_config, **kwargs)
-            await self._emit_graph_reconcile()
-            self._finalize_response(result)
-            return result
+        # Reset topology emission guard
+        self._graph_topology_emitted = False
+        self._clear_all_node_queues()
 
-        # Step 1: Breakdown
-        if self.breakdown_inferencer is None:
-            raise ValueError(
-                "breakdown_inferencer must be set when predefined_sub_queries is None. "
-                "Either provide a breakdown_inferencer or set predefined_sub_queries."
-            )
-        # Wire stream_observer for live breakdown streaming in graph visualization
-        if self.graph_reporter is not None and hasattr(self.breakdown_inferencer, 'stream_observer'):
-            self.breakdown_inferencer.stream_observer = self.graph_reporter.node_stream_observer("breakdown")
-        if hasattr(self.breakdown_inferencer, "ainfer"):
-            raw_output = await self.breakdown_inferencer.ainfer(
-                inference_input, inference_config=inference_config
-            )
-        else:
-            raw_output = self.breakdown_inferencer.infer(
-                inference_input, inference_config=inference_config
-            )
-
-        # Guard: detect API error responses masquerading as valid output.
-        # Rovo/AI Gateway sometimes returns error strings (e.g., "An unknown error
-        # occurred", "RECONNECT_SUPPORTED...") as 200 OK — the inferencer treats
-        # them as valid. Detect and raise so the retry mechanism can handle it.
-        _raw_str = str(raw_output).strip()
-        _ERROR_PATTERNS = [
-            "An unknown error occurred",
-            "RECONNECT_SUPPORTED",
-            "peer closed connection",
-            "Internal Server Error",
-        ]
-        if any(p in _raw_str for p in _ERROR_PATTERNS) and len(_raw_str) < 200:
-            raise RuntimeError(f"Breakdown returned API error instead of subtasks: {_raw_str[:100]}")
-
-        # Step 2: Parse
-        if self.breakdown_parser is not None:
-            sub_queries = self.breakdown_parser(raw_output)
-        elif self.breakdown_format == "json_subtasks":
-            sub_queries = self._parse_json_subtasks(raw_output)
-        elif self.breakdown_format == "numbered_list":
-            sub_queries = parse_numbered_list(str(raw_output))
-        elif isinstance(raw_output, list):
-            sub_queries = raw_output
-        else:
-            sub_queries = parse_numbered_list(str(raw_output))
-
-        # Step 2b: Save breakdown checkpoint
-        self._save_breakdown_checkpoint(raw_output, sub_queries)
-
-        # Step 3: Cap
-        if self.max_breakdown is not None and len(sub_queries) > self.max_breakdown:
-            sub_queries = sub_queries[: self.max_breakdown]
-
-        if not sub_queries:
-            return raw_output
-
-        # Step 3b: Breakdown-only mode — return after breakdown phase
-        if self.breakdown_only:
-            return raw_output
-
-        # Step 3c: Interactive sub-query selection checkpoint
-        if self.enable_checkpoint_sub_query_selection and self.interactive:
-            # TODO: interactive_checkpoint module does not exist at agent_foundation.ui — needs separate migration
-            from agent_foundation.ui.interactive_checkpoint import (
-                checkpoint_breakdown_review,
-            )
-
-            cp_result = await checkpoint_breakdown_review(
-                self.interactive, sub_queries, default_action="approve"
-            )
-            if cp_result.action == "select" and cp_result.selected_indices:
-                sub_queries = [
-                    sub_queries[i]
-                    for i in cp_result.selected_indices
-                    if i < len(sub_queries)
-                ]
-            if not sub_queries:
-                return raw_output
-
-        # Fix 2: Emit breakdown result as node_stream so clicking "Breakdown" in the
-        # TaskPanel graph shows the parsed subtask list.
-        # Uses reporter.on_node_stream() public API — NOT reporter._ws directly.
-        if self.graph_reporter is not None:
-            try:
-                _summary = []
-                for _i, _sq in enumerate(sub_queries if isinstance(sub_queries, list) else [sub_queries]):
-                    if isinstance(_sq, dict):
-                        _desc = _sq.get("query", str(_sq))
-                    else:
-                        _desc = str(_sq)
-                    if len(_desc) > 300:
-                        _desc = _desc[:297] + "..."
-                    _summary.append(f"**{_i+1}.** {_desc}")
-                _bd_content = "\n\n".join(_summary)
-                await self.graph_reporter.on_node_stream("breakdown", _bd_content, is_final=True)
-            except Exception as _e:
-                _logger.warning("[BTA] breakdown node_stream emit failed: %s", _e)
-
-        # Step 4: Build diamond graph (force async mode for async worker fns)
+        # Force async mode for worker fns
         old_use_async = getattr(self, "use_async", False)
         self.use_async = True
+
         try:
-            self._build_diamond_graph(
-                sub_queries,
-                inference_config=inference_config,
-                _original_query=inference_input,
-                **kwargs,
+            # Create the breakdown node as the sole start node
+            breakdown_node = WorkGraphNode(
+                name="breakdown",
+                value=self._make_breakdown_fn(inference_input, inference_config, **kwargs),
+                result_pass_down_mode=ResultPassDownMode.NoPassDown,
+                enable_result_save=self.enable_result_save,
+                resume_with_saved_results=self.resume_with_saved_results,
+                retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
             )
+            # Assign _get_result_path so expansion infrastructure can persist records
+            _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+            _bd_ckpt = None
+            if self._workspace is not None:
+                _bd_ckpt = self._workspace.checkpoint_path("breakdown")
+            elif self.checkpoint_dir:
+                _bd_ckpt = os.path.join(self.checkpoint_dir, "breakdown")
+            if _bd_ckpt:
+                breakdown_node._get_result_path = (
+                    lambda rid, *a, _d=_bd_ckpt, _e=_ext, **kw: os.path.join(
+                        _d, f"{rid}_result{_e}"
+                    )
+                )
+            self.start_nodes = [breakdown_node]
+
+            # Configure expansion on WorkGraph
+            self.max_expansion_depth = 1
+            self.max_total_nodes = max(self.max_breakdown or 100, 100) + 2
+
+            # Propagate expansion settings to the breakdown node (and any future nodes).
+            # __attrs_post_init__ already called this, but with the default max_expansion_depth=0.
+            # We must re-propagate now that we've set max_expansion_depth=1 and new start_nodes.
+            self._propagate_expansion_settings()
+
+            # Run the graph — expansion handles the rest
+            result = await WorkGraph._arun(self, inference_input, **kwargs)
         finally:
             self.use_async = old_use_async
 
-        # Step 5: Run the diamond via WorkGraph._arun
-        await self._emit_pending_graph_topology()  # Fix: was missing in normal breakdown path
-        result = await WorkGraph._arun(self, inference_input, **kwargs)
-        # Unwrap single-element tuples from WorkGraph's post_process
-        if isinstance(result, tuple) and len(result) == 1:
-            result = result[0]
+        result = self._unwrap_workgraph_result(result)
 
-        # Step 5b: Interactive results review checkpoint
+        # Emit full topology after expansion attaches subgraph
+        if self.graph_reporter is not None and not self._graph_topology_emitted:
+            try:
+                from agent_foundation.common.inferencers.graph_events import (
+                    GraphTopologyEvent, NodeStatus,
+                )
+                worker_agg_topology = GraphTopologyEvent.from_work_graph(self)
+                # Prepend breakdown as virtual node (already completed)
+                breakdown_vnode = {
+                    "id": "breakdown", "label": "Breakdown",
+                    "group": None, "status": NodeStatus.COMPLETED,
+                }
+                worker_agg_topology.nodes.insert(0, breakdown_vnode)
+                # Add edges from breakdown to all worker entry nodes
+                for n in worker_agg_topology.nodes:
+                    nid = n["id"]
+                    # Skip breakdown and aggregator nodes — only add edges to worker entry nodes
+                    if nid == "breakdown" or nid.endswith("aggregator"):
+                        continue
+                    # Only add edge if not already present
+                    has_parent_edge = any(
+                        e["target"] == nid for e in worker_agg_topology.edges
+                        if e["source"] == "breakdown"
+                    )
+                    if not has_parent_edge:
+                        worker_agg_topology.edges.insert(
+                            0, {"source": "breakdown", "target": nid}
+                        )
+                self._pending_topology = worker_agg_topology
+                await self._emit_pending_graph_topology()
+                self._graph_topology_emitted = True
+            except Exception as _e:
+                _logger.warning("[BTA] full topology emit failed: %s", _e)
+
+        # Interactive results review checkpoint
         if self.enable_checkpoint_results_review and self.interactive:
-            # TODO: interactive_checkpoint module does not exist at agent_foundation.ui — needs separate migration
             from agent_foundation.ui.interactive_checkpoint import (
                 checkpoint_results_review,
             )
-
             result_str = str(result)[:2000]
             cp_result = await checkpoint_results_review(
                 self.interactive, result_str, default_action="approve"
             )
             if cp_result.action == "rerun":
-                # Re-run the entire graph
                 return await self._ainfer(inference_input, inference_config, **kwargs)
 
         await self._emit_graph_reconcile()
         self._finalize_response(result)
         return result
+
+    def _build_subgraph_spec(self, sub_queries, inference_config=None, **kwargs):
+        """Build a SubgraphSpec from parsed sub-queries.
+
+        Refactored from _build_diamond_graph(). Returns a SubgraphSpec
+        instead of setting self.start_nodes directly.
+
+        Preserves ALL worker construction logic (homogeneous, heterogeneous,
+        todo expansion, per-worker workspace assignment) and ALL aggregator
+        construction logic (prompt builder, workspace, checkpoint paths).
+
+        Returns:
+            SubgraphSpec with worker nodes (and optional aggregator node).
+            entry_nodes = worker nodes.
+        """
+        from rich_python_utils.common_objects.workflow.common.expansion import SubgraphSpec
+
+        # Pre-process: expand sub_queries with todos into individual worker queries
+        expanded_queries = []
+        for sq in sub_queries:
+            if isinstance(sq, dict):
+                sq_args = sq.get("args", {})
+                query_str = sq.get("query", str(sq))
+            else:
+                sq_args = {}
+                query_str = sq
+
+            # Determine if this task type should expand todos
+            task_type = None
+            if isinstance(self.worker_factory, dict) and self.task_type_arg_name:
+                task_type = sq_args.get(self.task_type_arg_name, "__default__")
+
+            if isinstance(self.expand_todos_to_workers, dict):
+                should_expand = self.expand_todos_to_workers.get(task_type, False) if task_type else False
+            else:
+                should_expand = self.expand_todos_to_workers
+
+            factory_entry = None
+            if task_type and isinstance(self.worker_factory, dict):
+                factory_entry = self.worker_factory.get(
+                    task_type, self.worker_factory.get("__default__")
+                )
+                if isinstance(factory_entry, dict):
+                    should_expand = factory_entry.get("expand_todos", should_expand)
+
+            todos = sq_args.get("todos") if isinstance(sq, dict) else None
+            if should_expand and todos and len(todos) > 1:
+                desc = sq_args.get("description", query_str)
+                for todo in todos:
+                    expanded_sq = dict(sq) if isinstance(sq, dict) else {"query": sq}
+                    expanded_sq["query"] = f"**Description**: {desc}\n\n**Todo**:\n- {todo}"
+                    expanded_sq["args"] = dict(sq_args)
+                    expanded_queries.append(expanded_sq)
+            else:
+                expanded_queries.append(sq)
+
+        if len(expanded_queries) != len(sub_queries):
+            _logger.info(
+                "Expanded %d sub_queries → %d workers (expand_todos_to_workers)",
+                len(sub_queries), len(expanded_queries),
+            )
+
+        worker_nodes = []
+        worker_output_paths = []
+        _bta_prefix = f"{self.name}." if getattr(self, "name", None) else ""
+        use_async = getattr(self, "use_async", False)
+
+        for i, sq in enumerate(expanded_queries):
+            if isinstance(sq, dict):
+                query_str = sq.get("query", str(sq))
+                sq_args = sq.get("args", {})
+            else:
+                query_str = sq
+                sq_args = {}
+
+            # Select and invoke worker factory
+            task_type = None
+            if isinstance(self.worker_factory, dict):
+                task_type = (
+                    sq_args.get(self.task_type_arg_name, "__default__")
+                    if self.task_type_arg_name
+                    else "__default__"
+                )
+                factory_entry = self.worker_factory.get(
+                    task_type, self.worker_factory.get("__default__")
+                )
+                if isinstance(factory_entry, str):
+                    factory_entry = self.worker_factory.get(factory_entry)
+                if factory_entry is None:
+                    raise ValueError(
+                        f"No worker factory for task type '{task_type}' "
+                        f"and no '__default__' fallback"
+                    )
+                if isinstance(factory_entry, dict) and "factory" in factory_entry:
+                    factory = factory_entry["factory"]
+                else:
+                    factory = factory_entry
+                if isinstance(factory, functools.partial):
+                    worker = factory()
+                else:
+                    worker = factory(sub_query=query_str, index=i)
+            else:
+                if isinstance(self.worker_factory, functools.partial):
+                    worker = self.worker_factory()
+                else:
+                    worker = self.worker_factory(sub_query=query_str, index=i)
+
+            # Assign child workspace to worker
+            if self._workspace is not None and isinstance(worker, InferencerBase):
+                prev_ws = getattr(worker, "_workspace", None)
+                use_fdl = (
+                    getattr(prev_ws, "use_final_deliverables_folder", False)
+                    if prev_ws
+                    else False
+                )
+                worker_ws = self._workspace.child(f"worker_{i}")
+                if use_fdl:
+                    from agent_foundation.common.inferencers.inferencer_workspace import (
+                        InferencerWorkspace,
+                    )
+                    worker_ws = InferencerWorkspace(
+                        root=worker_ws.root,
+                        use_final_deliverables_folder=use_fdl,
+                    )
+                worker_ws.ensure_dirs()
+                worker._workspace = worker_ws
+                worker_output_paths.append(worker.resolve_output_path())
+            else:
+                worker_output_paths.append(None)
+
+            _node_name = f"{_bta_prefix}worker_{i}"
+            if isinstance(worker, BreakdownThenAggregateInferencer):
+                worker.name = _node_name
+
+            from rich_python_utils.common_objects.workflow.common.resumable import Resumable
+            _worker_manages_resume = isinstance(worker, Resumable) and bool(
+                getattr(worker, "resume_with_saved_results", False)
+            )
+
+            def _make_worker_fn(w, q, is_async, manages_resume, _reporter=None, _node_id=None):
+                def _try_load_from_output():
+                    if manages_resume:
+                        return None
+                    output_path = (
+                        w.resolve_output_path()
+                        if hasattr(w, "resolve_output_path") else None
+                    )
+                    if not output_path:
+                        return None
+                    try:
+                        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                            with open(output_path, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            _logger.info(
+                                "Backup resume: output file exists, skipping worker: %s (%d bytes)",
+                                output_path, len(content),
+                            )
+                            return content
+                        if os.path.isdir(output_path) and os.listdir(output_path):
+                            _logger.info(
+                                "Backup resume: output dir exists, skipping worker: %s",
+                                output_path,
+                            )
+                            return output_path
+                    except OSError:
+                        pass
+                    return None
+
+                if is_async and hasattr(w, "ainfer"):
+                    async def async_worker_fn(*_args, **_kwargs):
+                        cached = _try_load_from_output()
+                        if cached is not None:
+                            if _reporter is not None and _node_id is not None:
+                                try:
+                                    await _reporter.on_node_stream(
+                                        _node_id, str(cached), is_final=True
+                                    )
+                                except Exception:
+                                    pass
+                            return cached
+                        result = await w.ainfer(q, inference_config=inference_config)
+                        if _reporter is not None and _node_id is not None:
+                            try:
+                                await _reporter.on_node_stream(
+                                    _node_id, str(result) if result else "", is_final=True
+                                )
+                            except Exception:
+                                pass
+                        return result
+                    return async_worker_fn
+                else:
+                    def worker_fn(*_args, **_kwargs):
+                        cached = _try_load_from_output()
+                        if cached is not None:
+                            return cached
+                        if hasattr(w, "infer"):
+                            return w.infer(q, inference_config=inference_config)
+                        return w(q)
+                    return worker_fn
+
+            worker_group = task_type if isinstance(self.worker_factory, dict) else None
+
+            # Graph visualization: inject per-node interactive
+            if self.graph_reporter is not None:
+                worker.interactive = self.graph_reporter.node_interactive(_node_name)
+                if hasattr(worker, 'stream_observer'):
+                    worker.stream_observer = self.graph_reporter.node_stream_observer(_node_name)
+                if hasattr(worker, 'graph_reporter') and worker.graph_reporter is None:
+                    worker.graph_reporter = self.graph_reporter.child_reporter(_node_name)
+                    if isinstance(worker, BreakdownThenAggregateInferencer):
+                        worker.name = None
+
+            _is_container = (
+                self.graph_reporter is not None
+                and hasattr(worker, 'graph_reporter')
+                and worker.graph_reporter is not None
+            )
+            _w_reporter = self.graph_reporter if self.graph_reporter is not None else None
+            node = WorkGraphNode(
+                name=_node_name,
+                value=_make_worker_fn(
+                    worker, query_str, use_async, _worker_manages_resume,
+                    _reporter=_w_reporter, _node_id=_node_name,
+                ),
+                result_pass_down_mode=ResultPassDownMode.ResultAsFirstArg,
+                group=worker_group,
+                enable_result_save=StepResultSaveOptions.SkipResumable,
+                resume_with_saved_results=ResumeMode.SkipResumable,
+                worker_manages_resume=_worker_manages_resume,
+                retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
+            )
+            _raw_label = (
+                str(query_str)[:120] if isinstance(query_str, str)
+                else query_str.get("description", query_str.get("query", f"worker_{i}"))[:120]
+                if isinstance(query_str, dict) else f"worker_{i}"
+            )
+            _raw_label = _raw_label.replace("**", "").replace("__", "").strip()
+            for _prefix in ("Description:", "description:", "Task:", "task:", "Query:", "query:"):
+                if _raw_label.startswith(_prefix):
+                    _raw_label = _raw_label[len(_prefix):].strip()
+                    break
+            node._viz_label = _raw_label[:80]
+            if _is_container:
+                node._is_container = True
+
+            worker_nodes.append(node)
+
+        agg_node = None
+        if not self.disable_aggregator and self.aggregator_inferencer is not None:
+            _captured_paths = list(worker_output_paths)
+            _bta_self = self
+
+            def _build_agg_input(prompt_builder, worker_results, original_query):
+                if prompt_builder is not None:
+                    try:
+                        return prompt_builder(
+                            worker_results,
+                            original_query=original_query,
+                            worker_output_paths=_captured_paths,
+                            bta=_bta_self,
+                        )
+                    except TypeError:
+                        try:
+                            return prompt_builder(
+                                worker_results,
+                                original_query=original_query,
+                                worker_output_paths=_captured_paths,
+                            )
+                        except TypeError:
+                            return prompt_builder(
+                                worker_results, original_query=original_query
+                            )
+                agg_has_local = getattr(agg_inf, "has_local_access", False)
+                parts = []
+                for idx, res in enumerate(worker_results):
+                    path = (
+                        _captured_paths[idx]
+                        if idx < len(_captured_paths)
+                        else None
+                    )
+                    if agg_has_local and path:
+                        parts.append(
+                            f"### Result {idx + 1}\n(See file: `{path}`)"
+                        )
+                    else:
+                        path_ref = (
+                            f"\n(Full output at: `{path}`)" if path else ""
+                        )
+                        parts.append(
+                            f"### Result {idx + 1}\n{res}{path_ref}"
+                        )
+                return "\n\n".join(parts)
+
+            def _make_agg_fn(agg_inf, prompt_builder, original_query, is_async, _reporter=None, _inference_args=None):
+                _agg_extra = _inference_args or {}
+                if is_async and hasattr(agg_inf, "ainfer"):
+                    async def async_agg_fn(*worker_results, **_kwargs):
+                        agg_input = _build_agg_input(
+                            prompt_builder, worker_results, original_query
+                        )
+                        result = await agg_inf.ainfer(
+                            agg_input, inference_config=inference_config,
+                            **_agg_extra
+                        )
+                        if _reporter is not None:
+                            try:
+                                await _reporter.on_node_stream(
+                                    "aggregator", str(result) if result else "", is_final=True
+                                )
+                            except Exception:
+                                pass
+                        return result
+                    return async_agg_fn
+                else:
+                    def agg_fn(*worker_results, **_kwargs):
+                        agg_input = _build_agg_input(
+                            prompt_builder, worker_results, original_query
+                        )
+                        if hasattr(agg_inf, "infer"):
+                            return agg_inf.infer(
+                                agg_input, inference_config=inference_config
+                            )
+                        return agg_inf(agg_input)
+                    return agg_fn
+
+            original_query = kwargs.get("_original_query", "")
+
+            agg_inf = self.aggregator_inferencer
+            if callable(agg_inf) and not isinstance(agg_inf, InferencerBase):
+                agg_inf = agg_inf()
+                self.aggregator_inferencer = agg_inf
+            if self._workspace is not None and isinstance(agg_inf, InferencerBase):
+                agg_ws = self._workspace.child("aggregator")
+                agg_ws.ensure_dirs()
+                agg_inf._workspace = agg_ws
+
+            _agg_node_name = f"{_bta_prefix}aggregator" if _bta_prefix else "aggregator"
+            if self.graph_reporter is not None and hasattr(agg_inf, 'stream_observer'):
+                agg_inf.stream_observer = self.graph_reporter.node_stream_observer(_agg_node_name)
+
+            agg_node = WorkGraphNode(
+                name=_agg_node_name,
+                value=_make_agg_fn(
+                    agg_inf,
+                    self.aggregator_prompt_builder,
+                    original_query,
+                    use_async,
+                    _reporter=self.graph_reporter,
+                    _inference_args=kwargs.get("_inference_args"),
+                ),
+                result_pass_down_mode=ResultPassDownMode.NoPassDown,
+                enable_result_save=self.enable_result_save,
+                resume_with_saved_results=self.resume_with_saved_results,
+                checkpoint_mode=self.checkpoint_mode,
+                retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
+            )
+            _ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+            _agg_ckpt = None
+            if self._workspace is not None:
+                _agg_ckpt = self._workspace.checkpoint_path("aggregator_result")
+            elif self.checkpoint_dir:
+                _agg_ckpt = os.path.join(self.checkpoint_dir, "aggregator_result")
+            if _agg_ckpt:
+                agg_node._get_result_path = (
+                    lambda rid, *a, _d=_agg_ckpt, _e=_ext, **kw: os.path.join(
+                        _d, f"{rid}_result{_e}"
+                    )
+                )
+
+            # Wire all workers → aggregation
+            for wn in worker_nodes:
+                wn.add_next(agg_node)
+
+        all_nodes = list(worker_nodes)
+        if agg_node is not None:
+            all_nodes.append(agg_node)
+
+        return SubgraphSpec(
+            nodes=all_nodes,
+            entry_nodes=list(worker_nodes),
+        )
+
+    def _make_breakdown_fn(self, inference_input, inference_config=None, **_inference_args):
+        """Create the breakdown node callable that returns GraphExpansionResult.
+
+        Handles predefined sub-queries, breakdown_only, interactive selection,
+        legacy checkpoint loading. Saves self._cached_sub_queries = sub_queries
+        BEFORE returning GraphExpansionResult.
+        """
+        from rich_python_utils.common_objects.workflow.common.expansion import (
+            GraphExpansionResult,
+        )
+
+        _bta = self
+        _inf_input = inference_input
+        _inf_config = inference_config
+        _extra_args = _inference_args
+        use_async = getattr(self, "use_async", False)
+
+        if use_async:
+            async def _breakdown_fn(*args, **kwargs):
+                # Step 0: Check for saved breakdown checkpoint (legacy compat)
+                sub_queries = _bta._load_breakdown_checkpoint()
+                raw_output = None
+                _from_predefined = False
+
+                if sub_queries is not None:
+                    # Resuming from checkpoint
+                    pass
+                elif _bta.predefined_sub_queries is not None:
+                    _from_predefined = True
+                    if _bta.breakdown_only:
+                        _logger.warning(
+                            "predefined_sub_queries is set but breakdown_only=True — "
+                            "breakdown_only ignored (no LLM breakdown to stop after)."
+                        )
+                    sub_queries = _bta._resolve_predefined_sub_queries()
+                else:
+                    # Run breakdown inferencer
+                    if _bta.breakdown_inferencer is None:
+                        raise ValueError(
+                            "breakdown_inferencer must be set when predefined_sub_queries is None. "
+                            "Either provide a breakdown_inferencer or set predefined_sub_queries."
+                        )
+                    # Wire stream_observer for live breakdown streaming
+                    if _bta.graph_reporter is not None and hasattr(_bta.breakdown_inferencer, 'stream_observer'):
+                        _bta.breakdown_inferencer.stream_observer = _bta.graph_reporter.node_stream_observer("breakdown")
+
+                    if hasattr(_bta.breakdown_inferencer, "ainfer"):
+                        raw_output = await _bta.breakdown_inferencer.ainfer(
+                            _inf_input, inference_config=_inf_config, **_inference_args
+                        )
+                    else:
+                        raw_output = _bta.breakdown_inferencer.infer(
+                            _inf_input, inference_config=_inf_config
+                        )
+
+                    # Guard: detect API error responses
+                    _raw_str = str(raw_output).strip()
+                    _ERROR_PATTERNS = [
+                        "An unknown error occurred",
+                        "RECONNECT_SUPPORTED",
+                        "peer closed connection",
+                        "Internal Server Error",
+                    ]
+                    if any(p in _raw_str for p in _ERROR_PATTERNS) and len(_raw_str) < 200:
+                        raise RuntimeError(f"Breakdown returned API error instead of subtasks: {_raw_str[:100]}")
+
+                    # Parse
+                    if _bta.breakdown_parser is not None:
+                        sub_queries = _bta.breakdown_parser(raw_output)
+                    elif _bta.breakdown_format == "json_subtasks":
+                        sub_queries = _bta._parse_json_subtasks(raw_output)
+                    elif _bta.breakdown_format == "numbered_list":
+                        sub_queries = parse_numbered_list(str(raw_output))
+                    elif isinstance(raw_output, list):
+                        sub_queries = raw_output
+                    else:
+                        sub_queries = parse_numbered_list(str(raw_output))
+
+                    # Save breakdown checkpoint
+                    _bta._save_breakdown_checkpoint(raw_output, sub_queries)
+
+                # Apply max_breakdown cap
+                if _bta.max_breakdown is not None and len(sub_queries) > _bta.max_breakdown:
+                    sub_queries = sub_queries[: _bta.max_breakdown]
+
+                if not sub_queries:
+                    return raw_output if raw_output is not None else ""
+
+                # Breakdown-only mode (skip when predefined_sub_queries — already warned)
+                if _bta.breakdown_only and not _from_predefined:
+                    return raw_output if raw_output is not None else sub_queries
+
+                # Interactive sub-query selection
+                if _bta.enable_checkpoint_sub_query_selection and _bta.interactive:
+                    from agent_foundation.ui.interactive_checkpoint import (
+                        checkpoint_breakdown_review,
+                    )
+                    cp_result = await checkpoint_breakdown_review(
+                        _bta.interactive, sub_queries, default_action="approve"
+                    )
+                    if cp_result.action == "select" and cp_result.selected_indices:
+                        sub_queries = [
+                            sub_queries[i]
+                            for i in cp_result.selected_indices
+                            if i < len(sub_queries)
+                        ]
+                    if not sub_queries:
+                        return raw_output if raw_output is not None else ""
+
+                # Emit breakdown result as node_stream
+                if _bta.graph_reporter is not None:
+                    try:
+                        _summary = []
+                        for _i, _sq in enumerate(sub_queries if isinstance(sub_queries, list) else [sub_queries]):
+                            if isinstance(_sq, dict):
+                                _desc = _sq.get("query", str(_sq))
+                            else:
+                                _desc = str(_sq)
+                            if len(_desc) > 300:
+                                _desc = _desc[:297] + "..."
+                            _summary.append(f"**{_i+1}.** {_desc}")
+                        _bd_content = "\n\n".join(_summary)
+                        await _bta.graph_reporter.on_node_stream("breakdown", _bd_content, is_final=True)
+                    except Exception as _e:
+                        _logger.warning("[BTA] breakdown node_stream emit failed: %s", _e)
+
+                # Cache sub_queries BEFORE returning GraphExpansionResult
+                _bta._cached_sub_queries = sub_queries
+
+                # On resume, _reconstruct_graph_expansions already attached workers
+                # to the breakdown node. WorkGraphNode._run resets _expansion_applied
+                # to False, so we can't rely on that flag. Instead, check if the
+                # breakdown node already has downstream nodes (workers) attached.
+                _bd_node = _bta.start_nodes[0] if _bta.start_nodes else None
+                if _bd_node and _bd_node.next:
+                    # Workers already attached from reconstruction — skip expansion
+                    return sub_queries
+
+                # Build SubgraphSpec
+                subgraph = _bta._build_subgraph_spec(
+                    sub_queries, inference_config=_inf_config,
+                    _original_query=_inf_input,
+                    _inference_args=_inference_args,
+                )
+
+                # Determine expansion_id
+                has_aggregator = not _bta.disable_aggregator and _bta.aggregator_inferencer is not None
+                expansion_id = "bta_diamond" if has_aggregator else "bta_workers"
+
+                return GraphExpansionResult(
+                    result=sub_queries,
+                    subgraph=subgraph,
+                    expansion_id=expansion_id,
+                    seed=sub_queries,
+                    reconstruct_from_seed=None,
+                    attach_mode='insert',
+                )
+
+            return _breakdown_fn
+        else:
+            def _breakdown_fn_sync(*args, **kwargs):
+                # Step 0: Check for saved breakdown checkpoint (legacy compat)
+                sub_queries = _bta._load_breakdown_checkpoint()
+                raw_output = None
+                _from_predefined = False
+
+                if sub_queries is not None:
+                    pass
+                elif _bta.predefined_sub_queries is not None:
+                    _from_predefined = True
+                    if _bta.breakdown_only:
+                        _logger.warning(
+                            "predefined_sub_queries is set but breakdown_only=True — "
+                            "breakdown_only ignored (no LLM breakdown to stop after)."
+                        )
+                    sub_queries = _bta._resolve_predefined_sub_queries()
+                else:
+                    if _bta.breakdown_inferencer is None:
+                        raise ValueError(
+                            "breakdown_inferencer must be set when predefined_sub_queries is None. "
+                            "Either provide a breakdown_inferencer or set predefined_sub_queries."
+                        )
+                    raw_output = _bta.breakdown_inferencer.infer(
+                        _inf_input, inference_config=_inf_config
+                    )
+
+                    if _bta.breakdown_parser is not None:
+                        sub_queries = _bta.breakdown_parser(raw_output)
+                    elif _bta.breakdown_format == "json_subtasks":
+                        sub_queries = _bta._parse_json_subtasks(raw_output)
+                    elif _bta.breakdown_format == "numbered_list":
+                        sub_queries = parse_numbered_list(str(raw_output))
+                    elif isinstance(raw_output, list):
+                        sub_queries = raw_output
+                    else:
+                        sub_queries = parse_numbered_list(str(raw_output))
+
+                    _bta._save_breakdown_checkpoint(raw_output, sub_queries)
+
+                if _bta.max_breakdown is not None and len(sub_queries) > _bta.max_breakdown:
+                    sub_queries = sub_queries[: _bta.max_breakdown]
+
+                if not sub_queries:
+                    return raw_output if raw_output is not None else ""
+
+                # Breakdown-only mode (skip when predefined_sub_queries — already warned)
+                if _bta.breakdown_only and not _from_predefined:
+                    return raw_output if raw_output is not None else sub_queries
+
+                # Cache sub_queries BEFORE returning GraphExpansionResult
+                _bta._cached_sub_queries = sub_queries
+
+                # On resume, _reconstruct_graph_expansions already attached workers
+                # to the breakdown node. WorkGraphNode._run resets _expansion_applied
+                # to False, so we can't rely on that flag. Instead, check if the
+                # breakdown node already has downstream nodes (workers) attached.
+                _bd_node = _bta.start_nodes[0] if _bta.start_nodes else None
+                if _bd_node and _bd_node.next:
+                    # Workers already attached from reconstruction — skip expansion
+                    return sub_queries
+
+                subgraph = _bta._build_subgraph_spec(
+                    sub_queries, inference_config=_inf_config,
+                    _original_query=_inf_input,
+                    _inference_args=_inference_args,
+                )
+
+                has_aggregator = not _bta.disable_aggregator and _bta.aggregator_inferencer is not None
+                expansion_id = "bta_diamond" if has_aggregator else "bta_workers"
+
+                return GraphExpansionResult(
+                    result=sub_queries,
+                    subgraph=subgraph,
+                    expansion_id=expansion_id,
+                    seed=sub_queries,
+                    reconstruct_from_seed=None,
+                    attach_mode='insert',
+                )
+
+            return _breakdown_fn_sync

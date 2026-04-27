@@ -317,9 +317,10 @@ DEFAULT_RESPONSE_TYPES = Union[str, InferencerResponse, InputAndResponse]
 def extract_response_text(result):
     """Extract text from various inferencer result types.
 
-    Type dispatch:
+    Type dispatch (order matters — most specific first):
     - DualInferencerResponse → str(result.base_response)
     - InferencerResponse → str(result.select_response())
+    - AgenticResult → result.text
     - Other → str(result)
 
     IMPORTANT: DualInferencerResponse check must come BEFORE InferencerResponse
@@ -329,4 +330,13 @@ def extract_response_text(result):
         return str(result.base_response)
     if isinstance(result, InferencerResponse):
         return str(result.select_response())
+    # Lazy import to avoid circular dependency (common.py is base layer)
+    try:
+        from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
+            AgenticResult,
+        )
+        if isinstance(result, AgenticResult):
+            return result.text
+    except ImportError:
+        pass
     return str(result)

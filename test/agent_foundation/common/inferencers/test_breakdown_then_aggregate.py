@@ -1131,5 +1131,64 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(factory.received_queries, ["Q1", "Q2"])
 
 
+# =============================================================================
+# Post-mortem fixes: Fix 1c (BTA child) + Fix 4 (narrow retry exceptions)
+# =============================================================================
+
+
+class TestPostMortemFixes(unittest.TestCase):
+    """Fix 1c: BTA._iter_child_inferencers yields the aggregator.
+    Fix 4: BTA's WorkGraph nodes use the narrow retry exception list."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_bta_iter_child_inferencers_yields_aggregator(self):
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+        agg = MockInferencer(response="agg")
+        bta = BreakdownThenAggregateInferencer(
+            predefined_sub_queries=["q1", "q2"],
+            worker_factory=lambda i: MockInferencer(response=f"w{i}"),
+            aggregator_inferencer=agg,
+            checkpoint_dir=self.tmpdir,
+        )
+        children = list(bta._iter_child_inferencers())
+        self.assertEqual(len(children), 1)
+        self.assertIs(children[0], agg)
+
+    def test_bta_iter_child_inferencers_no_aggregator_yields_nothing(self):
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+        bta = BreakdownThenAggregateInferencer(
+            predefined_sub_queries=["q1"],
+            worker_factory=lambda i: MockInferencer(response=f"w{i}"),
+            aggregator_inferencer=None,
+            checkpoint_dir=self.tmpdir,
+        )
+        self.assertEqual(list(bta._iter_child_inferencers()), [])
+
+    def test_transient_retry_exceptions_excludes_programming_errors(self):
+        """Fix 4: TRANSIENT_RETRY_EXCEPTIONS covers transient errors but
+        NOT programming errors (TypeError/ValueError/AttributeError)."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            TRANSIENT_RETRY_EXCEPTIONS,
+        )
+        self.assertIn(TimeoutError, TRANSIENT_RETRY_EXCEPTIONS)
+        self.assertIn(ConnectionError, TRANSIENT_RETRY_EXCEPTIONS)
+        self.assertIn(OSError, TRANSIENT_RETRY_EXCEPTIONS)
+        # Programming errors must NOT be subclasses of anything in the
+        # transient list. (TypeError, AttributeError, ValueError are NOT
+        # subclasses of TimeoutError, ConnectionError, or OSError.)
+        self.assertFalse(issubclass(TypeError, TRANSIENT_RETRY_EXCEPTIONS))
+        self.assertFalse(issubclass(AttributeError, TRANSIENT_RETRY_EXCEPTIONS))
+        self.assertFalse(issubclass(ValueError, TRANSIENT_RETRY_EXCEPTIONS))
+
+
 if __name__ == "__main__":
     unittest.main()

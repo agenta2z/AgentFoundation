@@ -381,3 +381,23 @@ class TestFallbackInferModeOutputContract(unittest.TestCase):
 
         result = asyncio.run(run())
         self.assertEqual(result, "fresh_result")
+
+
+# =============================================================================
+# Post-mortem fix 1b: StreamingInferencerBase._pre_retry → reset_session()
+# =============================================================================
+
+
+class TestPreRetryResetsSession(unittest.IsolatedAsyncioTestCase):
+    """Fix 1b: streaming inferencer's _pre_retry hook (overridden on
+    StreamingInferencerBase) calls the existing reset_session() so when a
+    parent inferencer's retry triggers child pre_retry propagation, the
+    streaming child's active_session_id is cleared — the next ainfer()
+    call on this instance starts fresh."""
+
+    async def test_pre_retry_clears_active_session_id(self):
+        inf = MockStreamingInferencer()
+        inf._session_id = "abc123"
+        self.assertEqual(inf.active_session_id, "abc123")
+        await inf._pre_retry(attempt=0, exception=ConnectionError("transient"))
+        self.assertIsNone(inf.active_session_id)

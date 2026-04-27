@@ -139,6 +139,7 @@ class ConversationalInferencer(InferencerBase):
         turn_number: int = 0,
         on_new_turn: Optional[Any] = None,
         on_prompt_rendered: Optional[Any] = None,
+        on_turn_complete: Optional[Any] = None,
     ) -> AgenticResult:
         """Main entry point. Replaces ConversationRouter._agentic_loop().
 
@@ -223,6 +224,7 @@ class ConversationalInferencer(InferencerBase):
             # clean text from --output-file or trailing JSON schema output.
             # API-based inferencers return None (stream IS the final output).
             clean_response = raw_response
+            _final = None  # default: no separate clean output
             if getattr(self.base_inferencer, "streams_differ_from_final_output", False):
                 _final = self.base_inferencer.get_final_output()
                 if _final:
@@ -392,6 +394,12 @@ class ConversationalInferencer(InferencerBase):
                         last_template_feed=self._last_template_feed,
                         last_template_config=self._last_template_config,
                     )
+                # Fire on_turn_complete after all messages for this turn are committed
+                if on_turn_complete:
+                    try:
+                        await on_turn_complete(iteration + 1)
+                    except Exception as _tc_err:
+                        logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
                 continue
 
             # 5a. Execute action tools from ToolsToInvoke (if any)
@@ -429,6 +437,12 @@ class ConversationalInferencer(InferencerBase):
                         last_template_feed=self._last_template_feed,
                         last_template_config=self._last_template_config,
                     )
+                # Fire on_turn_complete after all messages for this turn are committed
+                if on_turn_complete:
+                    try:
+                        await on_turn_complete(iteration + 1)
+                    except Exception as _tc_err:
+                        logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
                 continue
 
             # 5b. Parse for action tool calls (legacy XML format)
@@ -483,6 +497,12 @@ class ConversationalInferencer(InferencerBase):
                     last_template_feed=self._last_template_feed,
                     last_template_config=self._last_template_config,
                 )
+            # Fire on_turn_complete after all messages for this turn are committed
+            if on_turn_complete:
+                try:
+                    await on_turn_complete(iteration + 1)
+                except Exception as _tc_err:
+                    logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
 
         # Exhausted max iterations — return last raw response
         return AgenticResult(
@@ -526,6 +546,20 @@ class ConversationalInferencer(InferencerBase):
 
     def reset_dynamic_context(self) -> None:
         self._dynamic_context = AgenticDynamicContext()
+
+    def reset_for_flow_invocation(self) -> None:
+        """Reset state for a fresh flow invocation.
+
+        Clears conversation state to prevent leakage between flow phases
+        or worker nodes. Called by ConversationalFlowNodeAdapter before
+        each invocation.
+        """
+        self._messages = []
+        self.reset_dynamic_context()  # delegates to existing method
+        self.conversation_history = []
+
+    # Alias for LWI's reset_sessions_per_iteration which calls reset_session()
+    reset_session = reset_for_flow_invocation
 
     # =========================================================================
     # Prompt Rendering

@@ -1,0 +1,457 @@
+"""MultiFlowDualInferencer — convenience class for the common composition pattern.
+
+A :class:`DualInferencer` whose ``base_inferencer`` is auto-constructed as a
+:class:`MultiFlowInferencer` running N parallel dynamic-mode LWI flows that
+cross-pollinate via cross-flow visibility, with an aggregator integrating the
+final plan. Review and fix are performed by independent reviewer/fixer
+inferencers (set as ordinary :class:`DualInferencer` attributes).
+
+This class collapses the hand-wired composition::
+
+    multi_flow = MultiFlowInferencer(flow_configs=..., visible_flows="all", ...)
+    dual = DualInferencer(
+        base_inferencer = multi_flow,
+        review_inferencer = reviewer_cli,
+        fixer_inferencer = fixer_cli,
+        ...
+    )
+
+into a single construction step::
+
+    mfdi = MultiFlowDualInferencer(
+        flow_configs = ...,
+        visible_flows = "all",
+        review_inferencer = reviewer_cli,
+        fixer_inferencer = fixer_cli,
+        ...
+    )
+
+Round 7 — dynamic dispatch (rule-based and/or alias-based)::
+
+    mfdi = MultiFlowDualInferencer(
+        flow_configs=[...],
+        multi_flow_winner_parser=parse_winner_tag,
+        multi_flow_aggregator_prompt=AGGREGATOR_W_WINNER_TEMPLATE,
+        # Rule-based: avoid self-review + winner-as-fixer
+        review_default=kiro_cli,
+        review_priority_pool=[claude_cli],
+        fixer_match_winner=True,
+    )
+
+After each propose step (which runs MultiFlow), :meth:`_select_reviewer_and_fixer`
+mutates ``self.review_inferencer`` and ``self.fixer_inferencer`` based on
+the dispatch state MultiFlow exposed (``_last_winner_idx``,
+``_last_reviewer_alias``, ``_last_fixer_alias``).
+
+⚠️ **Production usability note for YAML configs**: When ``_target_: MultiFlowDual``
+is constructed from YAML, distinct YAML nodes typically produce distinct
+Python instances — and the ``is``-based self-review check would fail silently.
+**Always use the alias-based path with YAML**: declare your inferencers once,
+expose them via shared interpolation refs, populate ``inferencer_pool`` with
+``{alias: ${ref}}`` entries, and reference inferencers by alias string in
+``flow_configs``, ``review_default``, and ``review_priority_pool``. Aliases
+resolve to the SAME pool instance everywhere → ``is`` comparison works.
+
+Naming note: the class is *not* called ``MultiFlowPlanThenImplementInferencer``
+because :class:`PlanThenImplementInferencer` denotes a four-step
+plan/approval/implement/analysis workflow that is structurally different
+from this propose/review/fix loop.
+"""
+
+import logging
+from typing import Any, Callable, Dict, List, Optional, Union
+
+from attr import attrib, attrs
+
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+    DualInferencer,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
+    MultiFlowInferencer,
+    _VisibilitySpec,
+)
+from rich_python_utils.common_objects.workflow.workflow import Workflow
+from rich_python_utils.io_utils.artifact import artifact_type
+
+_logger = logging.getLogger(__name__)
+
+
+@artifact_type(Workflow, type="json", group="workflows")
+@attrs
+class MultiFlowDualInferencer(DualInferencer):
+    """DualInferencer whose ``base_inferencer`` is an auto-constructed MultiFlow.
+
+    Set ``flow_configs`` and the ``multi_flow_*`` attributes; the propose-phase
+    MultiFlow is built in :meth:`__attrs_post_init__`. Reviewer and fixer are
+    ordinary :class:`DualInferencer` attributes — either concrete
+    :class:`InferencerBase` instances or, for Round 7 dynamic dispatch, alias
+    strings resolved via ``inferencer_pool``.
+
+    DO NOT pass ``base_inferencer`` directly — construction will raise
+    :class:`ValueError` to surface the mistake immediately.
+
+    ⚠️ **YAML usage warning**: distinct YAML nodes produce distinct Python
+    instances; the rule-based self-review check uses ``is`` identity. **Use
+    the alias-based path with YAML**: populate ``inferencer_pool`` with shared
+    refs and reference inferencers by alias string. See module docstring.
+
+    Example (rule-based dispatch — main use case)::
+
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": q, "initial_inferencer": claude,
+                 "followup_inferencer": claude,
+                 "end_condition": parse_stop, "max_dynamic_steps": 4},
+                {"input": q, "initial_inferencer": kiro,
+                 "followup_inferencer": kiro,
+                 "end_condition": parse_stop, "max_dynamic_steps": 4},
+            ],
+            visible_flows="all",
+            multi_flow_aggregator_inferencer=synthesizer,
+            multi_flow_aggregator_prompt=AGGREGATOR_W_WINNER_TEMPLATE,
+            multi_flow_winner_parser=parse_winner_tag,
+            multi_flow_response_parser=parse_finalplan_tag,
+            review_default=kiro_cli,                 # default reviewer
+            review_priority_pool=[claude_cli],       # if Kiro wins → swap to Claude
+            fixer_match_winner=True,                 # fixer = winning flow's CLI
+            consensus_config=ConsensusConfig(max_iterations=2),
+        )
+        result = await mfdi.ainfer("Build a secure REST API")
+    """
+
+    # ─── MultiFlow-specific config (forwarded into the auto-constructed MultiFlow) ───
+    flow_configs: List[dict] = attrib(factory=list)
+    visible_flows: _VisibilitySpec = attrib(default="all")
+
+    multi_flow_aggregator_inferencer: Optional[InferencerBase] = attrib(default=None)
+    multi_flow_aggregator_prompt: Optional[str] = attrib(default=None)
+    multi_flow_aggregator_prompt_builder: Optional[Callable] = attrib(default=None)
+    multi_flow_followup_prompt: Optional[str] = attrib(default=None)
+    multi_flow_initial_prompt: Optional[str] = attrib(default=None)
+    multi_flow_judgment_parser: Optional[Callable] = attrib(default=None)
+    multi_flow_response_parser: Optional[Callable] = attrib(default=None)
+    multi_flow_max_concurrency: Optional[int] = attrib(default=None)
+    multi_flow_disable_aggregator: bool = attrib(default=False)
+    multi_flow_prompt_formatter: Optional[Callable] = attrib(default=None)
+
+    # ─── Round 7: dispatch parsers forwarded into MultiFlow ───
+    multi_flow_winner_parser: Optional[Callable] = attrib(default=None)
+    """Parser for ``<Winner>flow_X</Winner>``. Forwarded to MultiFlow."""
+
+    multi_flow_reviewer_alias_parser: Optional[Callable] = attrib(default=None)
+    """Parser for ``<Reviewer>alias</Reviewer>``. Forwarded to MultiFlow."""
+
+    multi_flow_fixer_alias_parser: Optional[Callable] = attrib(default=None)
+    """Parser for ``<Fixer>alias</Fixer>``. Forwarded to MultiFlow."""
+
+    # ─── Round 7: dispatch configuration on this class ───
+    inferencer_pool: Dict[str, InferencerBase] = attrib(factory=dict)
+    """Optional alias → instance mapping. Used both for resolving alias strings
+    in ``review_default`` / ``review_priority_pool`` and for resolving aliases
+    returned by the MultiFlow alias parsers (LLM-driven dispatch)."""
+
+    review_default: Union[InferencerBase, str, None] = attrib(default=None)
+    """Default reviewer for rule-based dispatch. May be an :class:`InferencerBase`
+    instance OR a string alias resolvable via ``inferencer_pool``. When set,
+    used as the reviewer unless the resolved default is the same instance as
+    the MultiFlow winner — then the priority pool is consulted."""
+
+    review_priority_pool: List[Union[InferencerBase, str]] = attrib(factory=list)
+    """Fallback reviewers (instances or aliases) tried in order when the
+    resolved ``review_default`` is the same instance as the MultiFlow winner.
+    Self-review avoidance."""
+
+    fixer_match_winner: bool = attrib(default=False)
+    """When True, ``fixer_inferencer`` is mutated to the MultiFlow winner's
+    inferencer after each propose step."""
+
+    def __attrs_post_init__(self):
+        # Catch the most common misuse early: caller setting base_inferencer.
+        if self.base_inferencer is not None:
+            raise ValueError(
+                "MultiFlowDualInferencer auto-constructs base_inferencer from "
+                "flow_configs; do not pass base_inferencer directly. Use "
+                "DualInferencer if you want manual control over base_inferencer."
+            )
+        if not self.flow_configs:
+            raise ValueError(
+                "MultiFlowDualInferencer requires at least one entry in flow_configs"
+            )
+
+        # If the caller specified a class-level initial_prompt template for the
+        # MultiFlow, propagate it into each flow_config that doesn't already
+        # supply its own. Per-flow override wins.
+        if self.multi_flow_initial_prompt is not None:
+            for cfg in self.flow_configs:
+                cfg.setdefault("initial_prompt", self.multi_flow_initial_prompt)
+
+        # Auto-construct the MultiFlow propose engine. Forward both
+        # ``workspace_root`` and ``checkpoint_dir`` so MultiFlow's own
+        # checkpoint storage piggy-backs on whichever the parent uses; if
+        # the parent later assigns ``_result_root_override`` to children,
+        # BTA's existing machinery will redirect checkpoint paths accordingly.
+        self.base_inferencer = MultiFlowInferencer(
+            flow_configs=self.flow_configs,
+            visible_flows=self.visible_flows,
+            aggregator_inferencer=self.multi_flow_aggregator_inferencer,
+            aggregator_prompt=self.multi_flow_aggregator_prompt,
+            aggregator_prompt_builder=self.multi_flow_aggregator_prompt_builder,
+            multiflow_followup_prompt=self.multi_flow_followup_prompt,
+            judgment_parser=self.multi_flow_judgment_parser,
+            response_parser=self.multi_flow_response_parser,
+            max_concurrency=self.multi_flow_max_concurrency,
+            disable_aggregator=self.multi_flow_disable_aggregator,
+            prompt_formatter=self.multi_flow_prompt_formatter,
+            workspace_root=self.workspace_root,
+            checkpoint_dir=self.checkpoint_dir,
+            # Round 7: forward dispatch parsers
+            winner_parser=self.multi_flow_winner_parser,
+            reviewer_alias_parser=self.multi_flow_reviewer_alias_parser,
+            fixer_alias_parser=self.multi_flow_fixer_alias_parser,
+        )
+
+        # Round 7: seed initial review_inferencer / fixer_inferencer from
+        # rule-based config if not already set. The dispatch in propose's tail
+        # may overwrite these per-attempt based on the winner.
+        if self.review_inferencer is None and self.review_default is not None:
+            self.review_inferencer = self._resolve_id(self.review_default)
+        if (
+            self.fixer_inferencer is None
+            and self.fixer_match_winner
+            and self.review_inferencer is not None
+        ):
+            # Placeholder until propose runs and we know the winner.
+            # Use the reviewer as a benign default so DualInferencer's
+            # 2-agent fallback doesn't kick in unexpectedly.
+            self.fixer_inferencer = self.review_inferencer
+
+        # Defer to DualInferencer for prompt-template setup, parser defaults,
+        # workspace, sub-inferencer wiring, etc.
+        super().__attrs_post_init__()
+
+    # ------------------------------------------------------------------
+    # Round 7 — dispatch helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_id(
+        self, x: Union[InferencerBase, str, None]
+    ) -> Optional[InferencerBase]:
+        """Resolve an instance-or-alias to a concrete :class:`InferencerBase`.
+
+        Resolution order:
+
+        1. ``None``                                → ``None``
+        2. Already an :class:`InferencerBase`      → returned as-is
+        3. String present in ``inferencer_pool``   → ``inferencer_pool[x]``
+        4. otherwise                               → :class:`KeyError`
+           with a message listing the known pool keys
+
+        We deliberately do NOT support dynamic class import from a dotted
+        path: configured instances (with ``target_path``, ``cache_folder``,
+        etc.) belong in the pool, and "instantiate from a class path" would
+        produce an un-configured instance.
+        """
+        if x is None:
+            return None
+        if isinstance(x, InferencerBase):
+            return x
+        if isinstance(x, str):
+            if x in self.inferencer_pool:
+                return self.inferencer_pool[x]
+            raise KeyError(
+                f"MultiFlowDualInferencer: identifier {x!r} not found in "
+                f"inferencer_pool (known keys: {sorted(self.inferencer_pool.keys())!r}). "
+                f"Either add it to inferencer_pool or pass an InferencerBase instance."
+            )
+        raise TypeError(
+            f"MultiFlowDualInferencer: expected InferencerBase | str | None, "
+            f"got {type(x).__name__}"
+        )
+
+    def _select_reviewer_and_fixer(self) -> None:
+        """Mutate ``self.review_inferencer`` and ``self.fixer_inferencer`` based
+        on dispatch state exposed by the inner MultiFlow.
+
+        Resolution precedence (per role):
+          1. LLM-driven alias from MultiFlow's alias parser, if present.
+             Failures (e.g., unknown alias) log a warning and fall through.
+          2. Rule-based: avoid-self-review for reviewer, match-winner for fixer.
+
+        When neither path applies, leaves the inferencer at its current value
+        (typically the construction-time default).
+        """
+        mfi = self.base_inferencer
+        if not isinstance(mfi, MultiFlowInferencer):
+            return  # nothing to dispatch on
+        winner = mfi.get_winner_inferencer()
+
+        # Sanity warnings: dispatch was configured but winner was not detected.
+        # Caused by missing winner_parser, malformed aggregator output, or the
+        # aggregator's prompt not instructing the LLM to emit <Winner>flow_X</Winner>.
+        # Suppressed when the LLM-driven alias path is in use (those don't need
+        # a winner). Edge case: if <Reviewer> is present but <Winner> is missing,
+        # the reviewer warning is correctly suppressed (alias dispatch covers
+        # reviewer); the fixer warning still fires because fixer dispatch DOES
+        # need a winner.
+        if winner is None:
+            if self.review_default is not None and not mfi.get_chosen_reviewer_alias():
+                _logger.warning(
+                    "MultiFlowDualInferencer: review_default is configured but "
+                    "the winner could not be identified from MultiFlow output. "
+                    "Self-review-avoidance cannot fire — reviewer will be set "
+                    "to review_default as-is. Verify multi_flow_winner_parser "
+                    "is configured AND the aggregator's prompt instructs the "
+                    "LLM to emit <Winner>flow_X</Winner>."
+                )
+            if self.fixer_match_winner and not mfi.get_chosen_fixer_alias():
+                _logger.warning(
+                    "MultiFlowDualInferencer: fixer_match_winner=True but the "
+                    "winner could not be identified. Fixer will keep its "
+                    "construction-time value (typically falling through to "
+                    "base_inferencer)."
+                )
+
+        # ----- Reviewer -----
+        # 1) LLM-driven alias takes precedence
+        alias = mfi.get_chosen_reviewer_alias()
+        chosen: Optional[InferencerBase] = None
+        if alias:
+            try:
+                chosen = self._resolve_id(alias)
+            except KeyError as exc:
+                _logger.warning(
+                    "MultiFlowDual: reviewer_alias %r could not be resolved "
+                    "(not in inferencer_pool): %s — falling back to rule-based dispatch",
+                    alias,
+                    exc,
+                )
+        if chosen is not None:
+            self.review_inferencer = chosen
+        elif self.review_default is not None:
+            # 2) Rule-based: avoid self-review
+            default = self._resolve_id(self.review_default)
+            if winner is not None and winner is default:
+                fallback: Optional[InferencerBase] = None
+                for cand in self.review_priority_pool:
+                    try:
+                        cand_inf = self._resolve_id(cand)
+                    except KeyError as exc:
+                        _logger.warning(
+                            "MultiFlowDual: priority_pool entry %r could not be "
+                            "resolved: %s — skipping", cand, exc,
+                        )
+                        continue
+                    if cand_inf is not None and cand_inf is not winner:
+                        fallback = cand_inf
+                        break
+                if fallback is not None:
+                    self.review_inferencer = fallback
+                else:
+                    _logger.warning(
+                        "MultiFlowDual: review_default is the winner and "
+                        "priority_pool exhausted; using default (self-review)."
+                    )
+                    self.review_inferencer = default
+            else:
+                self.review_inferencer = default
+
+        # ----- Fixer -----
+        alias = mfi.get_chosen_fixer_alias()
+        chosen = None
+        if alias:
+            try:
+                chosen = self._resolve_id(alias)
+            except KeyError as exc:
+                _logger.warning(
+                    "MultiFlowDual: fixer_alias %r could not be resolved "
+                    "(not in inferencer_pool): %s — falling back to rule-based dispatch",
+                    alias,
+                    exc,
+                )
+        if chosen is not None:
+            self.fixer_inferencer = chosen
+        elif self.fixer_match_winner and winner is not None:
+            self.fixer_inferencer = winner
+
+    def _collect_candidate_inferencers(self) -> List[InferencerBase]:
+        """Raw collection of every inferencer that could plausibly be
+        selected as reviewer or fixer at runtime, plus the base inferencer
+        itself. May contain duplicates (the same instance can appear in
+        multiple slots/pools) — callers go through
+        :meth:`_iter_child_inferencers` which dedups on identity.
+
+        Note: ``MultiFlowDualInferencer`` mutates ``review_inferencer`` /
+        ``fixer_inferencer`` mid-run via :meth:`_select_reviewer_and_fixer`,
+        so any parent→child operation must walk every candidate (not just
+        the current ``(base, review, fixer)`` triple).
+        """
+        cands: List[InferencerBase] = []
+        if self.base_inferencer is not None:
+            cands.append(self.base_inferencer)
+        for slot in (self.review_inferencer, self.fixer_inferencer):
+            if slot is not None:
+                cands.append(slot)
+        # review_default and priority pool (resolved if alias-typed)
+        if self.review_default is not None:
+            try:
+                resolved = self._resolve_id(self.review_default)
+                if resolved is not None:
+                    cands.append(resolved)
+            except KeyError:
+                pass
+        for c in self.review_priority_pool:
+            try:
+                resolved = self._resolve_id(c)
+                if resolved is not None:
+                    cands.append(resolved)
+            except KeyError:
+                continue
+        # Flow inferencers (initial + followup). We rely on these being
+        # idempotent on aconnect — ClaudeCodeCli / KiroCli are; document
+        # the contract for any custom flow inferencer.
+        if isinstance(self.base_inferencer, MultiFlowInferencer):
+            for cfg in self.base_inferencer.flow_configs:
+                init_inf = cfg.get("initial_inferencer")
+                fup_inf = cfg.get("followup_inferencer")
+                if init_inf is not None:
+                    cands.append(init_inf)
+                if fup_inf is not None and fup_inf is not init_inf:
+                    cands.append(fup_inf)
+        # Pool entries
+        for v in self.inferencer_pool.values():
+            if v is not None:
+                cands.append(v)
+        return cands
+
+    def _iter_child_inferencers(self):
+        """Broad candidate set including pool / default / priority_pool entries.
+
+        Yields each candidate at most once (id-based dedup) per the
+        ``InferencerBase._iter_child_inferencers`` contract. Used uniformly
+        by lifecycle methods (``aconnect`` / ``adisconnect`` —
+        inherited from ``DualInferencer``) and recursive ``pre_retry``.
+        """
+        seen: set = set()
+        for inf in self._collect_candidate_inferencers():
+            if inf is None or id(inf) in seen:
+                continue
+            seen.add(id(inf))
+            yield inf
+
+    # ------------------------------------------------------------------
+    # Round 7 — overrides
+    # ------------------------------------------------------------------
+
+    async def _step_propose_impl(self, step_input, state):
+        """Run the parent propose step (which calls MultiFlow), then dispatch
+        reviewer / fixer based on the dispatch state MultiFlow exposed."""
+        result = await DualInferencer._step_propose_impl(self, step_input, state)
+        self._select_reviewer_and_fixer()
+        return result
+
+    # NOTE: aconnect / adisconnect are inherited from DualInferencer.
+    # DualInferencer.aconnect/adisconnect iterate `_iter_child_inferencers`
+    # (with `hasattr` guards), and our override above yields the broad
+    # candidate set. So the inherited methods Just Work — no need for
+    # bespoke overrides here.

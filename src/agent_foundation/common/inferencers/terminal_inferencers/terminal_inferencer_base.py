@@ -439,7 +439,10 @@ class TerminalInferencerBase(InferencerBase):
             fd, filepath = tempfile.mkstemp(suffix=".txt", prefix="terminal_output_")
             os.close(fd)
 
-        with open(filepath, "w") as f:
+        # Explicit utf-8: terminal output (CLI subprocess stdout) routinely
+        # contains Unicode characters (LLM arrows, em-dashes). Without this,
+        # Windows' cp1252 default raises UnicodeEncodeError.
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         self.log_debug(f"Output saved to: {filepath}", "OutputFile")
