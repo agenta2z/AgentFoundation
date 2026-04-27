@@ -13,7 +13,8 @@ class InputMode(StrEnum):
     PRESS_TO_CONTINUE = 'press_to_continue'
     EXACT_STRING = 'exact_string'
     SINGLE_CHOICE = 'single_choice'
-    MULTIPLE_CHOICES = 'multiple_choices'
+    MULTIPLE_CHOICE = 'multiple_choice'
+    MULTIPLE_CHOICES = 'multiple_choice'  # alias — canonical is MULTIPLE_CHOICE
 
 
 @dataclass
@@ -46,7 +47,7 @@ class InputModeConfig:
         if self.mode == InputMode.EXACT_STRING:
             d['expected_string'] = self.expected_string
             d['case_sensitive'] = self.case_sensitive
-        elif self.mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICES):
+        elif self.mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICE):
             d['options'] = [
                 {'label': o.label, 'value': o.value,
                  **(({'follow_up_prompt': o.follow_up_prompt} if o.follow_up_prompt else {})),
@@ -54,7 +55,7 @@ class InputModeConfig:
                 for o in self.options
             ]
             d['allow_custom'] = self.allow_custom
-            if self.mode == InputMode.MULTIPLE_CHOICES:
+            if self.mode == InputMode.MULTIPLE_CHOICE:
                 # Only serialise non-default values to keep the dict lean
                 if not self.show_select_all:
                     d['show_select_all'] = False
@@ -71,7 +72,7 @@ class InputModeConfig:
         if mode == InputMode.EXACT_STRING:
             config.expected_string = d.get('expected_string', '')
             config.case_sensitive = d.get('case_sensitive', False)
-        elif mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICES):
+        elif mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICE):
             config.options = [
                 ChoiceOption(label=o['label'], value=o['value'],
                              follow_up_prompt=o.get('follow_up_prompt', ''),
@@ -79,7 +80,7 @@ class InputModeConfig:
                 for o in d.get('options', [])
             ]
             config.allow_custom = d.get('allow_custom', True)
-            if mode == InputMode.MULTIPLE_CHOICES:
+            if mode == InputMode.MULTIPLE_CHOICE:
                 config.show_select_all = d.get('show_select_all', True)
                 config.select_all_text = d.get('select_all_text', "All of above")
         config.metadata = d.get('metadata', {})
@@ -109,7 +110,7 @@ def multiple_choices(
     select_all_text: str = "All of above",
 ) -> InputModeConfig:
     return InputModeConfig(
-        mode=InputMode.MULTIPLE_CHOICES,
+        mode=InputMode.MULTIPLE_CHOICE,
         options=options,
         allow_custom=allow_custom,
         prompt=prompt,

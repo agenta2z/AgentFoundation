@@ -105,7 +105,7 @@ class RichInteractiveBase(InteractiveBase):
         if mode == InputMode.SINGLE_CHOICE and isinstance(user_input, dict):
             return self._resolve_single_choice(user_input, input_mode)
 
-        elif mode == InputMode.MULTIPLE_CHOICES and isinstance(user_input, dict):
+        elif mode == InputMode.MULTIPLE_CHOICE and isinstance(user_input, dict):
             return self._resolve_multiple_choices(user_input, input_mode)
 
         elif mode == InputMode.EXACT_STRING:

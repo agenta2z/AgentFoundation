@@ -435,15 +435,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         if isinstance(self.logger, str) and self.logger == "auto" and self._workspace:
             self._normalize_loggers()
 
-        # Configure breakdown_inferencer with the BTA's workspace.
-        # breakdown_inferencer runs BEFORE _build_diamond_graph(), so
-        # _configure_child_workspace() is never called on it there.
-        # We must configure it here, at init time, using a dedicated child workspace.
-        if self._workspace is not None and self.breakdown_inferencer is not None:
-            breakdown_ws = self._workspace.child("breakdown")
-            breakdown_ws.ensure_dirs()
-            self.breakdown_inferencer._workspace = breakdown_ws  # setter auto-configures
-
         # BTA is an orchestrator — it should NOT render its own inference_input
         # through a template (_render_prompt override below handles this).
         # Keep template_manager set so _finalize_output can write the BTA's
@@ -584,13 +575,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # Resolve output paths DYNAMICALLY at completion time (not at topology time).
             # Files don't exist when topology is emitted — they're written during execution.
             # When a node completes, its output file exists and can be resolved.
-            _workspace = getattr(self, 'workspace_root', None) or getattr(self, '_workspace_root', None)
+            # NOTE: capture self (not workspace_root) — for inner BTAs created by
+            # _ImportFactory, workspace_root is None at construction; _workspace is
+            # assigned later at runtime via worker._workspace = worker_ws.
+            _bta_self = self
 
             async def _async_status_cb(event):
                 output_path = ""
-                if event.status in ("completed", "error") and _workspace:
+                _ws_obj = getattr(_bta_self, '_workspace', None)
+                if event.status in ("completed", "error") and _ws_obj:
                     from pathlib import Path as _P
-                    _ws = _P(str(_workspace))
+                    _ws = _P(str(_ws_obj.root))
                     nid = event.node_id
                     if nid == "breakdown":
                         for candidate in [
@@ -623,9 +618,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # WorkGraphNode. So _async_status_cb (set on real WorkGraph nodes) never fires
             # for it. Emit an explicit completion event with the resolved output_path so
             # the UI can fetch breakdown_output.md when the breakdown node is clicked.
-            if _workspace:
+            _ws_obj_b = getattr(self, '_workspace', None)
+            if _ws_obj_b:
                 from pathlib import Path as _PB
-                _ws_b = _PB(str(_workspace))
+                _ws_b = _PB(str(_ws_obj_b.root))
                 _bd_output = ""
                 for _cand in [
                     _ws_b / "children" / "breakdown" / "outputs" / "breakdown_output.md",
@@ -880,6 +876,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 _logger.warning(
                     "Failed to write pipeline report to %s: %s", report_dst, e
                 )
+
+    def _configure_for_workspace(self, workspace):
+        super()._configure_for_workspace(workspace)
+        if self.breakdown_inferencer is not None:
+            bd_ws = workspace.child("breakdown")
+            bd_ws.ensure_dirs()
+            self.breakdown_inferencer._workspace = bd_ws
 
     def _finalize_output(self, response):
         if getattr(self, "_deliverables_copied", False):
