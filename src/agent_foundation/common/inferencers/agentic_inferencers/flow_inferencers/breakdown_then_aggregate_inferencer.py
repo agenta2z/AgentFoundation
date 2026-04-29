@@ -549,11 +549,65 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         _logger.info("Parsed %d subtasks from JSON breakdown", len(queries))
         return queries
 
-    async def _emit_pending_graph_topology(self) -> None:
-        """Emit the pending graph topology and wire status callbacks to all nodes.
+    def _make_graph_status_callback(self):
+        """Build the async status callback for WorkGraphNode event propagation.
 
-        Called from _ainfer() after the expansion-driven graph construction
-        completes and the full diamond topology is available.
+        Returns a coroutine function that forwards NodeStatusEvent from WorkGraph
+        nodes to the graph_reporter with resolved output_path. Set on the WorkGraph
+        BEFORE _arun() so _propagate_settings_to_subgraph() copies it to expansion
+        nodes (workers, aggregator) when they're created.
+
+        NOTE: captures self (not workspace_root) — for inner BTAs created by
+        _ImportFactory, workspace_root is None at construction; _workspace is
+        assigned later at runtime via worker._workspace = worker_ws.
+        """
+        reporter = self.graph_reporter
+        _bta_self = self
+
+        async def _async_status_cb(event):
+            output_path = ""
+            _ws_obj = getattr(_bta_self, '_workspace', None)
+            if event.status in ("completed", "error") and _ws_obj:
+                from pathlib import Path as _P
+                _ws = _P(str(_ws_obj.root))
+                nid = event.node_id
+                if nid == "breakdown":
+                    for candidate in [
+                        _ws / "children" / "breakdown" / "outputs" / "breakdown_output.md",
+                        _ws / "checkpoints" / "breakdown_result.json",
+                    ]:
+                        if candidate.exists():
+                            output_path = str(candidate)
+                            break
+                elif nid.startswith("worker_"):
+                    for fn in ("facet.md", "result.md", "output.md", "response.md"):
+                        candidate = _ws / "children" / nid / "outputs" / fn
+                        if candidate.exists():
+                            output_path = str(candidate)
+                            break
+                elif nid == "aggregator":
+                    for fn in ("role_document.md", "output.md", "result.md", "response.md"):
+                        candidate = _ws / "children" / "aggregator" / "outputs" / fn
+                        if candidate.exists():
+                            output_path = str(candidate)
+                            break
+            await reporter.on_node_status(
+                event.node_id, event.status,
+                getattr(event, 'error', ''),
+                output_path=output_path,
+            )
+
+        return _async_status_cb
+
+    async def _emit_pending_graph_topology(self) -> None:
+        """Emit the pending graph topology to the frontend.
+
+        Called from _ainfer() — either early (from _breakdown_fn after expansion
+        spec is built) or as a fallback after _arun() completes.
+
+        The status callback is set separately in _ainfer() via
+        _make_graph_status_callback() + set_graph_event_callback() BEFORE _arun(),
+        so it propagates to expansion nodes automatically.
         """
         pending_topo = getattr(self, '_pending_topology', None)
         _logger.info(
@@ -570,53 +624,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self._pending_topology = None  # clear before await (re-entrant safety)
         try:
             await self.graph_reporter.on_graph_topology(pending_topo)
-            # Wire async status callback to all WorkGraph nodes
-            reporter = self.graph_reporter
-            # Resolve output paths DYNAMICALLY at completion time (not at topology time).
-            # Files don't exist when topology is emitted — they're written during execution.
-            # When a node completes, its output file exists and can be resolved.
-            # NOTE: capture self (not workspace_root) — for inner BTAs created by
-            # _ImportFactory, workspace_root is None at construction; _workspace is
-            # assigned later at runtime via worker._workspace = worker_ws.
-            _bta_self = self
-
-            async def _async_status_cb(event):
-                output_path = ""
-                _ws_obj = getattr(_bta_self, '_workspace', None)
-                if event.status in ("completed", "error") and _ws_obj:
-                    from pathlib import Path as _P
-                    _ws = _P(str(_ws_obj.root))
-                    nid = event.node_id
-                    if nid == "breakdown":
-                        for candidate in [
-                            _ws / "children" / "breakdown" / "outputs" / "breakdown_output.md",
-                            _ws / "checkpoints" / "breakdown_result.json",
-                        ]:
-                            if candidate.exists():
-                                output_path = str(candidate)
-                                break
-                    elif nid.startswith("worker_"):
-                        for fn in ("facet.md", "result.md", "output.md", "response.md"):
-                            candidate = _ws / "children" / nid / "outputs" / fn
-                            if candidate.exists():
-                                output_path = str(candidate)
-                                break
-                    elif nid == "aggregator":
-                        for fn in ("role_document.md", "output.md", "result.md", "response.md"):
-                            candidate = _ws / "children" / "aggregator" / "outputs" / fn
-                            if candidate.exists():
-                                output_path = str(candidate)
-                                break
-                await reporter.on_node_status(
-                    event.node_id, event.status,
-                    getattr(event, 'error', ''),
-                    output_path=output_path,
-                )
-            self.set_graph_event_callback(_async_status_cb)
 
             # Breakdown is a VIRTUAL node — manually prepended to the topology, NOT a real
-            # WorkGraphNode. So _async_status_cb (set on real WorkGraph nodes) never fires
-            # for it. Emit an explicit completion event with the resolved output_path so
+            # WorkGraphNode. So the graph event callback never fires for it.
+            # Emit an explicit completion event with the resolved output_path so
             # the UI can fetch breakdown_output.md when the breakdown node is clicked.
             _ws_obj_b = getattr(self, '_workspace', None)
             if _ws_obj_b:
@@ -631,18 +642,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         _bd_output = str(_cand)
                         break
                 try:
-                    await reporter.on_node_status(
+                    await self.graph_reporter.on_node_status(
                         "breakdown", "completed",
                         output_path=_bd_output,
                     )
                 except Exception as _ebd:
-                    import logging as _logbd
-                    _logbd.getLogger(__name__).warning(
+                    _logger.warning(
                         "[BTA] breakdown node_status emit failed (visualization only): %s", _ebd
                     )
         except Exception as _e:
-            import logging as _log
-            _log.getLogger(__name__).warning(
+            _logger.warning(
                 "[BTA] graph topology emit failed (visualization only): %s", _e
             )
 
@@ -1050,6 +1059,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # __attrs_post_init__ already called this, but with the default max_expansion_depth=0.
             # We must re-propagate now that we've set max_expansion_depth=1 and new start_nodes.
             self._propagate_expansion_settings()
+
+            # Wire graph event callback BEFORE _arun() so it propagates to
+            # expansion nodes via _propagate_settings_to_subgraph() (workgraph.py:670).
+            # When breakdown returns GraphExpansionResult, _handle_graph_expansion
+            # copies _graph_event_callback from the breakdown node to all worker
+            # nodes — so they emit Running/Completed status events in real-time.
+            if self.graph_reporter is not None:
+                self.set_graph_event_callback(
+                    self._make_graph_status_callback()
+                )
 
             # Run the graph — expansion handles the rest
             result = await WorkGraph._arun(self, inference_input, **kwargs)
@@ -1633,6 +1652,50 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     _original_query=_inf_input,
                     _inference_args=_inference_args,
                 )
+
+                # Emit full topology IMMEDIATELY so the UI shows worker nodes
+                # before they start running. Without this, the UI shows only
+                # "Breakdown: Running" until _arun() returns (after all workers
+                # and aggregator finish), which can be minutes.
+                if _bta.graph_reporter is not None and not _bta._graph_topology_emitted:
+                    try:
+                        from agent_foundation.common.inferencers.graph_events import (
+                            GraphTopologyEvent, NodeStatus,
+                        )
+                        topo_nodes = [
+                            {"id": "breakdown", "label": "Breakdown", "group": None,
+                             "status": NodeStatus.COMPLETED},
+                        ]
+                        topo_edges = []
+                        worker_names = []
+                        for n in subgraph.entry_nodes:
+                            viz_label = getattr(n, "_viz_label", n.name)
+                            topo_nodes.append({
+                                "id": n.name, "label": viz_label,
+                                "group": getattr(n, "group", None),
+                                "status": NodeStatus.PENDING,
+                            })
+                            topo_edges.append({"source": "breakdown", "target": n.name})
+                            worker_names.append(n.name)
+                        for n in subgraph.nodes:
+                            if n not in subgraph.entry_nodes:
+                                viz_label = getattr(n, "_viz_label", n.name)
+                                topo_nodes.append({
+                                    "id": n.name, "label": viz_label,
+                                    "group": getattr(n, "group", None),
+                                    "status": NodeStatus.PENDING,
+                                })
+                                for wn in worker_names:
+                                    topo_edges.append({"source": wn, "target": n.name})
+
+                        topo = GraphTopologyEvent(
+                            nodes=topo_nodes, edges=topo_edges, layout="horizontal",
+                        )
+                        _bta._pending_topology = topo
+                        await _bta._emit_pending_graph_topology()
+                        _bta._graph_topology_emitted = True
+                    except Exception as _e:
+                        _logger.warning("[BTA] early topology emit failed: %s", _e)
 
                 # Determine expansion_id
                 has_aggregator = not _bta.disable_aggregator and _bta.aggregator_inferencer is not None
