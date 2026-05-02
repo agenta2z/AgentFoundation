@@ -8,11 +8,13 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
 from attr import attrib, attrs
 
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 
 
 @attrs
-class TerminalInferencerBase(InferencerBase):
+class TerminalInferencerBase(TemplatedInferencerBase):
     """
     Abstract base class for executing terminal commands as inference.
 

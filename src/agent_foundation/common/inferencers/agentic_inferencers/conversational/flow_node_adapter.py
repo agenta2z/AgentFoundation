@@ -31,6 +31,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 from agent_foundation.ui.interactive_base import InteractiveBase
 
 logger = logging.getLogger(__name__)
@@ -66,12 +69,14 @@ def zero_list_is_empty(x: Any) -> bool:
 
 
 @attrs(slots=False, kw_only=True)
-class ConversationalFlowNodeAdapter(InferencerBase):
+class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
     """Flow-side adapter that lets a ConversationalInferencer act as a node.
 
-    Inherits InferencerBase so it plugs into BTA/PTI/LWI as a standard
-    child inferencer with zero changes to flow code. Overrides _ainfer()
-    to delegate to run_agentic_loop().
+    Inherits TemplatedInferencerBase so it plugs into BTA/PTI/LWI as a standard
+    leaf-like child inferencer with full template-rendering support — the flow
+    parent renders the inference_input via this adapter's `template_manager`
+    in `_ainfer_single()` (upstream), then `_ainfer()` (overridden below)
+    delegates to `run_agentic_loop()`.
 
     The flow-level template rendering happens in _ainfer_single() (upstream
     of _ainfer), so inference_input arrives already rendered. This becomes

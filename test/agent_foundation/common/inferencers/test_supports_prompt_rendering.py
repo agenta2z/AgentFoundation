@@ -64,13 +64,21 @@ class TestInferencerBaseProperty(unittest.TestCase):
     def test_false_by_default(self):
         """Without template_manager, supports_prompt_rendering is False."""
         # We can't instantiate InferencerBase directly (abstract), so test
-        # via DualInferencer with no prompt_formatter (doesn't set template_manager)
+        # via DualInferencer with no prompt_formatter.
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer(),
             review_inferencer=_make_mock_inferencer(),
         )
-        # The base class attribute template_manager should be None
-        self.assertIsNone(dual.template_manager)
+        # After the TemplatedInferencerBase refactor, orchestrators (Dual,
+        # BTA, LWI) no longer carry the `template_manager` field — that lives
+        # on TemplatedInferencerBase, which they don't inherit from. The
+        # architectural intent is exactly that orchestrators have no template
+        # state at all (cascade injection naturally skips them).
+        self.assertFalse(
+            hasattr(dual, "template_manager"),
+            "DualInferencer should NOT have template_manager — it's an "
+            "orchestrator and shouldn't carry template state.",
+        )
 
 
 # ---------------------------------------------------------------------------

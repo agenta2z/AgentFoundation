@@ -435,11 +435,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         if isinstance(self.logger, str) and self.logger == "auto" and self._workspace:
             self._normalize_loggers()
 
-        # BTA is an orchestrator — it should NOT render its own inference_input
-        # through a template (_render_prompt override below handles this).
-        # Keep template_manager set so _finalize_output can write the BTA's
-        # output file (e.g., role_document.md) to workspace/outputs/.
-        self.template_key = ""
+        # BTA is an orchestrator — it does NOT render its own inference_input.
+        # After the TemplatedInferencerBase refactor, BTA inherits InferencerBase
+        # directly (no template_manager / template_key fields, and InferencerBase's
+        # `_render_prompt` is a no-op stub returning input unchanged). The previous
+        # `template_key = ""` line and `_render_prompt` override are no longer
+        # needed. `_finalize_output` is now gated on output_path + has_local_access
+        # (workspace concern, not template concern), so BTA's role_document.md /
+        # aggregation_report.md output still gets written.
 
         # --- Expansion-driven (new) implementation support ---
         # Cache for sub-queries used by subgraph_registry on resume.
@@ -453,14 +456,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self.subgraph_registry = self.subgraph_registry or {}
         self.subgraph_registry["bta_diamond"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
         self.subgraph_registry["bta_workers"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
-
-    def _render_prompt(self, inference_input: Any) -> Any:
-        """BTA is an orchestrator — it never renders its own inference_input.
-
-        The inference_input (task description) is passed directly to the
-        breakdown inferencer, which applies its own template_manager.
-        """
-        return inference_input
 
     # === MRO safety: block run()/arun() ===
 

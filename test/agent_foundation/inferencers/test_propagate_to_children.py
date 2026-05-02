@@ -1,4 +1,4 @@
-"""Tests for InferencerBase._propagate_to_children() runtime context propagation.
+"""Tests for TemplatedInferencerBase._propagate_to_children() runtime context propagation.
 
 Covers:
 - Direct InferencerBase children (attrs fields)
@@ -9,6 +9,11 @@ Covers:
 - Parent-wins semantics (runtime context overrides yaml defaults)
 - Multi-level nesting (3+ levels)
 - Edge cases: empty feed, None children, non-matching attrs, frozen partial keywords
+
+Note: After the TemplatedInferencerBase refactor, the template_extra_feed
+field and _propagate_to_children logic live on TemplatedInferencerBase rather
+than InferencerBase. The StubInferencer here inherits from
+TemplatedInferencerBase so it has those fields/methods available for testing.
 """
 
 import functools
@@ -18,14 +23,19 @@ import pytest
 from attr import attrib, attrs
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 
 
 # ---------------------------------------------------------------------------
-# Minimal concrete InferencerBase for testing (must implement _infer)
+# Minimal concrete TemplatedInferencerBase for testing (must implement _infer).
+# Inherits TemplatedInferencerBase so template_extra_feed + _propagate_to_children
+# are available — these moved off InferencerBase in the templated-base refactor.
 # ---------------------------------------------------------------------------
 
 @attrs
-class StubInferencer(InferencerBase):
+class StubInferencer(TemplatedInferencerBase):
     child: "InferencerBase" = attrib(default=None)
     children_list: list = attrib(factory=list)
     children_dict: dict = attrib(factory=dict)

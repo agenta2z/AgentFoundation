@@ -2,7 +2,9 @@ from typing import Any, Union, Dict, Callable
 
 from attr import attrs, attrib
 
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 
 import logging
 
@@ -10,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 @attrs
-class ApiInferencerBase(InferencerBase):
+class ApiInferencerBase(TemplatedInferencerBase):
     """
     A base class for API-based inference, extending `InferencerBase` with remote request functionality.
 

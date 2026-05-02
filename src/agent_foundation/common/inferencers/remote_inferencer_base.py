@@ -3,12 +3,14 @@ from typing import Any, Dict, Union
 
 from attr import attrib, attrs
 
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 from rich_python_utils.string_utils import add_prefix
 
 
 @attrs
-class RemoteInferencerBase(InferencerBase):
+class RemoteInferencerBase(TemplatedInferencerBase):
     """
     Base class for implementing remote inference logic.
 

@@ -61,6 +61,11 @@ register_alias(
     "inferencer",
 )
 register_alias(
+    "PTI",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer.PlanThenImplementInferencer",
+    "inferencer",
+)
+register_alias(
     "RovoChat",
     f"{_P}.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer.RovoChatInferencer",
     "inferencer",

@@ -134,15 +134,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
     workspace: Optional[Any] = attrib(default=None)
 
     # === Template-based prompt rendering (opt-in) ===
-    # When template_manager is set, inference_input is treated as the raw
-    # user query.  Before reaching _infer(), the base class renders a Jinja2
-    # template via template_manager, binding the raw input to {{ input }}.
-    # This eliminates the need for PromptWrapperInferencer in most cases.
-    template_manager: Optional[Any] = attrib(default=None)
-    template_key: str = attrib(default="")
-    template_root_space: Optional[str] = attrib(default=None)
-    template_extra_feed: dict = attrib(factory=dict)
-    template_variables: dict = attrib(factory=dict)
+    # Template fields (template_manager, template_key, template_root_space,
+    # template_extra_feed, template_variables) live on TemplatedInferencerBase
+    # (a subclass of InferencerBase). Inferencers that consume their own input
+    # via an LLM call (CLI/API/streaming leaves and their intermediate bases
+    # ApiInferencerBase / StreamingInferencerBase / RemoteInferencerBase /
+    # TerminalInferencerBase) inherit from TemplatedInferencerBase. Orchestrators
+    # (BTA, Dual, LWI, PTI, MultiFlow, MultiFlowDual, Conversational*) inherit
+    # from InferencerBase directly and don't carry template state — cascade
+    # injection of `_template_manager` naturally skips them.
+    #
+    # Method names `_render_prompt`, `_propagate_to_children`, and
+    # `supports_prompt_rendering` exist on InferencerBase as no-op stubs so
+    # `_ainfer_single`'s unconditional calls to them work for orchestrators.
+    # TemplatedInferencerBase overrides each with its real implementation.
 
     # --- _workspace property: auto-configures on assignment ---
 
@@ -155,6 +160,63 @@ class InferencerBase(Debuggable, Resumable, ABC):
         object.__setattr__(self, "_InferencerBase__workspace", value)
         if value is not None:
             self._configure_for_workspace(value)
+            self._propagate_workspace_to_children(value)
+
+    def _propagate_workspace_to_children(self, parent_workspace):
+        """When a workspace is assigned, give each direct child inferencer a
+        child workspace.
+
+        Each direct child ``InferencerBase`` reachable via
+        ``_for_each_child_inferencer`` gets ``parent_workspace.child(<slot>)``
+        assigned to its ``_workspace`` — but only if the child doesn't already
+        have a workspace (respects explicit pre-assignment by the caller, e.g.
+        BTA's ``worker._workspace = self._workspace.child(f"worker_{i}")``).
+
+        The child's own setter triggers recursively, so the propagation
+        cascades down the entire tree without each subclass needing to
+        re-implement it. This is symmetric with how ``_propagate_to_children``
+        already cascades ``template_extra_feed``.
+
+        Skips ``functools.partial`` factories (e.g. BTA's ``worker_factory``);
+        their instances get workspaces at runtime when the factory is invoked.
+
+        Note: only walks direct InferencerBase attrs, dict values, and list
+        elements (the patterns ``_for_each_child_inferencer`` covers).
+        Inferencers nested inside arbitrary dict structures (e.g. MFDual's
+        ``flow_configs`` list-of-dicts) are not reached by this walker;
+        those orchestrators are responsible for assigning their own children.
+        """
+        seen_ids: set = set()
+
+        def _on_instance(child, field_name, key):
+            if not isinstance(child, InferencerBase):
+                return  # duck-typed callables don't have _workspace
+            if getattr(child, "_workspace", None) is not None:
+                return  # respect explicit pre-assignment
+            if id(child) in seen_ids:
+                return  # dedup if same instance is in multiple slots
+            seen_ids.add(id(child))
+            child_name = field_name if key is None else f"{field_name}_{key}"
+            try:
+                child_ws = parent_workspace.child(child_name)
+                # Critical: create the on-disk dirs before assigning. Otherwise
+                # `_configure_for_workspace` will set working_dir to a
+                # non-existent path, and any subprocess inferencer (e.g.
+                # ClaudeCodeCli) will fail with NotADirectoryError when it
+                # tries to launch with cwd=workspace.root. Mirrors BTA's
+                # explicit `worker_ws.ensure_dirs()` before assignment.
+                child_ws.ensure_dirs()
+                child._workspace = child_ws
+            except Exception as exc:  # noqa: BLE001 — best-effort propagation
+                _logger.debug(
+                    "Workspace propagation to %s[%r]=%s skipped: %s",
+                    field_name, key, type(child).__name__, exc,
+                )
+
+        def _on_partial(partial, field_name, key):
+            return None  # factories assigned at runtime; don't mutate
+
+        self._for_each_child_inferencer(_on_instance, _on_partial)
 
     def _configure_for_workspace(self, workspace):
         """Auto-configure infrastructure when a workspace is assigned.
@@ -353,32 +415,15 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 on_instance(value, field.name, None)
 
     def _propagate_to_children(self):
-        """Push template_extra_feed to child inferencers found in attrs fields.
+        """Default: no-op. Overridden in TemplatedInferencerBase to propagate
+        ``template_extra_feed`` to child inferencers via
+        ``_for_each_child_inferencer``.
 
-        Parent's keys take precedence (update semantics) — runtime context
-        set by executor.execute() overrides yaml defaults on children.
-        Each InferencerBase does this 1 layer; recursive inference naturally
-        propagates through the full hierarchy.
+        Called unconditionally from ``_infer_single`` / ``_ainfer_single``;
+        the no-op default is needed for orchestrators (Dual, BTA, LWI, etc.)
+        that inherit from InferencerBase but have no template state.
         """
-        if not self.template_extra_feed:
-            return
-
-        import functools
-
-        feed = self.template_extra_feed
-        attr_name = TEMPLATE_EXTRA_FEED_ATTR
-
-        def _on_instance(child, field_name, key):
-            child.template_extra_feed.update(feed)
-
-        def _on_partial(p, field_name, key):
-            existing = p.keywords.get(attr_name, {})
-            merged = {**existing, **feed}
-            return functools.partial(
-                p.func, **{**p.keywords, attr_name: merged}
-            )
-
-        self._for_each_child_inferencer(_on_instance, _on_partial)
+        return None
 
     @property
     def secret_key(self) -> str:
@@ -522,108 +567,53 @@ class InferencerBase(Debuggable, Resumable, ABC):
         ]
 
     # -- Template rendering & output finalization -------------------------
-
-    def _build_template_feed(self, inference_input: str) -> dict:
-        """Build the template variable feed dict.
-
-        Merges (in priority order, lowest first):
-        1. ``template_variables`` — variant selectors resolved to file content
-           via ``template_manager.load_variable()``.  E.g.,
-           ``{"task_preamble": "skill_tool_creation"}`` loads
-           ``_variables/task_preamble/skill_tool_creation.jinja2``.
-        2. ``template_extra_feed`` — literal key-value overrides.
-        3. ``{{ input }}`` bound to ``inference_input``.
-        4. ``output_path`` (if inferencer has local file access).
-
-        Override this method to customize feed construction (e.g., add
-        dynamic variables from external sources).
-        """
-        feed: dict = {}
-        # Resolve template_variables: unified file-variant + literal support.
-        #   "skill_tool_creation"   → auto: try file, fall back to literal
-        #   "@skill_tool_creation"  → force file, error if not found
-        #   "=literal text"         → force literal, skip file check
-        if self.template_variables and self.template_manager:
-            for var_name, value in self.template_variables.items():
-                if not value:
-                    feed[var_name] = ""
-                elif not isinstance(value, str):
-                    feed[var_name] = value
-                elif value.startswith("@"):
-                    variant = value[1:]
-                    if hasattr(self.template_manager, "load_variable"):
-                        loaded = self.template_manager.load_variable(
-                            var_name, variant, self.template_root_space
-                        )
-                        if loaded is None:
-                            raise FileNotFoundError(
-                                f"template_variables: no variable file for "
-                                f"@{variant} (var={var_name}, space={self.template_root_space})"
-                            )
-                        feed[var_name] = loaded
-                    else:
-                        feed[var_name] = variant
-                elif value.startswith("="):
-                    feed[var_name] = value[1:]
-                elif hasattr(self.template_manager, "load_variable"):
-                    loaded = self.template_manager.load_variable(
-                        var_name, value, self.template_root_space
-                    )
-                    feed[var_name] = loaded if loaded is not None else value
-                else:
-                    feed[var_name] = value
-        feed.update(self.template_extra_feed)
-        feed["input"] = inference_input
-        resolved = self.resolve_output_path()
-        if resolved and os.path.isabs(resolved) and self.has_local_access:
-            feed["output_path"] = resolved
-        return feed
+    #
+    # `_render_prompt`, `_build_template_feed`, `_propagate_to_children`,
+    # and `supports_prompt_rendering` are template-rendering machinery; their
+    # real implementations live on TemplatedInferencerBase. The stubs below
+    # exist so `_ainfer_single` / `_infer_single` can call them
+    # unconditionally on every inferencer (including orchestrators like Dual,
+    # BTA, LWI that inherit InferencerBase directly without templates).
 
     @property
     def supports_prompt_rendering(self) -> bool:
-        """Whether this inferencer has prompt/template rendering capability.
-
-        Returns True when the inferencer is configured with a template_manager
-        (for base class auto-rendering) or when a subclass overrides this to
-        indicate its own prompt rendering support.
-        """
-        return self.template_manager is not None
+        """Default: False. Overridden in TemplatedInferencerBase."""
+        return False
 
     def _render_prompt(self, inference_input: Any) -> Any:
-        """Render a template-based prompt if template_manager is configured.
+        """Default: pass through unchanged. Overridden in TemplatedInferencerBase
+        to render via ``template_manager``.
 
-        Called by ``_infer_single`` / ``_ainfer_single`` after
-        ``input_preprocessor`` and before ``_infer``.  When
-        ``template_manager`` is None, returns ``inference_input`` unchanged.
+        Called unconditionally from ``_ainfer_single`` / ``_infer_single``.
+        Orchestrators (Dual, BTA, LWI) inherit this no-op behavior and pass
+        their ``inference_input`` straight through to their children.
         """
-        if self.template_manager is None:
-            return inference_input
-        feed = self._build_template_feed(inference_input)
-        return self.template_manager(
-            self.template_key,
-            active_template_root_space=self.template_root_space,
-            **feed,
-        )
+        return inference_input
 
     def _finalize_output(self, response: Any) -> Any:
-        """Post-process output when template_manager is active.
+        """Post-process output: extract <Response> and write to output_path.
 
-        When the inferencer lacks local file access but has an
-        ``output_path``, extracts ``<Response>``-delimited content from
-        the response, writes it to the resolved output path, and returns
-        the cleaned text.  This mirrors what PromptWrapperInferencer
-        previously did in ``_save_response_if_needed``.
+        Gate: ``has_local_access=True`` OR ``output_path`` unresolved →
+        no-op (return response unchanged). Otherwise: extract
+        ``<Response>``-delimited content and write to the resolved
+        absolute output path; return cleaned text.
 
         Called by ``_infer_single`` / ``_ainfer_single`` after ``_infer``
         returns but before ``response_post_processor``.
+
+        The gate is workspace-related (``output_path`` + ``has_local_access``),
+        not template-related. The previous gate ``template_manager is None``
+        was a coincidence — file-writing is conceptually independent of
+        whether the inferencer rendered through a template. This decoupling
+        lets orchestrators that don't render templates (e.g., BTA) still
+        write their aggregated output to ``workspace/outputs/<file>``.
         """
-        if self.template_manager is None:
+        if self.has_local_access:
+            # Local-access inferencer writes the file itself (e.g.,
+            # ClaudeCodeCli via Bash/Edit/Write tools).
             return response
         resolved = self.resolve_output_path()
         if not resolved or not os.path.isabs(resolved):
-            return response
-        if self.has_local_access:
-            # Local-access inferencer writes the file itself
             return response
         # Non-local: extract <Response> content and save to file
         from agent_foundation.common.response_parsers import extract_delimited
@@ -1692,7 +1682,5 @@ class InferencerBase(Debuggable, Resumable, ABC):
 # readable, IDE-friendly, and compile-time validated. The constant is for code
 # that must look up the attribute by name (introspection, partial keyword
 # manipulation, duck-typed protocol checks).
-import attr as _attr
-
-TEMPLATE_EXTRA_FEED_ATTR: str = _attr.fields(InferencerBase).template_extra_feed.name
+TEMPLATE_EXTRA_FEED_ATTR: str = "template_extra_feed"
 
