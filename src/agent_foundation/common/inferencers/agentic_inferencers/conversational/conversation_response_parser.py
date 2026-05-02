@@ -84,14 +84,28 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         for c in choices_raw
     ]
 
-    # Extract optional metadata fields (e.g., view path for artifacts).
-    # The LLM may put these in args directly OR in args.metadata.
+    # Extract optional metadata fields.
     metadata: dict[str, Any] = {}
-    _args_metadata = args.get("metadata", {}) if isinstance(args.get("metadata"), dict) else {}
-    for _meta_key in ("view", "view_label", "yes_label", "no_label"):
-        _val = args.get(_meta_key) or _args_metadata.get(_meta_key)
-        if _val:
-            metadata[_meta_key] = _val
+    for _key in (
+        "view",
+        "view_label",
+        "yes_label",
+        "no_label",
+        "group_id",
+        "on_group_resolve",
+        "on_yes_action",
+        "hide_no_button",
+    ):
+        _val = args.get(_key)
+        if _val is not None and _val != "":
+            metadata[_key] = _val
+
+    # Also accept top-level `metadata` block for forward-compat
+    top_level_meta = data.get("metadata")
+    if isinstance(top_level_meta, dict):
+        for _k, _v in top_level_meta.items():
+            if _v is not None and _v != "":
+                metadata[_k] = _v
 
     # Normalize plural/singular tool type variants.
     # LLM/SOP uses "multiple_choices" but ConversationToolType uses "multiple_choice".

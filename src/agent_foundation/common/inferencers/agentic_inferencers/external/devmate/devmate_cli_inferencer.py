@@ -1,14 +1,62 @@
 """DevMate CLI inferencer for executing DevMate CLI commands."""
 
+import asyncio
 import json
+import logging
 import os
+import re
 import tempfile
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO
+import time
+from pathlib import Path
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
 from attr import attrib, attrs
+from agent_foundation.common.inferencers.agentic_inferencers.common import (
+    InferencerExecutionError,
+    MaxIterationsExhaustedError,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
+    SessionMode,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionInferencerBase,
 )
+
+logger: logging.Logger = logging.getLogger(__name__)
+
+_FATAL_DEVMATE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"ERROR.*StreamingMessageHandler executor failure"),
+    re.compile(r"RECV_TIMEOUT to .*srproxy\.titan\.prod"),
+]
+
+_DEVMATE_LOG_TAIL_BYTES: int = 200_000
+_INTERNAL_FAILURE_WATCHER_POLL_SECONDS: float = 60.0
+_INTERNAL_FAILURE_CACHE_SILENCE_THRESHOLD_SECONDS: float = 120.0
+
+_PORT_FILE_RACE_BACKOFF_SECONDS: float = 2.5
+
+
+def _looks_like_port_file_race(error_text: str) -> bool:
+    return (
+        "ENOENT" in error_text
+        and "port" in error_text.lower()
+    )
+
+
+def _looks_like_max_iterations(error_text: str) -> bool:
+    return (
+        "MAX_ITERATIONS" in error_text
+        and "Max iterations of" in error_text
+        and "reached" in error_text
+    )
+
+
+def _looks_like_tool_use_corruption(error_text: str) -> bool:
+    return (
+        "tool_use" in error_text
+        and "tool_result" in error_text
+        and ("must be followed" in error_text or "orphan" in error_text.lower())
+    )
 
 
 @attrs
@@ -115,7 +163,7 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
     # Existing attributes
     repo_path: Optional[str] = attrib(default=None)
     model_name: str = attrib(default="claude-sonnet-4.5")
-    max_tokens: int = attrib(default=32768)
+    max_tokens: int = attrib(default=65536)
     no_create_commit: bool = attrib(default=True)
     context_files: Optional[List[str]] = attrib(default=None)
 
@@ -126,6 +174,18 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
     config_name: str = attrib(default="freeform")
     privacy_type: Optional[str] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
+
+    # Fault-tolerance attributes
+    use_file_for_large_arg_exceeding_size: Union[bool, int] = attrib(default=100_000)
+    session_mode: SessionMode = attrib(
+        default=SessionMode.SAME_SESSION_ACROSS_ROUNDS,
+        converter=lambda v: SessionMode(v) if isinstance(v, str) else v,
+    )
+    consecutive_error_threshold: int = attrib(default=2)
+    _consecutive_error_count: int = attrib(default=0, init=False)
+    total_timeout_on_internal_error_detection_seconds: float = attrib(default=2400)
+    _internal_failure_detected: bool = attrib(default=False, init=False)
+    _internal_failure_reason: str = attrib(default="", init=False)
 
     # Session management - inherited from StreamingInferencerBase via TerminalSessionInferencerBase:
     #   auto_resume, active_session_id, new_session, anew_session, resume_session, aresume_session
@@ -354,6 +414,13 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
             if trajectory_url:
                 result["trajectory_url"] = trajectory_url
 
+        # Extract finish_reason from diagnostic output
+        finish_reason_match = re.search(
+            r"FinishReason\.([A-Z_]+)", result.get("raw_output", "")
+        )
+        if finish_reason_match:
+            result["finish_reason"] = finish_reason_match.group(1)
+
         # Add error if failed
         if return_code != 0 and "error" not in result:
             result["error"] = (
@@ -512,56 +579,76 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs
     ) -> Dict[str, Any]:
-        """
-        Async inference using CLI subprocess.
-
-        This method provides async execution of the DevMate CLI command,
-        enabling non-blocking I/O during command execution.
-
-        Args:
-            inference_input: The prompt string or dict with 'prompt' key.
-            inference_config: Optional configuration (unused).
-            **kwargs: Additional arguments:
-                - session_id: Session ID for continuation
-                - resume: Whether to resume a previous session
-                - new_session: If True, forces a new session
-
-        Returns:
-            Result dictionary with output, session_id, etc.
-        """
-        # Handle new_session flag
+        """Async inference with session-mode policies and fault-tolerance."""
+        # --- Session-mode policy application ---
         new_session = kwargs.pop("new_session", False)
+        if self.session_mode == SessionMode.NEW_SESSION_PER_CALL:
+            new_session = True
+        elif (
+            self.session_mode == SessionMode.NEW_SESSION_ON_CONSECUTIVE_ERRORS
+            and self._consecutive_error_count >= self.consecutive_error_threshold
+        ):
+            new_session = True
+            self._consecutive_error_count = 0
+
         if new_session:
             self.active_session_id = None
 
-        # Determine session context (same logic as sync _infer)
         session_id = kwargs.get("session_id", self.active_session_id)
         is_resume = kwargs.get("resume", True)
 
-        # If no session to resume and auto_resume is enabled, check for active session
         if session_id is None:
             if self.auto_resume and self.active_session_id:
                 session_id = self.active_session_id
             else:
                 is_resume = False
 
-        # Update kwargs with session info for construct_command
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        # Use parent's _ainfer which calls construct_command and _execute_command_async
         result = await self._ainfer(inference_input, inference_config, **kwargs)
 
-        # Update active session if we got a new session ID
         result_session_id = (
             result.get("session_id") if isinstance(result, dict) else None
         )
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
-            self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Async"
+
+        # --- Fault-tolerance: promote failures to exceptions ---
+        if isinstance(result, dict) and not result.get("success", True):
+            self._consecutive_error_count += 1
+            error_text = result.get("error", "") or ""
+
+            if self.session_mode == SessionMode.NEW_SESSION_ON_ERROR:
+                self.active_session_id = None
+
+            if _looks_like_port_file_race(error_text):
+                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
+
+            if _looks_like_tool_use_corruption(error_text):
+                self.active_session_id = None
+
+            if _looks_like_max_iterations(error_text):
+                self.active_session_id = None
+                import re as _re
+                _m = _re.search(r"Max iterations of (\d+) reached", error_text)
+                raise MaxIterationsExhaustedError(
+                    tool="devmate",
+                    return_code=result.get("return_code"),
+                    stderr=result.get("stderr", "") or "",
+                    error=error_text,
+                    max_iterations=int(_m.group(1)) if _m else None,
+                    session_id=result.get("session_id"),
+                )
+
+            raise InferencerExecutionError(
+                tool="devmate",
+                return_code=result.get("return_code"),
+                stderr=result.get("stderr", "") or "",
+                error=error_text,
             )
 
+        self._consecutive_error_count = 0
         return result
 
     async def ainfer_streaming(

@@ -114,6 +114,9 @@ class ToolDefinition:
     # Used by tool_executor for dispatch and by prompt rendering for docs.
     derived_from: dict[str, Any] | None = None
     source_path: str = ""  # Path to the tool.json file (set by registry)
+    viewable_output_path: str = ""
+    viewable_output_label: str = ""
+    arg_template_rules: list[dict[str, str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -143,6 +146,12 @@ class ToolDefinition:
             d["agent_enabled"] = False
         if self.derived_from:
             d["derived_from"] = self.derived_from
+        if self.viewable_output_path:
+            d["viewable_output_path"] = self.viewable_output_path
+        if self.viewable_output_label:
+            d["viewable_output_label"] = self.viewable_output_label
+        if self.arg_template_rules is not None:
+            d["arg_template_rules"] = self.arg_template_rules
         return d
 
     @classmethod
@@ -166,4 +175,7 @@ class ToolDefinition:
             usage_guidance=data.get("usage_guidance", ""),
             agent_enabled=data.get("agent_enabled", True),
             derived_from=data.get("derived_from"),
+            viewable_output_path=data.get("viewable_output_path", ""),
+            viewable_output_label=data.get("viewable_output_label", ""),
+            arg_template_rules=data.get("arg_template_rules"),
         )

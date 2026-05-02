@@ -8,20 +8,29 @@ Designed for use with DualInferencer's ``response_parser`` parameter.
 """
 
 import re
+from typing import Optional
+
+
+_PROMPT_ECHO_MARKERS = ("**IMPORTANT", "wrap your response")
 
 
 def extract_delimited(
     raw: str,
     open_tag: str = "<Response>",
     close_tag: str = "</Response>",
-) -> str:
+) -> Optional[str]:
     """Extract content between delimiter tags.
 
     Searches for content enclosed by ``open_tag`` and ``close_tag``.
-    If multiple occurrences exist, returns the content from the **last**
-    match (to handle cases where the agent outputs multiple attempts).
+    Iterates matches in reverse order ("most-recent-wins" semantic) and
+    returns the first match whose content is NOT a prompt-template echo.
 
-    If no tags are found, returns the full raw string unchanged (passthrough).
+    Three return modes:
+
+    1. **No matches at all** -- returns the raw string unchanged (passthrough).
+    2. **One or more clean matches** -- returns the most-recent clean match's
+       content (stripped).
+    3. **Matches exist but ALL are prompt-template echoes** -- returns ``None``.
 
     Args:
         raw: The full raw output string from an inferencer.
@@ -29,16 +38,17 @@ def extract_delimited(
         close_tag: Closing delimiter tag. Defaults to ``</Response>``.
 
     Returns:
-        The extracted content (stripped of leading/trailing whitespace),
-        or the original string if no delimiters are found.
+        The extracted content (stripped of leading/trailing whitespace), the
+        raw string (passthrough -- no matches), or ``None`` (all matches were
+        prompt-echo -- hard failure).
     """
     pattern = re.escape(open_tag) + r"([\s\S]*?)" + re.escape(close_tag)
     matches = list(re.finditer(pattern, raw))
-    if matches:
-        return matches[-1].group(1).strip()
-    # Fallback: opening tag exists but no closing tag (truncated response).
-    # Extract from the last opening tag to end of string.
-    last_open = raw.rfind(open_tag)
-    if last_open >= 0:
-        return raw[last_open + len(open_tag):].strip()
-    return raw
+    if not matches:
+        return raw
+    for match in reversed(matches):
+        content = match.group(1).strip()
+        if all(marker in content for marker in _PROMPT_ECHO_MARKERS):
+            continue
+        return content
+    return None

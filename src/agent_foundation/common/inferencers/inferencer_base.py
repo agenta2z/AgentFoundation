@@ -1110,8 +1110,15 @@ class InferencerBase(Debuggable, Resumable, ABC):
             infer() atomizes results via iter__() before merging — a different
             input shape. Users can apply their own merging on the returned list.
         """
-        from rich_python_utils.mp_utils.mp_target import MPTarget
-        from rich_python_utils.mp_utils.parallel_process import parallel_process_by_pool
+        try:
+            from rich_python_utils.mp_utils.mp_target import MPTarget
+            from rich_python_utils.mp_utils.parallel_process import parallel_process_by_pool
+        except ImportError as _e:
+            raise NotImplementedError(
+                "parallel_infer requires rich_python_utils.mp_utils which is not "
+                "available in this environment. Install rich_python_utils with the "
+                "mp extra, or use sequential infer() calls instead."
+            ) from _e
 
         inference_inputs = list(inference_inputs)
         if not inference_inputs:
@@ -1437,6 +1444,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 args=retry_args,
                 default_return_or_raise=self.default_return_or_raise,
                 on_retry_callback=on_retry_callback,
+                non_retryable_exceptions=(
+                    asyncio.LimitOverrunError,
+                    asyncio.IncompleteReadError,
+                ),
                 total_timeout=effective_total_timeout,
                 attempt_timeout=effective_attempt_timeout,
                 fallback_func=effective_fallback_func,

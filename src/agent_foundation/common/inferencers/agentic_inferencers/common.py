@@ -314,6 +314,41 @@ class DualInferencerResponse(InferencerResponse):
 DEFAULT_RESPONSE_TYPES = Union[str, InferencerResponse, InputAndResponse]
 
 
+class InferencerExecutionError(RuntimeError):
+    """Raised when a terminal inferencer returns a structured failure result."""
+
+    def __init__(
+        self,
+        tool: str = "<terminal-inferencer>",
+        return_code: Optional[int] = None,
+        stderr: str = "",
+        error: str = "",
+    ) -> None:
+        self.tool = tool
+        self.return_code = return_code
+        self.stderr = stderr
+        self.error = error
+        msg = f"{tool} failed (return_code={return_code}): {error or stderr or '<no error message>'}"
+        super().__init__(msg)
+
+
+class MaxIterationsExhaustedError(InferencerExecutionError):
+    """Raised when a terminal inferencer's per-session iteration counter is
+    exhausted. Subclass of ``InferencerExecutionError`` for backward compatibility.
+    """
+
+    def __init__(
+        self,
+        *args,
+        max_iterations: Optional[int] = None,
+        session_id: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.max_iterations = max_iterations
+        self.session_id = session_id
+
+
 def extract_response_text(result):
     """Extract text from various inferencer result types.
 
@@ -321,6 +356,11 @@ def extract_response_text(result):
     - DualInferencerResponse → str(result.base_response)
     - InferencerResponse → str(result.select_response())
     - AgenticResult → result.text
+    - Terminal-inferencer result dict (has ``success`` key) → ``output`` on
+      success; raise ``InferencerExecutionError`` on failure.
+    - Plain dict without ``success`` key → returns the first matching string
+      value among ``output``/``raw_output``/``content`` keys; raises
+      ``InferencerExecutionError`` for unrecognized dict shapes.
     - Other → str(result)
 
     IMPORTANT: DualInferencerResponse check must come BEFORE InferencerResponse
@@ -330,7 +370,6 @@ def extract_response_text(result):
         return str(result.base_response)
     if isinstance(result, InferencerResponse):
         return str(result.select_response())
-    # Lazy import to avoid circular dependency (common.py is base layer)
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
             AgenticResult,
@@ -339,4 +378,42 @@ def extract_response_text(result):
             return result.text
     except ImportError:
         pass
+    if isinstance(result, dict) and "success" in result:
+        if not result.get("success", False):
+            error_text = result.get("error", "") or ""
+            if (
+                "MAX_ITERATIONS" in error_text
+                and "Max iterations of" in error_text
+                and "reached" in error_text
+            ):
+                import re as _re
+
+                _m = _re.search(r"Max iterations of (\d+) reached", error_text)
+                raise MaxIterationsExhaustedError(
+                    tool=result.get("tool") or "<terminal-inferencer>",
+                    return_code=result.get("return_code"),
+                    stderr=result.get("stderr", "") or "",
+                    error=error_text,
+                    max_iterations=int(_m.group(1)) if _m else None,
+                    session_id=result.get("session_id"),
+                )
+            raise InferencerExecutionError(
+                tool=result.get("tool") or "<terminal-inferencer>",
+                return_code=result.get("return_code"),
+                stderr=result.get("stderr", "") or "",
+                error=error_text,
+            )
+        return result.get("output", "") or ""
+    if isinstance(result, dict):
+        for key in ("output", "raw_output", "content"):
+            value = result.get(key)
+            if isinstance(value, str):
+                return value
+        raise InferencerExecutionError(
+            tool="<unknown_dict_shape>",
+            error=(
+                "extract_response_text received a dict without a recognized "
+                f"shape; keys={sorted(result.keys())[:8]!r}"
+            ),
+        )
     return str(result)

@@ -10,11 +10,11 @@ and tool argument collection.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 
-# Conversation tool type constants
-class ConversationToolType:
+class ConversationToolType(str, Enum):
     CLARIFICATION = "clarification"
     SINGLE_CHOICE = "single_choice"
     MULTIPLE_CHOICE = "multiple_choice"

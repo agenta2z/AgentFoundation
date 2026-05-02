@@ -104,6 +104,24 @@ def __getattr__(name):
         )
 
         return RovoDevServeInferencer
+    elif name == "ToolAsInferencer":
+        from agent_foundation.common.inferencers.agentic_inferencers.tool_inferencers import (
+            ToolAsInferencer,
+        )
+
+        return ToolAsInferencer
+    elif name == "ToolInferencerResponse":
+        from agent_foundation.common.inferencers.agentic_inferencers.tool_inferencers import (
+            ToolInferencerResponse,
+        )
+
+        return ToolInferencerResponse
+    elif name == "make_tool_chain":
+        from agent_foundation.common.inferencers.agentic_inferencers.tool_inferencers import (
+            make_tool_chain,
+        )
+
+        return make_tool_chain
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -122,5 +140,8 @@ __all__ = [
     "RovoDevCliInferencer",
     "RovoDevServeInferencer",
     "SDKInferencerResponse",
+    "ToolAsInferencer",
+    "ToolInferencerResponse",
     "WorkflowStepConfig",
+    "make_tool_chain",
 ]

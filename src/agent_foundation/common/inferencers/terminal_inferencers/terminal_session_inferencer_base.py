@@ -17,6 +17,8 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+
+_MAX_STDOUT_LINE_BYTES: int = 16 * 1024 * 1024  # 16 MB
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
     TerminalInferencerResponse,
 )
@@ -250,10 +252,18 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             Decoded stdout lines.
         """
         exit_task = asyncio.create_task(self._poll_process_exit(process.pid))
+        _fell_back_to_chunked = False
 
         try:
             while True:
-                read_task = asyncio.create_task(process.stdout.readline())
+                if _fell_back_to_chunked:
+                    read_task = asyncio.create_task(
+                        process.stdout.read(_MAX_STDOUT_LINE_BYTES)
+                    )
+                else:
+                    read_task = asyncio.create_task(
+                        process.stdout.readuntil(b"\n")
+                    )
 
                 done, _ = await asyncio.wait(
                     {read_task, exit_task},
@@ -261,7 +271,21 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
                 )
 
                 if read_task in done:
-                    line = read_task.result()
+                    try:
+                        line = read_task.result()
+                    except asyncio.IncompleteReadError as e:
+                        if e.partial:
+                            yield e.partial.decode("utf-8", errors="replace")
+                        break
+                    except asyncio.LimitOverrunError:
+                        logger.warning(
+                            "[%s] subprocess stdout line exceeded %d-byte "
+                            "buffer; falling back to chunked read",
+                            self.__class__.__name__,
+                            _MAX_STDOUT_LINE_BYTES,
+                        )
+                        _fell_back_to_chunked = True
+                        continue
                     if not line:  # EOF
                         break
                     yield line.decode("utf-8", errors="replace")
@@ -325,6 +349,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.working_dir,
+            limit=_MAX_STDOUT_LINE_BYTES,
         )
 
         collected_stdout: list[str] = []

@@ -72,6 +72,27 @@ class DevmateConfig(str, Enum):
     AGENT_FOUNDATION_AGENTIC = f"{_DEVMATE_CONFIG_DIR}/freeform_agentic"
 
 
+class SessionMode(Enum):
+    """Controls when DevmateCliInferencer starts a fresh devmate session.
+
+    Trade-off: session reuse preserves tool-use context (model "remembers"
+    cached file reads, prior tool results) but accumulates per-session caps
+    (``max_iterations``, ``max_time_mins``) and risks state corruption.
+    """
+
+    SAME_SESSION_ACROSS_ROUNDS = "same"
+    """Reuse active_session_id across all calls."""
+
+    NEW_SESSION_PER_CALL = "per_call"
+    """Fresh session for every infer/ainfer call."""
+
+    NEW_SESSION_ON_ERROR = "on_error"
+    """Reuse session on success; reset on any InferencerExecutionError."""
+
+    NEW_SESSION_ON_CONSECUTIVE_ERRORS = "on_consecutive_errors"
+    """Reuse normally; reset after N consecutive errors (default N=2)."""
+
+
 _logger = logging.getLogger(__name__)
 
 
