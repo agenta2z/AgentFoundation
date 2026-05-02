@@ -110,7 +110,11 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Development
+# Development directories (tracked on dev branch, ignored on main)
+_dev/
+_archive/
+_docs/
+_plan/
 
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
@@ -152,3 +156,4 @@ _tmp/
 _logs/
 
 # Dev files with hardcoded secrets
+**/bedrock_inferencers/_dev/
