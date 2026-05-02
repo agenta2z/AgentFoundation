@@ -324,7 +324,7 @@ async def _yield_filter(
 
 **References:**
 - `RovoChatInferencer` — streaming HTTP pattern
-- `ClaudeCodeInferencer` — connection lifecycle pattern
+- `ClaudeCodeSdkInferencer` — connection lifecycle pattern
 
 #### Attributes
 

@@ -1,13 +1,13 @@
 # Claude Code Inferencer Tests
 
-This directory contains tests for `ClaudeCodeInferencer`, which wraps the Claude Code SDK for agentic tasks.
+This directory contains tests for `ClaudeCodeSdkInferencer`, which wraps the Claude Code SDK for agentic tasks.
 
 ## Test Files
 
 | File | Type | Description | Status |
 |------|------|-------------|--------|
-| `test_claude_code_inferencer.py` | Unit | Mock-based unit tests | ✅ |
-| `test_claude_code_inferencer_real.py` | Integration | **Real SDK calls** | ✅ **ALL 5 PASSED** |
+| `test_claude_code_sdk_inferencer.py` | Unit | Mock-based unit tests | ✅ |
+| `test_claude_code_sdk_inferencer_real.py` | Integration | **Real SDK calls** | ✅ **ALL 5 PASSED** |
 | `test_claude_code_quick.py` | Sanity | Quick import/init checks | ✅ |
 
 ---
@@ -18,22 +18,22 @@ This directory contains tests for `ClaudeCodeInferencer`, which wraps the Claude
 
 ```bash
 # All tests (sync + async) with default query
-buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real
+buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real
 
 # With custom query
-buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --query "What is Python?"
+buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --query "What is Python?"
 
 # Sync mode only
-buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode sync
+buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode sync
 
 # Async mode only
-buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode async
+buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode async
 ```
 
 ### Run Unit Tests
 
 ```bash
-buck2 test @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer
+buck2 test @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer
 ```
 
 ---
@@ -140,7 +140,7 @@ This allows multiple consecutive sync calls to work correctly.
 For optimal performance with multiple queries, use the async context manager:
 
 ```python
-async with ClaudeCodeInferencer(root_folder="/tmp") as inferencer:
+async with ClaudeCodeSdkInferencer(root_folder="/tmp") as inferencer:
     # Single connection, multiple queries
     result1 = await inferencer.ainfer("Query 1")
     result2 = await inferencer.ainfer("Query 2")
@@ -185,7 +185,7 @@ deps = [
 
 Use `--prefer-remote` flag:
 ```bash
-buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real
+buck2 run --prefer-remote //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real
 ```
 
 ### "No module named 'claude_agent_sdk'"

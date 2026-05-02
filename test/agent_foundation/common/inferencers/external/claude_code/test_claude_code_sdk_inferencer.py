@@ -1,23 +1,23 @@
-"""Tests for ClaudeCodeInferencer."""
+"""Tests for ClaudeCodeSdkInferencer."""
 
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_inferencer import (
-    ClaudeCodeInferencer,
+from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (
+    ClaudeCodeSdkInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
 
 
-class ClaudeCodeInferencerInitTest(unittest.TestCase):
-    """Test initialization of ClaudeCodeInferencer."""
+class ClaudeCodeSdkInferencerInitTest(unittest.TestCase):
+    """Test initialization of ClaudeCodeSdkInferencer."""
 
     def test_default_initialization(self):
         """Test inferencer can be created with default values."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         self.assertIsNone(inferencer.root_folder)
         self.assertEqual(inferencer.system_prompt, "")
@@ -27,7 +27,7 @@ class ClaudeCodeInferencerInitTest(unittest.TestCase):
 
     def test_custom_initialization(self):
         """Test inferencer with custom parameters."""
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/path/to/repo",
             system_prompt="Custom prompt",
             idle_timeout_seconds=900,
@@ -42,34 +42,34 @@ class ClaudeCodeInferencerInitTest(unittest.TestCase):
         self.assertEqual(inferencer.model_id, "claude-3")
 
 
-class ClaudeCodeInferencerExtractPromptTest(unittest.TestCase):
+class ClaudeCodeSdkInferencerExtractPromptTest(unittest.TestCase):
     """Test _extract_prompt method."""
 
     def test_extract_prompt_from_string(self):
         """Test prompt extraction from string input."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
         result = inferencer._extract_prompt("Hello world")
         self.assertEqual(result, "Hello world")
 
     def test_extract_prompt_from_dict_with_prompt_key(self):
         """Test prompt extraction from dict with prompt key."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
         result = inferencer._extract_prompt({"prompt": "Hello from dict"})
         self.assertEqual(result, "Hello from dict")
 
     def test_extract_prompt_from_dict_without_prompt_key(self):
         """Test prompt extraction from dict without prompt key."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
         result = inferencer._extract_prompt({"other_key": "value"})
         self.assertIn("other_key", result)
 
 
-class ClaudeCodeInferencerSyncBridgeTest(unittest.TestCase):
+class ClaudeCodeSdkInferencerSyncBridgeTest(unittest.TestCase):
     """Test sync bridge behavior including stale-loop detection."""
 
     def test_stale_loop_detection_clears_client(self):
         """[v4 FIX #1] Verify that stale loop detection clears the client."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # Simulate a previous connection with a closed loop
         mock_closed_loop = MagicMock()
@@ -98,7 +98,7 @@ class ClaudeCodeInferencerSyncBridgeTest(unittest.TestCase):
     def test_multi_sync_call_reconnects(self):
         """[v4 FIX #1] Second sync call detects closed loop and reconnects
         instead of using stale client from previous asyncio.run()."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # First call: simulate connection
         first_loop = MagicMock()
@@ -124,7 +124,7 @@ class ClaudeCodeInferencerSyncBridgeTest(unittest.TestCase):
     def test_cross_loop_guard_raises_error(self):
         """[v4 FIX #3] Cross-loop guard raises RuntimeError if client connected
         in different loop."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # Set up a connected state with a specific loop
         connected_loop = MagicMock()
@@ -142,12 +142,12 @@ class ClaudeCodeInferencerSyncBridgeTest(unittest.TestCase):
             self.assertIn("different event loop", str(context.exception))
 
 
-class ClaudeCodeInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
-    """Async tests for ClaudeCodeInferencer."""
+class ClaudeCodeSdkInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
+    """Async tests for ClaudeCodeSdkInferencer."""
 
     async def test_aconnect_raises_on_missing_sdk(self):
         """Test that aconnect raises RuntimeError when SDK not available."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         with patch.dict("sys.modules", {"claude_agent_sdk": None}):
             with self.assertRaises(RuntimeError) as context:
@@ -157,7 +157,7 @@ class ClaudeCodeInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_adisconnect_clears_state(self):
         """Test that adisconnect properly clears internal state."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # Set up mock state
         mock_disconnect = AsyncMock()
@@ -174,7 +174,7 @@ class ClaudeCodeInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_async_context_manager(self):
         """Test async context manager protocol."""
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # Mock aconnect and adisconnect
         connect_mock = AsyncMock()
@@ -191,13 +191,13 @@ class ClaudeCodeInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_allowed_tools_forwarded_to_options(self):
         """[v3 FIX #4] allowed_tools attribute is passed to ClaudeAgentOptions."""
         custom_tools = ["Read", "Write", "Bash", "Computer"]
-        inferencer = ClaudeCodeInferencer(allowed_tools=custom_tools)
+        inferencer = ClaudeCodeSdkInferencer(allowed_tools=custom_tools)
 
         # Verify the attribute is set
         self.assertEqual(inferencer.allowed_tools, custom_tools)
 
 
-class ClaudeCodeInferencerResponseTest(unittest.TestCase):
+class ClaudeCodeSdkInferencerResponseTest(unittest.TestCase):
     """Test SDK response handling."""
 
     def test_sdk_inferencer_response_structure(self):

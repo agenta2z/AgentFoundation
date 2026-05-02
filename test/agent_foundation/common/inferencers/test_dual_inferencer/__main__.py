@@ -90,11 +90,11 @@ def create_inferencer(
     Uses absolute imports to avoid import-path issues.
     """
     if inferencer_type == "claude_code":
-        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_inferencer import (  # noqa: E501
-            ClaudeCodeInferencer,
+        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (  # noqa: E501
+            ClaudeCodeSdkInferencer,
         )
 
-        return ClaudeCodeInferencer(
+        return ClaudeCodeSdkInferencer(
             root_folder=root_folder,
             model_id=model or "",
             system_prompt=system_prompt,
@@ -327,7 +327,7 @@ def print_summary(workspace: Path, result) -> None:
 @click.option(
     "--system-prompt",
     default="",
-    help="System prompt for ClaudeCodeInferencer (ignored by devmate).",
+    help="System prompt for ClaudeCodeSdkInferencer (ignored by devmate).",
 )
 @click.option(
     "--timeout", default=1800, help="Per-message idle timeout seconds for inferencers."

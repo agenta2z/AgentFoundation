@@ -4,7 +4,7 @@
 """Streaming Inferencer Base.
 
 Extracts common streaming, session management, timeout handling, and
-sync-to-async bridging logic shared by ClaudeCodeInferencer,
+sync-to-async bridging logic shared by ClaudeCodeSdkInferencer,
 DevmateSDKInferencer, and DevmateCliInferencer.
 
 Subclasses implement ``_ainfer_streaming()`` — the single abstract primitive
@@ -41,8 +41,10 @@ from attr import attrib, attrs
 import contextvars
 
 from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
     _current_fallback_state,
+)
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
 )
 from agent_foundation.common.inferencers.prompt_templates import (
     DEFAULT_RECOVERY_DIR,
@@ -101,7 +103,7 @@ def _read_partial_from_cache(cache_path: str) -> Optional[str]:
 
 
 @attrs
-class StreamingInferencerBase(InferencerBase):
+class StreamingInferencerBase(TemplatedInferencerBase):
     """Base class for streaming inferencers with idle timeout, caching, and session management.
 
     Provides:

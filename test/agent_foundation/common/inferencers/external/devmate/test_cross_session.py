@@ -183,16 +183,16 @@ async def test_cross_session_cli():
 
 
 async def test_cross_session_claude():
-    """Test cross-session support for ClaudeCodeInferencer."""
+    """Test cross-session support for ClaudeCodeSdkInferencer."""
     print("\n" + "=" * 70)
-    print("CROSS-SESSION TEST - ClaudeCodeInferencer")
+    print("CROSS-SESSION TEST - ClaudeCodeSdkInferencer")
     print("=" * 70)
 
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
-    inferencer = ClaudeCodeInferencer(
+    inferencer = ClaudeCodeSdkInferencer(
         root_folder="/tmp",
         allowed_tools=[],
         idle_timeout_seconds=120,
@@ -221,7 +221,7 @@ async def test_cross_session_claude():
 
     print(f"\n    Session A: {session_a}")
     print(f"    Session B: {session_b}")
-    # Note: ClaudeCodeInferencer may have None session_id by design
+    # Note: ClaudeCodeSdkInferencer may have None session_id by design
     sessions_different = (session_a != session_b) or (
         session_a is None and session_b is None
     )
@@ -230,7 +230,7 @@ async def test_cross_session_claude():
     # === RESUME SESSION A: Ask about number ===
     print("\n[3] RESUME SESSION A: Ask 'What is my favorite number?'")
     start = time.time()
-    # ClaudeCodeInferencer resume uses session_id kwarg
+    # ClaudeCodeSdkInferencer resume uses session_id kwarg
     if session_a:
         result_a2 = await inferencer.aresume_session(
             "What is my favorite number? Just tell me the number.",
@@ -268,7 +268,7 @@ async def test_cross_session_claude():
     # === SUMMARY ===
     # For Claude, we need session IDs to work for true cross-session
     if session_a is None or session_b is None:
-        print("\n⚠️ WARNING: ClaudeCodeInferencer does not return session IDs")
+        print("\n⚠️ WARNING: ClaudeCodeSdkInferencer does not return session IDs")
         print("   Cross-session may not be supported by the underlying SDK")
         # Still check if memory works within context
         success = number_remembered or color_remembered
@@ -276,7 +276,7 @@ async def test_cross_session_claude():
         success = number_remembered and color_remembered and (session_a != session_b)
 
     print(
-        f"\n{'✅ PASSED' if success else '❌ FAILED'} - ClaudeCodeInferencer Cross-Session"
+        f"\n{'✅ PASSED' if success else '❌ FAILED'} - ClaudeCodeSdkInferencer Cross-Session"
     )
     return success
 
@@ -287,7 +287,7 @@ async def run_all_tests():
 
     results["DevmateSDKInferencer"] = await test_cross_session_sdk()
     results["DevmateCliInferencer"] = await test_cross_session_cli()
-    results["ClaudeCodeInferencer"] = await test_cross_session_claude()
+    results["ClaudeCodeSdkInferencer"] = await test_cross_session_claude()
 
     return results
 
@@ -317,7 +317,7 @@ def main():
         results = {"DevmateCliInferencer": result}
     elif args.inferencer == "claude":
         result = asyncio.run(test_cross_session_claude())
-        results = {"ClaudeCodeInferencer": result}
+        results = {"ClaudeCodeSdkInferencer": result}
     else:  # all
         results = asyncio.run(run_all_tests())
 

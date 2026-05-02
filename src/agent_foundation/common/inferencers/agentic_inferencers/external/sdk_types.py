@@ -1,7 +1,7 @@
 """Shared types for external SDK-based inferencers.
 
 This module provides common response types and utilities used by SDK-based
-inferencers (ClaudeCodeInferencer, DevmateSDKInferencer, etc.).
+inferencers (ClaudeCodeSdkInferencer, DevmateSDKInferencer, etc.).
 """
 
 from typing import Any, Optional

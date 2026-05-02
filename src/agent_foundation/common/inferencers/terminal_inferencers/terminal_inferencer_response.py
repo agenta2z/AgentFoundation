@@ -5,7 +5,7 @@ Provides a structured response with a clean ``__str__`` so that
 gets the meaningful output text rather than a raw dict repr.
 
 Follows the same pattern as ``SDKInferencerResponse`` used by
-``ClaudeCodeInferencer`` and ``DevmateSDKInferencer``.
+``ClaudeCodeSdkInferencer`` and ``DevmateSDKInferencer``.
 """
 
 from typing import Any, Dict, Optional

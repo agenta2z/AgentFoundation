@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick test script for ClaudeCodeInferencer.
+"""Quick test script for ClaudeCodeSdkInferencer.
 
 This script performs a simple import and basic functionality test
 without requiring the full SDK - just verifies the implementation loads correctly.
@@ -11,30 +11,30 @@ Or within a buck test target.
 import sys
 
 
-def test_import_claude_code_inferencer():
-    """Test that ClaudeCodeInferencer can be imported."""
-    print("TEST: Import ClaudeCodeInferencer")
+def test_import_claude_code_sdk_inferencer():
+    """Test that ClaudeCodeSdkInferencer can be imported."""
+    print("TEST: Import ClaudeCodeSdkInferencer")
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        print(f"  ✓ Import successful: {ClaudeCodeInferencer}")
+        print(f"  ✓ Import successful: {ClaudeCodeSdkInferencer}")
         return True
     except Exception as e:
         print(f"  ✗ Import failed: {e}")
         return False
 
 
-def test_claude_code_inferencer_initialization():
-    """Test that ClaudeCodeInferencer can be initialized."""
-    print("TEST: Initialize ClaudeCodeInferencer")
+def test_claude_code_sdk_inferencer_initialization():
+    """Test that ClaudeCodeSdkInferencer can be initialized."""
+    print("TEST: Initialize ClaudeCodeSdkInferencer")
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             system_prompt="Test prompt",
             allowed_tools=["Read"],
@@ -58,10 +58,10 @@ def test_extract_prompt():
     print("TEST: _extract_prompt method")
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # Test with string
         result1 = inferencer._extract_prompt("Hello world")
@@ -109,12 +109,12 @@ def test_lazy_import_from_package():
     print("TEST: Lazy import from package")
     try:
         from agent_foundation.common.inferencers.agentic_inferencers import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
             SDKInferencerResponse,
         )
 
         print(f"  ✓ Lazy import successful")
-        print(f"    - ClaudeCodeInferencer: {ClaudeCodeInferencer}")
+        print(f"    - ClaudeCodeSdkInferencer: {ClaudeCodeSdkInferencer}")
         print(f"    - SDKInferencerResponse: {SDKInferencerResponse}")
         return True
     except Exception as e:
@@ -130,8 +130,8 @@ def main():
     print()
 
     results = []
-    results.append(test_import_claude_code_inferencer())
-    results.append(test_claude_code_inferencer_initialization())
+    results.append(test_import_claude_code_sdk_inferencer())
+    results.append(test_claude_code_sdk_inferencer_initialization())
     results.append(test_extract_prompt())
     results.append(test_sdk_response_type())
     results.append(test_lazy_import_from_package())

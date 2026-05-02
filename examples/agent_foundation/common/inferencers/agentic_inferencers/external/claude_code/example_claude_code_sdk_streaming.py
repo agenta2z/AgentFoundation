@@ -46,7 +46,7 @@ def _prepare_env():
     The Claude Code binary refuses to start when it detects CLAUDECODE=1 in
     the environment (nesting guard). Safe to clear for SDK subprocess usage.
 
-    Note: ANTHROPIC_API_KEY is handled automatically by ClaudeCodeInferencer's
+    Note: ANTHROPIC_API_KEY is handled automatically by ClaudeCodeSdkInferencer's
     ``prefer_subscription=True`` default — no need to touch os.environ.
     """
     if os.environ.pop("CLAUDECODE", None):
@@ -64,12 +64,12 @@ async def demo_async_single(query: str, root_folder: str) -> None:
     print()
 
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
     start = time.time()
 
-    async with ClaudeCodeInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
         result = await inf.ainfer(query)
 
     elapsed = time.time() - start
@@ -94,7 +94,7 @@ async def demo_async_streaming(query: str, root_folder: str) -> None:
     print()
 
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
     start = time.time()
@@ -105,7 +105,7 @@ async def demo_async_streaming(query: str, root_folder: str) -> None:
     print("Response (streaming):")
     print("-" * 60)
 
-    async with ClaudeCodeInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
         async for chunk in inf.ainfer_streaming(query):
             if first_chunk_time is None:
                 first_chunk_time = time.time()
@@ -136,12 +136,12 @@ async def demo_sdk_response(query: str, root_folder: str) -> None:
     print()
 
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
     start = time.time()
 
-    async with ClaudeCodeInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
         response = await inf.ainfer(query, return_sdk_response=True)
 
     elapsed = time.time() - start
@@ -170,10 +170,10 @@ def demo_sync_single(query: str, root_folder: str) -> None:
     print()
 
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
-    inferencer = ClaudeCodeInferencer(root_folder=root_folder, allowed_tools=[])
+    inferencer = ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[])
 
     start = time.time()
     result = inferencer(query)

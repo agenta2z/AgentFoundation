@@ -7,9 +7,15 @@ Provides both async interface (recommended) and sync bridge (for backwards compa
 import asyncio
 import logging
 import os
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from attr import attrib, attrs
+from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+    SDK_NATIVE_EFFORT_LEVELS,
+    SDK_NATIVE_PERMISSION_MODES,
+    EffortLevel,
+    PermissionModeLiteral,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
@@ -21,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 @attrs
-class ClaudeCodeInferencer(StreamingInferencerBase):
+class ClaudeCodeSdkInferencer(StreamingInferencerBase):
     """Claude Code SDK as an async-native streaming inferencer with session continuation.
 
     Inherits from StreamingInferencerBase which provides:
@@ -40,16 +46,16 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
 
     Usage Patterns:
         # Sync (simple, but pays connect cost each call):
-        inferencer = ClaudeCodeInferencer(root_folder="/path/to/repo")
+        inferencer = ClaudeCodeSdkInferencer(root_folder="/path/to/repo")
         result = inferencer("Write a hello world program")
 
         # Multi-turn with auto-resume (recommended):
-        inferencer = ClaudeCodeInferencer(root_folder="/repo", auto_resume=True)
+        inferencer = ClaudeCodeSdkInferencer(root_folder="/repo", auto_resume=True)
         r1 = inferencer.new_session("My number is 42")
         r2 = inferencer.infer("What is my number?")  # Auto-resumes!
 
         # Async with context manager (persistent connection):
-        async with ClaudeCodeInferencer(root_folder="/repo") as inf:
+        async with ClaudeCodeSdkInferencer(root_folder="/repo") as inf:
             r1 = await inf.anew_session("My number is 42")
             r2 = await inf.ainfer("What is my number?")  # Auto-resumes!
 
@@ -78,6 +84,21 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
         sdk_env: Extra environment variables passed to the SDK subprocess.
             Merged after prefer_subscription filtering, so explicit entries
             here take precedence.
+        permission_mode: Permission control mode (default: ``None``, i.e.
+            let the SDK/CLI use its own default). One of ``"default"``,
+            ``"acceptEdits"``, ``"plan"``, ``"auto"``, ``"dontAsk"``, or
+            ``"bypassPermissions"``. Values inside the SDK's native Literal
+            (``default`` / ``acceptEdits`` / ``plan`` / ``bypassPermissions``)
+            are passed via ``ClaudeAgentOptions.permission_mode``; the wider
+            CLI-only values (``auto`` / ``dontAsk``) are routed through
+            ``ClaudeAgentOptions.extra_args`` so the SDK transport still
+            forwards them to the CLI.
+        effort: Reasoning-effort level (default: ``"max"``). One of ``"low"``,
+            ``"medium"``, ``"high"``, ``"xhigh"``, ``"max"``, or ``None`` to
+            omit the flag entirely (use the model's default). Higher levels
+            allocate more thinking budget at the cost of latency and tokens.
+            ``"xhigh"`` is routed via ``extra_args`` because the installed
+            SDK's typed Literal is narrower than the CLI's accepted set.
     """
 
     # ClaudeCode-specific attributes
@@ -89,6 +110,8 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
     include_partial_messages: bool = attrib(default=True)
     prefer_subscription: bool = attrib(default=True)
     sdk_env: Dict[str, str] = attrib(factory=dict)
+    permission_mode: Optional[PermissionModeLiteral] = attrib(default=None)
+    effort: Optional[EffortLevel] = attrib(default="max")
 
     # Internal state
     _client: Any = attrib(default=None, init=False, repr=False)
@@ -96,6 +119,40 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
     _connected_loop: Any = attrib(default=None, init=False, repr=False)
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
     _last_tool_use_count: int = attrib(default=0, init=False, repr=False)
+
+    # === Option-routing helper (also exercised by unit tests) ===
+
+    def _build_permission_effort_kwargs(
+        self,
+    ) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
+        """Split ``permission_mode`` and ``effort`` into SDK typed fields and ``extra_args``.
+
+        The installed claude-agent-sdk's typed ``permission_mode`` and
+        ``effort`` Literals are narrower than the CLI's accepted set
+        (no ``auto`` / ``dontAsk`` for permission, no ``xhigh`` for effort).
+        For type cleanliness and forward compatibility, values inside the
+        SDK's native Literal go through the typed field; the wider CLI-only
+        values go through ``extra_args`` so the SDK subprocess transport
+        still forwards them to the CLI as ``--permission-mode`` / ``--effort``.
+
+        Returns:
+            ``(sdk_kwargs, extra_args)`` — ``sdk_kwargs`` is splatted into
+            ``ClaudeAgentOptions(...)``; ``extra_args`` is passed as the
+            ``extra_args`` field. Either may be empty.
+        """
+        sdk_kwargs: Dict[str, Any] = {}
+        extra_args: Dict[str, Optional[str]] = {}
+        if self.permission_mode is not None:
+            if self.permission_mode in SDK_NATIVE_PERMISSION_MODES:
+                sdk_kwargs["permission_mode"] = self.permission_mode
+            else:
+                extra_args["permission-mode"] = self.permission_mode
+        if self.effort is not None:
+            if self.effort in SDK_NATIVE_EFFORT_LEVELS:
+                sdk_kwargs["effort"] = self.effort
+            else:
+                extra_args["effort"] = self.effort
+        return sdk_kwargs, extra_args
 
     # === Streaming Primitive ===
 
@@ -203,7 +260,7 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
         the loop closes. We MUST detect this and reconnect.
 
         For multi-call usage, prefer the async interface:
-            async with ClaudeCodeInferencer(...) as inf:
+            async with ClaudeCodeSdkInferencer(...) as inf:
                 r1 = await inf.ainfer("first")
                 r2 = await inf.ainfer("second")
 
@@ -272,6 +329,8 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
             )
         env.update(self.sdk_env)  # explicit sdk_env takes precedence
 
+        sdk_kwargs, extra_args = self._build_permission_effort_kwargs()
+
         options = ClaudeAgentOptions(
             model=self.model_id or None,
             cwd=str(self.root_folder) if self.root_folder else None,
@@ -280,6 +339,8 @@ class ClaudeCodeInferencer(StreamingInferencerBase):
             allowed_tools=self.allowed_tools,
             resume=session_id,
             env=env,
+            extra_args=extra_args,
+            **sdk_kwargs,
         )
 
         client = ClaudeSDKClient(options=options)

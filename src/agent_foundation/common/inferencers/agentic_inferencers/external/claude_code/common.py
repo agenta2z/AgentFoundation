@@ -10,10 +10,40 @@ API uses full date-qualified identifiers (e.g. ``claude-opus-4-6-20260204``
 from ``ClaudeModels``).
 
 This module provides ``resolve_model_tag`` to normalize any model tag
-string into the dash-separated format expected by Claude Code.
+string into the dash-separated format expected by Claude Code, plus
+shared Literal type aliases for ``--effort`` and ``--permission-mode``.
 """
 
 import re
+from typing import Literal
+
+# Reasoning-effort levels accepted by ``claude --effort <level>`` (CLI
+# v2.1.119+). Higher levels allocate more thinking budget to the model
+# at the cost of latency and tokens.
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+# Permission modes accepted by ``claude --permission-mode <mode>`` (CLI
+# v2.1.119+) and the equivalent ``ClaudeAgentOptions.permission_mode``
+# field. Note: the SDK's own Literal is narrower (no ``auto`` / ``dontAsk``)
+# but the SDK transport just stringifies and appends, so the wider CLI set
+# works at runtime — we route the extras through ``extra_args`` for type
+# cleanliness when calling the SDK.
+PermissionModeLiteral = Literal[
+    "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"
+]
+
+# Subset of ``EffortLevel`` that the installed claude-agent-sdk's typed
+# ``effort`` field accepts. Values outside this set must be passed via
+# ``extra_args`` instead of the typed field.
+SDK_NATIVE_EFFORT_LEVELS: frozenset[str] = frozenset(
+    {"low", "medium", "high", "max"}
+)
+
+# Subset of ``PermissionModeLiteral`` that the installed claude-agent-sdk's
+# typed ``permission_mode`` field accepts.
+SDK_NATIVE_PERMISSION_MODES: frozenset[str] = frozenset(
+    {"default", "acceptEdits", "plan", "bypassPermissions"}
+)
 
 # Explicit mapping for Anthropic API / ClaudeModels values whose short
 # alias cannot be derived by simple date-stripping + regex conversion.

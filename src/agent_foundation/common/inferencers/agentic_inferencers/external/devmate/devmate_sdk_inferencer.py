@@ -1,7 +1,7 @@
 """Devmate SDK Inferencer.
 
 Wraps the Devmate SDK client as an async-native StreamingInferencerBase implementation.
-Unlike ClaudeCodeInferencer, Devmate SDK creates a fresh client per query.
+Unlike ClaudeCodeSdkInferencer, Devmate SDK creates a fresh client per query.
 Supports session continuation via previous_session_id parameter.
 """
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class DevmateSDKInferencer(StreamingInferencerBase):
     """Devmate SDK as an async-native streaming inferencer with session continuation.
 
-    Unlike ClaudeCodeInferencer (persistent connection), Devmate SDK
+    Unlike ClaudeCodeSdkInferencer (persistent connection), Devmate SDK
     creates a fresh client per query. However, it supports session continuation
     via the previous_session_id parameter in start_session().
 

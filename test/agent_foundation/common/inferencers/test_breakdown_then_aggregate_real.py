@@ -82,11 +82,11 @@ def _try_create_devmate_inferencer(**kwargs):
         return None
 
 
-def _try_create_claude_code_inferencer(**kwargs):
-    """Try to create a ClaudeCodeInferencer. Returns (inferencer, name) or None."""
+def _try_create_claude_code_sdk_inferencer(**kwargs):
+    """Try to create a ClaudeCodeSdkInferencer. Returns (inferencer, name) or None."""
     try:
-        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_inferencer import (
-            ClaudeCodeInferencer,
+        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (
+            ClaudeCodeSdkInferencer,
         )
 
         defaults = {
@@ -97,7 +97,7 @@ def _try_create_claude_code_inferencer(**kwargs):
         }
         for k, v in kwargs.items():
             defaults[k] = v
-        inf = ClaudeCodeInferencer(**defaults)
+        inf = ClaudeCodeSdkInferencer(**defaults)
         return inf, "ClaudeCode"
     except Exception as e:
         print(f"  Claude Code not available: {type(e).__name__}: {e}")
@@ -117,7 +117,7 @@ def create_inferencer(backend: str, **kwargs):
     creators = {
         "metagen": _try_create_metagen_inferencer,
         "devmate": _try_create_devmate_inferencer,
-        "claude_code": _try_create_claude_code_inferencer,
+        "claude_code": _try_create_claude_code_sdk_inferencer,
     }
 
     if backend == "auto":

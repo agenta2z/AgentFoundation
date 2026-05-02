@@ -150,11 +150,11 @@ def create_inferencer(
         )
 
     elif inferencer_type == "claude_code":
-        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_inferencer import (  # noqa: E501
-            ClaudeCodeInferencer,
+        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (  # noqa: E501
+            ClaudeCodeSdkInferencer,
         )
 
-        return ClaudeCodeInferencer(
+        return ClaudeCodeSdkInferencer(
             target_path=root_folder,
             model_id=model or "",
             system_prompt="",

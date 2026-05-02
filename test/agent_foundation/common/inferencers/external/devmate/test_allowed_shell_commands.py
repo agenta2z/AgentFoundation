@@ -8,7 +8,7 @@ Tests the end-to-end behavior of ``enable_shell`` and
 - DevmateCliInferencer (config gen wiring + two-call sync)
 - DevmateSDKInferencer (config gen wiring + precedence)
 - ClaudeCodeCliInferencer (Bash filtering / --disallowedTools)
-- ClaudeCodeInferencer SDK (Bash removal + empty-list guard)
+- ClaudeCodeSdkInferencer SDK (Bash removal + empty-list guard)
 """
 
 import logging
@@ -23,8 +23,8 @@ from unittest.mock import patch
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_inferencer import (
-    ClaudeCodeInferencer,
+from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (
+    ClaudeCodeSdkInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
     generate_config_with_allowed_commands,
@@ -346,23 +346,23 @@ class ClaudeCodeCliAllowedShellCommandsLoggingTest(unittest.TestCase):
 
 
 # =====================================================================
-# ClaudeCodeInferencer SDK  --  enable_shell + allowed_shell_commands
+# ClaudeCodeSdkInferencer SDK  --  enable_shell + allowed_shell_commands
 # =====================================================================
 class ClaudeCodeSDKEnableShellTest(unittest.TestCase):
-    """Test enable_shell behaviour in ClaudeCodeInferencer (SDK)."""
+    """Test enable_shell behaviour in ClaudeCodeSdkInferencer (SDK)."""
 
     def test_enable_shell_default_true_keeps_bash(self) -> None:
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
         self.assertTrue(inferencer.enable_shell)
         self.assertIn("Bash", inferencer.allowed_tools)
 
     def test_enable_shell_false_removes_bash(self) -> None:
-        inferencer = ClaudeCodeInferencer(enable_shell=False)
+        inferencer = ClaudeCodeSdkInferencer(enable_shell=False)
         self.assertNotIn("Bash", inferencer.allowed_tools)
         self.assertEqual(inferencer.allowed_tools, ["Read", "Write"])
 
     def test_enable_shell_false_custom_tools_filters_bash(self) -> None:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             enable_shell=False,
             allowed_tools=["Read", "Bash", "Computer"],
         )
@@ -376,7 +376,7 @@ class ClaudeCodeSDKEnableShellTest(unittest.TestCase):
         as allow-all. A ValueError is raised instead.
         """
         with self.assertRaises(ValueError) as ctx:
-            ClaudeCodeInferencer(
+            ClaudeCodeSdkInferencer(
                 enable_shell=False,
                 allowed_tools=["Bash"],
             )
@@ -384,20 +384,20 @@ class ClaudeCodeSDKEnableShellTest(unittest.TestCase):
 
     def test_enable_shell_true_preserves_tools(self) -> None:
         custom = ["Read", "Write", "Bash", "Computer"]
-        inferencer = ClaudeCodeInferencer(enable_shell=True, allowed_tools=custom)
+        inferencer = ClaudeCodeSdkInferencer(enable_shell=True, allowed_tools=custom)
         self.assertEqual(inferencer.allowed_tools, custom)
 
     def test_allowed_shell_commands_default_none(self) -> None:
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
         self.assertIsNone(inferencer.allowed_shell_commands)
 
 
 class ClaudeCodeSDKAllowedShellCommandsLoggingTest(unittest.TestCase):
-    """Test logging for allowed_shell_commands in ClaudeCodeInferencer."""
+    """Test logging for allowed_shell_commands in ClaudeCodeSdkInferencer."""
 
     def test_logs_info_when_allowed_shell_commands_set(self) -> None:
         with self.assertLogs(level="INFO") as cm:
-            ClaudeCodeInferencer(allowed_shell_commands=["nvidia-smi"])
+            ClaudeCodeSdkInferencer(allowed_shell_commands=["nvidia-smi"])
         self.assertTrue(
             any(
                 "allowed_shell_commands" in msg and "nvidia-smi" in msg
@@ -408,7 +408,7 @@ class ClaudeCodeSDKAllowedShellCommandsLoggingTest(unittest.TestCase):
 
     def test_enable_shell_false_with_allowed_shell_commands_warns(self) -> None:
         with self.assertLogs(level="WARNING") as cm:
-            ClaudeCodeInferencer(
+            ClaudeCodeSdkInferencer(
                 enable_shell=False,
                 allowed_shell_commands=["nvidia-smi"],
             )

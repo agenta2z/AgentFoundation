@@ -83,7 +83,7 @@ buck2 test @//mode/dbgo //rankevolve/test/agentic_foundation:test_devmate_sdk_in
 
 ### Per-Call Client Model
 
-Unlike ClaudeCodeInferencer (which maintains a persistent connection), DevmateSDKInferencer creates a **fresh SDK client for each query**:
+Unlike ClaudeCodeSdkInferencer (which maintains a persistent connection), DevmateSDKInferencer creates a **fresh SDK client for each query**:
 
 ```python
 async def _ainfer(self, inference_input, inference_config=None, **kwargs):

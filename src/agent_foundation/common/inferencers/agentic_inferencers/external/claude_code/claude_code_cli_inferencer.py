@@ -11,6 +11,10 @@ import subprocess
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO
 
 from attr import attrib, attrs
+from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+    EffortLevel,
+    PermissionModeLiteral,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
 )
@@ -66,7 +70,16 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         system_prompt: Full system prompt override.
         append_system_prompt: Appended to default system prompt (requires Claude Code v2.1.58+).
         allowed_tools: List of tools Claude can use.
-        permission_mode: Permission control mode (default: "bypassPermissions").
+        permission_mode: Permission control mode (default: ``"bypassPermissions"``).
+            One of ``"default"``, ``"acceptEdits"``, ``"plan"``, ``"auto"``,
+            ``"dontAsk"``, or ``"bypassPermissions"`` — passed through as
+            ``--permission-mode``. ``"bypassPermissions"`` is emitted as
+            ``--dangerously-skip-permissions`` for backwards compatibility.
+        effort: Reasoning-effort level (default: ``"max"``). One of ``"low"``,
+            ``"medium"``, ``"high"``, ``"xhigh"``, ``"max"``, or ``None`` to
+            omit the flag entirely (use the model's default). Higher levels
+            allocate more thinking budget at the cost of latency and tokens.
+            Emitted as ``--effort <level>`` (Claude Code v2.1.119+).
         max_budget_usd: Maximum spend per call.
         extra_cli_args: Additional CLI arguments.
     """
@@ -83,7 +96,8 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     append_system_prompt: Optional[str] = attrib(default=None)
     allowed_tools: Optional[List[str]] = attrib(default=None)
     enable_shell: bool = attrib(default=True)
-    permission_mode: str = attrib(default="bypassPermissions")
+    permission_mode: PermissionModeLiteral = attrib(default="bypassPermissions")
+    effort: Optional[EffortLevel] = attrib(default="max")
     max_budget_usd: Optional[float] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
 
@@ -226,6 +240,9 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
             command_parts.append("--include-partial-messages")
 
         command_parts.append(f"--model {self.model_name}")
+
+        if self.effort is not None:
+            command_parts.append(f"--effort {self.effort}")
 
         if self.system_prompt:
             escaped_sys = self._escape_for_shell(self.system_prompt)
@@ -747,7 +764,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         - Session ID, cost, usage metadata NOT available after streaming
         - active_session_id NOT updated — multi-turn via streaming unsupported
 
-        For multi-turn, use ainfer() or the SDK-based ClaudeCodeInferencer.
+        For multi-turn, use ainfer() or the SDK-based ClaudeCodeSdkInferencer.
         """
         stream_callback: Optional[Callable[[str], None]] = kwargs.get("stream_callback")
         output_stream: Optional[TextIO] = kwargs.get("output_stream")

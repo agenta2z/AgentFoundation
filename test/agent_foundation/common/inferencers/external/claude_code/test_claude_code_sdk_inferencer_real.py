@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Real integration test for ClaudeCodeInferencer.
+"""Real integration test for ClaudeCodeSdkInferencer.
 
 This script actually calls the Claude Code SDK to verify the inferencer works.
 
 Usage (via buck2):
     # Run all tests with default query
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real
 
     # Run with custom query
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --query "What is Python?"
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --query "What is Python?"
 
     # Run specific test mode
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode sync --query "Explain recursion"
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode async --query "What is a list?"
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode streaming --query "Explain Python"
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode session
-    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_inferencer_real -- --mode all
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode sync --query "Explain recursion"
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode async --query "What is a list?"
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode streaming --query "Explain Python"
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode session
+    buck2 run @//mode/dbgo //rankevolve/test/agentic_foundation:test_claude_code_sdk_inferencer_real -- --mode all
 """
 
 import argparse
@@ -43,14 +43,14 @@ def test_sync_single_call(query: str):
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],  # No tools for simple question
             idle_timeout_seconds=120,
@@ -93,14 +93,14 @@ def test_sync_multiple_calls():
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -145,14 +145,14 @@ async def test_async_single_call(query: str):
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -194,16 +194,16 @@ async def test_async_context_manager():
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
         print("\nUsing async context manager (single connection, multiple queries)...")
 
-        async with ClaudeCodeInferencer(
+        async with ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -251,7 +251,7 @@ async def test_sdk_response_format():
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
         from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
             SDKInferencerResponse,
@@ -261,7 +261,7 @@ async def test_sdk_response_format():
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -313,14 +313,14 @@ def test_sync_streaming(query: str):
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -376,14 +376,14 @@ async def test_async_streaming(query: str):
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -439,15 +439,15 @@ async def test_session_continuation():
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
     except ImportError as e:
-        print(f"❌ Failed to import ClaudeCodeInferencer: {e}")
+        print(f"❌ Failed to import ClaudeCodeSdkInferencer: {e}")
         return False
 
     try:
         # Create inferencer with auto_resume=True (default)
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
@@ -548,27 +548,27 @@ def print_summary(results):
 def main():
     """Run tests based on command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Real integration tests for ClaudeCodeInferencer",
+        description="Real integration tests for ClaudeCodeSdkInferencer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Run all tests with default query
-  python test_claude_code_inferencer_real.py
+  python test_claude_code_sdk_inferencer_real.py
 
   # Run with custom query
-  python test_claude_code_inferencer_real.py --query "Explain Python decorators"
+  python test_claude_code_sdk_inferencer_real.py --query "Explain Python decorators"
 
   # Run only sync tests
-  python test_claude_code_inferencer_real.py --mode sync --query "What is a list?"
+  python test_claude_code_sdk_inferencer_real.py --mode sync --query "What is a list?"
 
   # Run only async tests
-  python test_claude_code_inferencer_real.py --mode async --query "What is a dict?"
+  python test_claude_code_sdk_inferencer_real.py --mode async --query "What is a dict?"
 
   # Run streaming tests (see output in real-time)
-  python test_claude_code_inferencer_real.py --mode streaming --query "Explain Python"
+  python test_claude_code_sdk_inferencer_real.py --mode streaming --query "Explain Python"
 
   # Run session continuation test
-  python test_claude_code_inferencer_real.py --mode session
+  python test_claude_code_sdk_inferencer_real.py --mode session
         """,
     )
     parser.add_argument(

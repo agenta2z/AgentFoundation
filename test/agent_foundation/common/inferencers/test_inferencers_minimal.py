@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal test script for ClaudeCodeInferencer and DevmateSDKInferencer.
+"""Minimal test script for ClaudeCodeSdkInferencer and DevmateSDKInferencer.
 
 This script tests:
 1. Module imports work correctly
@@ -55,15 +55,15 @@ def test_imports():
         print(f"✗ sdk_types import failed: {e}")
         errors.append(str(e))
 
-    # Test 1.3: Import ClaudeCodeInferencer
+    # Test 1.3: Import ClaudeCodeSdkInferencer
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        print("✓ ClaudeCodeInferencer imports work")
+        print("✓ ClaudeCodeSdkInferencer imports work")
     except Exception as e:
-        print(f"✗ ClaudeCodeInferencer import failed: {e}")
+        print(f"✗ ClaudeCodeSdkInferencer import failed: {e}")
         errors.append(str(e))
 
     # Test 1.4: Import DevmateSDKInferencer
@@ -80,7 +80,7 @@ def test_imports():
     # Test 1.5: Lazy import from package
     try:
         from agent_foundation.common.inferencers.agentic_inferencers import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
             DevmateSDKInferencer,
             SDKInferencerResponse,
         )
@@ -104,13 +104,13 @@ def test_initialization():
 
     errors = []
 
-    # Test 2.1: ClaudeCodeInferencer initialization
+    # Test 2.1: ClaudeCodeSdkInferencer initialization
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        inferencer = ClaudeCodeInferencer(
+        inferencer = ClaudeCodeSdkInferencer(
             root_folder="/tmp",
             system_prompt="Test",
             allowed_tools=["Read"],
@@ -122,11 +122,11 @@ def test_initialization():
         assert inferencer.allowed_tools == ["Read"]
         assert inferencer.idle_timeout_seconds == 60
 
-        print("✓ ClaudeCodeInferencer initialization works")
+        print("✓ ClaudeCodeSdkInferencer initialization works")
         print(f"  - root_folder: {inferencer.root_folder}")
         print(f"  - allowed_tools: {inferencer.allowed_tools}")
     except Exception as e:
-        print(f"✗ ClaudeCodeInferencer init failed: {e}")
+        print(f"✗ ClaudeCodeSdkInferencer init failed: {e}")
         errors.append(str(e))
 
     # Test 2.2: DevmateSDKInferencer initialization
@@ -192,13 +192,13 @@ def test_methods():
 
     errors = []
 
-    # Test 3.1: _extract_prompt for ClaudeCodeInferencer
+    # Test 3.1: _extract_prompt for ClaudeCodeSdkInferencer
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         # String input
         assert inferencer._extract_prompt("hello") == "hello"
@@ -208,9 +208,9 @@ def test_methods():
         result = inferencer._extract_prompt({"other": "value"})
         assert "other" in result
 
-        print("✓ ClaudeCodeInferencer._extract_prompt works")
+        print("✓ ClaudeCodeSdkInferencer._extract_prompt works")
     except Exception as e:
-        print(f"✗ ClaudeCodeInferencer._extract_prompt failed: {e}")
+        print(f"✗ ClaudeCodeSdkInferencer._extract_prompt failed: {e}")
         errors.append(str(e))
 
     # Test 3.2: _extract_prompt for DevmateSDKInferencer
@@ -245,13 +245,13 @@ def test_async_infrastructure():
 
     errors = []
 
-    # Test 4.1: Check async methods exist on ClaudeCodeInferencer
+    # Test 4.1: Check async methods exist on ClaudeCodeSdkInferencer
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        inferencer = ClaudeCodeInferencer()
+        inferencer = ClaudeCodeSdkInferencer()
 
         assert hasattr(inferencer, "ainfer")
         assert hasattr(inferencer, "aconnect")
@@ -260,9 +260,9 @@ def test_async_infrastructure():
         assert hasattr(inferencer, "__aenter__")
         assert hasattr(inferencer, "__aexit__")
 
-        print("✓ ClaudeCodeInferencer has all async methods")
+        print("✓ ClaudeCodeSdkInferencer has all async methods")
     except Exception as e:
-        print(f"✗ ClaudeCodeInferencer async methods check failed: {e}")
+        print(f"✗ ClaudeCodeSdkInferencer async methods check failed: {e}")
         errors.append(str(e))
 
     # Test 4.2: Check async methods exist on DevmateSDKInferencer
@@ -312,7 +312,7 @@ def test_real_sdk_call_claude():
 
     try:
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
         # Check if SDK is available
@@ -326,7 +326,7 @@ def test_real_sdk_call_claude():
             return True  # Not a failure, just skipped
 
         if sdk_available:
-            inferencer = ClaudeCodeInferencer(
+            inferencer = ClaudeCodeSdkInferencer(
                 root_folder="/tmp",
                 allowed_tools=[],
                 idle_timeout_seconds=60,

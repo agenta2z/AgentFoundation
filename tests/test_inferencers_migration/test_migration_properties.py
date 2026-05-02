@@ -133,7 +133,7 @@ _FLOW_INFERENCERS_FILES = [
 
 _CLAUDE_CODE_FILES = [
     "agentic_inferencers/external/claude_code/__init__.py",
-    "agentic_inferencers/external/claude_code/claude_code_inferencer.py",
+    "agentic_inferencers/external/claude_code/claude_code_sdk_inferencer.py",
     "agentic_inferencers/external/claude_code/claude_code_cli_inferencer.py",
     "agentic_inferencers/external/claude_code/common.py",
 ]
@@ -336,7 +336,7 @@ _INIT_EXPECTED_SYMBOLS: list[tuple[str, set[str]]] = [
     (
         "agentic_inferencers/__init__.py",
         {
-            "ClaudeCodeInferencer",
+            "ClaudeCodeSdkInferencer",
             "DevmateSDKInferencer",
             "DevmateCliInferencer",
             "SDKInferencerResponse",

@@ -47,7 +47,7 @@ if os.path.isdir(_rich_utils_src) and _rich_utils_src not in sys.path:
 def _prepare_env():
     """Unset CLAUDECODE to bypass the nested-session guard.
 
-    Note: ANTHROPIC_API_KEY is handled automatically by ClaudeCodeInferencer's
+    Note: ANTHROPIC_API_KEY is handled automatically by ClaudeCodeSdkInferencer's
     ``prefer_subscription=True`` default.
     """
     if os.environ.pop("CLAUDECODE", None):
@@ -77,7 +77,7 @@ async def send_and_print(inferencer, message: str, label: str = "") -> str:
 
 async def main_async(args):
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-        ClaudeCodeInferencer,
+        ClaudeCodeSdkInferencer,
     )
 
     print()
@@ -90,7 +90,7 @@ async def main_async(args):
     print("STEP 1: Create Session A -- tell secret 'banana'")
     print("-" * 40)
 
-    async with ClaudeCodeInferencer(
+    async with ClaudeCodeSdkInferencer(
         root_folder=args.root_folder, allowed_tools=[], auto_resume=True
     ) as inf_a:
         response_a1 = await send_and_print(
@@ -119,7 +119,7 @@ async def main_async(args):
     print("STEP 3: Create Session B -- tell secret 'dragon'")
     print("-" * 40)
 
-    async with ClaudeCodeInferencer(
+    async with ClaudeCodeSdkInferencer(
         root_folder=args.root_folder, allowed_tools=[], auto_resume=True
     ) as inf_b:
         response_b1 = await send_and_print(
@@ -148,7 +148,7 @@ async def main_async(args):
     print("STEP 5: New Session C -- should NOT know any secret")
     print("-" * 40)
 
-    async with ClaudeCodeInferencer(
+    async with ClaudeCodeSdkInferencer(
         root_folder=args.root_folder, allowed_tools=[]
     ) as inf_c:
         response_c = await send_and_print(

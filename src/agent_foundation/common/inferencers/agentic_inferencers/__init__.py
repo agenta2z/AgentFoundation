@@ -3,7 +3,7 @@
 This package provides inferencer implementations for agentic AI interactions,
 including reflective inferencers and external SDK-based inferencers.
 
-External SDK inferencers (ClaudeCodeInferencer, DevmateSDKInferencer) use lazy
+External SDK inferencers (ClaudeCodeSdkInferencer, DevmateSDKInferencer) use lazy
 imports to avoid requiring their SDKs at import time. This allows code that
 doesn't use these inferencers to import the package without the SDK dependencies.
 """
@@ -14,12 +14,12 @@ doesn't use these inferencers to import the package without the SDK dependencies
 
 def __getattr__(name):
     """Lazy import external SDK inferencers."""
-    if name == "ClaudeCodeInferencer":
+    if name == "ClaudeCodeSdkInferencer":
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
-            ClaudeCodeInferencer,
+            ClaudeCodeSdkInferencer,
         )
 
-        return ClaudeCodeInferencer
+        return ClaudeCodeSdkInferencer
     elif name == "DevmateSDKInferencer":
         from agent_foundation.common.inferencers.agentic_inferencers.external.devmate import (
             DevmateSDKInferencer,
@@ -127,7 +127,7 @@ def __getattr__(name):
 
 __all__ = [
     "BreakdownThenAggregateInferencer",
-    "ClaudeCodeInferencer",
+    "ClaudeCodeSdkInferencer",
     "DevmateCliInferencer",
     "DevmateSDKInferencer",
     "DualInferencer",

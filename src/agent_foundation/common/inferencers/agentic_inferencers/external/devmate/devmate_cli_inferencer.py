@@ -70,7 +70,7 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
 
     Consistent Session API:
         This inferencer implements the unified session management API shared by
-        all three external inferencers (ClaudeCodeInferencer, DevmateSDKInferencer,
+        all three external inferencers (ClaudeCodeSdkInferencer, DevmateSDKInferencer,
         DevmateCliInferencer). The API includes:
 
         Attributes:
