@@ -59,7 +59,7 @@ from this propose/review/fix loop.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 from attr import attrib, attrs
 
@@ -70,6 +70,14 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
     _VisibilitySpec,
+)
+from agent_foundation.common.inferencers.flow_parsers import (
+    parse_finalplan_tag,
+    parse_winner_tag,
+)
+from agent_foundation.common.inferencers.template_defaults import (
+    FOLLOWUP_AGGREGATION_DEFAULTS,
+    STRUCTURED_AGGREGATION_DEFAULTS,
 )
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
@@ -120,6 +128,23 @@ class MultiFlowDualInferencer(DualInferencer):
         result = await mfdi.ainfer("Build a secure REST API")
     """
 
+    # === Slot-based template role defaults (consumed by config_utils._walk) ===
+    # Inherits Dual's review_inferencer.template_key="review" via MRO.
+    # Adds defaults for the forwarded MultiFlow slots:
+    #   - multi_flow_aggregator_inferencer → aggregation triplet
+    #   - flow_configs.*.followup_inferencer → conditional aggregation triplet
+    #     (gated on visible_flows!="self" AND inject_upstream_artifacts=True;
+    #     both are class-default-aware — MFDual defaults visible_flows="all"
+    #     AND inject_upstream_artifacts=True, so bare MFDual YAMLs get the
+    #     aggregation framing without any flag wiring).
+    SLOT_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        # multi_flow_aggregator + per-flow followup both depend on the full
+        # structured-aggregation triplet — task_response_format renders the
+        # winner_pick / iteration_judgment schemas when their flags fire.
+        "multi_flow_aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
+        "flow_configs.*.followup_inferencer": FOLLOWUP_AGGREGATION_DEFAULTS,
+    }
+
     # ─── MultiFlow-specific config (forwarded into the auto-constructed MultiFlow) ───
     flow_configs: List[dict] = attrib(factory=list)
     visible_flows: _VisibilitySpec = attrib(default="all")
@@ -130,20 +155,52 @@ class MultiFlowDualInferencer(DualInferencer):
     multi_flow_followup_prompt: Optional[str] = attrib(default=None)
     multi_flow_initial_prompt: Optional[str] = attrib(default=None)
     multi_flow_judgment_parser: Optional[Callable] = attrib(default=None)
-    multi_flow_response_parser: Optional[Callable] = attrib(default=None)
+    multi_flow_response_parser: Optional[Callable] = attrib(default=parse_finalplan_tag)
+    """Default ``parse_finalplan_tag``: extracts ``<FinalPlan>...</FinalPlan>``
+    content from the aggregator output, falls back to the raw string when no
+    tag is present (graceful — passthrough for use cases that don't wrap)."""
     multi_flow_max_concurrency: Optional[int] = attrib(default=None)
     multi_flow_disable_aggregator: bool = attrib(default=False)
     multi_flow_prompt_formatter: Optional[Callable] = attrib(default=None)
 
     # ─── Round 7: dispatch parsers forwarded into MultiFlow ───
-    multi_flow_winner_parser: Optional[Callable] = attrib(default=None)
-    """Parser for ``<Winner>flow_X</Winner>``. Forwarded to MultiFlow."""
+    multi_flow_winner_parser: Optional[Callable] = attrib(default=parse_winner_tag)
+    """Default ``parse_winner_tag``: extracts the winning flow index from the
+    aggregator's ``winner_pick`` JSON block (or legacy ``<Winner>flow_K</Winner>``
+    tag), returns ``None`` if neither is present (graceful — dispatch falls back
+    to ``review_default``). Forwarded to MultiFlow."""
 
     multi_flow_reviewer_alias_parser: Optional[Callable] = attrib(default=None)
     """Parser for ``<Reviewer>alias</Reviewer>``. Forwarded to MultiFlow."""
 
     multi_flow_fixer_alias_parser: Optional[Callable] = attrib(default=None)
     """Parser for ``<Fixer>alias</Fixer>``. Forwarded to MultiFlow."""
+
+    # ─── Runtime input propagation (opt-in, forwarded to MultiFlow) ───
+    propagate_runtime_input: bool = attrib(default=False)
+    """Forward to MultiFlow's ``propagate_runtime_input``. When True, MultiFlow
+    rewrites each flow's input from the runtime ``inference_input`` per call.
+    Required when MFDual is used as a PTI planner so PTI's runtime subtask
+    description actually reaches the flows. Resume not supported when True."""
+
+    runtime_input_template: Optional[str] = attrib(default=None)
+    """Forward to MultiFlow's ``runtime_input_template``. Optional Jinja
+    template wrapping each flow's input with feed
+    ``{input, flow_idx, n_flows}`` for per-flow perspective seeding."""
+
+    inject_upstream_artifacts: bool = attrib(default=True)
+    """Forward to MultiFlow's ``inject_upstream_artifacts``. When True (the
+    MFDual default), the auto-constructed MultiFlow pushes formatted peer
+    outputs into target inferencers' ``template_extra_feed["upstream_artifacts"]``
+    and returns the per-flow input as ``inference_input`` so wrapper templates
+    can use ``{{ upstream_artifacts }}`` and ``{{ input }}`` as separate slots.
+
+    Default differs from MultiFlow's (False): MFDual is purpose-built for
+    cross-flow aggregation with peer visibility (``visible_flows="all"`` is
+    also MFDual's default), so injection is the natural mode. Set to ``False``
+    only when the followup is a bare leaf without a wrapper template that
+    consumes the slot — e.g., the ``multi-flow-dual.yaml`` topology preset
+    that opts out explicitly to preserve simple prev_result passthrough."""
 
     # ─── Round 7: dispatch configuration on this class ───
     inferencer_pool: Dict[str, InferencerBase] = attrib(factory=dict)
@@ -166,6 +223,21 @@ class MultiFlowDualInferencer(DualInferencer):
     """When True, ``fixer_inferencer`` is mutated to the MultiFlow winner's
     inferencer after each propose step."""
 
+    winner_pick: bool = attrib(default=False)
+    """Named feature toggle for the winner-pick pattern. When True,
+    auto-injects ``include_winner_pick: true`` into
+    ``multi_flow_aggregator_inferencer.template_extra_feed`` so the
+    aggregator's wrapper template renders the JSON schema instructing
+    the LLM to emit a ``winner_pick`` block. The default
+    :func:`parse_winner_tag` (set on ``multi_flow_winner_parser``)
+    extracts the index. ``setdefault`` semantics — explicit user values
+    in ``template_extra_feed`` win.
+
+    Pair with ``fixer_match_winner=True`` for full Round 7 dispatch
+    (winner identified by aggregator → fixer set to that flow's CLI).
+    Use without ``fixer_match_winner`` for observability — the JSON
+    block is emitted and parsed but the parsed index isn't auto-routed."""
+
     def __attrs_post_init__(self):
         # Catch the most common misuse early: caller setting base_inferencer.
         if self.base_inferencer is not None:
@@ -185,6 +257,20 @@ class MultiFlowDualInferencer(DualInferencer):
         if self.multi_flow_initial_prompt is not None:
             for cfg in self.flow_configs:
                 cfg.setdefault("initial_prompt", self.multi_flow_initial_prompt)
+
+        # `winner_pick: true` is a named feature toggle that auto-sets the
+        # ``include_winner_pick`` template flag on the multi_flow_aggregator's
+        # template_extra_feed (its wrapper template renders the JSON schema
+        # asking the LLM to emit a `winner_pick` block). Done BEFORE the
+        # MultiFlow auto-construction below so the mutated aggregator is
+        # forwarded into the inner MultiFlow with the flag set. ``setdefault``
+        # preserves any explicit user value.
+        if self.winner_pick and self.multi_flow_aggregator_inferencer is not None:
+            agg = self.multi_flow_aggregator_inferencer
+            if hasattr(agg, "template_extra_feed"):
+                if agg.template_extra_feed is None:
+                    agg.template_extra_feed = {}
+                agg.template_extra_feed.setdefault("include_winner_pick", True)
 
         # Auto-construct the MultiFlow propose engine. Forward both
         # ``workspace_root`` and ``checkpoint_dir`` so MultiFlow's own
@@ -209,6 +295,12 @@ class MultiFlowDualInferencer(DualInferencer):
             winner_parser=self.multi_flow_winner_parser,
             reviewer_alias_parser=self.multi_flow_reviewer_alias_parser,
             fixer_alias_parser=self.multi_flow_fixer_alias_parser,
+            # Runtime input propagation (opt-in, lets MFDual be used as PTI planner)
+            propagate_runtime_input=self.propagate_runtime_input,
+            runtime_input_template=self.runtime_input_template,
+            # Upstream-artifact injection (opt-in, wires {{ upstream_artifacts }}
+            # slot in target inferencers' wrapper templates separate from {{ input }})
+            inject_upstream_artifacts=self.inject_upstream_artifacts,
         )
 
         # Round 7: seed initial review_inferencer / fixer_inferencer from

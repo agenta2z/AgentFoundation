@@ -1,0 +1,30 @@
+Create a comprehensive, actionable, implementable plan that covers:
+
+1. **High-Level Approach**: Overall strategical and architectural decisions
+2. **Key Execution/Implementation Steps**: Ordered list of concrete tasks/subtasks
+3. **Potential Risks and Mitigations**: What could go wrong and how to prevent it
+4. **Files to Create/Modify**: Itemize new and existing files with their intended updates
+5. **Validation/Testing Strategy**: How to verify the execution/implementation outcomes and ensure its quality.
+
+### NOTES (on environment):
+- Avoid recursive searches on large top-level directories — they may hang or time out. Try to **target specific files or narrow subdirectories for searches**. You can always expand searches later if more exploration is needed.
+- If a search command seems to hang (no output for >600 seconds), move on and try a more targeted search.
+
+### NOTES (on resolving dependencies):
+- Do NOT conclude a dependency (e.g., a required library, import, module or package) is unavailable just because you cannot find it in the codebase.
+  * Dependencies can be managed by the environment (e.g., build tools, package managers).
+  * Check the environment configs, and alternative dependency paths before dismissing.
+- When a specific dependency is not found, search for related materials (e.g., documentation, source code, in-code comments). Be creative, clues may exist somewhere else (e.g. in a sister project or a different but related repository).
+- Only dismiss a dependency as "unavailable" after ALL checks fail.
+
+### NOTES (on accessing files outside the working directory):
+- Try efficient file-reading tools first. If they fail with path errors, fall back to command-line tools (cat, grep, sed, ls).
+
+### NOTES (on plan quality):
+- Prefer elegant, well-structured solutions over hacky, ad-hoc ones. Extract shared logic into sharable materials/components (e.g. templates, utilities, services, or modules) rather than duplicating them.
+- Mind the blast radius of changes, but proceed if broader changes are genuinely beneficial and well justified.
+
+### NOTES (emphasizing requirements):
+- **DO NOT write the full execution/implementation** (e.g., DO NOT write entire planned code/scripts) in a plan. The plan is a roadmap, not the full execution/implementation.
+- Do NOT fabricate or assume (e.g., file paths, function signatures, or module structures) — always read and verify the actual materials (e.g., code, documentation) before referencing it in your plan.
+- If the plan includes benchmarking, plan for results to be written to an artifact file (e.g., JSON) — do NOT rely on stdout.

@@ -10,6 +10,7 @@ import enum
 import logging
 import os
 import subprocess
+import sys
 from abc import abstractmethod
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
@@ -131,6 +132,28 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             CLI argument string.
         """
         raise NotImplementedError
+
+    def _resolve_subprocess_cwd(self, cwd: Optional[str] = None) -> Optional[str]:
+        """Return ``cwd`` adapted for the platform's CreateProcess limit.
+
+        On Windows, ``CreateProcessW``'s ``lpCurrentDirectory`` enforces
+        MAX_PATH=260 even when the registry's ``LongPathsEnabled`` flag is
+        set — that flag only lifts the limit for file APIs, not process
+        creation. The documented escape hatch is the ``\\\\?\\`` namespace
+        prefix, which raises the cap to ~32K wide chars. Applied lazily
+        only when the path is long enough to risk truncation, so short
+        paths remain unchanged and Linux/macOS are no-ops.
+        """
+        if cwd is None:
+            cwd = self.working_dir
+        if not cwd or sys.platform != "win32":
+            return cwd
+        if cwd.startswith("\\\\?\\"):
+            return cwd
+        absolute = os.path.abspath(cwd)
+        if len(absolute) < 240:
+            return absolute
+        return "\\\\?\\" + absolute
 
     # === Helpers: subprocess pipe-hang prevention ===
 
@@ -348,7 +371,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             full_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
             limit=_MAX_STDOUT_LINE_BYTES,
         )
 
@@ -443,7 +466,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             shell=True,
             capture_output=True,
             text=True,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
         )
         result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
         return TerminalInferencerResponse.from_dict(result_dict)
@@ -477,7 +500,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
         )
 
         collected: list[str] = []
@@ -514,7 +537,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             full_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
         )
 
         collected: list[str] = []

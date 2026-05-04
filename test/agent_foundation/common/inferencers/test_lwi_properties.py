@@ -24,10 +24,10 @@ def _make_mock_inferencer(return_value="mock_result"):
     return mock
 
 
-def _make_lwi_with_workspace(step_configs, response_builder, workspace_path):
+def _make_lwi_with_workspace(step_configs, response_builder, workspace_root):
     """Create an LWI with workspace but checkpointing/serialization disabled.
 
-    Manually sets _workspace after construction (instead of using workspace_path)
+    Manually sets _workspace after construction (instead of using workspace_root)
     to avoid _auto_enable_checkpointing and _save_final_result side effects.
     The workspace is available for markers and iteration dirs, but no
     checkpoint/resume or final result serialization occurs.
@@ -42,16 +42,16 @@ def _make_lwi_with_workspace(step_configs, response_builder, workspace_path):
     lwi = LinearWorkflowInferencer(
         step_configs=step_configs,
         response_builder=response_builder,
-        # Do NOT set workspace_path — we set _workspace manually below
+        # Do NOT set workspace_root — we set _workspace manually below
     )
     # Set workspace manually so markers and iteration dirs work,
     # but _save_final_result and _auto_enable_checkpointing are skipped
     # (_save_final_result checks self._workspace which we set, so we also
     # need to monkey-patch _save_final_result to be a no-op)
-    lwi._workspace = InferencerWorkspace(root=workspace_path)
-    lwi.workspace_path = workspace_path
+    lwi._workspace = InferencerWorkspace(root=workspace_root)
+    lwi.workspace_root = workspace_root
     # Prevent _auto_enable_checkpointing from enabling resume
-    lwi._result_root_override = workspace_path
+    lwi._result_root_override = workspace_root
     # Prevent _save_final_result from causing recursion on self-referential state
     lwi._save_final_result = lambda state: None
     return lwi
@@ -155,7 +155,7 @@ def test_iteration_workspace_directory_creation(n_iters):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: state.get("work_output", ""),
-        workspace_path=workspace,
+        workspace_root=workspace,
     )
 
     lwi.infer("start")
@@ -198,7 +198,7 @@ def test_step_completion_markers_written(n_steps):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: "done",
-        workspace_path=workspace,
+        workspace_root=workspace,
     )
 
     lwi.infer("test_input")

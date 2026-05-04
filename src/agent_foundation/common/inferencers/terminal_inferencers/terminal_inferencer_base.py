@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 from abc import abstractmethod
 from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
@@ -56,6 +57,28 @@ class TerminalInferencerBase(TemplatedInferencerBase):
         if self.working_dir is None:
             self.working_dir = os.getcwd()
         super().__attrs_post_init__()
+
+    def _resolve_subprocess_cwd(self, cwd: Optional[str] = None) -> Optional[str]:
+        """Return ``cwd`` adapted for the platform's CreateProcess limit.
+
+        On Windows, ``CreateProcessW``'s ``lpCurrentDirectory`` enforces
+        MAX_PATH=260 even when the registry's ``LongPathsEnabled`` flag is
+        set — that flag only lifts the limit for file APIs, not process
+        creation. The documented escape hatch is the ``\\\\?\\`` namespace
+        prefix, which raises the cap to ~32K wide chars. Applied lazily
+        only when the path is long enough to risk truncation, so short
+        paths remain unchanged and Linux/macOS are no-ops.
+        """
+        if cwd is None:
+            cwd = self.working_dir
+        if not cwd or sys.platform != "win32":
+            return cwd
+        if cwd.startswith("\\\\?\\"):
+            return cwd
+        absolute = os.path.abspath(cwd)
+        if len(absolute) < 240:
+            return absolute
+        return "\\\\?\\" + absolute
 
     @abstractmethod
     def construct_command(self, inference_input: Any, **kwargs) -> "List[str] | str":
@@ -113,8 +136,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             if self.env_vars:
                 env.update(self.env_vars)
 
-        if cwd is None:
-            cwd = self.working_dir
+        cwd = self._resolve_subprocess_cwd(cwd)
 
         self.log_debug(f"Executing script: {script}", "Script")
 
@@ -246,7 +268,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             result = subprocess.run(
                 command,
                 shell=use_shell,
-                cwd=self.working_dir,
+                cwd=self._resolve_subprocess_cwd(),
                 env=env,
                 capture_output=True,
                 text=True,
@@ -330,7 +352,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             process = subprocess.Popen(
                 command,
                 shell=use_shell,
-                cwd=self.working_dir,
+                cwd=self._resolve_subprocess_cwd(),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Combine stderr into stdout for streaming

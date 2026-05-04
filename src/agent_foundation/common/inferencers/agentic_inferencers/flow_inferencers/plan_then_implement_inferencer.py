@@ -362,9 +362,22 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     approve_all_iterations: bool = attrib(default=False)
 
     # Workspace config
-    # workspace_path is inherited from LinearWorkflowInferencer
+    # workspace_root is inherited from LinearWorkflowInferencer
+    # (renamed from workspace_path to align with Dual/BTA/MFDual naming).
     resume_workspace: Optional[str] = attrib(default=None)
     iteration_handoff_template: Optional[str] = attrib(default=None)
+
+    # NOTE: PTI does NOT set ``_workspace_propagation_skip``. Generic
+    # propagation runs at construction time — assigning each child
+    # (planner_inferencer, executor_inferencer, analyzer_inferencer) a
+    # ``<pti>/children/<attr_name>/`` workspace. This is necessary so each
+    # child's ``_logger: auto`` and ``cache_folder`` cascade resolve at
+    # construction. At runtime, ``_setup_child_workflows`` re-assigns each
+    # child's ``_workspace`` to ``<pti>/iter_<N>/children/<short_name>/``
+    # (the iteration-aware path); the setter re-fires propagation and
+    # re-resolves loggers under the new path. The construction-time dirs
+    # become unused after the first iteration starts, but the cost is
+    # cosmetic disk hygiene — functionally everything is correct.
 
     # Declarative output selection — controls which child outputs
     # _finalize_outputs() copies to workspace root outputs/.
@@ -417,13 +430,22 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 "enable_analysis=True requires analyzer_inferencer to be set"
             )
 
-        # Validation: analysis or multi-iteration requires workspace
+        # Validation: analysis or multi-iteration requires workspace.
+        # At construction time, ``self._workspace`` is None (parent's
+        # propagation runs after this child's __attrs_post_init__), so
+        # validation is satisfied if either the explicit ``workspace_root``
+        # field is set OR ``resume_workspace`` is set OR a parent-propagated
+        # ``_workspace`` is already in place (rare, e.g. set programmatically
+        # by a caller).
         if (self.enable_analysis or self.enable_multiple_iterations) and (
-            self.workspace_path is None and self.resume_workspace is None
+            self.workspace_root is None
+            and self.resume_workspace is None
+            and self._workspace is None
         ):
             raise ValueError(
                 "enable_analysis=True or enable_multiple_iterations=True "
-                "requires workspace_path or resume_workspace to be set"
+                "requires workspace_root or resume_workspace to be set "
+                "(or a parent-propagated _workspace)"
             )
 
         # --- Set checkpoint_subdir for PTI-specific checkpoint paths ---
@@ -860,7 +882,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             return "(first iteration — no prior history)"
 
         iter_workspace = os.path.dirname(outputs_dir)
-        root_ws = self.resume_workspace or self.workspace_path
+        root_ws = (
+            self.resume_workspace
+            or self.workspace_root
+            or (self._workspace.root if self._workspace else None)
+        )
         if root_ws is None:
             root_ws = os.path.dirname(os.path.dirname(iter_workspace))
 
@@ -2411,7 +2437,19 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
         self._partial_iteration_history = None
 
-        base_workspace = self.resume_workspace or self.workspace_path
+        # Resolve workspace from three sources in priority order:
+        #   1. ``resume_workspace`` — explicit resume target wins (preserves
+        #      resume semantics for in-flight workspaces).
+        #   2. ``workspace_root`` — explicit YAML/programmatic config.
+        #   3. ``self._workspace.root`` — parent-propagated workspace (set by
+        #      a parent's ``_propagate_workspace_to_children`` after PTI's
+        #      ``__attrs_post_init__`` has already run; available by _ainfer
+        #      time).
+        base_workspace = (
+            self.resume_workspace
+            or self.workspace_root
+            or (self._workspace.root if self._workspace else None)
+        )
 
         # Handle "complete" early return for resume
         if self.resume_workspace:

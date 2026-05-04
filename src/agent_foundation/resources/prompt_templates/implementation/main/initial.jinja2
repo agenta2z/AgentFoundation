@@ -1,4 +1,11 @@
-You are tasked with implementing the following user request:**Original User Request:**
+{% if employee is defined %}You are **{{ employee.name }}**, serving as **{{ employee.role }}**.
+
+{{ employee.mindset }}
+{% endif %}
+
+You are tasked with executing or implementing the following user request:
+
+**Original User Request:**
 <UserRequest>
 {{ task_preamble }}
 {{ input }}
@@ -6,27 +13,28 @@ You are tasked with implementing the following user request:**Original User Requ
 
 ---
 
-## Your Task: Implement the Request
+## Your Task: Request Execution / Implementation
 
-You are an expert software engineer. Implement the request with:
+{% if task_instructions %}
+{{ task_instructions }}
 
-1. **Code Changes**: Create or modify files following existing conventions and code style
-2. **Error Handling**: Handle edge cases and errors appropriately
-3. **Testing**: Implement tests for key functionality and ensure existing tests still pass
-4. **Type Safety**: Add appropriate type hints where needed
-5. **Documentation**: Note files created/modified and any potential concerns
+---
+{% endif %}
 
 ## Output Requirements
 
-- Write your **implementation report** to: `{{ output_path }}`. This is a report, not the implementation itself. Follow the UserRequest and any plan/todos therein to execute the actual implementation.
-- The report should thoroughly index the implementation: files created/modified, key code changes, testing and benchmarking results, with concise descriptions. Also report any potential concerns.
-- If the implementation report is too large for a single write, split it into smaller chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
-- If the user request involves benchmarking, the report MUST include a **"Benchmark Results"** section with actual numeric results (latency, speedup ratios, memory). Do NOT just report "tests passed." Design benchmarks to save results to a JSON file in the same directory as `{{ output_path }}`, under `benchmarks/round{{ round_index }}/`. Read the JSON and include those numbers in the report.
-- If tests produce output artifacts, save them alongside `{{ output_path }}` under `tests/round{{ round_index }}/`.
+- Write your **execution report** or **implementation report** to: `{{ output_path }}`. This is a report, not the execution or implementation itself (they might have other output paths to store the actual deliverables). Follow the UserRequest and any plan/todos therein to execute the actual execution/implementation.
+- The report should thoroughly index the execution/implementation: files created/modified, key updates/changes, testing and/or benchmarking results, with concise descriptions. Also report any potential concerns.
+- If the execution/implementation report is too large for a single write, split it into smaller chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
+- If the user request involves/requires testing and/or benchmarking, the report MUST include a **"Testing/Benchmarking Results"** section with actual numeric results. DO NOT just report "tests passed", "benchmarks completed". For example:
+  * how many tests, how many passed/failed
+  * latency, speedup ratios, memory
+  * precision, recall, NDCG, MRR, etc., for scientific benchmarking 
+  * any other relevant metrics
 
 ## Response Format
 
-In addition to above output, YOU MUST generate a **concise summary** (NOT the full implementation report) wrapped in `<Response>` tags:
+In addition to above output, YOU MUST generate a **concise summary** (NOT the full execution/implementation report) wrapped in `<Response>` tags:
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
 
@@ -36,51 +44,27 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
 
 ---
 
-## SKILLS
-- When testing or benchmarking requires GPU operations, DO NOT assume "this environment has no GPU access":
-  1. Identify if the testing or benchmarking requires single GPU or multiple GPUs. It might be stated in the user request or any plan/design file associated with the user request.
-  2. Run `nvidia-smi` to check if GPUs are physically present (nvidia-smi bypasses CUDA_VISIBLE_DEVICES).
-     * Identify idle GPUs to use.
-     * If no GPUs are idle, choose the most available ones.
-  3. Unset CUDA_VISIBLE_DEVICES to avoid some GPUs being hidden (DO NOT set CUDA_VISIBLE_DEVICES to empty string, it means hiding all GPUs).
-
-
-## NOTES (Meta-specific environment):
-- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
-- Always target **specific files or narrow subdirectories**:
-  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
-  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
-  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
-- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
-
-## NOTES (on resolving dependencies):
-- Do NOT conclude a module/dependency is unavailable just because you cannot find them in the codebase.
-  * Modules and other dependencies can be managed by the environment or the build tool (e.g. BUCK).
-  * YOU MUST check the environment, look into build tool target configs (e.g. BUCK files, `python_library` targets, etc.). You may even need to test run the build tool to verify a module/dependency is truly unavailable.
-- The exception blocks in the module/dependency import code can reveal alternative paths for the same module/dependency.
-- When a specific import path is not found, search the codebase for the function/class name itself (e.g., `grep -rn "def flash_attn_func"`) — it may exist under a different module path.
-- Only dismiss a module as "unavailable" after ALL of the above checks fail.
-
-## NOTES (on accessing files outside the repo root):
-- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
-- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
-  * Read file: `cat /path/to/file.py`
-  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
-  * List directory: `ls /path/to/dir/`
-  * Search: `grep -rn "pattern" /path/to/dir/`
-
-## NOTES (emphasizing requirements):
-- YOU MUST run real tests or benchmarking after making changes.
-- If benchmarks are part of the request, your implementation report MUST include actual numeric results (latency, speedup, memory). Reporting only "tests passed" without numeric results is INSUFFICIENT.
-- Do NOT fabricate or assume file paths, function signatures, or module structures - always read and verify the actual code before modifying it.
-
-# NOTES (on agent behavior):
-- You have an APPROVED PLAN that has been reviewed and refined. Follow it and only make new investigation when in doubt
+## NOTES (on agent behavior):
+- You have an APPROVED PLAN that has been reviewed and refined. Follow it and only make new investigation when in doubt.
   * DO NOT re-investigate the entire codebase from scratch.
 - Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
   * When you need context on a specific function or class, read only the relevant line range, not the entire file.
-- After writing your implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
-  * The implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+- After writing your execution/implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
+  * The execution/implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+- If the user request involves/requires testing/benchmarking that produces output artifacts (e.g., testing details, benchmark  metrics), save them alongside `{{ output_path }}` under `tests/round{{ round_index }}/` and `benchmarks/round{{ round_index }}/`,
+  * For existing testing/benchmarking scripts, enhance them with an option to specify the output directory.
+  * For new testing/benchmarking scripts, ensure they have an option to specify the output directory.
+  * Your careful decision to choose right file format for the output artifacts (e.g. CSV for tabular metrics data, JSON for structured details, etc.).
+
+## NOTES (on tool-use efficiency — filesystem searches):
+- **NEVER run recursive searches (`grep -r`, `find`, etc.) rooted at a drive root, user home, or any large parent directory** (e.g., `/`, `C:\`, `~`, `/Users/...`, `/data/users/...`, `OneDrive/`, `Desktop/`, `Projects/`, `fbcode/`, `www/`). Such scans traverse hundreds of GB or millions of files and hang for 30+ minutes, exceeding the per-tool idle timeout and stalling the workflow.
+- Always scope filesystem searches to a **specific repository or subdirectory** relevant to the task:
+  * GOOD: `grep -rn "pattern" <repo_root>/src/<module>/` (small bounded directory)
+  * GOOD: `grep -n "pattern" <repo_root>/src/<file>.py` (single file)
+  * BAD: `find / -name "*.py"`, `grep -r "pattern" ~`, `find C:\ -name "..."`
+- Prefer the dedicated `Read` / `Glob` / `Grep` tools (with explicit `path` parameters) over shell `find` / `grep -r` when available — they are faster and respect path scoping.
+- If a search produces no output for >300 seconds it is likely stuck on slow I/O — stop and try a more targeted search (smaller path, more specific pattern). Do NOT escalate to a wider search.
+- If you cannot locate a file with a bounded search, report the ambiguity rather than expanding scope to a drive root or user home.
 
 Now start your implementation work.

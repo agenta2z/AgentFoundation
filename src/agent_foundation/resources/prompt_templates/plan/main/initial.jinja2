@@ -1,4 +1,9 @@
-You are tasked with creating a comprehensive plan for the following user request:
+{% if employee is defined %}You are **{{ employee.name }}**, serving as **{{ employee.role }}**.
+
+{{ employee.mindset }}
+{% endif %}
+
+You are tasked with creating a comprehensive artifact (plan, document, design, etc.) for the following user request:
 
 **Original User Request:**
 <UserRequest>
@@ -7,91 +12,61 @@ You are tasked with creating a comprehensive plan for the following user request
 </UserRequest>
 
 ---
+{% if task_instructions %}
+## Your Task
+{{ task_instructions }}
 
-## Your Task: Create a Detailed Plan
+{% endif %}
+## Quality & Size Guidelines
 
-Create a comprehensive, implementable plan that covers:
-
-1. **High-Level Approach**: Overall strategy and architecture decisions
-2. **Files to Create/Modify**: Specific files with their intended changes
-3. **Key Implementation Steps**: Ordered list of concrete tasks
-4. **Potential Risks and Mitigations**: What could go wrong and how to prevent it
-5. **Testing Strategy**: How to verify the implementation works
-
-## Plan Quality & Size Guidelines
-
-- **You MUST make detailed and evidence-based plan**:
-  * Include concrete findings from your investigation, specific file paths, line numbers, and reasoned analysis.
-  * A good plan demonstrates that you actually read and understood the code, not just skimmed it. The plan MUST provide enough details that the implementer can follow without re-investigating from scratch.
+- **You MUST perform a relevant, detailed and evidence-based analysis** before producing the final artifact:
+  * Include concrete findings from your investigation, specific references, and reasoned analysis.
+  * A good artifact demonstrates that you actually read and understood the relevant materials, not just skimmed them. It MUST provide reasonably enough details that a reader can follow without re-investigating from scratch.
 
 However,
-- **DO NOT write the full implementation** in the plan. The plan is a roadmap not the full implementation.
-- **DO NOT copy-paste large blocks of source code** into the plan. Instead:
-  * Reference code by file path and line range (e.g., "`PMA.forward()` in `pytorch_modules_roo.py` lines 780-820")
-  * Use brief pseudocode snippets (5-10 lines) only when necessary to clarify a non-obvious approach
-  * Describe WHAT the code does and WHY it matters, rather than reproducing it verbatim
+- **DO NOT copy-paste large blocks of source material** into the artifact. Instead:
+  * Reference materials by title, path, or location
+  * Use brief excerpts (5-10 lines) only when necessary to clarify a non-obvious point
+  * Describe WHAT the source says and WHY it matters, rather than reproducing it verbatim
 
 ## Output Requirements
 
-- Write your **complete plan** in markdown format to: `{{ output_path }}`
-- The plan should be human readable and structured with details, that another human or agent could follow to implement later.
-- When writing a large plan YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
-
+- Write your **complete artifact** following any user-requested format to: `{{ output_path }}`
+- The artifact should be human readable and structured with details, that another human or agent could follow or act on later.
+- When writing a large artifact, YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
 
 ## Response Format
 
-In addition to above output, YOU MUST generate a **concise summary** (NOT the full plan) wrapped in `<Response>` tags:
+In addition to above output, YOU MUST generate a **concise summary** (NOT the full artifact) wrapped in `<Response>` tags:
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
 
 <Response>
-[Your concise natural language summary of what you have investigated and planned. Do NOT repeat the full plan here — it is already in the file above.]
+[Your concise natural language summary of what you have investigated and produced. Do NOT repeat the full artifact here — it is already in the file above.]
+{% if task_response_format %}
+{{ task_response_format }}
+{% endif %}
 </Response>
 
 ---
 
-## NOTES (Meta-specific environment):
-- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
-- Always target **specific files or narrow subdirectories**:
-  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
-  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
-  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
-- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
-
-## NOTES (on resolving dependencies):
-- Do NOT conclude a module/dependency is unavailable just because you cannot find them in the codebase.
-  * Modules and other dependencies can be managed by the environment or the build tool (e.g. BUCK).
-  * YOU MUST check the environment, look into build tool target configs (e.g. BUCK files, `python_library` targets, etc.). You may even need to test run the build tool to verify a module/dependency is truly unavailable.
-- The exception blocks in the module/dependency import code can reveal alternative paths for the same module/dependency.
-- When a specific import path is not found, search the codebase for the function/class name itself (e.g., `grep -rn "def flash_attn_func"`) — it may exist under a different module path.
-- Only dismiss a module as "unavailable" after ALL of the above checks fail.
-
-## NOTES (on accessing files outside the repo root):
-- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
-- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
-  * Read file: `cat /path/to/file.py`
-  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
-  * List directory: `ls /path/to/dir/`
-  * Search: `grep -rn "pattern" /path/to/dir/`
-
-## NOTES (on engineering quality):
-- Prefer elegant, well-structured solutions over hacky ones. For example, extract shared logic into a utility or separate module rather than duplicating code across multiple locations.
-- Mind the blast radius of your changes, but proceed if broader changes are genuinely beneficial and well justified.
-
-## NOTES (emphasizing requirements):
-- If the user request involves testing or benchmarking that requires GPU, YOU MUST plan to check GPU availability. Do not assume GPU availability without actually checking.
-  * If some testing or benchmarking requires multiple GPUs, YOU MUST also state this in the plan and explain why. By default, assume single-GPU testing/benchmarking.
-- If the plan includes benchmarking, plan for the benchmark tool to write results to a file (e.g., JSON) so the implementation agent can read and report actual numeric results. DO NOT rely on stdout or stderr.
-- Do NOT fabricate or assume file paths, function signatures, or module structures - always read and verify the actual code before referencing it in your plan.
-
-# NOTES (on agent behavior):
+## NOTES (on agent behavior):
 - Deep & Focused Investigation Requirement:
-  * You MUST look into all code related to the user ask. You MUST conduct a deep, thorough, and accurate investigation with critical thinking.
-  * If the plan involves user-visible experience (e.g. CLI, UI, streaming output), trace the end-to-end user experience and verify the planned changes will not break or regress the user experience.
-  * However, YOU MUST also prevent unnecessary recursively explore the entire codebase — focus on the modules that will actually be modified.
+  * You MUST conduct a deep, thorough, and accurate investigation with critical thinking.
+  * If the task involves user-visible experience (e.g. CLI, UI, streaming output), trace the end-to-end user experience and verify the planned changes will not break or regress the user experience.
+  * However, YOU MUST also prevent unnecessary exploration — focus on the materials that are actually relevant.
   * Balance exploration vs. efficiency. Prioritize thoroughness over speed if the task scope genuinely requires deeper investigation, but avoid aimless exploration.
-- You can briefly check the plan file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
-  * The plan output is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
+- You can briefly check the output file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
 
-Now start your planning work.
+## NOTES (on tool-use efficiency — filesystem searches):
+- **NEVER run recursive searches (`grep -r`, `find`, etc.) rooted at a drive root, user home, or any large parent directory** (e.g., `/`, `C:\`, `~`, `/Users/...`, `/data/users/...`, `OneDrive/`, `Desktop/`, `Projects/`, `fbcode/`, `www/`). Such scans traverse hundreds of GB or millions of files and hang for 30+ minutes, exceeding the per-tool idle timeout and stalling the workflow.
+- Always scope filesystem searches to a **specific repository or subdirectory** relevant to the task:
+  * GOOD: `grep -rn "pattern" <repo_root>/src/<module>/` (small bounded directory)
+  * GOOD: `grep -n "pattern" <repo_root>/src/<file>.py` (single file)
+  * BAD: `find / -name "*.py"`, `grep -r "pattern" ~`, `find C:\ -name "..."`
+- Prefer the dedicated `Read` / `Glob` / `Grep` tools (with explicit `path` parameters) over shell `find` / `grep -r` when available — they are faster and respect path scoping.
+- If a search produces no output for >300 seconds it is likely stuck on slow I/O — stop and try a more targeted search (smaller path, more specific pattern). Do NOT escalate to a wider search.
+- If you cannot locate a file with a bounded search, report the ambiguity rather than expanding scope to a drive root or user home.
+
+Now start your work.

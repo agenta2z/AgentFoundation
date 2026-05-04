@@ -3,29 +3,38 @@
 {{ employee.mindset }}
 {% endif %}
 
+{# Guard workflow variables — shown when workflow_description is set (always for rovodev backend) #}
+{% if workflow_description is defined and workflow_description %}
 ## Workflow Context
-You operate on {{ workflow_target_path }} under repository `{{ session_root_path }}`.
+{% if workflow_target_path is defined and workflow_target_path %}
+You operate on {{ workflow_target_path }} under repository `{{ session_root_path | default("(not set)") }}`.
+{% endif %}
 
 <WorkflowDescription>
-{{ workflow_description }}
+{{ workflow_description | default("No active workflow.") }}
 </WorkflowDescription>
 
 <WorkflowStatus>
-{{ workflow_status }}
+{{ workflow_status | default("No workflow active.") }}
 </WorkflowStatus>
 
 <WorkflowNextStepGuidance>
-{{ workflow_nextstep_guidance }}
+{{ workflow_nextstep_guidance | default("No specific guidance — respond to the user's request directly.") }}
 </WorkflowNextStepGuidance>
+{% endif %}
 
 
 ## Available Tools
 
+{% if action_tools is defined and action_tools %}
 ### Action Tools
 {{ action_tools }}
+{% endif %}
 
+{% if conversation_tools is defined and conversation_tools %}
 ### Conversation Tools (structured input collection only)
 {{ conversation_tools }}
+{% endif %}
 
 ## Conversation
 <Conversation>

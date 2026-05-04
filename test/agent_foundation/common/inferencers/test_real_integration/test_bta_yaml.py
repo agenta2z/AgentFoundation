@@ -89,7 +89,7 @@ def test_bta_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "bta_streaming_workers.yaml",
-        {"workspace_path": str(tmp_workspace["workspace"])},
+        {"workspace_root": str(tmp_workspace["workspace"])},
     )
     obj = instantiate(cfg)
 
@@ -135,7 +135,7 @@ def test_bta_yaml_attribute_verification(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "bta_streaming_workers.yaml",
-        {"workspace_path": ws},
+        {"workspace_root": ws},
     )
     obj = instantiate(cfg)
 
@@ -183,7 +183,7 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "pti_with_bta_executor.yaml",
-        {"workspace_path": str(tmp_workspace["workspace"])},
+        {"workspace_root": str(tmp_workspace["workspace"])},
     )
     obj = instantiate(cfg)
 
@@ -230,7 +230,7 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
         f"executor max_breakdown should be 2, got {obj.executor_inferencer.max_breakdown}"
     )
 
-    # PTI workspace_path
-    assert Path(obj.workspace_path) == Path(str(tmp_workspace["workspace"])), (
-        f"PTI workspace_path mismatch: {obj.workspace_path}"
+    # PTI workspace_root
+    assert Path(obj.workspace_root) == Path(str(tmp_workspace["workspace"])), (
+        f"PTI workspace_root mismatch: {obj.workspace_root}"
     )

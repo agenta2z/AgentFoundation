@@ -142,13 +142,15 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         response_builder: Callable(state) -> final response.  Defaults to
             returning the full state dict.
         initial_state_factory: Callable(inference_input) -> initial state dict.
-        workspace_path: Optional workspace root for checkpoint file I/O.
+        workspace_root: Optional workspace root for checkpoint file I/O.
+            Renamed from ``workspace_path`` for consistency with
+            DualInferencer / BTA / MFDual which also use ``workspace_root``.
     """
 
     step_configs: List[WorkflowStepConfig] = attrib(factory=list)
     response_builder: Optional[Callable] = attrib(default=None)
     initial_state_factory: Optional[Callable] = attrib(default=None)
-    workspace_path: Optional[str] = attrib(default=None)
+    workspace_root: Optional[str] = attrib(default=None)
 
     # --- New: Iteration Management ---
     iteration_workspace_factory: Optional[Callable[[str, int], str]] = attrib(default=None)
@@ -181,11 +183,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         super(LinearWorkflowInferencer, self).__attrs_post_init__()
 
         # Workspace reconstruction
-        if self.workspace_path is not None:
+        if self.workspace_root is not None:
             from agent_foundation.common.inferencers.inferencer_workspace import (
                 InferencerWorkspace,
             )
-            self._workspace = InferencerWorkspace(root=self.workspace_path)
+            self._workspace = InferencerWorkspace(root=self.workspace_root)
         else:
             self._workspace = None
 
@@ -247,9 +249,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         iteration = state.get("iteration", 1)
 
         # 1. Create iteration workspace (skip if no workspace configured)
-        if self.workspace_path is not None:
+        if self.workspace_root is not None:
             iter_path = self._get_iteration_workspace(
-                self.workspace_path, iteration, self.iteration_workspace_factory
+                self.workspace_root, iteration, self.iteration_workspace_factory
             )
             ws = InferencerWorkspace(root=iter_path)
             ws.ensure_dirs()
@@ -766,11 +768,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         self._inference_args = _inference_args
 
         # Workspace setup — skip if already set by subclass
-        if self._workspace is None and self.workspace_path is not None:
+        if self._workspace is None and self.workspace_root is not None:
             from agent_foundation.common.inferencers.inferencer_workspace import (
                 InferencerWorkspace,
             )
-            self._workspace = InferencerWorkspace(root=self.workspace_path)
+            self._workspace = InferencerWorkspace(root=self.workspace_root)
 
         # Final result cache check (Req 8)
         if self.resume_with_saved_results:

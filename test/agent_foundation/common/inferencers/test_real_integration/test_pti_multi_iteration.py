@@ -62,7 +62,7 @@ async def test_pti_single_iteration_real_llm(tmp_workspace):
     pti = PlanThenImplementInferencer(
         planner_inferencer=_make_claude(tmp_workspace, append_system_prompt=PLANNER_SYSTEM_PROMPT),
         executor_inferencer=_make_claude(tmp_workspace, append_system_prompt=EXECUTOR_SYSTEM_PROMPT),
-        workspace_path=str(tmp_workspace["workspace"]),
+        workspace_root=str(tmp_workspace["workspace"]),
         planner_outputs_plan_to_file=True,
     )
 
@@ -89,7 +89,7 @@ async def test_pti_multi_iteration_with_analyzer(tmp_workspace):
         enable_analysis=True,
         enable_multiple_iterations=True,
         max_meta_iterations=3,
-        workspace_path=str(tmp_workspace["workspace"]),
+        workspace_root=str(tmp_workspace["workspace"]),
     )
 
     result = await pti.ainfer("Plan a small CSV parser.")

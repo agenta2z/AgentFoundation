@@ -26,6 +26,33 @@ Why a separate base?
     ``template_root_space`` (or ``template_key``). Forgetting the namespace
     raises a loud ``ValueError`` from ``_render_prompt`` rather than silently
     no-rendering.
+
+Slot-based role defaults
+------------------------
+Some template fields are role-derived: BTA's breakdown slot always wants
+``template_root_space="task_breakdown"``; any aggregator slot consuming
+upstream artifacts wants the ``aggregation`` triplet; any review slot
+wants ``template_key="review"``. Repeating these in every YAML is brittle
+(partial-triplet drift) and noisy.
+
+Each orchestrator class declares a ``SLOT_DEFAULTS`` ClassVar mapping
+slot names (or dotted paths with ``*`` wildcards) to a reusable
+:class:`agent_foundation.common.inferencers.template_defaults.InferencerTemplateDefaults`
+bundle. The Hydra walker (``rich_python_utils.config_utils._instantiate``,
+step 1d) fills missing template fields on the slot child before
+construction: scalar fill for ``template_root_space``/``template_key``;
+per-key dict merge for ``template_variables``/``template_extra_feed``
+(user-supplied keys always win). The named bundles
+(``BREAKDOWN_TEMPLATE_DEFAULTS``, ``AGGREGATION_TEMPLATE_DEFAULTS``,
+``REVIEW_TEMPLATE_DEFAULTS``, ``FOLLOWUP_AGGREGATION_DEFAULTS``) are the
+single source of truth for "what the role wants"; YAMLs only spell out
+the use-case-specific choices (``template_root_space: implementation``
+vs ``plan``).
+
+Opt-out: set ``_disable_slot_defaults_: true`` on any orchestrator node
+to skip the entire injection at that node. Per-key opt-out: set the key
+to an empty string (``task_instructions: ""``) — the empty value
+survives the merge and the template renders that variable empty.
 """
 
 from __future__ import annotations
@@ -66,6 +93,13 @@ class TemplatedInferencerBase(InferencerBase):
     template_root_space: Optional[str] = attrib(default=None)
     template_extra_feed: dict = attrib(factory=dict)
     template_variables: dict = attrib(factory=dict)
+    # Default version for variable lookups. Used when a key in
+    # ``template_variables`` has a None/empty value -- per-key explicit
+    # values still win. Distinct from ``TemplateManager.template_version``
+    # (deployment-level default): this is the per-inferencer override that
+    # flows into ``load_variable`` for variable lookups made by THIS
+    # inferencer.
+    template_version: Optional[str] = attrib(default=None)
 
     # ------------------------------------------------------------------
     # Template feed construction
@@ -92,8 +126,13 @@ class TemplatedInferencerBase(InferencerBase):
         #   "skill_tool_creation"   → auto: try file, fall back to literal
         #   "@skill_tool_creation"  → force file, error if not found
         #   "=literal text"         → force literal, skip file check
+        # If a key has an empty/None value AND template_version is set, the
+        # per-inferencer template_version fills in (so YAMLs can declare
+        # `template_version: aggregation` once and list keys with empty values).
         if self.template_variables and self.template_manager:
             for var_name, value in self.template_variables.items():
+                if not value and self.template_version:
+                    value = self.template_version
                 if not value:
                     feed[var_name] = ""
                 elif not isinstance(value, str):

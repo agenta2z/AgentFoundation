@@ -133,7 +133,7 @@ async def test_three_level_nesting(tmp_workspace):
     pti1 = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     # First run — planning completes, executor interrupted at leaf level
@@ -152,7 +152,7 @@ async def test_three_level_nesting(tmp_workspace):
     pti2 = PlanThenImplementInferencer(
         planner_inferencer=planner2,
         executor_inferencer=executor2,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
         resume_workspace=workspace_dir,
     )
 
@@ -226,7 +226,7 @@ async def test_pti_with_bta_composition(tmp_workspace):
     pti = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=bta_executor,
-        workspace_path=str(tmp_workspace["workspace"]),
+        workspace_root=str(tmp_workspace["workspace"]),
     )
 
     result = await pti.ainfer(BREAKDOWN_PROMPT)
@@ -306,7 +306,7 @@ async def test_mixed_checkpoint_modes(tmp_workspace):
     pti = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     result = await pti.ainfer("What is 2+2? Explain your reasoning step by step.")

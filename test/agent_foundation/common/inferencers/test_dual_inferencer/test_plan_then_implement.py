@@ -771,11 +771,11 @@ def main(
     if analyzer_inf is not None:
         pti_kwargs["analyzer_inferencer"] = analyzer_inf
 
-    # Always pass workspace_path so Tier 1 (Workflow JSON) checkpoints are
+    # Always pass workspace_root so Tier 1 (Workflow JSON) checkpoints are
     # enabled for every run, not just analysis/multi-iteration modes.  This
     # makes --resume-workspace recovery precise (exact step + state) instead
     # of relying on the less-reliable Tier 2 file-existence heuristic.
-    pti_kwargs["workspace_path"] = str(workspace_path)
+    pti_kwargs["workspace_root"] = str(workspace_path)
 
     if resume_workspace is not None:
         pti_kwargs["resume_workspace"] = resume_workspace

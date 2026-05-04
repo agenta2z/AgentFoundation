@@ -127,7 +127,7 @@ class TestResearchThenImplementE2E(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=_make_mock(plan_text),
                 executor_inferencer=executor,
-                workspace_path=tmpdir,
+                workspace_root=tmpdir,
                 planner_outputs_plan_to_file=False,  # inline plan in executor input
             )
 

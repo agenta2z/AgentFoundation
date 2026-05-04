@@ -11,11 +11,15 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 from attr import attrib, attrs
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
+)
+from agent_foundation.common.inferencers.template_defaults import (
+    BREAKDOWN_TEMPLATE_DEFAULTS,
+    STRUCTURED_AGGREGATION_DEFAULTS,
 )
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
     ResultPassDownMode,
@@ -157,6 +161,32 @@ def _detect_conflicts_and_promote(
         )
 
     return deliverables_promoted, deliverables_with_conflicts
+
+
+def make_upstream_injecting_aggregator_prompt_builder():
+    """DEPRECATED: prefer setting ``BTA.inject_upstream_artifacts_to_aggregator=True``
+    instead of wiring this factory as ``aggregator_prompt_builder``.
+
+    Both produce identical behavior: worker outputs pushed into
+    ``aggregator_inferencer.template_extra_feed["upstream_artifacts"]``,
+    breakdown's ``aggregation_guidance`` (if captured) forwarded to
+    ``template_extra_feed["aggregation_guidance"]``, and the original BTA
+    query returned as the aggregator's ``inference_input`` (rendered into
+    ``{{ input }}`` by the wrapper).
+
+    The class-level flag is the canonical pattern (mirrors MFDual's
+    ``inject_upstream_artifacts``); this factory is kept for backward
+    compatibility with YAMLs that still wire
+    ``aggregator_prompt_builder: UpstreamInjectingAggregatorPromptBuilder``.
+    """
+    def _builder(worker_results, original_query=None, worker_output_paths=None, bta=None):
+        if bta is not None:
+            bta._inject_aggregator_extra_feed(
+                worker_results, worker_output_paths,
+            )
+        return original_query or ""
+
+    return _builder
 
 
 def make_conflict_aware_prompt_builder(
@@ -307,6 +337,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         contradictory — ``breakdown_only`` will be ignored with a warning.
     """
 
+    # === Slot-based template role defaults (consumed by config_utils._walk) ===
+    # Each entry: slot field name → InferencerTemplateDefaults bundle.
+    # Hydra-time injection fills missing template fields on the slot child;
+    # user-supplied values always win (per-key for dicts, scalar fill for
+    # template_root_space/template_key). Subclasses (MultiFlow) inherit via
+    # MRO. See ``template_defaults`` module for the named bundles.
+    SLOT_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "breakdown_inferencer": BREAKDOWN_TEMPLATE_DEFAULTS,
+        # Full structured-aggregation triplet. Refactor 12 made the version-
+        # to-default fallback safe (a missing aggregation.jinja2 falls back
+        # to default.jinja2 instead of literal-corrupting the prompt), and
+        # Refactor 13's template_version + None-keyed template_variables
+        # lets the YAML drop per-key entries. Both plan and exec BTA
+        # aggregator slots receive the same defaults; per-namespace
+        # aggregation files (plan/.../task_instructions/aggregation.jinja2,
+        # implementation/.../task_instructions/aggregation.jinja2) provide
+        # the role-correct content for each.
+        "aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
+    }
+
     # === Breakdown ===
     breakdown_inferencer: InferencerBase = attrib(default=None)
     max_breakdown: Optional[int] = attrib(default=None)
@@ -340,6 +390,35 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # === Aggregation ===
     aggregator_inferencer: Optional[InferencerBase] = attrib(default=None)
     aggregator_prompt_builder: Optional[Callable] = attrib(default=None)
+    # ----- Upstream artifact injection to aggregator (modern slot semantics) -----
+    # When True (default): BTA pushes formatted worker outputs into
+    # ``aggregator_inferencer.template_extra_feed["upstream_artifacts"]``,
+    # forwards ``_last_aggregation_guidance`` (captured at breakdown-parse
+    # time) to ``template_extra_feed["aggregation_guidance"]``, and returns
+    # the original BTA query as the aggregator's ``inference_input`` (which
+    # the wrapper template renders into ``{{ input }}``).
+    #
+    # When False (legacy opt-out): BTA formats worker outputs as
+    # ``### Result N\n<output>`` and returns that text as the aggregator's
+    # ``inference_input`` directly — meaning ``{{ input }}`` ends up
+    # containing the worker outputs and ``{{ upstream_artifacts }}`` is
+    # undefined. Use this for template-less aggregators (no
+    # ``template_root_space``) or for aggregator wrappers that don't have a
+    # ``{{ upstream_artifacts }}`` slot. Older topologies that put worker
+    # outputs in the wrapper's ``{{ input }}`` slot must use this opt-out.
+    #
+    # The default flipped from False -> True after audit confirmed every
+    # in-tree consumer either (a) has a wrapper that consumes
+    # ``{{ upstream_artifacts }}`` via ``task_preamble: aggregation``, or
+    # (b) uses a custom ``aggregator_prompt_builder`` that ignores this
+    # flag, or (c) uses ``MockAggregator`` which doesn't render templates.
+    #
+    # Note: a custom ``aggregator_prompt_builder`` (when set) takes
+    # precedence over this flag — the prompt_builder is fully responsible
+    # for building the aggregator's input in that case.
+    #
+    # Mirrors MFDual's ``inject_upstream_artifacts`` flag at the BTA level.
+    inject_upstream_artifacts_to_aggregator: bool = attrib(default=True, kw_only=True)
 
     # === Checkpoint ===
     checkpoint_dir: Optional[str] = attrib(default=None)
@@ -400,6 +479,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # Guard: emit topology only once per _ainfer() call.
     # Reset at the top of _infer/_ainfer so reused BTA instances work correctly.
     _graph_topology_emitted: bool = attrib(default=False, init=False, repr=False)
+
+    # Captured at breakdown-parse time from the breakdown response's
+    # ``aggregation_guidance`` field. Plumbed forward to the aggregator's
+    # ``template_extra_feed["aggregation_guidance"]`` so the aggregator
+    # prompt can render the breakdown's reconstruction guidance via
+    # ``{{ aggregation_guidance }}``. Reset to None at the top of
+    # ``_parse_json_subtasks`` so stale values don't leak across calls.
+    _last_aggregation_guidance: Optional[str] = attrib(
+        default=None, init=False, repr=False
+    )
 
     # Suppress WorkGraph's start_nodes requirement at construction time
     # (graph is built dynamically in _infer/_ainfer)
@@ -471,6 +560,74 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             "arun() would bypass graph setup in _ainfer()."
         )
 
+    def _format_worker_results_text(
+        self,
+        worker_results,
+        worker_output_paths=None,
+    ) -> str:
+        """Format worker_results as ``### Result N\\n<output>`` lines, joined
+        by blank lines.
+
+        Used by both the legacy default ``_build_agg_input`` path (where the
+        formatted text becomes the aggregator's ``inference_input`` directly)
+        and the new ``inject_upstream_artifacts_to_aggregator`` path (where
+        the formatted text becomes the value of
+        ``template_extra_feed["upstream_artifacts"]``).
+
+        When the aggregator has local file access AND a worker output path is
+        available, the result is referenced by path rather than inlined
+        (avoids OS ARG_MAX limits when piping large outputs to subprocess).
+        """
+        agg_has_local = (
+            self.aggregator_inferencer is not None
+            and getattr(self.aggregator_inferencer, "has_local_access", False)
+        )
+        paths = list(worker_output_paths or [])
+        parts = []
+        for idx, res in enumerate(worker_results):
+            path = paths[idx] if idx < len(paths) else None
+            if agg_has_local and path:
+                parts.append(f"### Result {idx + 1}\n(See file: `{path}`)")
+            else:
+                path_ref = f"\n(Full output at: `{path}`)" if path else ""
+                parts.append(f"### Result {idx + 1}\n{res}{path_ref}")
+        return "\n\n".join(parts)
+
+    def _inject_aggregator_extra_feed(
+        self,
+        worker_results,
+        worker_output_paths=None,
+    ) -> None:
+        """Push formatted upstream artifacts (and breakdown-captured
+        aggregation_guidance, if any) into the aggregator inferencer's
+        ``template_extra_feed``. Used when
+        ``inject_upstream_artifacts_to_aggregator=True`` AND no custom
+        ``aggregator_prompt_builder`` is set.
+
+        Idempotent within a single BTA call: ``template_extra_feed`` is a
+        plain dict mutated in place. The ``aggregation_guidance`` key is
+        DROPPED when the breakdown didn't produce one this call (avoids stale
+        guidance from a previous call leaking into the current prompt).
+        """
+        if self.aggregator_inferencer is None:
+            return
+        target = self.aggregator_inferencer
+        if not hasattr(target, "template_extra_feed"):
+            return
+        if target.template_extra_feed is None:
+            target.template_extra_feed = {}
+
+        upstream_text = self._format_worker_results_text(
+            worker_results, worker_output_paths
+        )
+        target.template_extra_feed["upstream_artifacts"] = upstream_text
+
+        guidance = getattr(self, "_last_aggregation_guidance", None)
+        if guidance:
+            target.template_extra_feed["aggregation_guidance"] = guidance
+        else:
+            target.template_extra_feed.pop("aggregation_guidance", None)
+
     def _parse_json_subtasks(self, raw_output: str) -> List:
         """Parse JSON subtask format from the task_breakdown template.
 
@@ -478,10 +635,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         with a ``subtasks`` array, and builds structured sub_queries for BTA.
         Falls back to ``parse_numbered_list`` if JSON extraction fails.
 
+        Side effect: also captures the breakdown's ``aggregation_guidance``
+        field (when present) into ``self._last_aggregation_guidance`` so the
+        downstream aggregator prompt builder can plumb it forward into the
+        aggregator's ``template_extra_feed["aggregation_guidance"]``. Reset
+        to ``None`` at the top so stale values from previous calls don't leak.
+
         This is the built-in parser for ``breakdown_format="json_subtasks"``,
         consolidating the parsing logic previously duplicated across tools.
         """
         from agent_foundation.common.response_parsers import extract_delimited
+
+        # Reset breakdown-derived aggregation guidance for this call. Set
+        # below if the parsed JSON includes the field; remains None if the
+        # JSON is malformed or the field is absent.
+        self._last_aggregation_guidance = None
 
         response_text = extract_delimited(str(raw_output))
 
@@ -510,6 +678,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         subtasks = data.get("subtasks") or data.get("decomposed_subtasks") or []
         if not subtasks:
             return parse_numbered_list(response_text)
+
+        # Capture aggregation_guidance for the downstream aggregator. Tolerate
+        # missing/empty values — the aggregator prompt's ``{% if %}`` branch
+        # gates the whole section.
+        guidance = data.get("aggregation_guidance")
+        if isinstance(guidance, str) and guidance.strip():
+            self._last_aggregation_guidance = guidance.strip()
 
         queries = []
         for subtask in subtasks:
@@ -1374,6 +1549,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             _bta_self = self
 
             def _build_agg_input(prompt_builder, worker_results, original_query):
+                # Custom prompt_builder takes precedence — fully responsible
+                # for building the aggregator's input.
                 if prompt_builder is not None:
                     try:
                         return prompt_builder(
@@ -1393,26 +1570,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             return prompt_builder(
                                 worker_results, original_query=original_query
                             )
-                agg_has_local = getattr(agg_inf, "has_local_access", False)
-                parts = []
-                for idx, res in enumerate(worker_results):
-                    path = (
-                        _captured_paths[idx]
-                        if idx < len(_captured_paths)
-                        else None
+
+                # Modern path: opt-in via inject_upstream_artifacts_to_aggregator.
+                # Worker outputs go into template_extra_feed["upstream_artifacts"];
+                # the aggregator's inference_input becomes the original BTA query
+                # (which the wrapper's {{ input }} slot renders correctly under
+                # "Original User Request"). aggregation_guidance from the
+                # breakdown is also forwarded (see _inject_aggregator_extra_feed).
+                if _bta_self.inject_upstream_artifacts_to_aggregator:
+                    _bta_self._inject_aggregator_extra_feed(
+                        worker_results, _captured_paths,
                     )
-                    if agg_has_local and path:
-                        parts.append(
-                            f"### Result {idx + 1}\n(See file: `{path}`)"
-                        )
-                    else:
-                        path_ref = (
-                            f"\n(Full output at: `{path}`)" if path else ""
-                        )
-                        parts.append(
-                            f"### Result {idx + 1}\n{res}{path_ref}"
-                        )
-                return "\n\n".join(parts)
+                    return original_query or ""
+
+                # Legacy default: format worker outputs as agg input directly.
+                # The wrapper's {{ input }} slot ends up containing the worker
+                # outputs (and {{ upstream_artifacts }} is undefined). Older
+                # aggregator wrappers expect this shape.
+                return _bta_self._format_worker_results_text(
+                    worker_results, _captured_paths,
+                )
 
             def _make_agg_fn(agg_inf, prompt_builder, original_query, is_async, _reporter=None, _inference_args=None):
                 _agg_extra = _inference_args or {}

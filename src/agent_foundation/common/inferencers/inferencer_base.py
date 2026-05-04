@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sys
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from functools import partial
@@ -162,6 +163,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self._configure_for_workspace(value)
             self._propagate_workspace_to_children(value)
 
+    # Subclasses may override this class attribute to declare which attrs
+    # they manage workspace assignment for themselves (e.g., PTI's runtime
+    # ``_setup_child_workflows`` claims planner/executor children with
+    # iter_<N>-aware paths). Generic propagation skips those attrs to avoid
+    # creating orphan dirs at construction time.
+    _workspace_propagation_skip: frozenset = frozenset()
+
     def _propagate_workspace_to_children(self, parent_workspace):
         """When a workspace is assigned, give each direct child inferencer a
         child workspace.
@@ -180,6 +188,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
         Skips ``functools.partial`` factories (e.g. BTA's ``worker_factory``);
         their instances get workspaces at runtime when the factory is invoked.
 
+        Subclasses can opt out of propagation for specific attrs by setting
+        the class-level ``_workspace_propagation_skip`` to a frozenset of
+        attr names. Used by PTI to suppress propagation to ``_CHILD_DEFAULTS``
+        keys, since PTI's runtime ``_setup_child_workflows`` claims those
+        children with iter_<N>-aware paths under ``iter_<N>/children/``.
+
         Note: only walks direct InferencerBase attrs, dict values, and list
         elements (the patterns ``_for_each_child_inferencer`` covers).
         Inferencers nested inside arbitrary dict structures (e.g. MFDual's
@@ -187,8 +201,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
         those orchestrators are responsible for assigning their own children.
         """
         seen_ids: set = set()
+        skip = self._workspace_propagation_skip
 
         def _on_instance(child, field_name, key):
+            if field_name in skip:
+                return  # subclass manages this attr's workspace itself
             if not isinstance(child, InferencerBase):
                 return  # duck-typed callables don't have _workspace
             if getattr(child, "_workspace", None) is not None:
@@ -227,7 +244,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
         import os
 
         if hasattr(self, "working_dir"):
-            self.working_dir = str(workspace.root)
+            new_wd = str(workspace.root)
+            # Windows CreateProcessW enforces MAX_PATH=260 on lpCurrentDirectory
+            # regardless of the registry's LongPathsEnabled flag, and Python's
+            # subprocess does not honor the \\?\ prefix for cwd (bpo-40671).
+            # When workspace.root exceeds the limit, leave working_dir at its
+            # previously-resolved value (typically target_path) so subprocess
+            # inferencers can still launch; framework writes use workspace.root
+            # explicitly via resolve_output_path() rather than relying on cwd.
+            if sys.platform != "win32" or len(new_wd) < 240:
+                self.working_dir = new_wd
 
         if hasattr(self, "cache_folder"):
             self.cache_folder = os.path.join(

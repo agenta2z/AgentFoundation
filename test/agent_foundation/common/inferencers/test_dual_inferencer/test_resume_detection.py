@@ -1343,7 +1343,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=planner,
                 executor_inferencer=executor,
-                workspace_path=ws,
+                workspace_root=ws,
             )
             await pti._ainfer("test request")
 
@@ -1360,7 +1360,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=MockInferencer(_response="plan"),
                 executor_inferencer=MockInferencer(_response="impl"),
-                workspace_path=ws,
+                workspace_root=ws,
             )
             await pti._ainfer("test request")
 
@@ -1380,7 +1380,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=MockInferencer(_response="plan"),
                 executor_inferencer=executor,
-                workspace_path=ws,
+                workspace_root=ws,
             )
 
             with self.assertRaises(RuntimeError):
@@ -1515,7 +1515,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=MockInferencer(_response="plan"),
                 executor_inferencer=executor,
-                workspace_path=ws,
+                workspace_root=ws,
             )
 
             with self.assertRaises(RuntimeError):

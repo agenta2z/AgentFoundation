@@ -41,13 +41,7 @@ Your job is to **carefully, thoroughly analyze** the user request and break it i
 
 {% if output_path %}
 ## Output Requirements
-
 Write your **complete investigation and analysis** in markdown format to: `{{ output_path }}`
-
-This file should include:
-- Your detailed investigation of the codebase, documentation, and related systems
-- Evidence and reasoning that informed your decomposition
-- Any notable findings discovered during investigation
 
 When writing a large document, split it into smaller chunks and write them incrementally (append) to avoid single-write failure. Do NOT alter the content — only split the write operations.
 {% endif %}
@@ -68,14 +62,29 @@ For each subtask, assign a `subtask_id` as an integer starting from 1, and rate 
 - **MEDIUM**: Adds meaningful value but the core task could proceed without it
 - **LOW**: Nice-to-have; supplementary or exploratory
 
+For each subtask, assign a `priority_reason` to justify the priority rating.
+
+**IMPORTANT: Subtask Type Classification**: each subtask must be classified as either `INTERNAL` or `EXTERNAL`:
+- **EXTERNAL**: A high-level research question answerable through diving deep into external resources (e.g. academic literature/paper search, knowledgebase search, domain search, etc.). EXTERNAL subtasks do NOT have access to the local resources (e.g. codebase, documentation) — they cannot read files, inspect code. Frame these in terms of concepts, techniques, and approaches — DO NOT reference specific file paths, line numbers, or class names.
+- **INTERNAL**: An investigation that requires direct access to local resources — reading files, analyzing implementations, profiling, or benchmarking. INTERNAL subtasks CAN reference specific files, modules, and code patterns.
+- Choose the type that best matches what the subtask needs to succeed. A good decomposition typically has a mix of both types.
+  * Example EXTERNAL subtask: "What are state-of-the-art approaches for multi-task loss weighting in deep recommendation models? Compare gradient-based methods (PCGrad, CAGrad, Nash-MTL) vs. uncertainty-based weighting vs. manual tuning."
+  * Example INTERNAL subtask: "Investigate the model's forward pass (reference code path) to identify the top-3 compute-heavy modules. Measure per-module latency and memory usage to determine where optimization effort should be focused."
+
+Before producing your final decomposition, verify it against the three criteria above (Comprehensive, Independent, Actionable) and note any tradeoffs in the `reasoning` field.
+
 <Response>
-[Your rationale for the decomposition{% if output_path %}. The detailed investigation is already in the file above{% endif %}.]
-```json
+{% if output_path %}
+Your detailed investigation and reasoning is already in the output file above. Below is the structured JSON decomposition with a short `reasoning` summary.
+{% else %}
+[Write your detailed investigation, analysis, and reasoning here, BEFORE the JSON block below.]
+{% endif %}
+
+```json decomposed_subtasks
 {
   "subtasks": [
     {
       "subtask_id": 1,
-      "priority": "<CRITICAL|HIGH|MEDIUM|LOW>",
       "description": "<High-level overview of what this subtask investigates or accomplishes, followed by specific details on ideas, concepts, techniques, or directions, areas to examine>",
       "todos": [
         "One concrete query, research question, or work step central to this subtask",
@@ -83,7 +92,11 @@ For each subtask, assign a `subtask_id` as an integer starting from 1, and rate 
         ...
       ],
       "scope": "<what specific aspects of the original request this subtask covers>",
-      "dependencies": "<list of subtask_ids this depends on, or 'none'>"
+      "priority": "<CRITICAL|HIGH|MEDIUM|LOW>",
+      "priority_reason": "<why this subtask is prioritized this way>",
+      "priority_score": "<1-5 float: 1.0-1.9 = LOW, 2.0-2.9 = MEDIUM, 3.0-3.9 = HIGH, 4.0-5.0 = CRITICAL>",
+      "type": "INTERNAL|EXTERNAL",
+      "subtask_dependencies": ["<integer subtask_ids this depends on; empty array [] if none>"]
     }
   ],
   "reasoning": "<overall rationale for this decomposition and why it covers the full request>",
@@ -107,8 +120,7 @@ For each subtask, assign a `subtask_id` as an integer starting from 1, and rate 
 - If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
 
 ## NOTES (on decomposition quality):
-- Subtasks should be **research-oriented** — each one answerable through focused investigation (code reading, documentation lookup, targeted search, experimentation).
-- Avoid subtasks that are purely meta (e.g., "summarize findings") — every subtask should produce **new information or analysis**.
+- Each subtask should produce **new information or analysis** — EXTERNAL subtasks through literature/knowledge search, INTERNAL subtasks through code investigation, profiling, or experimentation.
 - If the original request references specific files, modules, or systems, ensure at least one subtask is scoped to each referenced entity.
 - If the request is ambiguous, prefer subtasks that **resolve the ambiguity** (e.g., "Determine whether X uses pattern A or B") over subtasks that assume one interpretation.
 

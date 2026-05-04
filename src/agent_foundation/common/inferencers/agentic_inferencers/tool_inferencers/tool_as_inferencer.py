@@ -550,7 +550,7 @@ class ToolAsInferencer(StreamingInferencerBase):
 def make_tool_chain(
     name: str,
     tools: list[Any],  # InferencerBase, but kept loose for heterogeneous chains
-    workspace_path: Optional[str] = None,
+    workspace_root: Optional[str] = None,
     state_threading: Literal["independent", "stdout_to_next"] = "stdout_to_next",
 ) -> Any:  # returns LinearWorkflowInferencer; loose for lazy-import
     """Compose ``tools`` into a fixed-length :class:`LinearWorkflowInferencer`.
@@ -567,7 +567,7 @@ def make_tool_chain(
         tools: Heterogeneous list of inferencers. ``ToolAsInferencer``
             and any ``InferencerBase`` (including ``DualInferencer``) are
             both fine — LWI doesn't care.
-        workspace_path: Passed through to LWI's ``workspace_path``.
+        workspace_root: Passed through to LWI's ``workspace_root``.
         state_threading: ``"stdout_to_next"`` (default) feeds each step's
             ``.parsed`` (or ``.stdout`` if no parser) into the next step's
             ``inference_input``. ``"independent"`` gives every step the
@@ -622,6 +622,6 @@ def make_tool_chain(
 
     return LinearWorkflowInferencer(
         step_configs=step_configs,
-        workspace_path=workspace_path,
+        workspace_root=workspace_root,
         initial_state_factory=lambda inp: {"input": inp, "prev_output": None},
     )

@@ -470,7 +470,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
             stdin=asyncio.subprocess.PIPE if use_stdin else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
             limit=16 * 1024 * 1024,
         )
 
@@ -618,7 +618,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
                 input=prompt,
                 capture_output=True,
                 text=True,
-                cwd=self.working_dir,
+                cwd=self._resolve_subprocess_cwd(),
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:

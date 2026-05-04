@@ -58,14 +58,14 @@ def _make_sequential_mock(responses: List) -> SequentialMockInferencer:
 def _make_lwi(
     step_configs: Optional[List[WorkflowStepConfig]] = None,
     response_builder: Optional[Callable] = None,
-    workspace_path: Optional[str] = None,
+    workspace_root: Optional[str] = None,
     **kwargs,
 ) -> LinearWorkflowInferencer:
     """Standard LWI with defaults useful in tests."""
     return LinearWorkflowInferencer(
         step_configs=step_configs or [],
         response_builder=response_builder,
-        workspace_path=workspace_path,
+        workspace_root=workspace_root,
         **kwargs,
     )
 

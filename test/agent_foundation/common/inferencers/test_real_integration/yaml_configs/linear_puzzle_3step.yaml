@@ -5,7 +5,7 @@ step_configs:
     inferencer:
       _target_: ClaudeCodeCLI
       model_name: sonnet
-      target_path: "{workspace_path}"
+      target_path: "{workspace_root}"
       permission_mode: bypassPermissions
     output_state_key: plan_output
   - _target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.WorkflowStepConfig
@@ -13,7 +13,7 @@ step_configs:
     inferencer:
       _target_: ClaudeCodeCLI
       model_name: sonnet
-      target_path: "{workspace_path}"
+      target_path: "{workspace_root}"
       permission_mode: bypassPermissions
     output_state_key: implement_output
   - _target_: agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer.WorkflowStepConfig
@@ -21,7 +21,7 @@ step_configs:
     inferencer:
       _target_: ClaudeCodeCLI
       model_name: sonnet
-      target_path: "{workspace_path}"
+      target_path: "{workspace_root}"
       permission_mode: bypassPermissions
     output_state_key: review_output
-workspace_path: "{workspace_path}"
+workspace_root: "{workspace_root}"

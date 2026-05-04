@@ -2,12 +2,12 @@ _target_: Dual
 base_inferencer:
   _target_: ClaudeCodeCLI
   model_name: sonnet
-  target_path: "{workspace_path}"
+  target_path: "{workspace_root}"
   permission_mode: bypassPermissions
 review_inferencer:
   _target_: agent_foundation.common.inferencers.agentic_inferencers.external.kiro.kiro_cli_inferencer.KiroCliInferencer
   model_name: auto
-  target_path: "{workspace_path}"
+  target_path: "{workspace_root}"
   trust_mode: all
 consensus_config:
   _target_: ConsensusConfig

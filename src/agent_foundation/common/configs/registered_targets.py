@@ -85,6 +85,37 @@ register_alias(
     "config",
 )
 
+# --- Upstream-Injecting Aggregator Prompt Builder ---
+# For BTA aggregators whose wrapper template uses a separate
+# ``{{ upstream_artifacts }}`` slot for peer outputs, distinct from the
+# ``{{ input }}`` slot for the original BTA query.
+register_alias(
+    "UpstreamInjectingAggregatorPromptBuilder",
+    f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.make_upstream_injecting_aggregator_prompt_builder",
+    "config",
+)
+
+# --- MultiFlow / MFDual tag parsers ---
+# YAML resolves `_target_: WinnerParser` to the factory function, which
+# is then called with no args to return the actual parser callable. The
+# parser becomes the value of the inferencer's `winner_parser`,
+# `end_condition`, or `response_parser` field at construction time.
+register_alias(
+    "WinnerParser",
+    f"{_P}.common.inferencers.flow_parsers.make_winner_parser",
+    "config",
+)
+register_alias(
+    "DecisionStopParser",
+    f"{_P}.common.inferencers.flow_parsers.make_decision_stop_parser",
+    "config",
+)
+register_alias(
+    "FinalPlanParser",
+    f"{_P}.common.inferencers.flow_parsers.make_finalplan_parser",
+    "config",
+)
+
 # --- Workspace ---
 register_alias(
     "InferencerWorkspace",

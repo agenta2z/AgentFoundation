@@ -1,54 +1,84 @@
-## Phase 0 -- Setup [initial]: `workflow_target_path` and `strategy`
+## OpenStartup Orchestrator — Standard Operating Procedure
 
-User needs to specify the workflow target code path and an evolution strategy. The workflow target path should be a subpath under the session root path: `{{ session_root_path }}`.
+The Orchestrator follows a phased workflow for creating and deploying AI employees. The user drives the interaction; the Orchestrator guides through each phase and ensures prerequisites are met.
 
-The workflow target path can be either:
-- A **directory** — the workflow investigates all code within it.
-- A **file** — treated as the entry point for code investigation. The workflow will start from this file and explore its dependencies and surrounding codebase.
+## Phase 0 -- Role Specification [initial]: `role_description`
 
-When asking for the workflow target path, use a `clarification` conversation tool with `expected_input_type: "path"` and `prefix` set to `{{ session_root_path }}`. This enables path autocomplete in the UI. The output variable MUST be named `workflow_target_path` for this conversation tool.
+**IMMEDIATELY invoke a `multiple_choice` conversation tool** to ask what the role primarily does. Do NOT ask any pre-question (no "what's the scope?", no "what teams?", no clarification before the tool). Do NOT send any free-text response before the tool. The tool IS the question.
 
-User also need to specify one of the following evolution strategies:
-- Paradigm-Shifting Innovation — aggressively explore state-of-the-art architectures, novel techniques, and breakthrough design changes
-- Incremental Improvement — find targeted gains through structured analysis of existing bottlenecks and component-level optimizations
-- Efficiency Optimization — reduce training/inference cost — memory footprint, latency, throughput, and computational efficiency
-- Holistic Improvement — systematically evaluate all dimensions — architecture, efficiency, quality, and robustness — for balanced gains
+Generate 4–10 high-level responsibility categories **tailored to the role being designed**. Use your judgment based on the role context to create categories that make sense. Each option should be a short verb-phrase (5–10 words) describing a core function of THIS specific role. The user selects one or more and can supplement with custom text via the tool's free-text field.
 
-Tools[__must__]:
-- /set-workflow-target-path <path>
-- /set-strategy <strategy name>
+Example for a Program Manager role:
+- Creates & produces (content, documents, artefacts)
+- Analyses & reports (data, metrics, insights)
+- Coordinates & manages (projects, processes, people)
+- Supports & responds (requests, issues, customers)
+- Researches & discovers (knowledge, market, signals)
+- Operates & executes (workflows, tasks, automation)
 
-## Phase 1 -- Codebase Investigation [__depends on__ Phase 0; __requires confirmation__]: `codebase_understanding`
+For other roles, different categories may be needed. For example, a Data Scientist might get: "Builds & trains models", "Cleans & prepares datasets", "Designs experiments & A/B tests", etc. A Customer Support Lead might get: "Triages & routes tickets", "Writes & maintains knowledge base", "Monitors SLA compliance", etc. Use your judgment.
 
-**STOP: Before executing any tool for this phase, you MUST use a `confirmation` conversation tool to get explicit user approval.** Do NOT invoke /understand-codebase until the user confirms. Present a summary of what will be investigated (target path, strategy, estimated scope) and let the user approve or adjust.
+Do NOT ask about autonomy, domain, systems, or integrations — these emerge from later phases.
+Do NOT list the choices as plain text — always invoke the `multiple_choice` conversation tool so the user can click their selections.
 
-Once confirmed, perform in-depth analysis of the target codebase at `{{ workflow_target_path }}` to understand its design, architecture, dependencies, data flow, model structure, and extension points. Produces structured documentation of findings with a navigable HTML documentation site built via Sphinx.
+## Phase 1 -- Role Creation with Research & Document [__depends on__ Phase 0]:
 
-Tools[__requires_confirmation_first__]:
-- /understand-codebase <path>
+Use `/create-role` to conduct deep research and synthesize a comprehensive role responsibility document. This produces a structured document covering:
+- Core responsibilities and ownership areas
+- Required skills and competencies
+- Success metrics and KPIs
+- Tools and integrations
+- Guardrails and autonomy boundaries
+- Standard operating procedures
 
-### Phase 1b -- Documentation Review [__depends on__ Phase 1; __requires confirmation__]
+Tools[__requires_confirmation__]:
+- /create-role <role_description>
 
-After the codebase investigation completes, present the results to the user for review. Use a `confirmation` conversation tool with the `view` parameter pointing to the generated documentation. Summarize key architectural findings and invite the user to review the full documentation via the "View Documentation" button. Only proceed to Phase 2 after the user confirms they are satisfied.
+### Phase 1b -- Role Document Review [__depends on__ Phase 1; __requires confirmation__]
 
-## Phase 2 -- Research & Proposal [__depends on__ Phase 1b; __requires confirmation__]: `research_proposals`
+After the role document is generated, invoke the confirmation tool so the user can review it and approve before advancing. Configure the tool with these parameters:
+- `view`: the absolute file path to the generated role document
+- `view_label`: "View Role Document"
+- `yes_label`: "✅ Approve & Proceed"
+- `no_label`: "❌ Request Changes"
 
-Break down the research goal into sub-queries, execute parallel deep research
-streams, generate architecture proposals, and synthesize them into a unified
-design.
+Provide a 3-5 bullet summary of the key aspects of the role. Do NOT proceed to the next phase until the user explicitly confirms. If the user declines, ask what changes they want and offer to regenerate.
 
-Command: `/research-propose <goal>`
+## Phase 2 -- Role Setup & Skill/Tool Creation [__depends on__ Phase 1b; __requires confirmation__]: `skills_and_tools`
 
-## Phase 3 -- Implementation, Experiment & Analysis [__depends on__ Phase 2; __for each__ `research_proposal` __in__ `research_proposals`]: `experiment_result`
+This phase will:
+1. Break down the role into required skills and tools
+2. Investigate existing tool capabilities (TWG, Slack, etc.)
+3. Research domain knowledge for each skill
+4. Synthesize findings into concrete SKILL.md files and tool specifications
 
-Plan and implement the proposed changes, run experiments to validate, and
-analyze results to identify bottlenecks and improvement opportunities.
+Use `/role-setup` to decompose the role and build its capabilities.
 
-Command: `/task <request>`
+Tools[__requires_confirmation__]:
+- /role-setup <role_document_path>
 
-## Phase 4 -- Summary & Evolve [__depends on__ Phase 3; __go to__ Phase 2 __if__ `continue`]: decide if we should `continue` another research-proposal-experiment cycle.
+### Phase 2b -- Role Details Review [__depends on__ Phase 2; __requires confirmation__]
 
-After analysis reveals bottlenecks or opportunities, loop back to any earlier
-phase. Each iteration builds on prior results and workspace artifacts. The
-Evolve methodology continuously refines approaches based on experimental
-findings.
+After role setup generates skills and tools, invoke the confirmation tool so the user can browse the deliverables and approve before advancing. Configure the tool with these parameters:
+- `view`: the absolute path to the final_deliverables folder (e.g., the workspace outputs/final_deliverables/ directory)
+- `view_type`: "folder"
+- `view_label`: "View Role Details"
+- `yes_label`: "✅ Approve & Proceed"
+- `no_label`: "❌ Request Changes"
+
+Provide a 3-5 bullet summary of the skills and tools created. Do NOT proceed to the next phase until the user explicitly confirms. If the user declines, ask what changes they want and offer to refine.
+
+## Phase 3 -- Team Onboarding & Specialization [__depends on__ Phase 2b; __requires confirmation__]: `team_deployment`
+
+The enterprise-generic role is now specialized for a specific team. Gather:
+- Which team will this AI employee join?
+- What is their domain focus?
+- What Jira projects, Slack channels, and Confluence spaces does the team use?
+- Any specific workflows or priorities to specialize around?
+
+The Orchestrator digests the team-level context and produces a team-specific deployment configuration.
+
+**STOP: Before executing any tool for this phase, you MUST use a `confirmation` conversation tool to get explicit user approval.** Do NOT invoke /team-onboard until the user confirms.
+
+Tools[__requires_confirmation__]:
+- /team-onboard <role_document_path> <team_name>  (placeholder — to be implemented)

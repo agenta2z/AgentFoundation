@@ -1,13 +1,8 @@
-{% if session_root_path %}
-## Target Codebase
-You are operating on the codebase at: `{{ session_root_path }}`
-All relative file paths should be resolved from this root.
-{% endif %}
-
 You are tasked with creating a comprehensive plan for the following user request:
 
 **Original User Request:**
 <UserRequest>
+{{ task_preamble }}
 {{ input }}
 </UserRequest>
 
@@ -23,27 +18,24 @@ Create a comprehensive, implementable plan that covers:
 4. **Potential Risks and Mitigations**: What could go wrong and how to prevent it
 5. **Testing Strategy**: How to verify the implementation works
 
-## Plan Size Constraints
+## Plan Quality & Size Guidelines
 
-**CRITICAL: Your plan MUST follow these size constraints to avoid excessive length:**
-- **NO full source code**: Do NOT include complete file contents or full implementation code in the plan. Instead, describe WHAT to change and WHERE, with brief pseudocode snippets only when necessary to clarify a non-obvious approach.
-- **Be strategic, not prescriptive**: The plan is a roadmap for the implementation agent, not the implementation itself. The implementer will read the actual code and write the actual implementation.
+- **You MUST make detailed and evidence-based plan**:
+  * Include concrete findings from your investigation, specific file paths, line numbers, and reasoned analysis.
+  * A good plan demonstrates that you actually read and understood the code, not just skimmed it. The plan MUST provide enough details that the implementer can follow without re-investigating from scratch.
 
-Example of what NOT to do:
-- Including a 200-line benchmark file in the plan
-- Copying entire module source code into the plan
-- Writing the full implementation in the plan
-
-Example of what TO do:
-- "Modify `PMA.forward()` in `pytorch_modules_roo.py` (line ~780) to add `sdp_kernel` context manager"
-- Brief 5-line pseudocode snippet showing the key logic change
-- "Create `tests/benchmark_flash_attn_pma.py` with configs for head_dim={64,128}, seq_len={1024,2048,4096}"
+However,
+- **DO NOT write the full implementation** in the plan. The plan is a roadmap not the full implementation.
+- **DO NOT copy-paste large blocks of source code** into the plan. Instead:
+  * Reference code by file path and line range (e.g., "`PMA.forward()` in `pytorch_modules_roo.py` lines 780-820")
+  * Use brief pseudocode snippets (5-10 lines) only when necessary to clarify a non-obvious approach
+  * Describe WHAT the code does and WHY it matters, rather than reproducing it verbatim
 
 ## Output Requirements
 
 - Write your **complete plan** in markdown format to: `{{ output_path }}`
 - The plan should be human readable and structured with details, that another human or agent could follow to implement later.
-- For large planning, YOU MUST break the write into multiple smaller appends to avoid single-write failure when possible.
+- When writing a large plan YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
 
 
 ## Response Format
@@ -97,7 +89,7 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * You MUST look into all code related to the user ask. You MUST conduct a deep, thorough, and accurate investigation with critical thinking.
   * If the plan involves user-visible experience (e.g. CLI, UI, streaming output), trace the end-to-end user experience and verify the planned changes will not break or regress the user experience.
   * However, YOU MUST also prevent unnecessary recursively explore the entire codebase — focus on the modules that will actually be modified.
-  * Aim to complete your investigation in ~30-40 tool uses. If you find yourself using more than 50 tools, stop investigating and start writing the plan with what you have.
+  * Balance exploration vs. efficiency. Prioritize thoroughness over speed if the task scope genuinely requires deeper investigation, but avoid aimless exploration.
 - You can briefly check the plan file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * The plan output is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.

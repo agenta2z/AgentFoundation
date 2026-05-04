@@ -79,7 +79,7 @@ def test_linear_workflow_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "linear_puzzle_3step.yaml",
-        {"workspace_path": str(tmp_workspace["workspace"])},
+        {"workspace_root": str(tmp_workspace["workspace"])},
     )
     obj = instantiate(cfg)
 
@@ -115,7 +115,7 @@ def test_linear_workflow_yaml_attribute_verification(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "linear_puzzle_3step.yaml",
-        {"workspace_path": ws},
+        {"workspace_root": ws},
     )
     obj = instantiate(cfg)
 
@@ -148,9 +148,9 @@ def test_linear_workflow_yaml_attribute_verification(tmp_workspace):
             f"got {sc.inferencer.permission_mode!r}"
         )
 
-    # Verify workspace_path on the LinearWorkflowInferencer itself
-    assert Path(obj.workspace_path) == Path(ws), (
-        f"workspace_path mismatch: expected {ws}, got {obj.workspace_path}"
+    # Verify workspace_root on the LinearWorkflowInferencer itself
+    assert Path(obj.workspace_root) == Path(ws), (
+        f"workspace_root mismatch: expected {ws}, got {obj.workspace_root}"
     )
 
 
@@ -175,7 +175,7 @@ async def test_linear_workflow_yaml_real_inference_call(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "linear_puzzle_3step.yaml",
-        {"workspace_path": ws},
+        {"workspace_root": ws},
     )
     obj = instantiate(cfg)
 

@@ -1,0 +1,31 @@
+Implement the request with:
+
+1. **Code Changes**: Create or modify files following existing conventions and code style
+2. **Error Handling**: Handle edge cases and errors appropriately
+3. **Testing**: Implement tests for key functionality and ensure existing tests still pass
+4. **Type Safety**: Add appropriate type hints where needed
+5. **Documentation**: Note files created/modified and any potential concerns
+
+## NOTES (on environment):
+- Always target **specific files or narrow subdirectories** for searches. Avoid recursive searches on large top-level directories — they may hang or time out.
+- If a search command seems to hang (no output for >300 seconds), move on and try a more targeted search.
+
+## NOTES (on resolving dependencies):
+- Do NOT conclude a module/dependency is unavailable just because you cannot find it in the codebase.
+  * Modules and dependencies can be managed by the environment or build tools.
+  * Check the environment, build tool configs, and alternative import paths before dismissing.
+- The exception blocks in import code can reveal alternative paths for the same module.
+- When a specific import path is not found, search for the function/class name itself — it may exist under a different module path.
+- Only dismiss a module as "unavailable" after ALL checks fail.
+
+## NOTES (on accessing files outside the working directory):
+- Try efficient file-reading tools first. If they fail with path errors, fall back to command-line tools (cat, grep, sed, ls).
+
+## NOTES (on engineering quality):
+- Prefer elegant, well-structured solutions over hacky ones. Extract shared logic into utilities rather than duplicating code.
+- Mind the blast radius of changes, but proceed if broader changes are genuinely beneficial and well justified.
+
+## NOTES (emphasizing requirements):
+- YOU MUST run real tests after making changes.
+- If benchmarks are part of the request, your implementation report MUST include actual numeric results (latency, speedup, memory). Reporting only "tests passed" without numeric results is INSUFFICIENT.
+- Do NOT fabricate or assume file paths, function signatures, or module structures — always read and verify the actual code before modifying it.

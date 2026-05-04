@@ -84,7 +84,7 @@ def test_pti_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_path": str(tmp_workspace["workspace"])},
+        {"workspace_root": str(tmp_workspace["workspace"])},
     )
     obj = instantiate(cfg)
 
@@ -130,20 +130,20 @@ def test_pti_yaml_instantiation(tmp_workspace):
 @skip_claude
 def test_pti_yaml_attribute_verification(tmp_workspace):
     """Verify model_name, target_path on nested children, consensus_config on
-    DualInferencers, and workspace_path on PTI.
+    DualInferencers, and workspace_root on PTI.
 
     **Validates: Requirements 17.1, 17.2**
     """
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_path": ws},
+        {"workspace_root": ws},
     )
     obj = instantiate(cfg)
 
-    # PTI workspace_path
-    assert Path(obj.workspace_path) == Path(ws), (
-        f"PTI workspace_path mismatch: {obj.workspace_path} != {ws}"
+    # PTI workspace_root
+    assert Path(obj.workspace_root) == Path(ws), (
+        f"PTI workspace_root mismatch: {obj.workspace_root} != {ws}"
     )
 
     # Planner DualInferencer — consensus_config
@@ -193,7 +193,7 @@ async def test_pti_yaml_real_inference_call(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_path": ws},
+        {"workspace_root": ws},
     )
     obj = instantiate(cfg)
 

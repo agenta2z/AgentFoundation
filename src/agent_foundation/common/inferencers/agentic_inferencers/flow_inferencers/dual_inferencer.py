@@ -17,7 +17,7 @@ import logging
 import os
 import re
 from functools import partial
-from typing import Any, Callable, List, Mapping, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Mapping, Optional, Union
 
 from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
@@ -46,6 +46,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.li
 )
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
+)
+from agent_foundation.common.inferencers.template_defaults import (
+    REVIEW_TEMPLATE_DEFAULTS,
 )
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.input_and_response import InputAndResponse
@@ -136,6 +139,21 @@ class DualInferencer(LinearWorkflowInferencer):
         enable_checkpoint: If True, enable Workflow checkpoint/resume.
         checkpoint_dir: Directory for checkpoint files.
     """
+
+    # === Slot-based template role defaults (consumed by config_utils._walk) ===
+    SLOT_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "review_inferencer": REVIEW_TEMPLATE_DEFAULTS,
+    }
+
+    # === Template-transparent slots (consumed by config_utils._walk wrapping descent) ===
+    # When this Dual fills a role-default slot of an enclosing orchestrator
+    # (e.g. BTA's aggregator_inferencer), the parent's defaults pass through
+    # to these inner slots instead of being applied to the wrapping Dual.
+    # Dual's own SLOT_DEFAULTS (review_inferencer.template_key=review) is
+    # applied separately when ``_walk`` enters the Dual node.
+    _TEMPLATE_TRANSPARENT_SLOTS: ClassVar[List[str]] = [
+        "base_inferencer", "review_inferencer", "fixer_inferencer",
+    ]
 
     base_inferencer: InferencerBase = attrib(default=None)
     review_inferencer: InferencerBase = attrib(default=None)
@@ -1079,16 +1097,19 @@ class DualInferencer(LinearWorkflowInferencer):
         round_index: int,
         inference_config: dict,
     ) -> str:
-        """Replace response with short file reference if output file exists.
+        """Persist the base response to disk and return the FULL content.
 
-        **Workspace mode** (``_workspace`` set + ``output_path`` set):
-        Writes per-round artifacts to ``artifacts/round{NN}_{basename}``.
+        Side effect: when ``output_path`` is configured, writes
+        ``artifacts/round{NN}_{basename}`` (workspace mode) or the legacy
+        ``inference_config["output_path"]`` template path. Existing
+        non-empty artifacts are preserved (no overwrite).
 
-        **Legacy mode**: Uses ``inference_config["output_path"]`` template with
-        ``{{ round_index }}`` substitution.
-
-        In both modes, if the inferencer did not write the file (e.g., lacks
-        filesystem access), saves the raw response as a fallback.
+        Return value: ``response_str`` unchanged. The reviewer step downstream
+        consumes this string verbatim, so substituting a "see file" stub
+        would leave the reviewer with nothing to evaluate (the reviewer LLM
+        is not instructed to follow the path) and would deadlock the Dual
+        loop on guaranteed rejection. Saving the artifact is the value-add;
+        truncating the response is not.
         """
         # -- Workspace mode --
         if self._workspace is not None and self.output_path:
@@ -1124,11 +1145,7 @@ class DualInferencer(LinearWorkflowInferencer):
                         resolved_path,
                         e,
                     )
-                    return response_str
-            return (
-                f"The complete output has been written to: `{resolved_path}`.\n"
-                f"Read that file for the full details."
-            )
+            return response_str
 
         # -- Legacy mode --
         output_path_template = inference_config.get("output_path", "")
@@ -1140,10 +1157,8 @@ class DualInferencer(LinearWorkflowInferencer):
         resolved_path = resolved_path.replace("{{round_index}}", str(round_index))
         if os.path.isfile(resolved_path) and os.path.getsize(resolved_path) > 0:
             logger.info(
-                "[DualInferencer] Output file exists and is non-empty (%d bytes), "
-                "replacing base_output_str (%d bytes) with file reference: %s",
+                "[DualInferencer] Output file exists and is non-empty (%d bytes): %s",
                 os.path.getsize(resolved_path),
-                len(response_str),
                 resolved_path,
             )
         else:
@@ -1163,11 +1178,7 @@ class DualInferencer(LinearWorkflowInferencer):
                     resolved_path,
                     e,
                 )
-                return response_str
-        return (
-            f"The complete output has been written to: `{resolved_path}`.\n"
-            f"Read that file for the full details."
-        )
+        return response_str
 
     def _assign_issue_ids(self, parsed_review: dict, iteration: int) -> dict:
         """Assign unique IDs to each issue in the parsed review."""

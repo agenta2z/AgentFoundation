@@ -4,12 +4,12 @@ planner_inferencer:
   base_inferencer:
     _target_: ClaudeCodeCLI
     model_name: sonnet
-    target_path: "{workspace_path}"
+    target_path: "{workspace_root}"
     permission_mode: bypassPermissions
   review_inferencer:
     _target_: ClaudeCodeCLI
     model_name: sonnet
-    target_path: "{workspace_path}"
+    target_path: "{workspace_root}"
     permission_mode: bypassPermissions
   consensus_config:
     _target_: ConsensusConfig
@@ -19,7 +19,7 @@ executor_inferencer:
   breakdown_inferencer:
     _target_: ClaudeCodeCLI
     model_name: sonnet
-    target_path: "{workspace_path}"
+    target_path: "{workspace_root}"
     permission_mode: bypassPermissions
   max_breakdown: 2
-workspace_path: "{workspace_path}"
+workspace_root: "{workspace_root}"

@@ -99,7 +99,7 @@ def test_two_step_chain_sync(tmp_path):
             ),
         ],
         response_builder=lambda state: state["impl_output"],
-        workspace_path=str(tmp_path),
+        workspace_root=str(tmp_path),
     )
 
     result = lwi.infer("Design and implement a REST API")
@@ -149,7 +149,7 @@ def test_disabled_step_is_noop(tmp_path):
             "s2": state.get("s2"),
             "s3": state.get("s3"),
         },
-        workspace_path=str(tmp_path),
+        workspace_root=str(tmp_path),
     )
 
     result = lwi.infer("test input")
@@ -191,7 +191,7 @@ def test_state_coherence(tmp_path):
             ),
         ],
         response_builder=lambda state: state,
-        workspace_path=str(tmp_path),
+        workspace_root=str(tmp_path),
     )
 
     result = lwi.infer("input")

@@ -37,7 +37,7 @@ Usage::
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Union
 
 from attr import attrib, attrs
 
@@ -46,6 +46,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
     LinearWorkflowInferencer,
+)
+from agent_foundation.common.inferencers.template_defaults import (
+    FOLLOWUP_AGGREGATION_DEFAULTS,
 )
 
 _logger = logging.getLogger(__name__)
@@ -112,6 +115,36 @@ Produce a final integrated synthesis drawing on the best of every team's work.
 
 
 # ---------------------------------------------------------------------------
+# Followup-input formatting (per-step iteration)
+# ---------------------------------------------------------------------------
+#
+# Default formatter for the per-step "upstream artifacts" text used at
+# step ≥ 1 of each flow's LWI. Output is either passed as the LWI's
+# ``inference_input`` directly (legacy passthrough mode) or pushed into the
+# followup_inferencer's ``template_extra_feed["upstream_artifacts"]`` slot
+# (when ``inject_upstream_artifacts=True``); in the latter mode the wrapper
+# template's ``{{ input }}`` slot carries the original task separately, so
+# the task does NOT appear in the formatted output below (avoids duplication
+# with the wrapper).
+#
+# Exposed as module-level constants so prompt-engineering tweaks live in
+# one place. Override by subclassing MultiFlowInferencer and replacing
+# ``_format_followup_input``, or bypass entirely via ``cfg["followup_prompt"]``
+# (legacy template path) or ``cfg["dynamic_input_builder"]`` (full callback).
+
+_FOLLOWUP_OWN_PREVIOUS_HEADER = (
+    "You previously produced this artifact (flow {flow_idx}, step {prev_step_idx}):\n"
+    "{your_prev}"
+)
+_FOLLOWUP_PEER_INTRO = "Here are artifacts produced by other parallel flows:"
+_FOLLOWUP_PEER_BLOCK_HEADER = "=== Flow {idx} ==="
+_FOLLOWUP_PEER_EMPTY_PLACEHOLDER = "(no output yet)"
+_FOLLOWUP_NO_PEERS = (
+    "(No peer outputs visible yet — this iteration sees only your own previous output.)"
+)
+
+
+# ---------------------------------------------------------------------------
 # Visibility helpers
 # ---------------------------------------------------------------------------
 
@@ -174,13 +207,41 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     ``visible_flows``     Per-flow visibility override                       *class default*
     ``initial_prompt``    Template (key or raw Jinja2) for step 0            ``None``
     ``followup_prompt``   Template for step ≥ 1                              ``None``
+    ``iteration_judgment`` Named feature toggle (see below)                  ``False``
     ====================  =================================================  ==========
 
     When no ``initial_prompt`` is set, step 0 receives the raw ``input`` field.
     When no ``followup_prompt`` and class-level
     ``multiflow_followup_prompt`` are set, step ≥ 1 receives the previous
     step's result directly (legacy passthrough).
+
+    ``iteration_judgment: true`` is a coordinated feature toggle that bundles
+    two coupled setups (without it, each half is inert):
+
+    1. Sets ``end_condition`` to ``parse_decision_stop`` — extracts the
+       ``iteration_judgment`` JSON block from each step's output and
+       terminates the flow early when the LLM emits ``"decision": "stop"``.
+    2. Sets ``followup_inferencer.template_extra_feed["include_iteration_judgment"]``
+       to ``True`` — the followup's wrapper template (e.g.
+       ``plan/main/_variables/task_response_format/aggregation.jinja2``)
+       renders the JSON schema instructing the LLM to emit the judgment.
+
+    Both halves use ``setdefault`` semantics — explicit user overrides win.
     """
+
+    # === Slot-based template role defaults (consumed by config_utils._walk) ===
+    # Inherits BTA's breakdown/aggregator defaults via MRO. The
+    # ``flow_configs.*.followup_inferencer`` wildcard path applies aggregation
+    # framing to each per-flow followup IFF (a) peers are visible
+    # (visible_flows != "self") AND (b) injection wiring is engaged
+    # (inject_upstream_artifacts=True). The condition is class-default-aware:
+    # MultiFlow defaults visible_flows="self" + inject=False (simple parallel
+    # sampling, no peer aggregation), so bare MultiFlow YAMLs skip the
+    # default; MFDual subclass defaults both to enable aggregation, so bare
+    # MFDual YAMLs apply the default automatically.
+    SLOT_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "flow_configs.*.followup_inferencer": FOLLOWUP_AGGREGATION_DEFAULTS,
+    }
 
     # MultiFlow-specific config (NEW vs. previous composition wrapper)
     flow_configs: List[dict] = attrib(factory=list)
@@ -211,6 +272,55 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     fixer_alias_parser: Optional[Callable[[str], Optional[str]]] = attrib(default=None)
     """Same as ``reviewer_alias_parser``, for ``<Fixer>alias</Fixer>``."""
 
+    # ----- Runtime input propagation (opt-in) -----
+    # When True, ``_ainfer`` / ``_infer`` mutate ``flow_configs[i]["input"]``
+    # and ``predefined_sub_queries`` from the runtime ``inference_input`` before
+    # delegating to BTA's worker spawning. Fixes the "predefined_sub_queries
+    # snapshotted at construction" problem that prevents MFDual from being used
+    # as a PTI planner (PTI calls ``planner.ainfer(state["current_input"])``;
+    # without this flag, the runtime input is dropped and flows run against the
+    # static placeholder strings declared in YAML).
+    #
+    # Default False preserves existing behavior for callers (tests, configs)
+    # that rely on static ``flow_configs[i]["input"]`` values.
+    #
+    # Caveat: NOT compatible with checkpoint/resume — the mutation is per-call
+    # and resume reconstruction of ``_cached_sub_queries`` may use stale values.
+    # Acceptable for non-resume use cases (e.g. shallow real-CLI tests).
+    propagate_runtime_input: bool = attrib(default=False)
+    """Opt-in: rewrite each flow's input from runtime ``inference_input`` per call."""
+
+    runtime_input_template: Optional[str] = attrib(default=None)
+    """Optional Jinja template to wrap runtime input per-flow. Receives feed
+    ``{"input": runtime_input, "flow_idx": i, "n_flows": N}``. Lets callers add
+    flow-specific perspective seeds (e.g. flow 0 = "foundational angle",
+    flow 1 = "incremental angle"). ``None`` = use runtime input verbatim for
+    all flows. Only consulted when ``propagate_runtime_input=True``."""
+
+    # ----- Upstream artifact injection (opt-in) -----
+    # When True, MultiFlow injects formatted upstream artifacts into the
+    # target inferencer's ``template_extra_feed["upstream_artifacts"]`` BEFORE
+    # invoking it, AND returns just the per-flow ``input`` (or original_query
+    # for the final aggregator) as ``inference_input``. This lets the target
+    # inferencer's wrapper template reference ``{{ upstream_artifacts }}`` and
+    # ``{{ input }}`` as separate slots — the upstream content lives in its
+    # own slot, the original task lives in ``{{ input }}``.
+    #
+    # Affects both:
+    #   - per-flow followup_inferencer (steps ≥ 1): upstream_artifacts =
+    #     rendered followup_prompt (formatted your_prev + visible_plans)
+    #   - final aggregator_inferencer: upstream_artifacts = rendered
+    #     aggregator_prompt (formatted worker_plans)
+    #
+    # Default False preserves existing behavior (upstream content goes into
+    # ``inference_input`` directly, ``{{ upstream_artifacts }}`` slot is
+    # undefined in the wrapper template).
+    inject_upstream_artifacts: bool = attrib(default=False)
+    """Opt-in: push formatted upstream artifacts into target inferencer's
+    ``template_extra_feed["upstream_artifacts"]`` per call, while letting
+    ``inference_input`` carry the original task. Lets wrapper templates with a
+    separate ``{{ upstream_artifacts }}`` slot work cleanly."""
+
     # Internal state — reset at the top of each ainfer/infer call.
     # Declared as init=False so attrs doesn't include them in __init__.
     _latest_per_flow: Dict[int, Any] = attrib(factory=dict, init=False)
@@ -234,7 +344,39 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     f"flow_configs[{i}] must be a dict (got {type(cfg).__name__})"
                 )
             if "input" not in cfg:
-                raise ValueError(f"flow_configs[{i}] is missing required key 'input'")
+                # When ``propagate_runtime_input=True``, ``cfg["input"]`` is
+                # overwritten per call by ``_apply_runtime_input_propagation``,
+                # so the YAML value is dead weight — author can omit it and
+                # we fill in an empty placeholder. When the flag is False,
+                # the input IS the per-flow query and must be supplied.
+                if self.propagate_runtime_input:
+                    cfg["input"] = ""
+                else:
+                    raise ValueError(
+                        f"flow_configs[{i}] is missing required key 'input' "
+                        f"(set 'propagate_runtime_input: true' if you intend "
+                        f"to fill it from the runtime inference_input per call)"
+                    )
+            # `iteration_judgment: true` is a named feature toggle that bundles
+            # two coupled setups: (a) `end_condition` parses the LLM's
+            # `iteration_judgment` JSON block to decide stop/continue, and
+            # (b) the followup_inferencer's wrapper template renders that
+            # JSON schema (so the LLM knows to emit it). Both halves are
+            # inert without the other, so we set them as a coordinated
+            # bundle. ``setdefault`` preserves any explicit user override.
+            if cfg.get("iteration_judgment", False):
+                # Lazy import to avoid module-load cycles.
+                from agent_foundation.common.inferencers.flow_parsers import (
+                    parse_decision_stop,
+                )
+                cfg.setdefault("end_condition", parse_decision_stop)
+                followup = cfg.get("followup_inferencer")
+                if followup is not None and hasattr(followup, "template_extra_feed"):
+                    if followup.template_extra_feed is None:
+                        followup.template_extra_feed = {}
+                    followup.template_extra_feed.setdefault(
+                        "include_iteration_judgment", True
+                    )
 
         # Forbid conflicting BTA-level config — MultiFlow owns these fields.
         if self.breakdown_inferencer is not None:
@@ -340,6 +482,62 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         return Template(template).render(**feed)
 
     # ------------------------------------------------------------------
+    # Workspace propagation override
+    # ------------------------------------------------------------------
+
+    def _propagate_workspace_to_children(self, parent_workspace):
+        """MultiFlow override: also walk ``flow_configs`` (list of dicts).
+
+        The base ``_for_each_child_inferencer`` walker iterates list items,
+        but doesn't recurse into dicts inside list items. MultiFlow's
+        ``flow_configs`` is a ``List[dict]`` where each dict carries
+        ``initial_inferencer`` and ``followup_inferencer`` slots — those
+        InferencerBase instances are invisible to the generic walker and
+        need explicit propagation.
+
+        For each ``flow_configs[i]`` entry, this assigns:
+
+        * ``initial_inferencer`` → ``parent_workspace.child(f"flow_{i}_initial")``
+        * ``followup_inferencer`` → ``parent_workspace.child(f"flow_{i}_followup")``
+
+        Direct attrs (e.g., ``aggregator_inferencer`` if set) are still
+        propagated by ``super()._propagate_workspace_to_children``, which
+        is called at the end so this override is purely additive.
+
+        Pre-assignment is respected — if a flow inferencer already has a
+        ``_workspace`` set, this skips it (matches the base walker contract).
+        """
+        for i, cfg in enumerate(self.flow_configs or []):
+            if not isinstance(cfg, dict):
+                continue
+            for slot, suffix in (
+                ("initial_inferencer", f"flow_{i}_initial"),
+                ("followup_inferencer", f"flow_{i}_followup"),
+            ):
+                child = cfg.get(slot)
+                if child is None:
+                    continue
+                # Duck-typed callables (e.g., partial-wrapped factories) lack
+                # _workspace; skip silently like the base walker does.
+                if not hasattr(child, "_workspace"):
+                    continue
+                if getattr(child, "_workspace", None) is not None:
+                    continue  # respect explicit pre-assignment
+                try:
+                    child_ws = parent_workspace.child(suffix)
+                    child_ws.ensure_dirs()
+                    child._workspace = child_ws
+                except Exception as exc:  # noqa: BLE001 — best-effort
+                    _logger.debug(
+                        "MultiFlow workspace propagation to flow_configs[%d].%s "
+                        "(%s) skipped: %s",
+                        i, slot, type(child).__name__, exc,
+                    )
+
+        # Direct attrs (aggregator_inferencer, etc.) handled by base.
+        super()._propagate_workspace_to_children(parent_workspace)
+
+    # ------------------------------------------------------------------
     # Per-flow visibility resolution
     # ------------------------------------------------------------------
 
@@ -347,6 +545,50 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         cfg = self.flow_configs[flow_idx]
         spec = cfg.get("visible_flows", self.visible_flows)
         return _resolve_visible_indices(flow_idx, len(self.flow_configs), spec)
+
+    # ------------------------------------------------------------------
+    # Followup-input formatting (per-step iteration default)
+    # ------------------------------------------------------------------
+
+    def _format_followup_input(
+        self,
+        *,
+        your_prev: str,
+        flow_idx: int,
+        step_idx: int,
+        visible_plans: Dict[int, Optional[str]],
+    ) -> str:
+        """Default formatter for per-step iteration input (used at step >= 1).
+
+        Composes the flow's previous output and visible peers' latest outputs
+        into a single text blob. Used as either the LWI's ``inference_input``
+        directly (legacy passthrough) or pushed into the followup_inferencer's
+        ``template_extra_feed["upstream_artifacts"]`` slot
+        (``inject_upstream_artifacts=True``); the original task is supplied by
+        the wrapper's ``{{ input }}`` slot in the latter mode, so it is NOT
+        included here.
+
+        Subclasses can override; callers can bypass via
+        ``cfg["followup_prompt"]`` (legacy template path) or
+        ``cfg["dynamic_input_builder"]`` (full callback).
+        """
+        parts = [
+            _FOLLOWUP_OWN_PREVIOUS_HEADER.format(
+                flow_idx=flow_idx,
+                prev_step_idx=step_idx - 1,
+                your_prev=your_prev,
+            ),
+        ]
+        if visible_plans:
+            peer_blocks = "\n\n".join(
+                f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n"
+                f"{plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER}"
+                for idx, plan in visible_plans.items()
+            )
+            parts.append(f"{_FOLLOWUP_PEER_INTRO}\n\n{peer_blocks}")
+        else:
+            parts.append(_FOLLOWUP_NO_PEERS)
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Aggregator prompt builder (default, installed when aggregator_prompt is set)
@@ -395,7 +637,26 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             }
 
             template = outer.aggregator_prompt or DEFAULT_AGGREGATOR_PROMPT_TEMPLATE
-            return outer._render_template(template, feed)
+            rendered = outer._render_template(template, feed)
+
+            # Upstream artifact injection: when enabled, push the rendered
+            # peer-output formatting into the aggregator inferencer's extra
+            # feed under ``upstream_artifacts`` and return JUST the original
+            # query as ``inference_input``. The aggregator's wrapper template
+            # then has ``{{ input }} = original_query`` and
+            # ``{{ upstream_artifacts }} = formatted peers`` as separate slots.
+            #
+            # Without this flag, the entire rendered string is the
+            # ``inference_input`` and ``{{ upstream_artifacts }}`` is undefined.
+            if outer.inject_upstream_artifacts and outer.aggregator_inferencer is not None:
+                target = outer.aggregator_inferencer
+                if hasattr(target, "template_extra_feed"):
+                    if target.template_extra_feed is None:
+                        target.template_extra_feed = {}
+                    target.template_extra_feed["upstream_artifacts"] = rendered
+                return original_query or ""
+
+            return rendered
 
         return _builder
 
@@ -452,22 +713,58 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 if user_dynamic_builder is not None:
                     return user_dynamic_builder(state, prev_result)
 
-                if followup_template is None:
-                    # No template configured — preserve legacy LWI behaviour
-                    # (pass the previous result through unchanged).
+                step_idx = state.get("dynamic_step_count", 0)
+
+                # Compute the upstream-artifacts text. Three modes, in priority:
+                #   1. ``followup_template`` is set → render template (legacy
+                #      escape hatch; lets callers customize per-step formatting
+                #      via Jinja).
+                #   2. ``inject_upstream_artifacts`` is True → built-in Python
+                #      formatter ``_format_followup_input`` (default for the
+                #      injection-into-extra-feed flow).
+                #   3. neither → legacy LWI passthrough (pass prev_result
+                #      through unchanged); preserves behavior for tests that
+                #      configure neither.
+                if followup_template is not None:
+                    feed = {
+                        "input": cfg.get("input", ""),
+                        "your_prev": prev_text,
+                        "visible_plans": visible_plans,
+                        "all_plans": {
+                            i: outer._latest_per_flow.get(i) for i in range(len(configs))
+                        },
+                        "flow_idx": index,
+                        "step_idx": step_idx,
+                    }
+                    upstream_text = outer._render_template(followup_template, feed)
+                elif outer.inject_upstream_artifacts:
+                    upstream_text = outer._format_followup_input(
+                        your_prev=prev_text,
+                        flow_idx=index,
+                        step_idx=step_idx,
+                        visible_plans=visible_plans,
+                    )
+                else:
                     return prev_result
 
-                feed = {
-                    "input": cfg.get("input", ""),
-                    "your_prev": prev_text,
-                    "visible_plans": visible_plans,
-                    "all_plans": {
-                        i: outer._latest_per_flow.get(i) for i in range(len(configs))
-                    },
-                    "flow_idx": index,
-                    "step_idx": state.get("dynamic_step_count", 0),
-                }
-                return outer._render_template(followup_template, feed)
+                # Upstream artifact injection: when enabled, push the formatted
+                # text (your_prev + visible_plans) into the followup_inferencer's
+                # extra feed under ``upstream_artifacts`` and return the per-flow
+                # runtime input as ``inference_input``. The followup_inferencer's
+                # wrapper template then has ``{{ input }} = cfg["input"]`` (the
+                # runtime task) and ``{{ upstream_artifacts }} = formatted peers``
+                # as separate slots. Without this flag, the full formatted output
+                # is the inference_input and ``{{ upstream_artifacts }}`` is
+                # undefined.
+                if outer.inject_upstream_artifacts:
+                    followup_inf = cfg.get("followup_inferencer")
+                    if followup_inf is not None and hasattr(followup_inf, "template_extra_feed"):
+                        if followup_inf.template_extra_feed is None:
+                            followup_inf.template_extra_feed = {}
+                        followup_inf.template_extra_feed["upstream_artifacts"] = upstream_text
+                    return cfg.get("input", "")
+
+                return upstream_text
 
             # When an initial_prompt template is set, render it lazily at the
             # start of the LWI run via ``initial_state_factory``. The factory
@@ -790,7 +1087,35 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         self._reset_dispatch_state_for_call()
         return super().infer(inference_input, inference_config, **_inference_args)
 
+    def _apply_runtime_input_propagation(self, inference_input: Any) -> None:
+        """Rewrite each flow's input from the runtime ``inference_input``.
+
+        No-op unless ``propagate_runtime_input=True``. When enabled, mutates
+        ``flow_configs[i]["input"]`` and ``predefined_sub_queries`` so the
+        downstream BTA worker spawning (which reads ``predefined_sub_queries``)
+        sees the runtime input rather than the static YAML placeholder.
+
+        If ``runtime_input_template`` is set, each flow's input is rendered
+        through it with feed ``{input, flow_idx, n_flows}`` — useful for
+        per-flow perspective seeding (different angles for different flows).
+
+        See class docstring for the resume-incompatibility caveat.
+        """
+        if not self.propagate_runtime_input:
+            return
+        n_flows = len(self.flow_configs)
+        for i, cfg in enumerate(self.flow_configs):
+            if self.runtime_input_template is not None:
+                cfg["input"] = self._render_template(
+                    self.runtime_input_template,
+                    {"input": inference_input, "flow_idx": i, "n_flows": n_flows},
+                )
+            else:
+                cfg["input"] = inference_input
+        self.predefined_sub_queries = [c["input"] for c in self.flow_configs]
+
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
+        self._apply_runtime_input_propagation(inference_input)
         self._reset_cross_flow_state()
         raw = await BreakdownThenAggregateInferencer._ainfer(
             self, inference_input, inference_config=inference_config, **_inference_args
@@ -802,6 +1127,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         return self._maybe_strip_response(raw)
 
     def _infer(self, inference_input, inference_config=None, **_inference_args):
+        self._apply_runtime_input_propagation(inference_input)
         self._reset_cross_flow_state()
         raw = BreakdownThenAggregateInferencer._infer(
             self, inference_input, inference_config=inference_config, **_inference_args

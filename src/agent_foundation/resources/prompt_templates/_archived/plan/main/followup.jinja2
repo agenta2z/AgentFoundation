@@ -1,15 +1,10 @@
-{% if session_root_path %}
-## Target Codebase
-You are operating on the codebase at: `{{ session_root_path }}`
-All relative file paths should be resolved from this root.
-{% endif %}
-
 You previously generated a plan for the following user request and received feedback from a reviewing agent.
 
 **Original User Request:**
-<UserRequest>
+<OriginalUserRequest>
+{{ task_preamble }}
 {{ input }}
-</UserRequest>
+</OriginalUserRequest>
 
 **Your Current Proposed Plan:**
 <ProposedPlan>
@@ -50,7 +45,7 @@ Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration
 
 Write your **improved plan** in markdown format to: `{{ output_path }}`
 - The plan should be human readable and structured with details, that another human or agent could follow to implement later.
-- For large planning, YOU MUST break the write into multiple smaller appends to avoid single-write failure when possible.
+- When writing a large plan, YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
 
 Wrap a structured response in `<Response>` tags:
 - **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.

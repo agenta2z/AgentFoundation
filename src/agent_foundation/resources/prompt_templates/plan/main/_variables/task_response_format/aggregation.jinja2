@@ -1,0 +1,26 @@
+{%- if include_iteration_judgment %}
+
+Conclude with the iteration judgment as a fenced JSON block. This signals whether the integration and consolidation step itself produced new value over the upstream inputs:
+
+```json iteration_judgment
+{
+  "decision": "continue",
+  "reason": "<one or two sentences. Pick \"continue\" if integrating the upstream inputs surfaced new signal worth another iteration. Pick \"stop\" if the upstream inputs were mostly identical and integration added little information, AND the consolidated artifact is internally consistent.>"
+}
+```
+
+`decision` MUST be exactly the string `"continue"` or `"stop"`.
+{%- endif %}
+{%- if include_winner_pick %}
+
+Conclude with the winner-pick judgment as a fenced JSON block. This is the answer to: if forced to pick one upstream input rather than integrate them all, which would you pick?
+
+```json winner_pick
+{
+  "winner_index": 0,
+  "reason": "<one or two sentences on why this input stands out. If none stands out, pick the most complete and grounded one.>"
+}
+```
+
+`winner_index` is the 0-based integer index of the chosen upstream input.
+{%- endif %}

@@ -1,0 +1,146 @@
+"""Output parsers for MultiFlow / MultiFlowDual aggregator + per-flow outputs.
+
+Three small functions, paired with the JSON-fenced response-format addenda
+emitted by ``plan/main/_variables/task_response_format/aggregation.jinja2``:
+
+* :func:`parse_winner_tag` — used as ``MultiFlowDual.multi_flow_winner_parser``
+  to extract the winning flow index from an aggregator's structured output.
+* :func:`parse_decision_stop` — used as a per-flow ``end_condition`` callable
+  on each ``flow_configs`` entry, signaling the flow has decided no further
+  iteration adds value.
+* :func:`parse_finalplan_tag` — used as ``MultiFlowDual.multi_flow_response_parser``
+  to extract the final plan content (stripping any wrapper tags) so the
+  outer Dual reviewer sees clean prose.
+
+Each parser first looks for a JSON-fenced block matching the response-format
+template, then falls back to the legacy XML-tag pattern so older outputs and
+hand-written test fixtures still parse.
+
+These exist as YAML-instantiable callables via the alias registry — see
+``agent_foundation.common.configs.registered_targets`` for ``WinnerParser``,
+``DecisionStopParser``, ``FinalPlanParser`` aliases.
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Optional
+
+
+# Legacy XML tag patterns (fallback path for older outputs / fixtures).
+_WINNER_RE = re.compile(r"<Winner>\s*flow_(\d+)\s*</Winner>", re.IGNORECASE)
+_DECISION_RE = re.compile(r"<Decision>\s*([\s\S]*?)\s*</Decision>", re.IGNORECASE)
+_FINALPLAN_RE = re.compile(r"<FinalPlan>([\s\S]*?)</FinalPlan>", re.IGNORECASE)
+
+# Matches ```json <label> ... ``` (label may be followed by extra text on
+# the fence line; we capture the body between the fences).
+_JSON_FENCE_TEMPLATE = r"```json\s+{label}\b[^\n]*\n([\s\S]*?)\n\s*```"
+
+_STOP_TOKENS = {"stop", "done", "halt"}
+
+
+def _extract_json_block(s: str, label: str) -> Optional[dict]:
+    """Find ```json <label> ... ``` and parse the body as JSON.
+
+    Returns the decoded dict, or ``None`` if the block is absent or invalid.
+    """
+    pattern = re.compile(_JSON_FENCE_TEMPLATE.format(label=re.escape(label)))
+    m = pattern.search(s)
+    if not m:
+        return None
+    try:
+        decoded = json.loads(m.group(1))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def parse_winner_tag(s: Any) -> Optional[int]:
+    """Extract the winning flow index from the aggregator output.
+
+    Primary path: ```json winner_pick`` block with ``"winner_index": K``.
+    Fallback: legacy ``<Winner>flow_K</Winner>`` tag.
+    Returns ``None`` if neither is present (graceful — dispatch falls back
+    to defaults).
+    """
+    if not isinstance(s, str):
+        return None
+    block = _extract_json_block(s, "winner_pick")
+    if block is not None:
+        idx = block.get("winner_index")
+        if isinstance(idx, bool):  # bool is subclass of int — exclude
+            idx = None
+        if isinstance(idx, int):
+            return idx
+        if isinstance(idx, str) and idx.strip().lstrip("-").isdigit():
+            return int(idx.strip())
+    m = _WINNER_RE.search(s)
+    return int(m.group(1)) if m else None
+
+
+def parse_decision_stop(state: Any, result: Any) -> bool:
+    """End-condition callable: ``True`` iff the model decided to stop iterating.
+
+    Signature matches ``LinearWorkflowInferencer.end_condition`` (the
+    ``(state, result)`` callable). Reads from ``result`` only — ``state``
+    is ignored but accepted for the standard end_condition interface.
+
+    Primary path: ```json iteration_judgment`` block with
+    ``"decision": "stop"`` (case-insensitive; ``done``/``halt`` also accepted).
+    Fallback: legacy ``<Decision>stop</Decision>`` tag.
+    Anything else (including ``continue``, missing block, malformed JSON)
+    → ``False`` (keep iterating).
+    """
+    text = result if isinstance(result, str) else getattr(result, "output", None)
+    if not isinstance(text, str):
+        text = str(result) if result is not None else ""
+    block = _extract_json_block(text, "iteration_judgment")
+    if block is not None:
+        decision = block.get("decision")
+        if isinstance(decision, str):
+            return decision.strip().lower() in _STOP_TOKENS
+        return False
+    m = _DECISION_RE.search(text)
+    if not m:
+        return False
+    return m.group(1).strip().lower() in _STOP_TOKENS
+
+
+def parse_finalplan_tag(s: Any) -> str:
+    """Extract content from ``<FinalPlan>...</FinalPlan>``.
+
+    Falls back to the original string when no tag is present (graceful — the
+    aggregator output is used verbatim if it didn't wrap properly). Used as
+    ``MultiFlowDual.multi_flow_response_parser`` so the outer Dual reviewer
+    receives the cleaned plan body.
+    """
+    if not isinstance(s, str):
+        return s
+    m = _FINALPLAN_RE.search(s)
+    return m.group(1).strip() if m else s
+
+
+# ---------------------------------------------------------------------------
+# Factory wrappers for YAML alias registration.
+#
+# YAML's ``_target_:`` resolves to a class or function and instantiates it
+# with the constructor kwargs. Since our parsers are plain functions (not
+# classes), we register tiny factories that return the function so the YAML
+# can do ``_target_: WinnerParser`` and end up with the function as the
+# inferencer's ``end_condition`` / ``winner_parser`` / ``response_parser``.
+# ---------------------------------------------------------------------------
+
+
+def make_winner_parser():
+    """Factory returning :func:`parse_winner_tag`."""
+    return parse_winner_tag
+
+
+def make_decision_stop_parser():
+    """Factory returning :func:`parse_decision_stop`."""
+    return parse_decision_stop
+
+
+def make_finalplan_parser():
+    """Factory returning :func:`parse_finalplan_tag`."""
+    return parse_finalplan_tag

@@ -116,7 +116,7 @@ async def test_planning_phase_crash_resume(tmp_workspace):
     pti1 = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     # First run — expect interruption during planning phase
@@ -135,7 +135,7 @@ async def test_planning_phase_crash_resume(tmp_workspace):
     pti2 = PlanThenImplementInferencer(
         planner_inferencer=planner2,
         executor_inferencer=executor2,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
         resume_workspace=workspace_dir,
     )
 
@@ -190,7 +190,7 @@ async def test_implementation_phase_crash_resume(tmp_workspace):
     pti1 = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     # First run — planning completes, executor interrupted (Req 13.1)
@@ -209,7 +209,7 @@ async def test_implementation_phase_crash_resume(tmp_workspace):
     pti2 = PlanThenImplementInferencer(
         planner_inferencer=planner2,
         executor_inferencer=executor2,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
         resume_workspace=workspace_dir,
     )
 
@@ -263,7 +263,7 @@ async def test_workspace_based_resume_detection(tmp_workspace):
     pti1 = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     # First run — planning completes, executor interrupted
@@ -300,7 +300,7 @@ async def test_workspace_based_resume_detection(tmp_workspace):
     pti2 = PlanThenImplementInferencer(
         planner_inferencer=planner2,
         executor_inferencer=executor2,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
         resume_workspace=workspace_dir,
     )
 
@@ -349,7 +349,7 @@ async def test_setup_child_workflows_propagation(tmp_workspace):
     pti = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_path=workspace_dir,
+        workspace_root=workspace_dir,
     )
 
     # Track _setup_child_workflows calls
