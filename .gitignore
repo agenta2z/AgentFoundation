@@ -111,10 +111,7 @@ venv.bak/
 Thumbs.db
 
 # Development directories (tracked on dev branch, ignored on main)
-_dev/
-_archive/
-_docs/
-_plan/
+# _dev/, _archive/, _docs/, _plan/ are gitignored on main only
 
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
