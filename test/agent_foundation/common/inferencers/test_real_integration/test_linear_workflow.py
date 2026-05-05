@@ -267,7 +267,7 @@ async def test_checkpoint_resume(tmp_workspace):
     lwi1 = LinearWorkflowInferencer(
         step_configs=step_configs_run1,
         response_builder=lambda state: state,
-        workspace_root=workspace_dir,
+        workspace=workspace_dir,
     )
 
     try:
@@ -313,7 +313,7 @@ async def test_checkpoint_resume(tmp_workspace):
     lwi2 = LinearWorkflowInferencer(
         step_configs=step_configs_run2,
         response_builder=lambda state: state,
-        workspace_root=workspace_dir,
+        workspace=workspace_dir,
     )
 
     result = await lwi2.ainfer(CHEAP_PROMPT)

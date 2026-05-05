@@ -29,6 +29,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
 )
 
 from .conftest import DEFAULT_TIMEOUT, skip_claude
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 # ---------------------------------------------------------------------------
 # Path to YAML templates
@@ -84,7 +85,7 @@ def test_pti_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_root": str(tmp_workspace["workspace"])},
+        {"workspace": InferencerWorkspace(root=str(tmp_workspace["workspace"]))},
     )
     obj = instantiate(cfg)
 
@@ -137,13 +138,13 @@ def test_pti_yaml_attribute_verification(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_root": ws},
+        {"workspace": InferencerWorkspace(root=ws)},
     )
     obj = instantiate(cfg)
 
     # PTI workspace_root
-    assert Path(obj.workspace_root) == Path(ws), (
-        f"PTI workspace_root mismatch: {obj.workspace_root} != {ws}"
+    assert Path(obj._workspace.root) == Path(ws), (
+        f"PTI workspace_root mismatch: {obj._workspace.root} != {ws}"
     )
 
     # Planner DualInferencer — consensus_config
@@ -193,7 +194,7 @@ async def test_pti_yaml_real_inference_call(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "pti_nested_dual.yaml",
-        {"workspace_root": ws},
+        {"workspace": InferencerWorkspace(root=ws)},
     )
     obj = instantiate(cfg)
 

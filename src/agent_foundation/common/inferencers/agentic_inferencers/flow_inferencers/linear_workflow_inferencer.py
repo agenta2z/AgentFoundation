@@ -142,15 +142,15 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         response_builder: Callable(state) -> final response.  Defaults to
             returning the full state dict.
         initial_state_factory: Callable(inference_input) -> initial state dict.
-        workspace_root: Optional workspace root for checkpoint file I/O.
-            Renamed from ``workspace_path`` for consistency with
-            DualInferencer / BTA / MFDual which also use ``workspace_root``.
+        workspace: Optional InferencerWorkspace for checkpoint/output I/O.
+            (Inherited from InferencerBase.) The legacy ``workspace_root: str``
+            shorthand was removed 2026-05-05; pass
+            ``workspace=InferencerWorkspace(root="/path", ...)`` instead.
     """
 
     step_configs: List[WorkflowStepConfig] = attrib(factory=list)
     response_builder: Optional[Callable] = attrib(default=None)
     initial_state_factory: Optional[Callable] = attrib(default=None)
-    workspace_root: Optional[str] = attrib(default=None)
 
     # --- New: Iteration Management ---
     iteration_workspace_factory: Optional[Callable[[str, int], str]] = attrib(default=None)
@@ -181,15 +181,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
     def __attrs_post_init__(self):
         super(LinearWorkflowInferencer, self).__attrs_post_init__()
-
-        # Workspace reconstruction
-        if self.workspace_root is not None:
-            from agent_foundation.common.inferencers.inferencer_workspace import (
-                InferencerWorkspace,
-            )
-            self._workspace = InferencerWorkspace(root=self.workspace_root)
-        else:
-            self._workspace = None
+        # Workspace is fully managed by InferencerBase.__attrs_post_init__
+        # (syncs `self.workspace` → `self._workspace`). No additional setup
+        # needed here. The legacy `workspace_root: Optional[str]` shorthand
+        # was removed 2026-05-05 — pass `workspace=InferencerWorkspace(...)`
+        # for the explicit form.
 
         # Set parent debuggable for child inferencers
         seen_ids: set = set()
@@ -249,9 +245,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         iteration = state.get("iteration", 1)
 
         # 1. Create iteration workspace (skip if no workspace configured)
-        if self.workspace_root is not None:
+        if self._workspace is not None:
             iter_path = self._get_iteration_workspace(
-                self.workspace_root, iteration, self.iteration_workspace_factory
+                self._workspace.root, iteration, self.iteration_workspace_factory
             )
             ws = InferencerWorkspace(root=iter_path)
             ws.ensure_dirs()
@@ -767,12 +763,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         self._inference_config = inference_config
         self._inference_args = _inference_args
 
-        # Workspace setup — skip if already set by subclass
-        if self._workspace is None and self.workspace_root is not None:
-            from agent_foundation.common.inferencers.inferencer_workspace import (
-                InferencerWorkspace,
-            )
-            self._workspace = InferencerWorkspace(root=self.workspace_root)
+        # Workspace was set in __attrs_post_init__ via InferencerBase syncing
+        # self.workspace → self._workspace. Nothing more to do here.
 
         # Final result cache check (Req 8)
         if self.resume_with_saved_results:

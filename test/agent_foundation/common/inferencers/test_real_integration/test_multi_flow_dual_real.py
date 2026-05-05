@@ -290,7 +290,7 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
             max_iterations=p["max_iterations"],
             max_consensus_attempts=p["max_consensus_attempts"],
         ),
-        workspace_root=str(tmp_path / "mfdi_workspace"),
+        workspace=str(tmp_path / "mfdi_workspace"),
     )
 
     async with mfdi:

@@ -357,6 +357,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         "aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
     }
 
+    # The aggregation stage gets a canonical runtime workspace via the WorkGraph
+    # node named "aggregator" (see _build_subgraph_spec / agg_inf._workspace =
+    # child("aggregator")). Skipping generic attr-based propagation for the
+    # direct child slot `aggregator_inferencer` avoids a duplicate,
+    # usually-empty `children/aggregator_inferencer/` directory.
+    _workspace_propagation_skip: frozenset = frozenset({"aggregator_inferencer"})
+
     # === Breakdown ===
     breakdown_inferencer: InferencerBase = attrib(default=None)
     max_breakdown: Optional[int] = attrib(default=None)
@@ -424,11 +431,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     checkpoint_dir: Optional[str] = attrib(default=None)
 
     # === Workspace support (opt-in, overrides checkpoint_dir when set) ===
-    # workspace_root: str — convenience shorthand to create a plain InferencerWorkspace.
-    # workspace: InferencerWorkspace — inherited from InferencerBase; takes precedence.
+    # workspace: InferencerWorkspace — inherited from InferencerBase.
     #   Configure workspace layout (e.g., use_final_deliverables_folder) on the
     #   InferencerWorkspace object directly, keeping workspace concerns out of BTA.
-    workspace_root: Optional[str] = attrib(default=None)
+    # The legacy `workspace_root: Optional[str]` shorthand was removed
+    # 2026-05-05; pass `workspace=InferencerWorkspace(root="/path", ...)`.
 
     # === Concurrency ===
     # Maximum number of worker nodes to run in parallel during the fan-out
@@ -457,6 +464,30 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     breakdown_only: bool = attrib(default=False)  # Stop after breakdown phase
     disable_aggregator: bool = attrib(default=False)  # Run workers but skip aggregation
     promote_worker_deliverables: bool = attrib(default=False, kw_only=True)
+
+    # === v1.7 Deliverable Boundary Semantics (Phase 2) ===
+    # BTA is a boundary by default. The boundary mechanism only ACTIVATES
+    # when use_final_deliverables_folder=True on the workspace; existing
+    # callers that don't set that flag get a no-op (backward compatible).
+    is_deliverable_boundary: bool = attrib(default=True, kw_only=True)
+    # When True, BTA's own response (aggregator's text output) is published
+    # to outputs/final_deliverables/<output_path>; when False, it stays in
+    # outputs/ as a report only. Default True since BTA's response IS the
+    # canonical aggregated artifact in most workflows.
+    publishes_response_as_deliverable: bool = attrib(default=True, kw_only=True)
+    # Subclass-local policy for boundary aggregation:
+    deliverable_namespace_strategy: str = attrib(
+        default="by_child_name", kw_only=True
+    )
+    deliverable_conflict_strategy: str = attrib(
+        default="skip_existing", kw_only=True
+    )
+    # Which child workspace names to collect from (default: all worker_*).
+    # The "fixer" extension below collects ALL boundaries; subclass-specific
+    # filters can be set via YAML/kwargs.
+    deliverable_collect_namespace_root: str = attrib(
+        default="workers", kw_only=True
+    )
     conflict_resolution_mode: str = attrib(default="last_writer_wins", kw_only=True)
     # When set, skips the LLM-driven breakdown phase entirely.
     # Accepts:
@@ -496,22 +527,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     def __attrs_post_init__(self):
         # InferencerBase.__attrs_post_init__ syncs self.workspace → self._workspace.
-        # We override here to also handle workspace_root (convenience shorthand)
-        # and to call ensure_dirs().
+        # The legacy `workspace_root` shorthand was removed 2026-05-05.
         super().__attrs_post_init__()
-
         if self._workspace is not None:
-            # workspace was provided directly via InferencerBase.workspace — use as-is.
             self._workspace.ensure_dirs()
-        elif self.workspace_root is not None:
-            # Convenience: create a plain InferencerWorkspace from the root path.
-            from agent_foundation.common.inferencers.inferencer_workspace import (
-                InferencerWorkspace,
-            )
-            self._workspace = InferencerWorkspace(root=self.workspace_root)
-            self._workspace.ensure_dirs()
-        else:
-            self._workspace = None
 
         # Auto-default output_path for the pipeline report.
         # This is the fallback filename used when the aggregator produces no
@@ -843,7 +862,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
             return os.path.join(self.checkpoint_dir, f"{result_id}_result{ext}")
         raise NotImplementedError(
-            "checkpoint_dir or workspace_root must be set for result saving"
+            "checkpoint_dir or workspace must be set for result saving"
         )
 
     def _resolve_predefined_sub_queries(self) -> List:
@@ -981,6 +1000,44 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     deliverables_dst,
                 )
                 copied_any_deliverable = True
+
+        # === v1.7 Deliverable Boundary EXTENSION (Phase 2) ===
+        # Run the boundary collect+aggregate post-step when:
+        #   1. is_deliverable_boundary=True (default for BTA)
+        #   2. workspace has use_final_deliverables_folder=True
+        #   3. Not already handled by promote_worker_deliverables (legacy path)
+        # The legacy promote_worker_deliverables path stays untouched for
+        # backward compatibility.
+        if (
+            self.is_deliverable_boundary
+            and not self.promote_worker_deliverables
+            and self._workspace is not None
+            and self._workspace.deliverables_dir is not None
+        ):
+            from agent_foundation.common.inferencers.deliverable_boundary import (
+                aggregate_into_self_deliverables,
+                collect_child_boundary_deliverables,
+            )
+
+            # Collect from workers (or other configured boundaries)
+            children = collect_child_boundary_deliverables(
+                self._workspace,
+                parent_inferencer=self,
+                boundary_filter=lambda name, ws: name.startswith("worker_"),
+            )
+            if children:
+                report = aggregate_into_self_deliverables(
+                    self._workspace, children,
+                    namespace_strategy=self.deliverable_namespace_strategy,
+                    conflict_strategy=self.deliverable_conflict_strategy,
+                    namespace_root=self.deliverable_collect_namespace_root,
+                )
+                if report.copied:
+                    copied_any_deliverable = True
+                    _logger.info(
+                        "BTA boundary surfaced %d worker deliverable(s) → %s",
+                        len(report.copied), self._workspace.deliverables_dir,
+                    )
 
         if self.promote_worker_deliverables and self._workspace is not None:
             from rich_python_utils.path_utils.path_listing import (
@@ -1422,6 +1479,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     )
                 worker_ws.ensure_dirs()
                 worker._workspace = worker_ws
+                # === v1.7 Phase 3: Wire worker as deliverable boundary ===
+                # Mark each worker as a boundary so its deliverables surface
+                # to this BTA's collect step. Workers may also be flow
+                # inferencers (MFDual, Dual) which default to is_deliverable_boundary=False;
+                # we explicitly promote them here because they're acting as
+                # the per-task work-unit. This is purely additive and only
+                # affects behavior when workspace.use_final_deliverables_folder=True.
+                worker.is_deliverable_boundary = True
                 worker_output_paths.append(worker.resolve_output_path())
             else:
                 worker_output_paths.append(None)

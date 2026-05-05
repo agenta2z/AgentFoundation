@@ -89,7 +89,7 @@ async def test_adapter_as_pti_planner_real_llm(tmp_workspace):
             tmp_workspace,
             append_system_prompt="You are an implementer. Output 1-line summary.",
         ),
-        workspace_root=str(tmp_workspace["workspace"]),
+        workspace=str(tmp_workspace["workspace"]),
         planner_outputs_plan_to_file=False,
     )
 

@@ -129,10 +129,48 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # triggers auto-configuration. Do NOT assign to ``workspace`` at runtime;
     # it's a plain attrs field with no setter side effects.
     #
-    # Flow inferencers (BTA, Dual) also accept workspace_root: str as a
-    # convenience shorthand that creates a plain InferencerWorkspace. When
-    # both workspace and workspace_root are set, workspace takes precedence.
+    # `workspace` is the **declarative input slot** — what users / YAML
+    # actually configure. It's a plain attrib (no setter side effects) so
+    # config-time assignment is cheap and predictable. The companion
+    # `_workspace` property below carries the **runtime-mutable backing**
+    # that the rest of the framework reads/writes throughout an inference
+    # call. `__attrs_post_init__` syncs `workspace → _workspace` once.
+    #
+    # Historically there was also a `workspace_root: Optional[str]` attrib
+    # on LWI/Dual/BTA/MFDual as a string-shorthand convenience. It has been
+    # removed (2026-05-05) — pass the full workspace object instead, e.g.:
+    #     Dual(workspace=InferencerWorkspace(root="/tmp/foo"))
+    # The shorthand was strictly less expressive (it could not carry flags
+    # like `use_final_deliverables_folder`) and led to a subtle clobber bug
+    # where its post-init logic overwrote the synced `_workspace = None`.
+    # Type ``Optional[Any]`` so that:
+    #   1. Hydra config dicts (pre-instantiation) pass through validation
+    #   2. ``InferencerWorkspace`` objects (post-instantiation, the canonical form)
+    #   3. ``str`` shorthand (post-instantiation, converted to ``InferencerWorkspace(root=<str>)``
+    #      in ``__attrs_post_init__``)
+    # All three are valid inputs.
     workspace: Optional[Any] = attrib(default=None)
+
+    # === Deliverable Boundary Semantics (v1.7) ===
+    # Whether this inferencer is a Deliverable Boundary. When True, the
+    # inferencer guarantees that its outputs/final_deliverables/ is the
+    # canonical artifact set visible to its immediate parent boundary.
+    #
+    # Subclass defaults (set on each subclass, NOT here):
+    #   - BreakdownThenAggregateInferencer  → True
+    #   - PlanThenImplementInferencer       → True
+    #   - DualInferencer                    → False (pass-through)
+    #   - LinearWorkflowInferencer          → False (pass-through)
+    #   - All API/CLI leaves                → False (default)
+    #
+    # The boundary mechanism only ACTIVATES when use_final_deliverables_folder
+    # is True on the workspace. With the default workspace (no flag), the
+    # boundary attribute is read but no surfacing happens (graceful no-op).
+    #
+    # See: agent_foundation/common/inferencers/deliverable_boundary.py for
+    # the surfacing helpers, and OpenStartup/_dev/_plan/
+    # deliverable-boundary-semantics-plan.md for the design rationale.
+    is_deliverable_boundary: bool = attrib(default=False)
 
     # === Template-based prompt rendering (opt-in) ===
     # Template fields (template_manager, template_key, template_root_space,
@@ -150,8 +188,33 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # `_ainfer_single`'s unconditional calls to them work for orchestrators.
     # TemplatedInferencerBase overrides each with its real implementation.
 
-    # --- _workspace property: auto-configures on assignment ---
-
+    # --- _workspace property: runtime-mutable backing for `workspace` ---
+    #
+    # PURPOSE: this is the **active, mutable workspace** that the rest of
+    # the framework actually reads from. The leading underscore is a NAMING
+    # WART (`_workspace` looks "private" by Python convention but in fact
+    # every orchestrator reads/writes it via `self._workspace.child(...)`,
+    # `self._workspace.ensure_dirs()`, `getattr(self, '_workspace', None)`).
+    # Treat it as a public, runtime-mutable cousin of the declarative
+    # `workspace` attrib above.
+    #
+    # WHY TWO FIELDS:
+    #   * `workspace` (above)  → static input from YAML / kwargs;
+    #                            attrib with no setter side effects;
+    #                            never reassigned after construction.
+    #   * `_workspace` (here)  → mutable runtime field;
+    #                            assignment triggers `_configure_for_workspace`
+    #                            and `_propagate_workspace_to_children`;
+    #                            re-set during PTI iterations
+    #                            (workspace.child("iter_0"), iter_1, ...).
+    #
+    # SYNC: `InferencerBase.__attrs_post_init__` runs `self._workspace =
+    # self.workspace` ONCE at construction time, copying the user's input
+    # into the runtime field and firing the side effects.
+    #
+    # The backing storage uses name mangling (`_InferencerBase__workspace`)
+    # so subclasses can't accidentally shadow it with their own `_workspace`
+    # attrib.
     @property
     def _workspace(self):
         return getattr(self, "_InferencerBase__workspace", None)
@@ -291,6 +354,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self.logger = new_loggers
 
     def __attrs_post_init__(self):
+        # Convenience shorthand: allow `workspace="<path>"` as a synonym for
+        # `workspace=InferencerWorkspace(root="<path>")` (with default flags).
+        # Lets simple YAML/Python sites stay terse:
+        #     LinearWorkflowInferencer(workspace="/tmp/foo")
+        #     # is equivalent to:
+        #     LinearWorkflowInferencer(workspace=InferencerWorkspace(root="/tmp/foo"))
+        # Use the explicit form when you need to set workspace flags
+        # (e.g. ``use_final_deliverables_folder=True``).
+        if isinstance(self.workspace, str):
+            from agent_foundation.common.inferencers.inferencer_workspace import (
+                InferencerWorkspace,
+            )
+            self.workspace = InferencerWorkspace(root=self.workspace)
+
         # Use property setter — triggers _configure_for_workspace if workspace is not None
         self._workspace = self.workspace
 

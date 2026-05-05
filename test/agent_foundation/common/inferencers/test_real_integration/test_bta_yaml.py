@@ -34,6 +34,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
 )
 
 from .conftest import DEFAULT_TIMEOUT, skip_claude
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 # ---------------------------------------------------------------------------
 # Path to YAML templates
@@ -89,7 +90,7 @@ def test_bta_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "bta_streaming_workers.yaml",
-        {"workspace_root": str(tmp_workspace["workspace"])},
+        {"workspace": InferencerWorkspace(root=str(tmp_workspace["workspace"]))},
     )
     obj = instantiate(cfg)
 
@@ -135,7 +136,7 @@ def test_bta_yaml_attribute_verification(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "bta_streaming_workers.yaml",
-        {"workspace_root": ws},
+        {"workspace": InferencerWorkspace(root=ws)},
     )
     obj = instantiate(cfg)
 
@@ -183,7 +184,7 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
     """
     cfg = _load_yaml_with_placeholders(
         "pti_with_bta_executor.yaml",
-        {"workspace_root": str(tmp_workspace["workspace"])},
+        {"workspace": InferencerWorkspace(root=str(tmp_workspace["workspace"]))},
     )
     obj = instantiate(cfg)
 
@@ -231,6 +232,6 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
     )
 
     # PTI workspace_root
-    assert Path(obj.workspace_root) == Path(str(tmp_workspace["workspace"])), (
-        f"PTI workspace_root mismatch: {obj.workspace_root}"
+    assert Path(obj._workspace.root) == Path(str(tmp_workspace["workspace"])), (
+        f"PTI workspace_root mismatch: {obj._workspace.root}"
     )

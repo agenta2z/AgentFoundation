@@ -27,6 +27,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 )
 
 from .conftest import DEFAULT_TIMEOUT, skip_both, skip_claude
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 # ---------------------------------------------------------------------------
 # Path to YAML templates
@@ -78,7 +79,7 @@ def test_yaml_instantiation(tmp_workspace):
     """Load dual_claude_kiro.yaml → instantiate → verify DualInferencer with correct children."""
     cfg = _load_yaml_with_placeholders(
         "dual_claude_kiro.yaml",
-        {"workspace_root": str(tmp_workspace["workspace"])},
+        {"workspace": InferencerWorkspace(root=str(tmp_workspace["workspace"]))},
     )
     obj = instantiate(cfg)
 
@@ -98,7 +99,7 @@ def test_yaml_attribute_verification(tmp_workspace):
     ws = str(tmp_workspace["workspace"])
     cfg = _load_yaml_with_placeholders(
         "dual_claude_kiro.yaml",
-        {"workspace_root": ws},
+        {"workspace": InferencerWorkspace(root=ws)},
     )
     obj = instantiate(cfg)
 
@@ -188,7 +189,7 @@ def test_yaml_checkpoint_config(tmp_workspace):
     cfg = _load_yaml_with_placeholders(
         "dual_with_checkpoint.yaml",
         {
-            "workspace_root": ws,
+            "workspace": InferencerWorkspace(root=ws),
             "cache_dir": cache,
             "checkpoint_dir": ckpt,
         },
@@ -222,7 +223,7 @@ async def test_yaml_real_inference_call(tmp_workspace):
     cfg = _load_yaml_with_placeholders(
         "dual_with_checkpoint.yaml",
         {
-            "workspace_root": ws,
+            "workspace": InferencerWorkspace(root=ws),
             "cache_dir": cache,
             "checkpoint_dir": ckpt,
         },

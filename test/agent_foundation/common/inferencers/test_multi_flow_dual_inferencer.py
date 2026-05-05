@@ -241,9 +241,9 @@ class TestT2AttrForwarding(unittest.TestCase):
             review_inferencer=_Scripted(script=[_approve()]),
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
-            workspace_root=self.tmp,
+            workspace=self.tmp,
         )
-        self.assertEqual(mfdi.base_inferencer.workspace_root, self.tmp)
+        self.assertEqual(mfdi.base_inferencer._workspace.root, self.tmp)
 
     def test_initial_prompt_propagates_into_flow_configs(self):
         flow_configs = _make_minimal_flow_configs(2)

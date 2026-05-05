@@ -29,4 +29,4 @@ executor_inferencer:
   consensus_config:
     _target_: ConsensusConfig
     max_iterations: 2
-workspace_root: "{workspace_root}"
+workspace: "{workspace_root}"

@@ -62,6 +62,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
+from agent_foundation.common.inferencers.inferencer_workspace import (
+    InferencerWorkspace,
+)
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
 )
@@ -775,7 +778,7 @@ def main(
     # enabled for every run, not just analysis/multi-iteration modes.  This
     # makes --resume-workspace recovery precise (exact step + state) instead
     # of relying on the less-reliable Tier 2 file-existence heuristic.
-    pti_kwargs["workspace_root"] = str(workspace_path)
+    pti_kwargs["workspace"] = InferencerWorkspace(root=str(workspace_path))
 
     if resume_workspace is not None:
         pti_kwargs["resume_workspace"] = resume_workspace

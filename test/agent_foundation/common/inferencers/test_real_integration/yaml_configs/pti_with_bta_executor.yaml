@@ -22,4 +22,4 @@ executor_inferencer:
     target_path: "{workspace_root}"
     permission_mode: bypassPermissions
   max_breakdown: 2
-workspace_root: "{workspace_root}"
+workspace: "{workspace_root}"

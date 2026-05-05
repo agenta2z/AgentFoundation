@@ -1,0 +1,98 @@
+Task a deep dive into {{ workflow_target_path }}. Carefully create a comprehensive, insightful and organized codebase documentation considering both {{ workflow_target_path }} and all its dependencies.
+
+Produce comprehensive documentation following this structure:
+1. Executive Summary
+2. Architecture Overview (components, data flow, design philosophy)
+3. Module Reference (for each major module: purpose, key classes/functions, dependencies)
+4. Key Abstractions & Design Patterns (intent, participants, code references)
+5. Entry Points & CLI Reference
+6. Configuration Reference
+7. Data Models & Schema
+8. Dependencies & Integrations
+9. Testing Guide
+10. Developer Guide (getting started, common tasks, debugging, conventions)
+11. Modeling Science & Efficiency Opportunities — dedicate a full major section to this, covering:
+    - Model architecture opportunities (novel layers, attention mechanisms, feature interaction modules, architecture search)
+    - Training efficiency (distributed strategies, mixed-precision, gradient checkpointing, optimizer choices, data loading bottlenecks)
+    - Inference efficiency (quantization, operator fusion, kernel optimization, batching, embedding sharding, graph compilation)
+    - Feature engineering & embeddings (embedding compression, feature interaction, feature selection, multi-modal fusion)
+    - Loss functions & optimization (multi-task learning, calibration, hard negative mining, curriculum learning)
+    - Data pipeline & sampling (sampling strategies, negative sampling, data augmentation, feature freshness)
+    - Evaluation & experimentation (offline-online metric correlation, counterfactual evaluation, interpretability)
+    - Research directions (retrieval-augmented ranking, foundation models for recommendation, self-supervised pre-training, NAS for ranking, RL for ranking optimization)
+    For each item: cite concrete files/modules/functions, describe what the code currently does, the proposed direction, estimated impact on model quality or efficiency (high/medium/low), and prerequisites or risks
+Appendix: File Index with one-line descriptions
+
+Documentation quality requirements:
+- Accuracy: every claim verified against actual code, with file paths and line references
+- Completeness: cover all major modules
+- Clarity: write for a developer new to the project — explain "why" not just "what"
+- Code examples: real code snippets for key APIs and patterns
+
+IMPORTANT:
+- This is a codebase understanding and documentation task. Your "implementation" IS the final documentation artifacts, NOT code changes. Ignore guidance about "Code Changes", "Error Handling", "Testing", or "Type Safety" — produce a comprehensive restructured document instead.
+- If no specific output directory for the documentation is specified, make documentation under a `docs/` folder to the parent directory of {{ workflow_target_path }} if it is a file, or directly under {{ workflow_target_path }} if it is a directory.
+
+### Sphinx scaffolding (create alongside documentation files)
+
+After creating all documentation `.md` files, also create these files in the docs root directory so the documentation can be built into a navigable HTML site using Sphinx:
+
+1. **`conf.py`** — Sphinx configuration with myst-parser for Markdown support:
+```python
+project = "Codebase Documentation"
+copyright = "2025, Meta"
+extensions = ["myst_parser"]
+source_suffix = {".md": "markdown"}
+master_doc = "index"
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+try:
+    import sphinx_rtd_theme
+    html_theme = "sphinx_rtd_theme"
+except ImportError:
+    html_theme = "alabaster"
+myst_heading_anchors = 3
+suppress_warnings = ["myst.header"]
+```
+
+2. **`index.md`** — Root document with toctree linking all section READMEs. Use myst-parser fenced directive syntax:
+````markdown
+# Documentation Index
+
+```{toctree}
+:maxdepth: 2
+:caption: Contents
+
+00_index/README
+01_project_overview/README
+02_directory_structure/README
+...list all section subdirectories...
+```
+````
+
+3. **`TARGETS`** — Buck build file for Sphinx:
+```python
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ads_ranking_for_feed")
+
+python_binary(
+    name = "sphinx",
+    main_module = "sphinx.cmd.build",
+    par_style = "xar",
+    deps = [
+        "fbsource//third-party/pypi/sphinx:sphinx",
+        "fbsource//third-party/pypi/sphinx-rtd-theme:sphinx-rtd-theme",
+        "fbsource//third-party/pypi/myst-parser:myst-parser",
+    ],
+)
+```
+
+### Build HTML documentation
+
+After creating all documentation files and Sphinx scaffolding, build the HTML documentation site:
+
+1. Build the sphinx binary: `buck2 build <docs_buck_target>:sphinx`
+2. Build HTML: `buck2 run <docs_buck_target>:sphinx -- -b html <docs_dir> <docs_dir>/_build/html`
+   where `<docs_buck_target>` is the Buck target path for the TARGETS file you created (e.g., `fbcode//path/to/docs`), and `<docs_dir>` is the absolute path to the docs root directory.
+3. If the build produces warnings about documents not included in toctree, those are non-blocking — the HTML is still generated correctly.
+4. Report the HTML output path in your implementation report.

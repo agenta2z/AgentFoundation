@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,6 @@ def _make_lwi_with_workspace(step_configs, response_builder, workspace_root):
     # (_save_final_result checks self._workspace which we set, so we also
     # need to monkey-patch _save_final_result to be a no-op)
     lwi._workspace = InferencerWorkspace(root=workspace_root)
-    lwi.workspace_root = workspace_root
     # Prevent _auto_enable_checkpointing from enabling resume
     lwi._result_root_override = workspace_root
     # Prevent _save_final_result from causing recursion on self-referential state
@@ -155,7 +155,7 @@ def test_iteration_workspace_directory_creation(n_iters):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: state.get("work_output", ""),
-        workspace_root=workspace,
+        workspace=InferencerWorkspace(root=workspace),
     )
 
     lwi.infer("start")
@@ -198,7 +198,7 @@ def test_step_completion_markers_written(n_steps):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: "done",
-        workspace_root=workspace,
+        workspace=InferencerWorkspace(root=workspace),
     )
 
     lwi.infer("test_input")

@@ -100,7 +100,7 @@ class TestAdapterAsPTIPlanner(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=adapter,
                 executor_inferencer=executor,
-                workspace_root=tmpdir,
+                workspace=tmpdir,
                 planner_outputs_plan_to_file=False,
             )
             await pti._ainfer("task")
@@ -196,7 +196,7 @@ class TestAdapterInLWIStep(unittest.IsolatedAsyncioTestCase):
                     "b": s["b_out"],
                     "c": s["c_out"],
                 },
-                workspace_root=tmpdir,
+                workspace=tmpdir,
             )
             result = await lwi._ainfer("input")
 

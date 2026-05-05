@@ -45,6 +45,7 @@ from rich_python_utils.config_utils import instantiate, register_class
 
 # Ensure registered_targets is loaded for alias resolution.
 import agent_foundation.common.configs.registered_targets  # noqa: F401
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -695,7 +696,7 @@ class TestRealWorldYAMLParity:
 
         cfg = load_config(
             str(_REAL_YAML),
-            overrides={"workspace_root": str(ws)},
+            overrides={"workspace": InferencerWorkspace(root=str(ws))},
         )
         return instantiate(cfg)
 
@@ -890,47 +891,47 @@ class TestRealWorldYAMLParity:
         assert fixer_exec_dual.base_inferencer.template_root_space == "implementation"
         assert fixer_exec_dual.review_inferencer.template_root_space == "implementation"
 
-    def test_hyperparams_defaults_resolve(self, root):
-        # Refactor 15: `_hyperparams:` block at YAML root + `${_hyperparams.X}`
+    def test_params_defaults_resolve(self, root):
+        # Refactor 15: `_params:` block at YAML root + `${_params.X}`
         # references resolve to the declared defaults at load time.
         plan_bta = root.base_inferencer.planner_inferencer.base_inferencer
         exec_bta = root.base_inferencer.executor_inferencer
         sample_mfdual = plan_bta.worker_factory["__default__"]()
 
-        # Default values from `_hyperparams:` block in the YAML.
+        # Default values from `_params:` block in the YAML.
         assert plan_bta.max_breakdown == 2, (
-            "plan_bta.max_breakdown should resolve from _hyperparams.plan_max_breakdown=2"
+            "plan_bta.max_breakdown should resolve from _params.plan_max_breakdown=2"
         )
         assert exec_bta.max_breakdown == 4, (
-            "exec_bta.max_breakdown should resolve from _hyperparams.exec_max_breakdown=4"
+            "exec_bta.max_breakdown should resolve from _params.exec_max_breakdown=4"
         )
         for i, fc in enumerate(sample_mfdual.flow_configs):
             assert fc["max_dynamic_steps"] == 3, (
                 f"flow[{i}].max_dynamic_steps should resolve from "
-                f"_hyperparams.flow_max_dynamic_steps=3"
+                f"_params.flow_max_dynamic_steps=3"
             )
-        # _hyperparams.consensus_max_iterations cascades via _consensus_config to all Duals.
+        # _params.consensus_max_iterations cascades via _consensus_config to all Duals.
         assert root.consensus_config.max_iterations == 1
-        # `_hyperparams` is auto-stripped at root by the `_-prefix` walker step;
+        # `_params` is auto-stripped at root by the `_-prefix` walker step;
         # no constructor receives it.
-        assert not hasattr(root, "hyperparams"), (
-            "_hyperparams must be stripped before instantiation (root)"
+        assert not hasattr(root, "params"), (
+            "_params must be stripped before instantiation (root)"
         )
 
-    def test_hyperparams_override_via_load_config(self, tmp_path_factory):
+    def test_params_override_via_load_config(self, tmp_path_factory):
         # Refactor 15: caller can override hyperparams via load_config(overrides=...).
-        # The dotted-path override key matches the `_hyperparams.<name>` path.
+        # The dotted-path override key matches the `_params.<name>` path.
         ws = tmp_path_factory.mktemp("hp_override_ws")
         from rich_python_utils.config_utils import load_config
 
         cfg = load_config(
             str(_REAL_YAML),
             overrides={
-                "workspace_root": str(ws),
-                "_hyperparams.plan_max_breakdown": 7,
-                "_hyperparams.exec_max_breakdown": 9,
-                "_hyperparams.flow_max_dynamic_steps": 5,
-                "_hyperparams.consensus_max_iterations": 3,
+                "workspace": InferencerWorkspace(root=str(ws)),
+                "_params.plan_max_breakdown": 7,
+                "_params.exec_max_breakdown": 9,
+                "_params.flow_max_dynamic_steps": 5,
+                "_params.consensus_max_iterations": 3,
             },
         )
         obj = instantiate(cfg)

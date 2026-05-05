@@ -1,0 +1,8 @@
+# SOP config for sop.md — maps subsection directives to instruction text.
+# Optional: without this file, subsections render as-is in markdown.
+
+subsections:
+  Tools:
+    directives:
+      __must__: "You MUST use the following tools to complete this phase:"
+      __prioritize__: "Prioritize the following tools (you may use alternatives if unavailable):"

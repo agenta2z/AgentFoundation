@@ -184,7 +184,7 @@ async def test_pti_multi_iteration_with_analysis(tmp_workspace):
         enable_multiple_iterations=True,
         max_meta_iterations=2,
         reset_sessions_per_meta_iteration=True,
-        workspace_root=workspace_dir,
+        workspace=workspace_dir,
     )
 
     result = await pti.ainfer(PUZZLE_PROMPT)

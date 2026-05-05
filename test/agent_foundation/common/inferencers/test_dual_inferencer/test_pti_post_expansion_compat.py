@@ -66,7 +66,7 @@ class TestPTIPostExpansionCompat(unittest.IsolatedAsyncioTestCase):
         pti = PlanThenImplementInferencer(
             planner_inferencer=_make_mock_inferencer(plan_response, "planner"),
             executor_inferencer=_make_mock_inferencer(impl_response, "executor"),
-            workspace_root=self.workspace,
+            workspace=self.workspace,
             max_meta_iterations=1,
             **kwargs,
         )
@@ -121,7 +121,7 @@ class TestPTICheckpointExpansionFields(unittest.IsolatedAsyncioTestCase):
         return PlanThenImplementInferencer(
             planner_inferencer=_make_mock_inferencer(plan_response, "planner"),
             executor_inferencer=_make_mock_inferencer(impl_response, "executor"),
-            workspace_root=self.workspace,
+            workspace=self.workspace,
             max_meta_iterations=1,
             **kwargs,
         )

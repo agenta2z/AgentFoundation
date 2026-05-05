@@ -56,7 +56,7 @@ async def test_pti_real_cache_hit_on_repeat(tmp_workspace):
                 tmp_workspace,
                 append_system_prompt="You are an implementer. 1-line summary.",
             ),
-            workspace_root=str(tmp_workspace["workspace"]),
+            workspace=str(tmp_workspace["workspace"]),
             planner_outputs_plan_to_file=False,
         )
 

@@ -65,7 +65,7 @@ def _make_lwi(
     return LinearWorkflowInferencer(
         step_configs=step_configs or [],
         response_builder=response_builder,
-        workspace_root=workspace_root,
+        workspace=workspace_root,
         **kwargs,
     )
 

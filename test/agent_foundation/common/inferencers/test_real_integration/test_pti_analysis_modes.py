@@ -71,7 +71,7 @@ async def test_pti_analysis_mode_variants(tmp_workspace, analysis_mode):
         enable_multiple_iterations=True,
         max_meta_iterations=2,
         analysis_mode=analysis_mode,
-        workspace_root=str(tmp_workspace["workspace"]),
+        workspace=str(tmp_workspace["workspace"]),
     )
 
     result = await pti.ainfer(f"Test analysis_mode={analysis_mode}: simple task.")

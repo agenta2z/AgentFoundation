@@ -194,7 +194,6 @@ class DualInferencer(LinearWorkflowInferencer):
     enable_checkpoint: bool = attrib(default=False, kw_only=True)
 
     # --- Workspace support (opt-in, overrides checkpoint_dir when set) ---
-    workspace_root: Optional[str] = attrib(default=None, kw_only=True)
 
     # --- Workflow-suppressed attrs inherited from LWI (init=False) ---
     # result_pass_down_mode, unpack_single_result,
@@ -253,22 +252,18 @@ class DualInferencer(LinearWorkflowInferencer):
         if self.consensus_checker is None:
             self.consensus_checker = DualInferencer._default_check_consensus
 
-        # Workspace setup — workspace (InferencerWorkspace object) takes precedence
-        # over workspace_root (convenience string shorthand).
-        # InferencerBase.__attrs_post_init__ already synced workspace → _workspace.
-        # Do NOT auto-bridge from checkpoint_dir — it maps to checkpoints
-        # INSIDE workspace, not the workspace root.
+        # Workspace setup. Pass the full `workspace=InferencerWorkspace(...)`
+        # object (declarative form) — the legacy `workspace_root: str`
+        # shorthand was removed 2026-05-05.
+        #
+        # If a workspace was pre-set on `_workspace` (rare), make sure dirs
+        # exist. Otherwise, the canonical sync happens in
+        # `super().__attrs_post_init__()` below: InferencerBase copies
+        # `self.workspace → self._workspace`, which fires the property
+        # setter (configure + propagate to children).
         if self._workspace is not None:
-            # workspace was provided directly via InferencerBase.workspace — use as-is.
             self._workspace.ensure_dirs()
-        elif self.workspace_root is not None:
-            from agent_foundation.common.inferencers.inferencer_workspace import (
-                InferencerWorkspace,
-            )
-            self._workspace = InferencerWorkspace(root=self.workspace_root)
-            self._workspace.ensure_dirs()
-        else:
-            self._workspace = None
+        # else: super() will sync from self.workspace.
 
         # Set parent debuggable for nested inferencers (deduplicate by identity)
         seen_ids = set()
@@ -375,19 +370,78 @@ class DualInferencer(LinearWorkflowInferencer):
 
         Only runs in workspace mode (``_workspace`` set + ``output_path`` set).
         Idempotent — safe to call on resume after crash.
+
+        v1.7 Phase 5: Dual is NOT a boundary itself, but it IS a pass-through
+        surfacer for its active proposer. When the active proposer is a
+        boundary (typical: a BTA or PTI), Dual copies that proposer's
+        final_deliverables/ contents into Dual's own final_deliverables/ so
+        the parent boundary can collect them. The proposer is determined by
+        reading the latest ConsensusIterationRecord.counter_feedback (None
+        means review passed, base wins; non-None means fixer ran and wins).
         """
         if self._workspace is None or not self.output_path:
             return
         basename = self.output_path
         artifacts = self._workspace.glob_artifacts(f"round*_{basename}")
-        if not artifacts:
-            return
-        import shutil
+        if artifacts:
+            import shutil
+            last_artifact = artifacts[-1]
+            dst = self._workspace.output_path(basename)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(last_artifact, dst)
 
-        last_artifact = artifacts[-1]  # sorted, so highest zero-padded round
-        dst = self._workspace.output_path(basename)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(last_artifact, dst)
+        # === v1.7 Phase 5: Pass-through surfacing of active proposer ===
+        if self._workspace.deliverables_dir is not None:
+            active = self._active_proposer()
+            if active is not None and getattr(active, "is_deliverable_boundary", False):
+                active_ws = getattr(active, "_workspace", None)
+                if active_ws is not None and active_ws.deliverables_dir is not None:
+                    self._workspace.surface_outputs_from(
+                        active_ws,
+                        skip_existing=True,
+                    )
+
+    def _active_proposer(self):
+        """Return the active proposer for this Dual run.
+
+        v1.7 §4.4: Dual surfaces EITHER base OR fixer (never both). Selection
+        is based on the latest iteration's counter_feedback:
+          - counter_feedback is None → review passed, base is active
+          - counter_feedback is non-None → fixer ran, fixer is active
+
+        v1.7.2 BUG FIX: the runtime state structure is
+        ``state["attempt_record"]["iterations"]`` (see _pending_state setup
+        at line ~489), NOT ``state["consensus_iterations"]``. Earlier code
+        read the wrong key, so this method always returned base_inferencer
+        in real runs (the fixer never won pass-through surfacing). Tests
+        also fabricated the wrong shape and didn't catch this. Now reads
+        the canonical attempt_record path with a back-compat fallback for
+        any test that fabricates the older synthetic shape.
+
+        Returns base_inferencer when state is not yet initialized.
+        """
+        state = getattr(self, "_state", None) or {}
+        # Preferred (real runtime) path.
+        attempt_record = state.get("attempt_record")
+        if isinstance(attempt_record, dict):
+            iters = attempt_record.get("iterations") or []
+        elif attempt_record is not None:
+            iters = getattr(attempt_record, "iterations", None) or []
+        else:
+            # Back-compat fallback for fabricated test states.
+            iters = state.get("consensus_iterations") or []
+        if not iters:
+            return self.base_inferencer
+        last = iters[-1]
+        if hasattr(last, "counter_feedback"):
+            counter = getattr(last, "counter_feedback", None)
+        elif isinstance(last, dict):
+            counter = last.get("counter_feedback")
+        else:
+            counter = None
+        if counter is None:
+            return self.base_inferencer
+        return self.fixer_inferencer if self.fixer_inferencer is not None else self.base_inferencer
 
     # region Sync/Async Bridge
 

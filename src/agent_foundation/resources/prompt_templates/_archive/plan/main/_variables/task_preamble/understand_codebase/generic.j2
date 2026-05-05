@@ -1,0 +1,28 @@
+Task a deep dive into {{ workflow_target_path }}. Carefully create a comprehensive, insightful and organized codebase documentation considering both {{ workflow_target_path }} and all its dependencies.
+
+Thoroughly investigate the target codebase covering the following topics:
+1. **Project Overview**: Purpose, goals, high-level architecture
+2. **Directory & Module Structure**: Layout, organizational principles
+3. **Core Components & Relationships**: Classes, modules, services, dependencies, data flow
+4. **Entry Points & Control Flow**: CLI entry points, API endpoints, execution flow
+5. **Key Abstractions & Design Patterns**: Patterns used, architectural abstractions
+6. **Data Models & Schema**: Key data structures, configuration objects
+7. **External Dependencies & Integrations**: Third-party and internal libraries
+8. **Configuration & Environment**: Config files, environment variables, CLI flags
+9. **Testing Infrastructure**: Test patterns, locations, utilities
+10. **Notable Implementation Details**: Complex algorithms, non-obvious decisions
+11. **Improvement & Research Opportunities**: Dedicate significant depth here. Identify:
+    - **Code quality & maintainability**: Dead code, duplication, missing abstractions, inconsistent patterns, error handling gaps
+    - **Architecture evolution**: Modularity improvements, dependency simplification, API surface reduction, migration paths
+    - **Performance optimization**: Algorithmic improvements, caching opportunities, I/O bottlenecks, concurrency patterns
+    - **Feature gaps**: Missing functionality, incomplete implementations, user-facing limitations
+    - **Testing coverage**: Untested code paths, missing integration tests, test infrastructure improvements
+    - **Documentation gaps**: Undocumented APIs, missing examples, outdated references
+    - **Research directions**: Novel approaches from recent literature that could improve the system
+    For each opportunity: cite concrete files/modules/functions, describe what the code currently does, the proposed direction, estimated impact (high/medium/low), and prerequisites or risks
+
+Investigation methodology:
+- Start from entry points and trace outward
+- Follow import chains to understand module dependencies. Identify and develop deep understanding of the key modules
+- Document things that would surprise a new developer
+- Organize your documentation into subfolders, where each subfolder addressing a major topic. Make the documentation human readable, easy to onboard and tutorial like, with sufficient details and explanations. Meanwhile also maintain AI-agent friendly indexes, appendix, lists, etc. for AI-agent use.

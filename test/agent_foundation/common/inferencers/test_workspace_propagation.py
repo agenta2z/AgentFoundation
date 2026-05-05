@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import attr
 import pytest
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +74,12 @@ def _make_minimal_inferencer():
 
 
 def test_lwi_workspace_root_field_rename_kwarg_works(tmp_ws_root):
-    """``LWI(workspace_root=...)`` constructor kwarg sets the field."""
+    """``LWI(workspace=InferencerWorkspace(root=...))`` constructor kwarg sets the field."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
-    lwi = LinearWorkflowInferencer(workspace_root=tmp_ws_root)
-    assert lwi.workspace_root == tmp_ws_root
+    lwi = LinearWorkflowInferencer(workspace=InferencerWorkspace(root=tmp_ws_root))
+    assert lwi._workspace.root == tmp_ws_root
     assert lwi._workspace is not None
     assert lwi._workspace.root == tmp_ws_root
 
@@ -117,7 +118,7 @@ def test_pti_constructs_without_workspace_root_when_analysis_disabled():
         enable_analysis=False,
         enable_multiple_iterations=False,
     )
-    assert pti.workspace_root is None
+    assert pti._workspace is None
     assert pti.resume_workspace is None
     assert pti._workspace is None  # parent hasn't propagated yet
 
@@ -148,7 +149,7 @@ def test_pti_ainfer_fallback_uses_propagated_workspace(tmp_ws_root):
     # Replicate the fallback expression exactly as it appears at ainfer time
     base_workspace = (
         pti.resume_workspace
-        or pti.workspace_root
+        or pti._workspace.root
         or (pti._workspace.root if pti._workspace else None)
     )
     assert base_workspace == tmp_ws_root
@@ -174,7 +175,7 @@ def test_pti_ainfer_fallback_resume_workspace_wins(tmp_ws_root, tmp_path):
     pti = PlanThenImplementInferencer(
         planner_inferencer=_make_minimal_inferencer(),
         executor_inferencer=_make_minimal_inferencer(),
-        workspace_root=config_path,
+        workspace=InferencerWorkspace(root=config_path),
         resume_workspace=resume_path,
         enable_analysis=False,
         enable_multiple_iterations=False,
@@ -183,10 +184,78 @@ def test_pti_ainfer_fallback_resume_workspace_wins(tmp_ws_root, tmp_path):
 
     base_workspace = (
         pti.resume_workspace
-        or pti.workspace_root
+        or pti._workspace.root
         or (pti._workspace.root if pti._workspace else None)
     )
     assert base_workspace == resume_path
+
+
+# ---------------------------------------------------------------------------
+# Test 6: PTI propagation skips _CHILD_DEFAULTS
+# ---------------------------------------------------------------------------
+
+
+def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_aggregator_workspace(tmp_ws_root):
+    """BTA should NOT create a duplicate attr-slot workspace for
+    ``aggregator_inferencer`` at construction time; the runtime graph later
+    assigns the canonical ``children/aggregator/`` workspace when the
+    aggregation node is wired.
+
+    Why this exists:
+        Before 2026-05-05, generic ``InferencerBase._propagate_workspace_to_children``
+        would eagerly allocate ``children/aggregator_inferencer/`` because
+        ``aggregator_inferencer`` is a direct child attr on BTA. Then
+        ``BreakdownThenAggregateInferencer._build_subgraph_spec()`` would later
+        reassign the same inferencer to ``children/aggregator/`` for the
+        runtime graph node. That left two sibling folders:
+
+            children/aggregator/
+            children/aggregator_inferencer/
+
+        with the latter usually empty/vestigial. The fix is to skip generic
+        propagation for that attr and let the runtime graph own the canonical
+        aggregator workspace.
+    """
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+        BreakdownThenAggregateInferencer,
+    )
+
+    breakdown = _make_minimal_inferencer()
+    aggregator = _make_minimal_inferencer()
+
+    # Worker factory returns fresh inferencers; a single one is enough to force
+    # _build_subgraph_spec() to wire the aggregator node.
+    def _worker_factory(sub_query=None, index=None):
+        return _make_minimal_inferencer()
+
+    bta = BreakdownThenAggregateInferencer(
+        breakdown_inferencer=breakdown,
+        aggregator_inferencer=aggregator,
+        worker_factory=_worker_factory,
+        workspace=InferencerWorkspace(root=tmp_ws_root),
+        max_breakdown=1,
+    )
+
+    # Construction-time propagation should skip aggregator_inferencer entirely.
+    assert aggregator._workspace is None, (
+        "BTA should NOT eagerly assign children/aggregator_inferencer via "
+        "generic workspace propagation. The canonical aggregator workspace is "
+        "assigned at runtime under children/aggregator/."
+    )
+
+    # Simulate runtime graph wiring. This should assign the canonical runtime
+    # workspace under children/aggregator/.
+    _ = bta._build_subgraph_spec(["subtask 0"], _original_query="top-level query")
+
+    assert aggregator._workspace is not None, (
+        "Runtime graph wiring should assign aggregator._workspace."
+    )
+    assert aggregator._workspace.root.endswith(os.path.join("children", "aggregator")), (
+        f"Expected runtime aggregator workspace to end with children/aggregator, got: {aggregator._workspace.root!r}"
+    )
+    assert "aggregator_inferencer" not in aggregator._workspace.root, (
+        f"Aggregator runtime workspace should NOT use the old attr-slot name: {aggregator._workspace.root!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +282,7 @@ def test_pti_propagates_to_children_at_construction(tmp_ws_root):
     pti = PlanThenImplementInferencer(
         planner_inferencer=planner,
         executor_inferencer=executor,
-        workspace_root=tmp_ws_root,
+        workspace=InferencerWorkspace(root=tmp_ws_root),
     )
     # __attrs_post_init__ already triggered the setter via workspace_root
     assert pti._workspace is not None
@@ -320,7 +389,7 @@ def test_dual_propagates_to_base_review_fixer(tmp_ws_root):
         base_inferencer=base,
         review_inferencer=review,
         fixer_inferencer=fixer,
-        workspace_root=tmp_ws_root,
+        workspace=InferencerWorkspace(root=tmp_ws_root),
     )
     assert dual._workspace is not None
     for child, slot in ((base, "base_inferencer"),
@@ -357,7 +426,7 @@ def test_full_topology_propagation_through_dual_pti(tmp_ws_root):
     )
     outer = DualInferencer(
         base_inferencer=pti,
-        workspace_root=tmp_ws_root,
+        workspace=InferencerWorkspace(root=tmp_ws_root),
     )
     # Outer Dual rooted at tmp_ws_root
     assert outer._workspace is not None

@@ -99,6 +99,97 @@ class InferencerWorkspace:
             return None
         return os.path.join(d, relative)
 
+    @property
+    def has_deliverables(self) -> bool:
+        """True iff deliverables_dir exists on disk AND is non-empty.
+
+        v1.7 Phase 1: the non-empty check prevents spurious 'I have
+        deliverables' signals from a directory that was created by
+        ensure_dirs() but never written into.
+        """
+        d = self.deliverables_dir
+        return bool(d and os.path.isdir(d) and os.listdir(d))
+
+    def deliverable_paths(self) -> List[str]:
+        """Return all file paths currently in deliverables_dir, recursively.
+
+        Paths are relative to deliverables_dir. Returns empty list when
+        deliverables are not configured or the directory doesn't exist.
+        """
+        d = self.deliverables_dir
+        if not (d and os.path.isdir(d)):
+            return []
+        result = []
+        for root_dir, _dirs, files in os.walk(d):
+            for f in files:
+                abs_path = os.path.join(root_dir, f)
+                rel_path = os.path.relpath(abs_path, d)
+                result.append(rel_path)
+        return sorted(result)
+
+    def surface_outputs_from(
+        self,
+        source_workspace: "InferencerWorkspace",
+        *,
+        namespace: "Optional[str]" = None,
+        skip_existing: bool = True,
+    ) -> List[str]:
+        """Copy a source workspace's deliverables into this workspace's deliverables_dir.
+
+        v1.7 Phase 0 PRIMITIVE: low-level file-copy used by the boundary helpers
+        in `deliverable_boundary.py`. Per-file copy preserves provenance.
+
+        Args:
+            source_workspace: The child workspace whose deliverables to copy.
+            namespace: Optional subdirectory under self.deliverables_dir to
+                copy files into (e.g., "workers/worker_0" or "planner").
+                If None, files copy directly to self.deliverables_dir/.
+            skip_existing: If True, never overwrite files that already exist.
+
+        Returns:
+            List of relative paths copied (relative to self.deliverables_dir).
+
+        Returns empty list (no-op) if either workspace lacks deliverables_dir,
+        or if source has no deliverables.
+        """
+        import shutil
+
+        if self.deliverables_dir is None:
+            return []
+        if source_workspace.deliverables_dir is None:
+            return []
+        if not source_workspace.has_deliverables:
+            return []
+
+        # Compute destination root
+        dst_root = self.deliverables_dir
+        if namespace:
+            # Validate each path component
+            for component in namespace.split("/"):
+                if component:
+                    self._validate_child_name(component)
+            dst_root = os.path.join(dst_root, namespace)
+
+        os.makedirs(dst_root, exist_ok=True)
+        copied = []
+        src_root = source_workspace.deliverables_dir
+
+        for root_dir, _dirs, files in os.walk(src_root):
+            for f in files:
+                src_path = os.path.join(root_dir, f)
+                rel_path = os.path.relpath(src_path, src_root)
+                dst_path = os.path.join(dst_root, rel_path)
+
+                if skip_existing and os.path.exists(dst_path):
+                    continue
+
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                # Track relative to self.deliverables_dir (include namespace)
+                copied.append(os.path.relpath(dst_path, self.deliverables_dir))
+
+        return copied
+
     # -- Directory creation --
 
     def ensure_dirs(self, *extra_subdirs: str) -> None:
@@ -116,6 +207,12 @@ class InferencerWorkspace:
         for d in (self.outputs_dir, self.artifacts_dir,
                   self.checkpoints_dir, self.logs_dir):
             os.makedirs(d, exist_ok=True)
+        # v1.7 Phase 0 BUG FIX: also create deliverables_dir when configured.
+        # Previously deliverables_dir was returned by the property but never
+        # created on disk, causing has_deliverables() and downstream copy
+        # operations to silently fail with "directory not found".
+        if self.deliverables_dir is not None:
+            os.makedirs(self.deliverables_dir, exist_ok=True)
         for sub in extra_subdirs:
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
 
@@ -172,9 +269,17 @@ class InferencerWorkspace:
 
         Does NOT create directories on disk — call
         :meth:`ensure_dirs` on the returned workspace when ready.
+
+        v1.7 Phase 0 BUG FIX: propagates ``use_final_deliverables_folder`` to
+        the child workspace. Previously this was lost on every child(), so
+        nested orchestrators silently ran without deliverable directories
+        even though the root requested them.
         """
         self._validate_child_name(name)
-        return InferencerWorkspace(root=os.path.join(self.children_dir, name))
+        return InferencerWorkspace(
+            root=os.path.join(self.children_dir, name),
+            use_final_deliverables_folder=self.use_final_deliverables_folder,
+        )
 
     def child_output(self, child_name: str, output_relative: str) -> str:
         """Resolve a child's output path without creating the child workspace.

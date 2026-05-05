@@ -136,7 +136,7 @@ class TestPTIPlannerFailureBlocksExecutor(unittest.IsolatedAsyncioTestCase):
             pti = PlanThenImplementInferencer(
                 planner_inferencer=_RaisingInferencer(RuntimeError("planner failed")),
                 executor_inferencer=executor,
-                workspace_root=tmpdir,
+                workspace=tmpdir,
             )
             with self.assertRaises(Exception):
                 await pti._ainfer("task")

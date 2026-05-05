@@ -272,11 +272,12 @@ class MultiFlowDualInferencer(DualInferencer):
                     agg.template_extra_feed = {}
                 agg.template_extra_feed.setdefault("include_winner_pick", True)
 
-        # Auto-construct the MultiFlow propose engine. Forward both
-        # ``workspace_root`` and ``checkpoint_dir`` so MultiFlow's own
+        # Auto-construct the MultiFlow propose engine. Forward
+        # ``workspace`` and ``checkpoint_dir`` so MultiFlow's own
         # checkpoint storage piggy-backs on whichever the parent uses; if
         # the parent later assigns ``_result_root_override`` to children,
         # BTA's existing machinery will redirect checkpoint paths accordingly.
+        # (The legacy ``workspace_root`` shorthand was removed 2026-05-05.)
         self.base_inferencer = MultiFlowInferencer(
             flow_configs=self.flow_configs,
             visible_flows=self.visible_flows,
@@ -289,7 +290,7 @@ class MultiFlowDualInferencer(DualInferencer):
             max_concurrency=self.multi_flow_max_concurrency,
             disable_aggregator=self.multi_flow_disable_aggregator,
             prompt_formatter=self.multi_flow_prompt_formatter,
-            workspace_root=self.workspace_root,
+            workspace=self.workspace,
             checkpoint_dir=self.checkpoint_dir,
             # Round 7: forward dispatch parsers
             winner_parser=self.multi_flow_winner_parser,

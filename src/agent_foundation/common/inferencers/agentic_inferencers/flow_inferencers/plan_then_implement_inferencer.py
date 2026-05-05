@@ -352,6 +352,19 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     enable_analysis: bool = attrib(default=False)
     enable_multiple_iterations: bool = attrib(default=False)
 
+    # === v1.7 Deliverable Boundary Semantics (Phase 4) ===
+    # PTI is a boundary by default. The boundary mechanism only ACTIVATES
+    # when use_final_deliverables_folder=True; existing callers without that
+    # flag get a no-op (backward compatible).
+    is_deliverable_boundary: bool = attrib(default=True, kw_only=True)
+    publishes_response_as_deliverable: bool = attrib(default=True, kw_only=True)
+    # PTI uses by_role namespacing for its planner/executor/analyzer children.
+    # The workspace child dirs use SHORT names from _CHILD_DEFAULTS:
+    # planner, executor, analyzer (NOT *_inferencer). PTI does NOT have a
+    # fixer child — fixer is outer Dual's sibling, not PTI's child.
+    deliverable_namespace_strategy: str = attrib(default="by_role", kw_only=True)
+    deliverable_conflict_strategy: str = attrib(default="skip_existing", kw_only=True)
+
     # Multi-iteration config
     max_meta_iterations: int = attrib(default=3)
     analyzer_inferencer: Optional[InferencerBase] = attrib(default=None)
@@ -362,8 +375,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     approve_all_iterations: bool = attrib(default=False)
 
     # Workspace config
-    # workspace_root is inherited from LinearWorkflowInferencer
-    # (renamed from workspace_path to align with Dual/BTA/MFDual naming).
+    # ``workspace`` is inherited from InferencerBase (use it for the I/O
+    # workspace). The legacy ``workspace_root: Optional[str]`` shorthand
+    # was removed 2026-05-05; pass ``workspace=InferencerWorkspace(root=...)``.
     resume_workspace: Optional[str] = attrib(default=None)
     iteration_handoff_template: Optional[str] = attrib(default=None)
 
@@ -433,18 +447,18 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # Validation: analysis or multi-iteration requires workspace.
         # At construction time, ``self._workspace`` is None (parent's
         # propagation runs after this child's __attrs_post_init__), so
-        # validation is satisfied if either the explicit ``workspace_root``
-        # field is set OR ``resume_workspace`` is set OR a parent-propagated
+        # validation is satisfied if either the explicit ``workspace`` field
+        # is set OR ``resume_workspace`` is set OR a parent-propagated
         # ``_workspace`` is already in place (rare, e.g. set programmatically
         # by a caller).
         if (self.enable_analysis or self.enable_multiple_iterations) and (
-            self.workspace_root is None
+            self.workspace is None
             and self.resume_workspace is None
             and self._workspace is None
         ):
             raise ValueError(
                 "enable_analysis=True or enable_multiple_iterations=True "
-                "requires workspace_root or resume_workspace to be set "
+                "requires workspace or resume_workspace to be set "
                 "(or a parent-propagated _workspace)"
             )
 
@@ -884,7 +898,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         iter_workspace = os.path.dirname(outputs_dir)
         root_ws = (
             self.resume_workspace
-            or self.workspace_root
             or (self._workspace.root if self._workspace else None)
         )
         if root_ws is None:
@@ -2398,7 +2411,12 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         iter_ws_path = self._get_iteration_workspace(
             self._workspace.root, last_iter
         )
-        iter_ws = InferencerWorkspace(root=iter_ws_path)
+        # v1.7 Phase 4: propagate use_final_deliverables_folder so child
+        # workspaces returned by iter_ws.child(role) have their deliverables_dir set.
+        iter_ws = InferencerWorkspace(
+            root=iter_ws_path,
+            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
+        )
 
         os.makedirs(self._workspace.outputs_dir, exist_ok=True)
         for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
@@ -2407,6 +2425,57 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 dst = self._workspace.output_path(filename)
                 if os.path.isfile(src):
                     shutil.copy2(src, dst)
+
+        # === v1.7 Deliverable Boundary EXTENSION (Phase 4) ===
+        # Surface planner/executor/analyzer child boundaries to this PTI's
+        # final_deliverables/ with by_role namespacing.
+        if (
+            self.is_deliverable_boundary
+            and self._workspace is not None
+            and self._workspace.deliverables_dir is not None
+        ):
+            from agent_foundation.common.inferencers.deliverable_boundary import (
+                aggregate_into_self_deliverables,
+                collect_child_boundary_deliverables,
+            )
+            # PTI's child workspaces use SHORT names from _CHILD_DEFAULTS
+            # (planner, executor, analyzer). They live under the iter_ws,
+            # which is itself a child of self._workspace. Walk the iter_ws's
+            # children to collect the role boundaries.
+            children = collect_child_boundary_deliverables(
+                iter_ws,
+                boundary_filter=lambda name, ws: name in (
+                    "planner", "executor", "analyzer"
+                ),
+            )
+            if children:
+                report = aggregate_into_self_deliverables(
+                    self._workspace, children,
+                    namespace_strategy=self.deliverable_namespace_strategy,
+                    conflict_strategy=self.deliverable_conflict_strategy,
+                )
+                if report.copied:
+                    import logging
+                    _pti_logger = logging.getLogger(__name__)
+                    _pti_logger.info(
+                        "PTI boundary surfaced %d role deliverable(s) → %s",
+                        len(report.copied), self._workspace.deliverables_dir,
+                    )
+
+            # Publish PTI's own response (the implementation file) into
+            # final_deliverables/ when configured.
+            if self.publishes_response_as_deliverable:
+                for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
+                    if flag in self.output_mode:
+                        src = self._workspace.output_path(filename)
+                        dst = self._workspace.deliverable_path(filename)
+                        if (
+                            dst is not None
+                            and os.path.isfile(src)
+                            and not os.path.exists(dst)
+                        ):
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            shutil.copy2(src, dst)
 
     def resolve_output_path(self, runtime_override=None):
         """PTI override: resolve based on output_mode."""
@@ -2437,17 +2506,15 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
         self._partial_iteration_history = None
 
-        # Resolve workspace from three sources in priority order:
+        # Resolve workspace from two sources in priority order:
         #   1. ``resume_workspace`` — explicit resume target wins (preserves
         #      resume semantics for in-flight workspaces).
-        #   2. ``workspace_root`` — explicit YAML/programmatic config.
-        #   3. ``self._workspace.root`` — parent-propagated workspace (set by
-        #      a parent's ``_propagate_workspace_to_children`` after PTI's
-        #      ``__attrs_post_init__`` has already run; available by _ainfer
-        #      time).
+        #   2. ``self._workspace.root`` — synced from ``self.workspace`` by
+        #      InferencerBase, or set by a parent's
+        #      ``_propagate_workspace_to_children`` after PTI's
+        #      ``__attrs_post_init__`` has already run.
         base_workspace = (
             self.resume_workspace
-            or self.workspace_root
             or (self._workspace.root if self._workspace else None)
         )
 

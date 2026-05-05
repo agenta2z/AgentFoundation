@@ -24,4 +24,4 @@ step_configs:
       target_path: "{workspace_root}"
       permission_mode: bypassPermissions
     output_state_key: review_output
-workspace_root: "{workspace_root}"
+workspace: "{workspace_root}"
