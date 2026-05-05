@@ -9,13 +9,6 @@ You previously implemented the following user request and received feedback from
 {{ input }}
 </OriginalUserRequest>
 
-{% if task_instructions %}
-Here is the original additional task instruction for your reference:
-<OriginalTaskInstructions>
-{{ task_instructions }}
-</OriginalTaskInstructions>
-{% endif %}
-
 **Your Current Implementation:**
 <CurrentImplementation>
 {{ main_response }}
@@ -29,8 +22,16 @@ Here is the original additional task instruction for your reference:
 **Current Review Iteration Index**: {{ round_index }}
 
 ---
+{% if task_instructions %}
+Here are the original task instructions for your reference:
+<OriginalTaskInstructions>
+{{ task_instructions }}
+</OriginalTaskInstructions>
+{% endif %}
 
-## Your Task: Evaluate Each Feedback Item & Refine the Implementation
+---
+
+## Your Current Task: Evaluate Each Feedback Item & Refine the Implementation
 
 ### Step 1: Critical Evaluation of Feedback
 
@@ -95,14 +96,5 @@ Meanwhile, wrap a structured response in `<Response>` tags.
 - After writing your improved implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * The implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
-
-## NOTES (on tool-use efficiency — filesystem searches):
-- **NEVER run recursive searches (`grep -r`, `find`, etc.) rooted at a drive root, user home, or any large parent directory** (e.g., `/`, `C:\`, `~`, `/Users/...`, `/data/users/...`, `OneDrive/`, `Desktop/`, `Projects/`, `fbcode/`, `www/`). Such scans traverse hundreds of GB or millions of files and hang for 30+ minutes, exceeding the per-tool idle timeout and stalling the workflow.
-- Always scope filesystem searches to a **specific repository or subdirectory** relevant to the task:
-  * GOOD: `grep -rn "pattern" <repo_root>/src/<module>/` (small bounded directory)
-  * GOOD: `grep -n "pattern" <repo_root>/src/<file>.py` (single file)
-  * BAD: `find / -name "*.py"`, `grep -r "pattern" ~`, `find C:\ -name "..."`
-- Prefer the dedicated `Read` / `Glob` / `Grep` tools (with explicit `path` parameters) over shell `find` / `grep -r` when available — they are faster and respect path scoping.
-- If a search produces no output for >300 seconds it is likely stuck on slow I/O — stop and try a more targeted search. Do NOT escalate to a wider search.
 
 Now start your work counter-reviewing the ReviewerFeedback and refining your implementation as needed.

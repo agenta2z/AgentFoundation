@@ -9,13 +9,6 @@ You are tasked with carefully and thoroughly reviewing a document proposed by an
 {{ input }}
 </OriginalUserRequest>
 
-{% if task_instructions %}
-Here is the original additional task instruction for your reference:
-<OriginalTaskInstructions>
-{{ task_instructions }}
-</OriginalTaskInstructions>
-{% endif %}
-
 **Latest Proposed Document By Another Agent:**
 <ProposedDocument>
 {{ main_response }}
@@ -37,8 +30,16 @@ Only re-raise issues if you have NEW evidence or the author misunderstood.
 {% endif %}
 
 ---
+{% if task_instructions %}
+Here is the original task instructions for your reference.
+<OriginalTaskInstructions>
+{{ task_instructions }}
+</OriginalTaskInstructions>
+{% endif %}
 
-## Your Task: Critical Review
+---
+
+## Your Current Task: Critical Review
 
 You are an expert reviewer. Your job is to **carefully, thoroughly double-check with critical-thinking** whether this document is:
 

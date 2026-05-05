@@ -122,44 +122,21 @@ class TemplatedInferencerBase(InferencerBase):
         dynamic variables from external sources).
         """
         feed: dict = {}
-        # Resolve template_variables: unified file-variant + literal support.
-        #   "skill_tool_creation"   → auto: try file, fall back to literal
-        #   "@skill_tool_creation"  → force file, error if not found
-        #   "=literal text"         → force literal, skip file check
-        # If a key has an empty/None value AND template_version is set, the
-        # per-inferencer template_version fills in (so YAMLs can declare
-        # `template_version: aggregation` once and list keys with empty values).
+        # Resolve template_variables via load_variables() (unified batch API
+        # with cascade: space/type → space → global _variables/).
+        # Prefix conventions: "@variant" = strict, "=literal" = force literal,
+        # "variant" = try file then fall back to literal, None = use template_version.
         if self.template_variables and self.template_manager:
-            for var_name, value in self.template_variables.items():
-                if not value and self.template_version:
-                    value = self.template_version
-                if not value:
-                    feed[var_name] = ""
-                elif not isinstance(value, str):
-                    feed[var_name] = value
-                elif value.startswith("@"):
-                    variant = value[1:]
-                    if hasattr(self.template_manager, "load_variable"):
-                        loaded = self.template_manager.load_variable(
-                            var_name, variant, self.template_root_space
-                        )
-                        if loaded is None:
-                            raise FileNotFoundError(
-                                f"template_variables: no variable file for "
-                                f"@{variant} (var={var_name}, space={self.template_root_space})"
-                            )
-                        feed[var_name] = loaded
-                    else:
-                        feed[var_name] = variant
-                elif value.startswith("="):
-                    feed[var_name] = value[1:]
-                elif hasattr(self.template_manager, "load_variable"):
-                    loaded = self.template_manager.load_variable(
-                        var_name, value, self.template_root_space
-                    )
-                    feed[var_name] = loaded if loaded is not None else value
-                else:
-                    feed[var_name] = value
+            if hasattr(self.template_manager, "load_variables"):
+                resolved = self.template_manager.load_variables(
+                    variable_specs=self.template_variables,
+                    root_space=self.template_root_space,
+                    default_version=self.template_version or "",
+                )
+                feed.update(resolved)
+            else:
+                for var_name, value in self.template_variables.items():
+                    feed[var_name] = value if value else ""
         feed.update(self.template_extra_feed)
         feed["input"] = inference_input
         resolved = self.resolve_output_path()

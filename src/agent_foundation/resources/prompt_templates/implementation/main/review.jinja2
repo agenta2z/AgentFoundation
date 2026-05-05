@@ -9,13 +9,6 @@ You are tasked with carefully and thoroughly reviewing an implementation made by
 {{ input }}
 </OriginalUserRequest>
 
-{% if task_instructions %}
-Here is the original additional task instruction for your reference:
-<OriginalTaskInstructions>
-{{ task_instructions }}
-</OriginalTaskInstructions>
-{% endif %}
-
 **Latest Implementation By Another Agent:**
 <CurrentImplementation>
 {{ main_response }}
@@ -38,8 +31,16 @@ Only re-raise issues if you have NEW evidence or the implementer misunderstood.
 {% endif %}
 
 ---
+{% if task_instructions %}
+Here are the original task instructions for your reference:
+<OriginalTaskInstructions>
+{{ task_instructions }}
+</OriginalTaskInstructions>
+{% endif %}
 
-## Your Task: Critical Code Review
+---
+
+## Your Current Task: Critical Code Review
 
 You are an expert code reviewer. Your job is to **carefully, thoroughly double-check with critical-thinking** whether this implementation is:
 

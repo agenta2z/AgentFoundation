@@ -1,0 +1,5 @@
+## NOTES (on local search efficiency):
+- NEVER run recursive local searches (`grep -r`, `find`, etc.) rooted at a drive root, user home, or any large parent directory (e.g., `/`, `C:\`, `~`, `/Users/`, `/data/users/`). Such scans could traverse hundreds of GB or millions of files and hang for extremely long time. 
+- Try to scope local searches to specific modules or subdirectories relevant to the task, e.g., through listing a few levels of subdirectories. Read codebase documentation if available and check potential locations, etc.
+  * Prefer dedicated `Read` / `Glob` / `Grep` tools over shell `find` / `grep -r` when available — they are typically faster and respect path scoping.
+  * If a local search produces no output for a long time and likely stuck — stop and try a more targeted local search (smaller path, more specific pattern). Do NOT escalate to a wider search.

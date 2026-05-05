@@ -57,14 +57,6 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * For new testing/benchmarking scripts, ensure they have an option to specify the output directory.
   * Your careful decision to choose right file format for the output artifacts (e.g. CSV for tabular metrics data, JSON for structured details, etc.).
 
-## NOTES (on tool-use efficiency — filesystem searches):
-- **NEVER run recursive searches (`grep -r`, `find`, etc.) rooted at a drive root, user home, or any large parent directory** (e.g., `/`, `C:\`, `~`, `/Users/...`, `/data/users/...`, `OneDrive/`, `Desktop/`, `Projects/`, `fbcode/`, `www/`). Such scans traverse hundreds of GB or millions of files and hang for 30+ minutes, exceeding the per-tool idle timeout and stalling the workflow.
-- Always scope filesystem searches to a **specific repository or subdirectory** relevant to the task:
-  * GOOD: `grep -rn "pattern" <repo_root>/src/<module>/` (small bounded directory)
-  * GOOD: `grep -n "pattern" <repo_root>/src/<file>.py` (single file)
-  * BAD: `find / -name "*.py"`, `grep -r "pattern" ~`, `find C:\ -name "..."`
-- Prefer the dedicated `Read` / `Glob` / `Grep` tools (with explicit `path` parameters) over shell `find` / `grep -r` when available — they are faster and respect path scoping.
-- If a search produces no output for >300 seconds it is likely stuck on slow I/O — stop and try a more targeted search (smaller path, more specific pattern). Do NOT escalate to a wider search.
-- If you cannot locate a file with a bounded search, report the ambiguity rather than expanding scope to a drive root or user home.
+{{ notes/local_search_efficiency }}
 
 Now start your implementation work.
