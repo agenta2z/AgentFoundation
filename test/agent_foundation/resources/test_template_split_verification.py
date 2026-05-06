@@ -119,6 +119,65 @@ class TestSharedVariableLoading:
             "notes.local_search_efficiency content"
         )
 
+    def test_implementation_template_renders_with_notes(self) -> None:
+        """Render implementation/main/initial.jinja2 with the shared notes variable.
+        Catches slash-vs-dot typos ({{ notes/foo }} vs {{ notes.foo }})."""
+        from rich_python_utils.string_utils.formatting.jinja2_format import (
+            format_template,
+        )
+        from rich_python_utils.string_utils.formatting.template_manager import (
+            TemplateManager,
+        )
+
+        tm = TemplateManager(
+            templates=str(AF_TEMPLATES_ROOT),
+            active_template_type="main",
+            template_formatter=format_template,
+        )
+        feed = tm.load_variables(
+            {"notes.local_search_efficiency": None},
+            root_space="implementation",
+        )
+        rendered = tm(
+            "initial",
+            active_template_root_space="implementation",
+            input="Test implementation request",
+            task_preamble="",
+            task_instructions="",
+            output_path="/tmp/test_output.md",
+            round_index=1,
+            **feed,
+        )
+        notes_content = feed["notes"]["local_search_efficiency"]
+        assert notes_content in rendered, (
+            "Rendered implementation template should contain the shared "
+            "notes.local_search_efficiency content"
+        )
+
+    def test_plan_task_instructions_variable_renders_with_notes(self) -> None:
+        """Render plan/main/_variables/task_instructions/default.jinja2 directly
+        with notes provided. Catches slash-vs-dot typos in _variables files."""
+        import jinja2
+
+        path = (
+            AF_TEMPLATES_ROOT
+            / "plan"
+            / "main"
+            / "_variables"
+            / "task_instructions"
+            / "default.jinja2"
+        )
+        content = path.read_text(encoding="utf-8")
+        env = jinja2.Environment(undefined=jinja2.ChainableUndefined)
+        tmpl = env.from_string(content)
+        rendered = tmpl.render(
+            notes={"local_search_efficiency": "SEARCH_EFFICIENCY_SENTINEL"},
+        )
+        assert "SEARCH_EFFICIENCY_SENTINEL" in rendered, (
+            "plan/main/_variables/task_instructions/default.jinja2 should render "
+            "notes.local_search_efficiency content (check for slash-vs-dot typo)"
+        )
+
     def test_task_breakdown_template_renders_without_notes(self) -> None:
         """When notes is NOT configured, the template renders cleanly
         (ChainableUndefined produces empty string, no error)."""

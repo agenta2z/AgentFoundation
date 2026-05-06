@@ -24,3 +24,16 @@ Conclude with the winner-pick judgment as a fenced JSON block. This is the answe
 
 `winner_index` is the 0-based integer index of the chosen upstream input.
 {%- endif %}
+{%- if include_ranking %}
+
+Rank all upstream inputs from strongest to weakest as a fenced JSON block:
+
+```json ranking
+{
+  "ranking": [0, 1],
+  "reason": "<brief justification for the ordering>"
+}
+```
+
+`ranking` is a list of 0-based integer indices ordered from strongest (best) to weakest. Must include all upstream input indices exactly once.
+{%- endif %}
