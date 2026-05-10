@@ -10,6 +10,25 @@ You previously implemented the following user request and received feedback from
 </OriginalUserRequest>
 
 **Your Current Implementation:**
+{%- if prior_output_path %}
+
+The previous implementation report is saved on disk at:
+  `{{ prior_output_path }}`
+
+To preserve content and avoid regeneration drift, your **FIRST tool action MUST be**
+to copy the previous file to your output path before any edit. For example:
+    cp {{ prior_output_path }} {{ output_path }}
+(or your environment's equivalent file-copy operation).
+
+Then make targeted in-place edits to `{{ output_path }}`. **DO NOT** retype the
+report — copy the file first and edit it incrementally.
+{%- else %}
+
+(The previous implementation's on-disk path is unavailable for this run — use
+the inline content below as the source of truth. Preserve structure, section
+ordering, and any unchanged sections verbatim.)
+{%- endif %}
+
 <CurrentImplementation>
 {{ main_response }}
 </CurrentImplementation>

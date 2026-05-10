@@ -460,6 +460,7 @@ class TestT4EndToEnd(unittest.TestCase):
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=rev,
             fixer_inferencer=fix,
+            inject_upstream_artifacts=False,
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -988,6 +989,280 @@ class TestPostMortemFixes(unittest.TestCase):
         warnings_text = "\n".join(cm.output)
         self.assertIn("review_default", warnings_text)
         self.assertIn("fixer_match_winner", warnings_text)
+
+
+# ---------------------------------------------------------------------------
+# T12 — reviewer_match_second (runner-up as reviewer)
+# ---------------------------------------------------------------------------
+
+
+def _aggregator_text_with_winner_and_ranking(
+    integrated: str, winner_idx: int, ranking: list
+) -> str:
+    winner_json = json.dumps({"winner_index": winner_idx, "reason": "test"})
+    ranking_json = json.dumps({"ranking": ranking, "reason": "test"})
+    return (
+        f"<FinalPlan>\n{integrated}\n</FinalPlan>\n"
+        f"```json winner_pick\n{winner_json}\n```\n"
+        f"```json ranking\n{ranking_json}\n```"
+    )
+
+
+def _aggregator_text_with_ranking(integrated: str, ranking: list) -> str:
+    ranking_json = json.dumps({"ranking": ranking, "reason": "test"})
+    return (
+        f"<FinalPlan>\n{integrated}\n</FinalPlan>\n"
+        f"```json ranking\n{ranking_json}\n```"
+    )
+
+
+class TestT12ReviewerMatchSecond(unittest.TestCase):
+    """Round 7 / T12: reviewer_match_second — runner-up as reviewer."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_seeds_reviewer_at_construction(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            reviewer_match_second=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+
+    def test_auto_enables_winner_pick(self):
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=_make_minimal_flow_configs(2),
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            reviewer_match_second=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        self.assertTrue(mfdi.winner_pick)
+
+    def test_single_flow_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            MultiFlowDualInferencer(
+                flow_configs=_make_minimal_flow_configs(1),
+                multi_flow_aggregator_inferencer=_Scripted(script=[]),
+                reviewer_match_second=True,
+                consensus_config=ConsensusConfig(max_iterations=1),
+            )
+        self.assertIn("reviewer_match_second", str(ctx.exception))
+
+    def test_selects_runner_up_2_flows(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner_and_ranking("integrated", 0, [0, 1])]
+        )
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_response_parser=_parse_finalplan,
+            reviewer_match_second=True,
+            fixer_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        result = mfdi.infer("master")
+        self.assertIsInstance(result, DualInferencerResponse)
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+
+    def test_selects_runner_up_3_flows(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        flow2_inf = _Scripted(script=["plan_2"])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner_and_ranking("integrated", 2, [2, 0, 1])]
+        )
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t2", "initial_inferencer": flow2_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_response_parser=_parse_finalplan,
+            reviewer_match_second=True,
+            fixer_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        result = mfdi.infer("master")
+        self.assertIsInstance(result, DualInferencerResponse)
+        self.assertIs(mfdi.review_inferencer, flow0_inf)
+
+    def test_fallback_no_ranking(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=0)]
+        )
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_winner_parser=_parse_winner_tag,
+            multi_flow_response_parser=_parse_finalplan,
+            reviewer_match_second=True,
+            fixer_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        result = mfdi.infer("master")
+        self.assertIsInstance(result, DualInferencerResponse)
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+
+    def test_combined_with_fixer_match_winner(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner_and_ranking("integrated", 0, [0, 1])]
+        )
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_response_parser=_parse_finalplan,
+            reviewer_match_second=True,
+            fixer_match_winner=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        result = mfdi.infer("master")
+        self.assertIsInstance(result, DualInferencerResponse)
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
+
+    def test_recomputes_on_winner_change(self):
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            reviewer_match_second=True,
+            fixer_match_winner=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        mfi = mfdi.base_inferencer
+        mfi._last_winner_idx = 0
+        mfi._last_ranking = [0, 1]
+        mfdi._select_reviewer_and_fixer()
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
+
+        mfi._last_winner_idx = 1
+        mfi._last_ranking = [1, 0]
+        mfdi._select_reviewer_and_fixer()
+        self.assertIs(mfdi.review_inferencer, flow0_inf)
+        self.assertIs(mfdi.fixer_inferencer, flow1_inf)
+
+    def test_shared_instance_warns(self):
+        import logging
+        shared = _Scripted(script=["plan"])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": shared,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": shared,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            reviewer_match_second=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        mfi = mfdi.base_inferencer
+        mfi._last_winner_idx = 0
+        with self.assertLogs(
+            "agent_foundation.common.inferencers.agentic_inferencers."
+            "flow_inferencers.multi_flow_dual_inferencer",
+            level=logging.WARNING,
+        ) as cm:
+            mfdi._select_reviewer_and_fixer()
+        self.assertIn("runner-up", "\n".join(cm.output))
+
+
+# ---------------------------------------------------------------------------
+# T12p — parse_ranking_tag parser tests
+# ---------------------------------------------------------------------------
+
+
+class TestT12Parser(unittest.TestCase):
+    """Parser tests for parse_ranking_tag."""
+
+    def test_json_block(self):
+        from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+        text = 'Some text\n```json ranking\n{"ranking": [2, 0, 1], "reason": "ok"}\n```\nmore'
+        self.assertEqual(parse_ranking_tag(text), [2, 0, 1])
+
+    def test_none_when_absent(self):
+        from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+        self.assertIsNone(parse_ranking_tag("no ranking here"))
+
+    def test_non_string(self):
+        from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+        self.assertIsNone(parse_ranking_tag(42))
+        self.assertIsNone(parse_ranking_tag(None))
+
+    def test_bool_indices_excluded(self):
+        from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+        text = '```json ranking\n{"ranking": [true, 0, 1]}\n```'
+        self.assertEqual(parse_ranking_tag(text), [0, 1])
 
 
 if __name__ == "__main__":

@@ -157,16 +157,23 @@ def collect_child_boundary_deliverables(
         for child_name_attr, child_inf in children_iter:
             if child_inf is None:
                 continue
-            if not getattr(child_inf, "is_deliverable_boundary", False):
-                continue
             child_ws = getattr(child_inf, "_workspace", None)
             if child_ws is None:
+                continue
+            is_boundary = getattr(child_inf, "is_deliverable_boundary", False)
+            has_self_promoted = (
+                not is_boundary
+                and getattr(child_ws, "has_deliverables", False)
+            )
+            if not is_boundary and not has_self_promoted:
                 continue
             # The workspace's basename is the canonical "name" for namespacing
             child_dir_name = os.path.basename(child_ws.root)
             if child_dir_name in seen_names:
                 continue
-            if not boundary_filter(child_dir_name, child_ws):
+            # boundary_filter applies to boundaries only; self-promoted
+            # leaves bypass it (e.g., aggregator bypasses "worker_*" filter)
+            if is_boundary and not boundary_filter(child_dir_name, child_ws):
                 continue
             files = _list_deliverable_files(child_ws)
             if not files:
@@ -205,7 +212,8 @@ def collect_child_boundary_deliverables(
             files = _list_deliverable_files(child_ws)
             if not files:
                 continue
-            if not boundary_filter(child_name, child_ws):
+            is_self_promoted = os.path.exists(os.path.join(d, ".self_promoted"))
+            if not is_self_promoted and not boundary_filter(child_name, child_ws):
                 continue
             discovered.append(
                 ChildBoundaryDeliverables(
@@ -446,6 +454,8 @@ def _list_deliverable_files(workspace: Any) -> List[str]:
     result = []
     for root_dir, _dirs, files in os.walk(d):
         for f in files:
+            if f.startswith("."):
+                continue
             abs_path = os.path.join(root_dir, f)
             rel_path = os.path.relpath(abs_path, d)
             result.append(rel_path)

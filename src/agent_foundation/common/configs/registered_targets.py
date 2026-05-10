@@ -115,6 +115,11 @@ register_alias(
     f"{_P}.common.inferencers.flow_parsers.make_finalplan_parser",
     "config",
 )
+register_alias(
+    "RankingParser",
+    f"{_P}.common.inferencers.flow_parsers.make_ranking_parser",
+    "config",
+)
 
 # --- Workspace ---
 register_alias(

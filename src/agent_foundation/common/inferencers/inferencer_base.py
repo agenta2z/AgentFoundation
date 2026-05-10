@@ -119,6 +119,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # Simple API inferencers leave this as None.
     output_path: Optional[str] = attrib(default=None)
 
+    output_is_deliverable: bool = attrib(default=False)
+    """When True, output file is copied into final_deliverables/ after
+    finalization. Extends BTA/PTI's publishes_response_as_deliverable
+    concept to any inferencer."""
+
+    output_manifest_index: bool = attrib(default=False)
+    """When True, emit output_manifest.json listing contributing files
+    (LLM prompts, streaming cache, session logs). Auto-enables when
+    output_is_deliverable is True."""
+
     # === Workspace (opt-in) ===
     # Construction-time workspace. Synced to ``_workspace`` (property) in
     # ``__attrs_post_init__``, which auto-configures cache_folder, working_dir,
@@ -726,6 +736,92 @@ class InferencerBase(Debuggable, Resumable, ABC):
             f.write(cleaned)
         return cleaned
 
+    def _post_finalize_deliverable_and_manifest(self) -> None:
+        """Promote output to final_deliverables/ and/or emit manifest.
+
+        Called after _finalize_output() regardless of has_local_access.
+        """
+        import shutil as _shutil
+
+        ws = self._workspace
+        if ws is None:
+            return
+
+        resolved = self.resolve_output_path()
+        if not resolved or not os.path.isfile(resolved):
+            return
+
+        if self.output_is_deliverable:
+            fd = getattr(ws, "deliverables_dir", None)
+            if fd is not None:
+                dst = os.path.join(fd, os.path.basename(resolved))
+                os.makedirs(fd, exist_ok=True)
+                if not os.path.exists(dst):
+                    _shutil.copy2(resolved, dst)
+                marker = os.path.join(fd, ".self_promoted")
+                if not os.path.exists(marker):
+                    open(marker, "w").close()
+
+        if self.output_manifest_index or self.output_is_deliverable:
+            self._emit_output_manifest(resolved)
+
+    def _emit_output_manifest(self, output_path: str) -> None:
+        """Walk workspace logs/session and emit output_manifest.json."""
+        import json as _json
+
+        ws = self._workspace
+        contributors = []
+
+        logs_dir = getattr(ws, "logs_dir", None)
+        if logs_dir:
+            session_dir = os.path.join(logs_dir, "session")
+            if os.path.isdir(session_dir):
+                for entry in sorted(os.listdir(session_dir)):
+                    entry_path = os.path.join(session_dir, entry)
+                    if entry.endswith(".jsonl.parts") and os.path.isdir(entry_path):
+                        for cat_name in sorted(os.listdir(entry_path)):
+                            cat_path = os.path.join(entry_path, cat_name)
+                            if not os.path.isdir(cat_path):
+                                continue
+                            for fname in sorted(os.listdir(cat_path)):
+                                fpath = os.path.join(cat_path, fname)
+                                if os.path.isfile(fpath):
+                                    contributors.append({
+                                        "category": cat_name.lower(),
+                                        "path": os.path.realpath(fpath),
+                                        "size_bytes": os.path.getsize(fpath),
+                                    })
+                    elif entry.endswith(".jsonl") and os.path.isfile(entry_path):
+                        contributors.append({
+                            "category": "session_log",
+                            "path": os.path.realpath(entry_path),
+                            "size_bytes": os.path.getsize(entry_path),
+                        })
+
+        for src_info in getattr(self, "_consumed_upstream_paths", []):
+            p = str(src_info)
+            if os.path.isfile(p):
+                contributors.append({
+                    "category": "upstream_artifact",
+                    "path": os.path.realpath(p),
+                })
+
+        manifest = {
+            "schema_version": "1.0",
+            "output": {
+                "path": os.path.realpath(output_path),
+                "size_bytes": os.path.getsize(output_path),
+                "produced_by": type(self).__name__,
+                "workspace_root": os.path.realpath(ws.root),
+            },
+            "contributors": contributors,
+            "stats": {"total": len(contributors)},
+        }
+
+        manifest_path = os.path.splitext(output_path)[0] + "_manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write(_json.dumps(manifest, indent=2))
+
     # -- Resumable protocol implementation ----------------------------------
 
     def _get_result_path(self, result_id, *args, **kwargs) -> str:
@@ -769,6 +865,31 @@ class InferencerBase(Debuggable, Resumable, ABC):
     def _infer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
+        # ── Phase 1 (leaf-owned template rendering): extract per-call render
+        # parameters from _inference_args BEFORE forwarding to _infer().
+        # `extra_feed` is consumed by _render_prompt; `render_only` short-circuits
+        # the LLM call. Both are KEYWORD-ONLY by convention here (orchestrators
+        # pass them by name). Extracting them prevents leakage to _infer() which
+        # would TypeError on unrecognized kwargs.
+        _extra_feed = _inference_args.pop("extra_feed", None)
+        _render_only = _inference_args.pop("render_only", False)
+        return self.__infer_single_impl(
+            inference_input,
+            inference_config,
+            _extra_feed=_extra_feed,
+            _render_only=_render_only,
+            **_inference_args,
+        )
+
+    def __infer_single_impl(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        _extra_feed: Optional[dict] = None,
+        _render_only: bool = False,
+        **_inference_args,
+    ):
         """
         Process a single inference input with preprocessing, inference, and post-processing.
 
@@ -801,8 +922,21 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
 
-        # Template rendering (opt-in: only when template_manager is set)
-        inference_input = self._render_prompt(inference_input)
+        # Template rendering (opt-in: only when template_manager is set).
+        # Round-7 invariant: conditional kwarg pass to avoid TypeError on
+        # subclass overrides that don't declare extra_feed (e.g.
+        # ConversationalInferencer._render_prompt). When _extra_feed is
+        # None, this call is byte-identical to the legacy form.
+        if _extra_feed is not None:
+            inference_input = self._render_prompt(inference_input, extra_feed=_extra_feed)
+        else:
+            inference_input = self._render_prompt(inference_input)
+
+        # Phase 1: render_only mode — used by orchestrators that need the
+        # rendered prompt for logging/cache-keying without invoking the LLM.
+        # See Q14 / ConsensusIterationRecord.review_input use case.
+        if _render_only:
+            return inference_input
 
         # Resume hook: check for cached result from a previous session.
         # Placed AFTER preprocessing/rendering so prompt hash matches cache.
@@ -812,6 +946,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if resume_result is not None:
             # Run the same post-processing tail as the normal path
             resume_result = self._finalize_output(resume_result)
+            self._post_finalize_deliverable_and_manifest()
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
@@ -967,6 +1102,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Template output finalization (extract <Response>, save to file)
         inference_response = self._finalize_output(inference_response)
+        self._post_finalize_deliverable_and_manifest()
 
         # Update state graphs from response
         if self.state_graphs:
@@ -1348,6 +1484,27 @@ class InferencerBase(Debuggable, Resumable, ABC):
     async def _ainfer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
+        # ── Phase 1 (leaf-owned template rendering): extract per-call render
+        # parameters from _inference_args. See _infer_single for design notes.
+        _extra_feed = _inference_args.pop("extra_feed", None)
+        _render_only = _inference_args.pop("render_only", False)
+        return await self.__ainfer_single_impl(
+            inference_input,
+            inference_config,
+            _extra_feed=_extra_feed,
+            _render_only=_render_only,
+            **_inference_args,
+        )
+
+    async def __ainfer_single_impl(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        _extra_feed: Optional[dict] = None,
+        _render_only: bool = False,
+        **_inference_args,
+    ):
         """Async process a single inference input with preprocessing, inference, and post-processing.
 
         Async equivalent of _infer_single(). Handles:
@@ -1376,8 +1533,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
 
-        # Template rendering (opt-in: only when template_manager is set)
-        inference_input = self._render_prompt(inference_input)
+        # Template rendering (opt-in: only when template_manager is set).
+        # Round-7 invariant: conditional kwarg pass — see _infer_single.
+        if _extra_feed is not None:
+            inference_input = self._render_prompt(inference_input, extra_feed=_extra_feed)
+        else:
+            inference_input = self._render_prompt(inference_input)
+
+        # Phase 1: render_only short-circuit — see _infer_single.
+        if _render_only:
+            return inference_input
 
         # Resume hook (async): check for cached result from a previous session.
         # Uses _atry (async) so streaming override can await self._ainfer().
@@ -1387,6 +1552,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if resume_result is not None:
             # Run the same post-processing tail as the normal path
             resume_result = self._finalize_output(resume_result)
+            self._post_finalize_deliverable_and_manifest()
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
@@ -1560,6 +1726,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Template output finalization (extract <Response>, save to file)
         inference_response = self._finalize_output(inference_response)
+        self._post_finalize_deliverable_and_manifest()
 
         # Update state graphs from response
         if self.state_graphs:

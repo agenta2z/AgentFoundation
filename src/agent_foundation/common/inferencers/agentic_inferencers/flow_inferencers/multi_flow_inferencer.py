@@ -272,6 +272,10 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     fixer_alias_parser: Optional[Callable[[str], Optional[str]]] = attrib(default=None)
     """Same as ``reviewer_alias_parser``, for ``<Fixer>alias</Fixer>``."""
 
+    ranking_parser: Optional[Callable[[str], Optional[list]]] = attrib(default=None)
+    """Parser for flow ranking in aggregator output. Returns flow indices
+    ordered best-to-worst, or None if not found."""
+
     # ----- Runtime input propagation (opt-in) -----
     # When True, ``_ainfer`` / ``_infer`` mutate ``flow_configs[i]["input"]``
     # and ``predefined_sub_queries`` from the runtime ``inference_input`` before
@@ -328,6 +332,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     _last_winner_idx: Optional[int] = attrib(default=None, init=False)
     _last_reviewer_alias: Optional[str] = attrib(default=None, init=False)
     _last_fixer_alias: Optional[str] = attrib(default=None, init=False)
+    _last_ranking: Optional[list] = attrib(default=None, init=False)
 
     # ------------------------------------------------------------------
     # Initialization
@@ -855,6 +860,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         self._last_winner_idx = None
         self._last_reviewer_alias = None
         self._last_fixer_alias = None
+        self._last_ranking = None
 
     # ------------------------------------------------------------------
     # Recursive pre_retry — declare children for the retry-time hook.
@@ -920,6 +926,19 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     self._last_fixer_alias = str(alias)
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("MultiFlow fixer_alias_parser raised: %s", exc)
+        if self.ranking_parser is not None:
+            try:
+                ranking = self.ranking_parser(raw)
+                if ranking is not None and isinstance(ranking, list):
+                    valid = [int(i) for i in ranking
+                             if 0 <= int(i) < len(self.flow_configs)]
+                    valid = list(dict.fromkeys(valid))
+                    if valid:
+                        self._last_ranking = valid
+                        if self._last_winner_idx is None:
+                            self._last_winner_idx = valid[0]
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning("MultiFlow ranking_parser raised: %s", exc)
 
     def get_winner_flow_idx(self) -> Optional[int]:
         """Index of the winning flow (per the most recent ainfer/infer call),
@@ -948,6 +967,33 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     def get_chosen_fixer_alias(self) -> Optional[str]:
         """The alias the aggregator chose for the fixer, or None."""
         return self._last_fixer_alias
+
+    def get_ranking(self) -> Optional[list]:
+        """Flow indices ordered best-to-worst, or None."""
+        return self._last_ranking
+
+    def get_runner_up_flow_idx(self) -> Optional[int]:
+        """Index of the second-best flow, or None."""
+        if self._last_ranking is not None and len(self._last_ranking) > 1:
+            return self._last_ranking[1]
+        return None
+
+    def get_runner_up_inferencer(self) -> Optional[Any]:
+        """The ``initial_inferencer`` of the runner-up flow, or None."""
+        idx = self.get_runner_up_flow_idx()
+        if idx is not None and 0 <= idx < len(self.flow_configs):
+            return self.flow_configs[idx].get("initial_inferencer")
+        return None
+
+    def get_first_non_winner_inferencer(self) -> Optional[Any]:
+        """First flow inferencer that is not the winner (declaration order).
+        Fallback when ranking is unavailable."""
+        winner = self.get_winner_inferencer()
+        for cfg in self.flow_configs:
+            inf = cfg.get("initial_inferencer")
+            if inf is not None and inf is not winner:
+                return inf
+        return None
 
     def _normalize_aggregator_output(self, raw: Any) -> Any:
         """Pick the aggregator's textual output from BTA's result.

@@ -1039,6 +1039,22 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         len(report.copied), self._workspace.deliverables_dir,
                     )
 
+            # v1.7.3: Auto-publish own aggregator response to final_deliverables/
+            # when publishes_response_as_deliverable=True. Without this step,
+            # BTA's deliverables_dir would only contain surfaced children but
+            # nothing of BTA's own, breaking the parent boundary's collect.
+            if self.publishes_response_as_deliverable and self.output_path:
+                import shutil
+                src = self._workspace.output_path(self.output_path)
+                dst = self._workspace.deliverable_path(self.output_path)
+                if dst is not None and os.path.isfile(src) and not os.path.exists(dst):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                    copied_any_deliverable = True
+                    _logger.info(
+                        "BTA published own response → %s", dst,
+                    )
+
         if self.promote_worker_deliverables and self._workspace is not None:
             from rich_python_utils.path_utils.path_listing import (
                 find_conflicting_and_agreed_files,

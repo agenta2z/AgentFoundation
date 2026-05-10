@@ -100,12 +100,30 @@ class TemplatedInferencerBase(InferencerBase):
     # flows into ``load_variable`` for variable lookups made by THIS
     # inferencer.
     template_version: Optional[str] = attrib(default=None)
+    # Mode flags (e.g. "deep_mode", "elegant_mode") that toggle conditional
+    # blocks in templates AND auto-load instruction text from
+    # ``_variables/instructions/modes/<name>.jinja2``. For each entry:
+    #   - ``feed["enable_<name>"] = bool(enabled)`` is exposed to Jinja2.
+    #   - When enabled, the corresponding mode file (if present) is loaded
+    #     and merged into ``feed["instructions"]["modes"][<name>]`` for
+    #     ``{{ instructions.modes.<name> }}`` access.
+    # Adding a new mode = drop a file in ``_variables/instructions/modes/``
+    # and set ``modes: {<name>: true}`` in YAML. No code changes needed.
+    # Defaults to deep_mode + elegant_mode ON — matches the user's standing
+    # instructions ("ultrathink", "elegant proper solution"). Override per
+    # YAML topology when specific runs need different behavior.
+    modes: dict = attrib(factory=lambda: {"deep_mode": True, "elegant_mode": True})
 
     # ------------------------------------------------------------------
     # Template feed construction
     # ------------------------------------------------------------------
 
-    def _build_template_feed(self, inference_input: str) -> dict:
+    def _build_template_feed(
+        self,
+        inference_input: str,
+        *,
+        extra_feed: Optional[dict] = None,
+    ) -> dict:
         """Build the template variable feed dict.
 
         Merges (in priority order, lowest first):
@@ -115,12 +133,28 @@ class TemplatedInferencerBase(InferencerBase):
            ``{"task_preamble": "skill_tool_creation"}`` loads
            ``_variables/task_preamble/skill_tool_creation.jinja2``.
         2. ``template_extra_feed`` — literal key-value overrides.
-        3. ``{{ input }}`` bound to ``inference_input``.
-        4. ``output_path`` (if inferencer has local file access).
+        3. ``extra_feed`` — per-call feed overrides (Phase 1, leaf-owned
+           template rendering). Caller MUST NOT include reserved keys
+           ({"input", "__template_space__"}) — ValueError raised at top.
+        4. ``{{ input }}`` bound to ``inference_input`` (sacrosanct).
+        5. ``output_path`` (if inferencer has local file access).
 
         Override this method to customize feed construction (e.g., add
         dynamic variables from external sources).
         """
+        # ── Phase 1 (Q11): reserved-key guard. Per-call extra_feed cannot
+        # clobber sacrosanct slots — silent override of {{ input }} would
+        # be invisible until production. Raise loud at the boundary.
+        if extra_feed:
+            PROTECTED = {"input", "__template_space__"}
+            collisions = PROTECTED & extra_feed.keys()
+            if collisions:
+                raise ValueError(
+                    f"{type(self).__name__}._build_template_feed: extra_feed "
+                    f"contains reserved key(s) {sorted(collisions)} which would "
+                    f"clobber sacrosanct slots. Reserved: {sorted(PROTECTED)}. "
+                    f"Caller must remove these keys before passing extra_feed."
+                )
         feed: dict = {}
         # Resolve template_variables via load_variables() (unified batch API
         # with cascade: space/type → space → global _variables/).
@@ -138,11 +172,105 @@ class TemplatedInferencerBase(InferencerBase):
                 for var_name, value in self.template_variables.items():
                     feed[var_name] = value if value else ""
         feed.update(self.template_extra_feed)
+        # Phase 1 (leaf-owned rendering): per-call extra_feed merge — wins
+        # over class-level template_extra_feed but loses to {{ input }} and
+        # __template_space__ (sacrosanct, set after this).
+        if extra_feed:
+            feed.update(extra_feed)
+        # Inject __template_space__ so .variables.yaml aliases like
+        # `__action__: __template_space__` resolve to the active space
+        # ("plan" / "implementation" / "task_breakdown"). Sourced from
+        # template_root_space (semantically the same value).
+        if self.template_root_space:
+            feed["__template_space__"] = self.template_root_space
+
+        # Mode handling: for each declared mode, set enable_<name> bool
+        # and (if enabled) load instruction content into nested dict for
+        # {{ instructions.modes.<name> }} Jinja2 access.
+        # Note: load_variables() in TemplateManager only splits on the
+        # FIRST dot (so "instructions.modes.deep_mode" resolves wrong).
+        # We use _cascade_load_variable directly for proper nested access.
+        if self.modes:
+            self._inject_mode_flags_and_content(feed)
+
         feed["input"] = inference_input
         resolved = self.resolve_output_path()
         if resolved and os.path.isabs(resolved) and self.has_local_access:
             feed["output_path"] = resolved
         return feed
+
+    def _inject_mode_flags_and_content(self, feed: dict) -> None:
+        """Populate `enable_<name>` flags and `instructions.modes.<name>`
+        content from `self.modes`.
+
+        Flag derivation is unconditional (so `{%- if enable_X %}` can
+        check the value even when False/missing). Content loading happens
+        only for enabled modes — disabled modes contribute nothing.
+
+        Errors are handled defensively but observably:
+          - FileNotFoundError → debug log (mode declared but no instruction
+            file; rendering proceeds, the conditional block emits nothing
+            of value).
+          - Any other exception → warning log (don't silently swallow real
+            bugs; explicitly NOT `except Exception: pass`).
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        for mode_name, enabled in self.modes.items():
+            feed[f"enable_{mode_name}"] = bool(enabled)
+            if not enabled:
+                continue
+            if not self.template_manager:
+                continue
+            # Use _cascade_load_variable for proper nested-folder lookup.
+            # Args: var_name (folder path with /), version (file stem),
+            #       root_space, tmpl_type.
+            try:
+                content = self.template_manager._cascade_load_variable(
+                    "instructions/modes",
+                    mode_name,
+                    self.template_root_space or "",
+                    "main",
+                )
+            except FileNotFoundError:
+                logger.debug(
+                    "Mode '%s' enabled but no instruction file at "
+                    "_variables/instructions/modes/%s.jinja2 — "
+                    "{{ instructions.modes.%s }} will render empty.",
+                    mode_name, mode_name, mode_name,
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    "Failed to load mode instructions for '%s': %s",
+                    mode_name, e,
+                )
+                continue
+
+            if content is None:
+                # File doesn't exist (cascade returned None, didn't raise).
+                continue
+
+            # Merge into feed as {"instructions": {"modes": {<name>: <content>}}}
+            instructions = feed.setdefault("instructions", {})
+            if not isinstance(instructions, dict):
+                # Don't clobber a non-dict 'instructions' set by extra_feed
+                logger.warning(
+                    "feed['instructions'] is %s, not dict — cannot inject "
+                    "modes.%s. Skipping.",
+                    type(instructions).__name__, mode_name,
+                )
+                continue
+            modes_ns = instructions.setdefault("modes", {})
+            if not isinstance(modes_ns, dict):
+                logger.warning(
+                    "feed['instructions']['modes'] is %s, not dict — "
+                    "cannot inject modes.%s. Skipping.",
+                    type(modes_ns).__name__, mode_name,
+                )
+                continue
+            modes_ns[mode_name] = content
 
     # ------------------------------------------------------------------
     # Stub overrides — provide real implementations for InferencerBase's
@@ -157,11 +285,24 @@ class TemplatedInferencerBase(InferencerBase):
         """
         return self.template_manager is not None
 
-    def _render_prompt(self, inference_input: Any) -> Any:
+    def _render_prompt(
+        self,
+        inference_input: Any,
+        *,
+        extra_feed: Optional[dict] = None,
+    ) -> Any:
         """Render a template-based prompt if ``template_manager`` is configured.
 
         Called by ``_infer_single`` / ``_ainfer_single`` after
         ``input_preprocessor`` and before ``_infer``.
+
+        Args:
+            inference_input: The user/orchestrator input string.
+            extra_feed: Optional per-call feed dict (Phase 1, leaf-owned
+                template rendering). When provided, merged into the
+                template feed via ``_build_template_feed(extra_feed=...)``.
+                MUST NOT contain reserved keys ({"input",
+                "__template_space__"}) — see ``_build_template_feed``.
 
         Behavior:
 
@@ -175,6 +316,11 @@ class TemplatedInferencerBase(InferencerBase):
         - Otherwise → render the template via ``template_manager`` with
           this inferencer's ``template_key`` and ``active_template_root_space``,
           populated by ``_build_template_feed``.
+
+        SUBCLASS OVERRIDE NOTE: Overrides MUST accept ``extra_feed`` (or
+        ``**kwargs``) to avoid TypeError when callers pass it. The call
+        site (``_*_single``) uses a conditional kwarg pass to support
+        legacy overrides — see Round-7 audit in the leaf-rendering plan.
         """
         if self.template_manager is None:
             return inference_input
@@ -188,7 +334,7 @@ class TemplatedInferencerBase(InferencerBase):
                 f"orchestrator that shouldn't render its own input, it should "
                 f"inherit from InferencerBase, not TemplatedInferencerBase."
             )
-        feed = self._build_template_feed(inference_input)
+        feed = self._build_template_feed(inference_input, extra_feed=extra_feed)
         return self.template_manager(
             self.template_key,
             active_template_root_space=self.template_root_space,
@@ -196,7 +342,7 @@ class TemplatedInferencerBase(InferencerBase):
         )
 
     def _propagate_to_children(self):
-        """Push ``template_extra_feed`` to child inferencers found in attrs fields.
+        """Push ``template_extra_feed`` and ``modes`` to child inferencers.
 
         Parent's keys take precedence (update semantics) — runtime context
         set by the orchestrator overrides yaml defaults on children. Each
@@ -207,25 +353,32 @@ class TemplatedInferencerBase(InferencerBase):
         generic walker) to discover child instances, partials, and duck-typed
         callables across attrs/dict/list fields.
         """
-        if not self.template_extra_feed:
-            return
+        # Propagate template_extra_feed (the original behavior).
+        if self.template_extra_feed:
+            self._propagate_dict_attr_to_children(
+                self.template_extra_feed, TEMPLATE_EXTRA_FEED_ATTR,
+            )
+        # Propagate modes — same merge semantics so a parent topology can
+        # set `modes: {deep_mode: true}` once and have it cascade to every
+        # descendant inferencer (no per-child YAML edits required).
+        if self.modes:
+            self._propagate_dict_attr_to_children(self.modes, "modes")
 
-        feed = self.template_extra_feed
-        attr_name = TEMPLATE_EXTRA_FEED_ATTR
+    def _propagate_dict_attr_to_children(self, source: dict, attr_name: str):
+        """Helper: merge ``source`` into each child's ``attr_name`` dict.
 
+        Children without this attribute are skipped (they can't receive it).
+        Partials get merged kwargs.
+        """
         def _on_instance(child, field_name, key):
-            # Children that don't have template_extra_feed (e.g., orchestrators
-            # that inherit InferencerBase directly) are skipped — nowhere to
-            # merge into. Children that DO have it (TemplatedInferencerBase
-            # descendants + duck-typed callables) receive the merged dict.
             existing = getattr(child, attr_name, None)
             if existing is None:
                 return
-            existing.update(feed)
+            existing.update(source)
 
         def _on_partial(p, field_name, key):
             existing = p.keywords.get(attr_name, {})
-            merged = {**existing, **feed}
+            merged = {**existing, **source}
             return functools.partial(
                 p.func, **{**p.keywords, attr_name: merged}
             )

@@ -56,6 +56,12 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * If the task involves user-visible experience (e.g. CLI, UI, streaming output), trace the end-to-end user experience and verify the planned changes will not break or regress the user experience.
   * However, YOU MUST also prevent unnecessary exploration — focus on the materials that are actually relevant.
   * Balance exploration vs. efficiency. Prioritize thoroughness over speed if the task scope genuinely requires deeper investigation, but avoid aimless exploration.
+{%- if enable_deep_mode %}
+- {{ instructions.modes.deep_mode }}
+{%- endif %}
+{%- if enable_elegant_mode %}
+- {{ instructions.modes.elegant_mode }}
+{%- endif %}
 - You can briefly check the output file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
 

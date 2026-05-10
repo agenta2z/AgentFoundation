@@ -39,6 +39,7 @@ from .template_constants import (
     FIELD_TEMPLATE_ROOT_SPACE,
     FIELD_TEMPLATE_VARIABLES,
     FIELD_TEMPLATE_VERSION,
+    KEY_FOLLOWUP,
     KEY_REVIEW,
     SPACE_TASK_BREAKDOWN,
     VAR_TASK_INSTRUCTIONS,
@@ -292,6 +293,19 @@ REVIEW_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
 """For any review slot: render the canonical ``review`` template variant."""
 
 
+FOLLOWUP_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
+    template_key=KEY_FOLLOWUP,
+)
+"""For any followup/fixer slot: render the canonical ``followup`` template variant.
+
+Phase 1 of the leaf-owned template rendering refactor — defined here but
+NOT yet wired into ``Dual.SLOT_DEFAULTS``. Wiring happens atomically in
+Phase 2 (combined with Dual stop-rendering its own followup template) to
+avoid double-rendering during migration. Until Phase 2 ships, callers
+that want the fixer to template via SLOT_DEFAULTS must wire this manually.
+"""
+
+
 def _aggregation_applicable(parent: dict) -> bool:
     """True iff peers are visible (semantic intent) AND inject is wired
     (mechanical engagement).
@@ -341,5 +355,6 @@ __all__ = [
     "AGGREGATOR_PREAMBLE_DEFAULTS",
     "STRUCTURED_AGGREGATION_DEFAULTS",
     "REVIEW_TEMPLATE_DEFAULTS",
+    "FOLLOWUP_TEMPLATE_DEFAULTS",
     "FOLLOWUP_AGGREGATION_DEFAULTS",
 ]

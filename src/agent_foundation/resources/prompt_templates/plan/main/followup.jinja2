@@ -10,6 +10,25 @@ You previously generated a document for the following user request and received 
 </OriginalUserRequest>
 
 **Your Current Proposed Document:**
+{%- if prior_output_path %}
+
+The previous version is saved on disk at:
+  `{{ prior_output_path }}`
+
+To preserve content and avoid regeneration drift, your **FIRST tool action MUST be**
+to copy the previous file to your output path before any edit. For example:
+    cp {{ prior_output_path }} {{ output_path }}
+(or your environment's equivalent file-copy operation).
+
+Then make targeted in-place edits to `{{ output_path }}`. **DO NOT** retype the
+document — copy the file first and edit it incrementally.
+{%- else %}
+
+(The previous version's on-disk path is unavailable for this run — use the
+inline content below as the source of truth. Preserve title, section
+numbering, length, and any unchanged sections verbatim.)
+{%- endif %}
+
 <ProposedDocument>
 {{ main_response }}
 </ProposedDocument>
@@ -50,9 +69,10 @@ For each accepted issue, carefully revise the document while ensuring:
 
 ### Efficiency: Prefer Incremental Edits
 
-Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration is not warranted (e.g. most fixes are local like a few lines in 1-2 sections), try to **copy the previous document file and apply targeted edits**. This saves time and avoids accidental regressions in unchanged sections.
+Check the reviewer's `estimated_fix_impact` for each issue. When fixes are mostly local (confined to a few lines within 1–2 sections) or when cross-section changes touch only a small portion of the document, YOU MUST **copy the previous document file and apply targeted edits**. This saves time and avoids accidental regressions in unchanged sections.
 
 ## Output Requirements
+
 
 Write your **improved document** in markdown format to: `{{ output_path }}`
 - The document should be human readable and structured with details, that another human or agent could follow or act on later.
@@ -84,7 +104,10 @@ Wrap a structured response in `<Response>` tags:
 ## NOTES (on agent behavior):
 - Deep Investigation Requirement: You MUST conduct a careful, deep, and accurate investigation of each feedback item with critical thinking. Validate claims by checking actual sources — do not assume.
 - Every accept/reject must cite concrete evidence with careful reasoning — DO NOT speculate or assume.
-- Prefer copying the previous version and making incremental targeted edits over full regeneration when full regeneration is not necessary.
+- Prefer copying the previous version and making incremental targeted edits over full regeneration when full regeneration is not necessary. If fixes are mostly localized—small edits within 1–2 sections, or limited cross-section changes, YOU MUST copy the previous document and apply targeted edits. This saves time and prevents regressions in unchanged content.
+{%- if enable_elegant_mode %}
+- {{ instructions.modes.elegant_mode }} Double check we apply right fixes for true issues.
+{%- endif %}
 - You can briefly check the refined document file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
 

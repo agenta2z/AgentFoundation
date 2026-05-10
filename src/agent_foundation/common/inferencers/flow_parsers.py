@@ -1,6 +1,6 @@
 """Output parsers for MultiFlow / MultiFlowDual aggregator + per-flow outputs.
 
-Three small functions, paired with the JSON-fenced response-format addenda
+Four small functions, paired with the JSON-fenced response-format addenda
 emitted by ``plan/main/_variables/task_response_format/aggregation.jinja2``:
 
 * :func:`parse_winner_tag` — used as ``MultiFlowDual.multi_flow_winner_parser``
@@ -11,6 +11,8 @@ emitted by ``plan/main/_variables/task_response_format/aggregation.jinja2``:
 * :func:`parse_finalplan_tag` — used as ``MultiFlowDual.multi_flow_response_parser``
   to extract the final plan content (stripping any wrapper tags) so the
   outer Dual reviewer sees clean prose.
+* :func:`parse_ranking_tag` — used as ``MultiFlowDual.multi_flow_ranking_parser``
+  to extract the ordered flow ranking from an aggregator's structured output.
 
 Each parser first looks for a JSON-fenced block matching the response-format
 template, then falls back to the legacy XML-tag pattern so older outputs and
@@ -18,13 +20,13 @@ hand-written test fixtures still parse.
 
 These exist as YAML-instantiable callables via the alias registry — see
 ``agent_foundation.common.configs.registered_targets`` for ``WinnerParser``,
-``DecisionStopParser``, ``FinalPlanParser`` aliases.
+``DecisionStopParser``, ``FinalPlanParser``, ``RankingParser`` aliases.
 """
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 
 # Legacy XML tag patterns (fallback path for older outputs / fixtures).
@@ -120,6 +122,33 @@ def parse_finalplan_tag(s: Any) -> str:
     return m.group(1).strip() if m else s
 
 
+def parse_ranking_tag(s: Any) -> Optional[List[int]]:
+    """Extract the flow ranking from the aggregator output.
+
+    Primary path: ````` json ranking`` block with ``"ranking": [0, 1, ...]``.
+    Returns a list of 0-based flow indices ordered best-to-worst, or ``None``
+    if the block is absent or invalid (graceful — dispatch falls back to
+    declaration order).
+    """
+    if not isinstance(s, str):
+        return None
+    block = _extract_json_block(s, "ranking")
+    if block is not None:
+        ranking = block.get("ranking")
+        if isinstance(ranking, list):
+            result: List[int] = []
+            for idx in ranking:
+                if isinstance(idx, bool):
+                    continue
+                if isinstance(idx, int):
+                    result.append(idx)
+                elif isinstance(idx, str) and idx.strip().isdigit():
+                    result.append(int(idx.strip()))
+            if result:
+                return result
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Factory wrappers for YAML alias registration.
 #
@@ -144,3 +173,8 @@ def make_decision_stop_parser():
 def make_finalplan_parser():
     """Factory returning :func:`parse_finalplan_tag`."""
     return parse_finalplan_tag
+
+
+def make_ranking_parser():
+    """Factory returning :func:`parse_ranking_tag`."""
+    return parse_ranking_tag

@@ -10,6 +10,16 @@ You are tasked with carefully and thoroughly reviewing an implementation made by
 </OriginalUserRequest>
 
 **Latest Implementation By Another Agent:**
+{%- if prior_output_path %}
+
+The implementation report is saved on disk at:
+  `{{ prior_output_path }}`
+
+You SHOULD inspect it directly via your file-reading tool (e.g.
+`read_file({{ prior_output_path }})`) to ensure your review is based on the
+actual on-disk content rather than only the inline excerpt below.
+{%- endif %}
+
 <CurrentImplementation>
 {{ main_response }}
 

@@ -9,6 +9,7 @@ import asyncio
 import enum
 import logging
 import os
+import signal
 import subprocess
 import sys
 from abc import abstractmethod
@@ -229,10 +230,32 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
                 if transport is not None and not transport.is_closing():
                     transport.close()
 
+    @staticmethod
+    def _kill_process_group(pgid: int) -> None:
+        """Send SIGKILL to all processes in the given process group.
+
+        With ``start_new_session=True``, the subprocess's PID equals its
+        PGID, so pass ``process.pid`` directly.  Safe to call after the
+        main process has exited — children retain the PGID even after
+        reparenting to init.
+
+        PGID collision with an unrelated process is impossible while any
+        group member exists: POSIX ``setsid()`` fails with ``EPERM``
+        when a process group with the target PGID is still occupied.
+
+        No-op on Windows (``os.killpg`` is POSIX-only).
+        """
+        if not hasattr(os, "killpg"):
+            return
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
     async def _safe_process_cleanup(
         self, process: asyncio.subprocess.Process, timeout: float = 5.0
     ) -> None:
-        """Clean up subprocess: force-close pipes and wait with timeout.
+        """Clean up subprocess: force-close pipes, wait, and kill process group.
 
         Args:
             process: The subprocess to clean up.
@@ -240,18 +263,21 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         """
         self._force_close_pipes(process)
         try:
-            await asyncio.wait_for(process.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            logger.warning(
-                "[%s] process.wait() timed out after %.1fs — killing process",
-                self.__class__.__name__,
-                timeout,
-            )
             try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-            await process.wait()
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[%s] process.wait() timed out after %.1fs — killing process tree",
+                    self.__class__.__name__,
+                    timeout,
+                )
+                self._kill_process_group(process.pid)
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            self._kill_process_group(process.pid)
 
     async def _read_stdout_with_exit_detection(
         self,
@@ -373,6 +399,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             stderr=asyncio.subprocess.PIPE,
             cwd=self._resolve_subprocess_cwd(),
             limit=_MAX_STDOUT_LINE_BYTES,
+            start_new_session=True,
         )
 
         collected_stdout: list[str] = []
@@ -501,6 +528,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             stderr=subprocess.PIPE,
             text=True,
             cwd=self._resolve_subprocess_cwd(),
+            start_new_session=True,
         )
 
         collected: list[str] = []
@@ -509,7 +537,21 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
                 collected.append(line)
                 yield line
         finally:
-            process.wait()
+            try:
+                try:
+                    process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    logger.warning(
+                        "[%s] sync process.wait() timed out — killing process tree",
+                        self.__class__.__name__,
+                    )
+                    self._kill_process_group(process.pid)
+                    try:
+                        process.wait(timeout=3.0)
+                    except subprocess.TimeoutExpired:
+                        pass
+            finally:
+                self._kill_process_group(process.pid)
             self._last_streaming_output = "".join(collected)
             self._last_streaming_return_code = process.returncode
 
@@ -538,6 +580,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self._resolve_subprocess_cwd(),
+            start_new_session=True,
         )
 
         collected: list[str] = []

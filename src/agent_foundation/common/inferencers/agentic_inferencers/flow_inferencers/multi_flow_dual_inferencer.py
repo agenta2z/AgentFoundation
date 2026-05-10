@@ -73,6 +73,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
 )
 from agent_foundation.common.inferencers.flow_parsers import (
     parse_finalplan_tag,
+    parse_ranking_tag,
     parse_winner_tag,
 )
 from agent_foundation.common.inferencers.template_defaults import (
@@ -144,6 +145,8 @@ class MultiFlowDualInferencer(DualInferencer):
         "multi_flow_aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
         "flow_configs.*.followup_inferencer": FOLLOWUP_AGGREGATION_DEFAULTS,
     }
+
+    _workspace_propagation_skip: frozenset = frozenset({"multi_flow_aggregator_inferencer"})
 
     # ─── MultiFlow-specific config (forwarded into the auto-constructed MultiFlow) ───
     flow_configs: List[dict] = attrib(factory=list)
@@ -223,6 +226,21 @@ class MultiFlowDualInferencer(DualInferencer):
     """When True, ``fixer_inferencer`` is mutated to the MultiFlow winner's
     inferencer after each propose step."""
 
+    reviewer_match_second: bool = attrib(default=False)
+    """When True, auto-assigns the runner-up flow's inferencer as reviewer
+    after each propose step. For 2 flows, the runner-up is the non-winner.
+    For N>2, uses the aggregator's ranking (position 1). Falls back to the
+    first non-winner in flow_configs order if ranking is unavailable.
+
+    Auto-enables ``winner_pick`` (runner-up is relative to a winner).
+    Auto-injects ``include_ranking`` template flag on the aggregator.
+    Symmetric with ``fixer_match_winner``: winner->fixer, runner-up->reviewer."""
+
+    multi_flow_ranking_parser: Optional[Callable] = attrib(default=None)
+    """Parser for ranking block in aggregator output. Auto-set to
+    ``parse_ranking_tag`` when ``reviewer_match_second`` is True and no
+    explicit parser is provided."""
+
     winner_pick: bool = attrib(default=False)
     """Named feature toggle for the winner-pick pattern. When True,
     auto-injects ``include_winner_pick: true`` into
@@ -258,6 +276,15 @@ class MultiFlowDualInferencer(DualInferencer):
             for cfg in self.flow_configs:
                 cfg.setdefault("initial_prompt", self.multi_flow_initial_prompt)
 
+        # reviewer_match_second validation + auto-enable dependencies.
+        if self.reviewer_match_second:
+            if len(self.flow_configs) < 2:
+                raise ValueError(
+                    "reviewer_match_second requires at least 2 entries in "
+                    f"flow_configs (got {len(self.flow_configs)})"
+                )
+            self.winner_pick = True
+
         # `winner_pick: true` is a named feature toggle that auto-sets the
         # ``include_winner_pick`` template flag on the multi_flow_aggregator's
         # template_extra_feed (its wrapper template renders the JSON schema
@@ -271,6 +298,16 @@ class MultiFlowDualInferencer(DualInferencer):
                 if agg.template_extra_feed is None:
                     agg.template_extra_feed = {}
                 agg.template_extra_feed.setdefault("include_winner_pick", True)
+
+        # reviewer_match_second: inject ranking template flag + default parser.
+        if self.reviewer_match_second and self.multi_flow_aggregator_inferencer is not None:
+            agg = self.multi_flow_aggregator_inferencer
+            if hasattr(agg, "template_extra_feed"):
+                if agg.template_extra_feed is None:
+                    agg.template_extra_feed = {}
+                agg.template_extra_feed.setdefault("include_ranking", True)
+            if self.multi_flow_ranking_parser is None:
+                self.multi_flow_ranking_parser = parse_ranking_tag
 
         # Auto-construct the MultiFlow propose engine. Forward
         # ``workspace`` and ``checkpoint_dir`` so MultiFlow's own
@@ -296,6 +333,7 @@ class MultiFlowDualInferencer(DualInferencer):
             winner_parser=self.multi_flow_winner_parser,
             reviewer_alias_parser=self.multi_flow_reviewer_alias_parser,
             fixer_alias_parser=self.multi_flow_fixer_alias_parser,
+            ranking_parser=self.multi_flow_ranking_parser,
             # Runtime input propagation (opt-in, lets MFDual be used as PTI planner)
             propagate_runtime_input=self.propagate_runtime_input,
             runtime_input_template=self.runtime_input_template,
@@ -310,6 +348,12 @@ class MultiFlowDualInferencer(DualInferencer):
         if self.review_inferencer is None and self.review_default is not None:
             self.review_inferencer = self._resolve_id(self.review_default)
         if (
+            self.review_inferencer is None
+            and self.reviewer_match_second
+            and len(self.flow_configs) > 1
+        ):
+            self.review_inferencer = self.flow_configs[1].get("initial_inferencer")
+        if (
             self.fixer_inferencer is None
             and self.fixer_match_winner
             and self.review_inferencer is not None
@@ -322,6 +366,13 @@ class MultiFlowDualInferencer(DualInferencer):
         # Defer to DualInferencer for prompt-template setup, parser defaults,
         # workspace, sub-inferencer wiring, etc.
         super().__attrs_post_init__()
+
+        if self.review_inferencer is None:
+            _logger.warning(
+                "MultiFlowDualInferencer: no reviewer mechanism configured "
+                "(review_inferencer, review_default, or reviewer_match_second "
+                "are all unset). The review step will fail at runtime."
+            )
 
     # ------------------------------------------------------------------
     # Round 7 — dispatch helpers
@@ -366,10 +417,14 @@ class MultiFlowDualInferencer(DualInferencer):
         """Mutate ``self.review_inferencer`` and ``self.fixer_inferencer`` based
         on dispatch state exposed by the inner MultiFlow.
 
-        Resolution precedence (per role):
+        Resolution precedence (reviewer):
           1. LLM-driven alias from MultiFlow's alias parser, if present.
-             Failures (e.g., unknown alias) log a warning and fall through.
-          2. Rule-based: avoid-self-review for reviewer, match-winner for fixer.
+          2. ``reviewer_match_second``: runner-up from ranking or first non-winner.
+          3. Rule-based: ``review_default`` with avoid-self-review via priority pool.
+
+        Resolution precedence (fixer):
+          1. LLM-driven alias from MultiFlow's fixer alias parser.
+          2. ``fixer_match_winner``: winner's flow inferencer.
 
         When neither path applies, leaves the inferencer at its current value
         (typically the construction-time default).
@@ -421,8 +476,20 @@ class MultiFlowDualInferencer(DualInferencer):
                 )
         if chosen is not None:
             self.review_inferencer = chosen
+        elif self.reviewer_match_second and winner is not None:
+            # 2) Runner-up as reviewer (ranking-based or declaration-order fallback)
+            runner_up = mfi.get_runner_up_inferencer()
+            if runner_up is None:
+                runner_up = mfi.get_first_non_winner_inferencer()
+            if runner_up is not None and runner_up is not winner:
+                self.review_inferencer = runner_up
+            else:
+                _logger.warning(
+                    "MultiFlowDual: reviewer_match_second=True but no valid "
+                    "runner-up found. Reviewer unchanged."
+                )
         elif self.review_default is not None:
-            # 2) Rule-based: avoid self-review
+            # 3) Rule-based: avoid self-review
             default = self._resolve_id(self.review_default)
             if winner is not None and winner is default:
                 fallback: Optional[InferencerBase] = None
@@ -539,8 +606,29 @@ class MultiFlowDualInferencer(DualInferencer):
     async def _step_propose_impl(self, step_input, state):
         """Run the parent propose step (which calls MultiFlow), then dispatch
         reviewer / fixer based on the dispatch state MultiFlow exposed."""
+        prev_reviewer = self.review_inferencer
+        prev_fixer = self.fixer_inferencer
         result = await DualInferencer._step_propose_impl(self, step_input, state)
         self._select_reviewer_and_fixer()
+        for prev, curr in [
+            (prev_reviewer, self.review_inferencer),
+            (prev_fixer, self.fixer_inferencer),
+        ]:
+            if curr is not prev and hasattr(curr, "reset_session"):
+                curr.reset_session()
+
+        mfi = self.base_inferencer
+        if isinstance(mfi, MultiFlowInferencer):
+            dispatch_extra = {"mfdual_dispatch": {
+                "winner_idx": mfi._last_winner_idx,
+                "ranking": mfi._last_ranking,
+            }}
+            round_idx = (self._state.get("total_iterations", 0) + 1) if isinstance(getattr(self, "_state", None), dict) else 1
+            self._record_round_audit(
+                round_idx, "review_dispatch", self.review_inferencer,
+                extra=dispatch_extra,
+            )
+
         return result
 
     # NOTE: aconnect / adisconnect are inherited from DualInferencer.
