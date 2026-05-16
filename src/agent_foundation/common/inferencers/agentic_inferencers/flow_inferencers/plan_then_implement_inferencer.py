@@ -2114,6 +2114,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         executor_input = self._build_executor_input(
             state["current_input"], plan_str, plan_file_path=plan_file_path
         )
+        # NOTE: Plan output path is embedded inline within executor_input
+        # via _build_executor_input (see prose mention "Plan saved to:
+        # <path>"). No structured plan_output_path template variable is
+        # injected because no executor template currently consumes it —
+        # would be speculative infrastructure with no consumer.
 
         self.log_info(f"[{self.executor_phase}] Starting execution phase")
 
@@ -2392,6 +2397,51 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             child._workspace = child_ws
             if not child.output_path:
                 child.output_path = default_output
+
+    def _finalize_output(self, response):
+        """PTI override: symlink per-flag child outputs as own.
+
+        Iterates ``_OUTPUT_MODE_MAP`` and symlinks each relevant child's
+        output based on ``output_mode`` (Flag enum — supports composites
+        like ``PLAN_AND_IMPLEMENTATION`` and ``ALL``).
+        """
+        if self._workspace is None:
+            return super()._finalize_output(response)
+
+        state = self._state or {}
+        last_iter = state.get("iteration", 1)
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+        iter_ws_path = self._get_iteration_workspace(
+            self._workspace.root, last_iter
+        )
+        iter_ws = InferencerWorkspace(
+            root=iter_ws_path,
+            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
+        )
+
+        for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
+            if flag in self.output_mode:
+                child_ws = iter_ws.child(child_name)
+                # Symlink output file
+                child_deliv = child_ws.deliverable_path(filename)
+                child_out = child_ws.output_path(filename) if hasattr(child_ws, "output_path") else None
+                src = child_deliv if (child_deliv and os.path.isfile(child_deliv)) else child_out
+                if src and os.path.isfile(src):
+                    dst = self._workspace.output_path(filename)
+                    self._symlink_or_copy(src, dst)
+                # Symlink deliverable file
+                if self._workspace.deliverables_dir and child_deliv and os.path.isfile(child_deliv):
+                    dst = self._workspace.deliverable_path(filename)
+                    if dst:
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        self._symlink_or_copy(child_deliv, dst)
+
+        resolved = self.resolve_output_path()
+        if resolved and os.path.isfile(resolved):
+            self._emit_output_manifest(resolved)
+        return response
 
     def _finalize_outputs(self):
         """Copy selected child outputs from LAST iteration to workspace root.

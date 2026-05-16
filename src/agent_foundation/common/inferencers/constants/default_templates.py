@@ -1,5 +1,9 @@
-DEFAULT_PLACEHOLDER_INFERENCE_PROMPT = "prompt"
-DEFAULT_PLACEHOLDER_INFERENCE_RESPONSE = "response"
+"""Default in-Python prompt templates (legacy fallback).
+
+These are used when no TemplateManager is configured on the orchestrator.
+They are deprecated in favor of Jinja2 file-based templates under
+``prompt_templates/{plan,implementation}/main/{review,followup}.jinja2``.
+"""
 
 DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE = """You are a smart agent helping users handle their asks.
 You have been provided a prompt with the the user ask and all the instructions, and you made a response.
@@ -37,13 +41,6 @@ You output follow this format:
 [compose your improved response; follow exactly the same format as your previous Response]
 </ImprovedResponse>
 """
-
-# DualInferencer placeholder keys
-DEFAULT_PLACEHOLDER_DUAL_INPUT = "input"
-DEFAULT_PLACEHOLDER_DUAL_PROPOSAL = "proposal"
-DEFAULT_PLACEHOLDER_DUAL_ISSUES = "issues"
-DEFAULT_PLACEHOLDER_DUAL_REASONING = "reasoning"
-DEFAULT_PLACEHOLDER_DUAL_COUNTER_FEEDBACK = "counter_feedback"
 
 DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE = """You are a critical reviewer. Review the following proposal against the original request.
 
@@ -146,4 +143,3 @@ Then provide your complete improved proposal inside these tags:
 <ImprovedProposal>
 [your full improved proposal here]
 </ImprovedProposal>"""
-

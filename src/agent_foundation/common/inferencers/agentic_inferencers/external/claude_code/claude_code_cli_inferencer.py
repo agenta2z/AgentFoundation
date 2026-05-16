@@ -84,6 +84,8 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
         extra_cli_args: Additional CLI arguments.
     """
 
+    has_local_access: bool = attrib(default=True)
+
     # Claude Code CLI-specific attributes
     idle_timeout_seconds: int = attrib(default=1800)
     tool_use_idle_timeout_seconds: int = attrib(default=7200)

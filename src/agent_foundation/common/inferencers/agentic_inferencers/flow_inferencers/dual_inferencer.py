@@ -31,7 +31,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     Severity,
     severity_at_most,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.constants import (
+from agent_foundation.common.inferencers.constants import (
     DEFAULT_PLACEHOLDER_DUAL_COUNTER_FEEDBACK,
     DEFAULT_PLACEHOLDER_DUAL_INPUT,
     DEFAULT_PLACEHOLDER_DUAL_ISSUES,
@@ -179,6 +179,12 @@ class DualInferencer(LinearWorkflowInferencer):
         "base_inferencer", "review_inferencer", "fixer_inferencer",
     ]
 
+    _workspace_propagation_skip: frozenset = frozenset((
+        "base_inferencer",
+        "review_inferencer",
+        "fixer_inferencer",
+    ))
+
     base_inferencer: InferencerBase = attrib(default=None)
     review_inferencer: InferencerBase = attrib(default=None)
     fixer_inferencer: Optional[InferencerBase] = attrib(default=None)
@@ -302,7 +308,7 @@ class DualInferencer(LinearWorkflowInferencer):
             # custom formatter but no explicit prompts; production callers
             # using a shared TemplateManager get the implicit-key-discovery
             # path instead.
-            from agent_foundation.common.inferencers.agentic_inferencers.constants import (
+            from agent_foundation.common.inferencers.constants import (
                 DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
                 DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
             )
@@ -344,7 +350,7 @@ class DualInferencer(LinearWorkflowInferencer):
             # legacy in-Python defaults with a one-time warning. Same
             # backward-compatibility rationale as the custom-formatter path
             # above.
-            from agent_foundation.common.inferencers.agentic_inferencers.constants import (
+            from agent_foundation.common.inferencers.constants import (
                 DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
                 DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
             )
@@ -499,68 +505,57 @@ class DualInferencer(LinearWorkflowInferencer):
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Finalization — copy last round artifact to outputs/
+    # Workspace propagation — per-round child workspaces
+    # ------------------------------------------------------------------
+
+    def _propagate_workspace_to_children(self, parent_workspace):
+        """Dual override: assign ``children/propose/`` to base_inferencer.
+
+        review_inferencer and fixer_inferencer get per-round workspaces
+        at runtime (in ``_step_review_impl`` / ``_step_fix_impl``).
+        """
+        from agent_foundation.common.inferencers.inferencer_base import (
+            InferencerBase,
+        )
+        base = getattr(self, "base_inferencer", None)
+        if base is not None and isinstance(base, InferencerBase):
+            if getattr(base, "_workspace", None) is None:
+                child_ws = parent_workspace.child("propose")
+                child_ws.ensure_dirs()
+                base._workspace = child_ws
+        super()._propagate_workspace_to_children(parent_workspace)
+
+    # ------------------------------------------------------------------
+    # Output finalization (orchestrator override)
+    # ------------------------------------------------------------------
+
+    def _finalize_output(self, response):
+        """Dual override: symlink to canonical child's output.
+
+        The canonical child is tracked by ``_last_output_child_ws``,
+        set by ``_step_propose_impl`` and ``_step_fix_impl``.
+        """
+        child_ws = getattr(self, "_last_output_child_ws", None)
+        if child_ws is not None:
+            self._symlink_child_output(child_ws)
+            resolved = self.resolve_output_path()
+            if resolved and os.path.isfile(resolved):
+                self._emit_output_manifest(resolved)
+            return response
+        return super()._finalize_output(response)
+
+    # ------------------------------------------------------------------
+    # Finalization — audit bookkeeping
     # ------------------------------------------------------------------
 
     def _finalize_response(self):
-        """Copy the last round artifact to ``outputs/`` as the final deliverable.
+        """Dual audit bookkeeping — surfacing moved to ``_finalize_output``.
 
-        Only runs in workspace mode (``_workspace`` set + ``output_path`` set).
-        Idempotent — safe to call on resume after crash.
-
-        v1.7 Phase 5: Dual is NOT a boundary itself, but it IS a transparent
-        pass-through surfacer for its active proposer. The active proposer is
-        determined by reading the latest ConsensusIterationRecord.counter_feedback:
-          - counter_feedback is None  → review passed, base_inferencer is active
-          - counter_feedback non-None → fixer ran, fixer_inferencer is active
-
-        If the active proposer has a non-empty final_deliverables/ (i.e.
-        ``active_ws.has_deliverables`` is True), Dual copies those files into its
-        own final_deliverables/ so the parent boundary (BTA, PTI, etc.) can
-        collect them in the next hop.
-
-        The gate is workspace state (has_deliverables), NOT a role flag on the
-        proposer. This correctly handles both boundary proposers (BTA, PTI with
-        is_deliverable_boundary=True) and self-promoting leaf proposers (e.g. a
-        leaf fixer with output_is_deliverable=True) uniformly.
+        Only the round_log.jsonl audit is relevant here. Output surfacing
+        and deliverable promotion are handled by the ``_finalize_output``
+        override via ``_last_output_child_ws`` symlinks.
         """
-        if self._workspace is None or not self.output_path:
-            return
-        basename = self.output_path
-        artifacts = self._workspace.glob_artifacts(f"round*_{basename}")
-        if artifacts:
-            import shutil
-            last_artifact = artifacts[-1]
-            dst = self._workspace.output_path(basename)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(last_artifact, dst)
-
-        # === v1.7 Phase 5: Pass-through surfacing of active proposer ===
-        # Dual is NOT a boundary itself — it is a transparent pass-through that
-        # surfaces whatever the active proposer (base or fixer) has written into
-        # its own final_deliverables/ up into Dual's own final_deliverables/.
-        #
-        # The correct gate is the actual workspace state — does the active
-        # proposer have non-empty final_deliverables/? — not a role flag on the
-        # proposer. Using is_deliverable_boundary as the gate was wrong because:
-        #   (a) is_deliverable_boundary is a tree-traversal stop-condition used
-        #       by PARENT orchestrators (BTA, PTI) when collecting from children,
-        #       not a signal about whether an inferencer has deliverables to share.
-        #   (b) It excluded leaf fixers (output_is_deliverable=True but
-        #       is_deliverable_boundary=False by default) even when they had
-        #       written a fully valid final_deliverables/ via self-promotion.
-        # surface_outputs_from() already guards against empty source dirs
-        # internally (has_deliverables check at line 160-161 of
-        # inferencer_workspace.py), so this is safe and idempotent.
-        if self._workspace.deliverables_dir is not None:
-            active = self._active_proposer()
-            if active is not None:
-                active_ws = getattr(active, "_workspace", None)
-                if active_ws is not None and active_ws.has_deliverables:
-                    self._workspace.surface_outputs_from(
-                        active_ws,
-                        skip_existing=True,
-                    )
+        pass
 
     def _active_proposer(self):
         """Return the active proposer for this Dual run.
@@ -645,8 +640,9 @@ class DualInferencer(LinearWorkflowInferencer):
         if ws is None:
             return None
 
+        from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
         out_basename = os.path.basename(
-            getattr(proposer, "_output_path", None) or "output.md"
+            getattr(proposer, "_output_path", None) or DEFAULT_OUTPUT_FILENAME
         )
 
         # Tier 1: deliverable file
@@ -682,26 +678,42 @@ class DualInferencer(LinearWorkflowInferencer):
 
         return None
 
-    def _record_round_audit(self, round_idx, phase, inferencer, extra=None):
+    def _record_round_audit(self, round_idx, phase, inferencer, extra=None,
+                            workspace_root_at_phase=None):
         """Record a single round phase to structured log + navigation symlink.
 
         Fail-safe: exceptions are logged but never propagate — audit must
         not crash the inference run.
+
+        Args:
+            round_idx: The round number for this audit entry.
+            phase: The phase label (e.g. "propose", "review", "fix").
+            inferencer: The child inferencer whose workspace is being recorded.
+            extra: Optional dict of additional fields for the log entry.
+            workspace_root_at_phase: Optional snapshot of the inferencer's
+                workspace root captured BEFORE ainfer(). When provided, this
+                is used as the symlink target instead of the live
+                ``inferencer._workspace.root`` — which may have been mutated
+                by role-reassignment during the call. Defaults to None
+                (falls back to live read for backward compatibility).
         """
         if not self.enable_round_audit or self._workspace is None:
             return
-        if getattr(inferencer, "_workspace", None) is None:
+        if workspace_root_at_phase is None and getattr(inferencer, "_workspace", None) is None:
             return
 
         try:
             import json as _json
             from datetime import datetime as _dt
 
+            # Fix #8: use snapshot if provided, else live read
+            target = workspace_root_at_phase or str(inferencer._workspace.root)
+
             log_entry = {
                 "round": round_idx,
                 "phase": phase,
                 "inferencer_class": type(inferencer).__name__,
-                "inferencer_workspace": str(inferencer._workspace.root),
+                "inferencer_workspace": target,
                 "timestamp": _dt.utcnow().isoformat(),
                 **(extra or {}),
             }
@@ -717,7 +729,16 @@ class DualInferencer(LinearWorkflowInferencer):
                 nav_dir = os.path.join(children_dir, f"round_{round_idx:02d}")
                 os.makedirs(nav_dir, exist_ok=True)
                 link_path = os.path.join(nav_dir, phase)
-                target = str(inferencer._workspace.root)
+
+                # Fix #7: cross-worker leakage detection
+                my_root = str(self._workspace.root).rstrip("/") + "/"
+                if not target.startswith(my_root):
+                    logger.error(
+                        "Audit: cross-worker leakage at round_%02d/%s: "
+                        "target %s outside %s",
+                        round_idx, phase, target, self._workspace.root,
+                    )
+
                 if os.path.islink(link_path):
                     os.unlink(link_path)
                 try:
@@ -1025,11 +1046,21 @@ class DualInferencer(LinearWorkflowInferencer):
             parts_subfolder=_sf,
         )
 
+        # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
+        # during the call may mutate _workspace.root on the inferencer.
+        _propose_ws_snapshot = (
+            str(self.base_inferencer._workspace.root)
+            if getattr(self.base_inferencer, "_workspace", None) is not None
+            else None
+        )
         _raw_base = str(
             await self.base_inferencer.ainfer(
                 initial_prompt, **getattr(self, "_current_extra_inference_args", {})
             )
         )
+        # Track canonical output child for _finalize_output symlink
+        if getattr(self.base_inferencer, "_workspace", None) is not None:
+            self._last_output_child_ws = self.base_inferencer._workspace
         _sf = f"Round{state['total_iterations'] + 1:02d}"
         self.log_debug(
             _raw_base,
@@ -1059,6 +1090,7 @@ class DualInferencer(LinearWorkflowInferencer):
         self._state = state
         self._record_round_audit(
             state["total_iterations"] + 1, "propose", self.base_inferencer,
+            workspace_root_at_phase=_propose_ws_snapshot,
         )
         return base_output_str
 
@@ -1086,6 +1118,15 @@ class DualInferencer(LinearWorkflowInferencer):
         iteration = consensus_iter
         total_iters = state["total_iterations"]
         attempt_num = state["attempt_record"]["attempt"]
+
+        # Per-round workspace: assign review_inferencer to round_NN/children/review/
+        if self._workspace is not None and self.review_inferencer is not None:
+            round_ws = self._workspace.child(f"round_{consensus_iter:02d}")
+            review_ws = round_ws.child("review")
+            review_ws.ensure_dirs()
+            self.review_inferencer._workspace = review_ws
+            # Store round workspace for fix step to use
+            self._current_round_ws = round_ws
 
         logger.info(
             "[%s] ROUND_TRACE inner_loop_top: iteration=%d, total_iterations=%d",
@@ -1172,6 +1213,14 @@ class DualInferencer(LinearWorkflowInferencer):
         #     pass it as the input directly (leaf's _render_prompt is no-op
         #     because it has no template_manager / no template_key — Phase 1d
         #     loud-failure does NOT trigger because template_manager is None).
+
+        # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
+        # during the call may mutate _workspace.root on the inferencer.
+        _review_ws_snapshot = (
+            str(self.review_inferencer._workspace.root)
+            if getattr(self.review_inferencer, "_workspace", None) is not None
+            else None
+        )
         if review_leaf_can_render:
             # Reuse _review_extra_feed computed above for the logging prompt —
             # same dict, no re-computation, no re-rendering by Dual.
@@ -1240,6 +1289,7 @@ class DualInferencer(LinearWorkflowInferencer):
 
         self._record_round_audit(
             total_iters, "review", self.review_inferencer,
+            workspace_root_at_phase=_review_ws_snapshot,
         )
 
         if reached:
@@ -1263,6 +1313,13 @@ class DualInferencer(LinearWorkflowInferencer):
         total_iters = state["total_iterations"]
         attempt_num = state["attempt_record"]["attempt"]
         parsed_review = state["parsed_review"]
+
+        # Per-round workspace: assign fixer to round_NN/children/fix/
+        round_ws = getattr(self, "_current_round_ws", None)
+        if round_ws is not None and self.fixer_inferencer is not None:
+            fix_ws = round_ws.child("fix")
+            fix_ws.ensure_dirs()
+            self.fixer_inferencer._workspace = fix_ws
 
         try:
             # Phase 2 (leaf-owned template rendering): build feed dict, then
@@ -1327,6 +1384,14 @@ class DualInferencer(LinearWorkflowInferencer):
         )
 
         # Phase 2: dual invocation paths (see _step_review_impl).
+
+        # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
+        # during the call may mutate _workspace.root on the inferencer.
+        _fix_ws_snapshot = (
+            str(self.fixer_inferencer._workspace.root)
+            if getattr(self.fixer_inferencer, "_workspace", None) is not None
+            else None
+        )
         if fixer_leaf_can_render:
             # Reuse _fixer_extra_feed computed above — same dict, one render.
             _raw_fix = str(
@@ -1343,6 +1408,9 @@ class DualInferencer(LinearWorkflowInferencer):
                     **getattr(self, "_current_extra_inference_args", {}),
                 )
             )
+        # Track canonical output child for _finalize_output symlink
+        if getattr(self.fixer_inferencer, "_workspace", None) is not None:
+            self._last_output_child_ws = self.fixer_inferencer._workspace
         self.log_debug(
             _raw_fix,
             "RawFixResponse",
@@ -1382,6 +1450,7 @@ class DualInferencer(LinearWorkflowInferencer):
         self._pending_state = dict(state)
         self._record_round_audit(
             total_iters, "fix", self.fixer_inferencer,
+            workspace_root_at_phase=_fix_ws_snapshot,
         )
         return fix_output_str
 
@@ -1663,7 +1732,8 @@ class DualInferencer(LinearWorkflowInferencer):
             renders into ``<CurrentProposal>`` tag.
           * ``"main_response"`` →
             outer Jinja template's ``{{ main_response }}`` →
-            renders into ``<ProposedDocument>`` tag.
+            renders into ``<PriorVersionArtifact>`` tag (plan) or
+            ``<PriorImplementation>`` tag (implementation).
             (Set unconditionally so empty-tag bug cannot recur regardless
             of how the YAML configures ``placeholder_proposal``.)
           * ``"prior_output_path"`` →

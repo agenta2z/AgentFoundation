@@ -10,6 +10,7 @@ Tier ordering:
 """
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -1263,6 +1264,346 @@ class TestT12Parser(unittest.TestCase):
         from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
         text = '```json ranking\n{"ranking": [true, 0, 1]}\n```'
         self.assertEqual(parse_ranking_tag(text), [0, 1])
+
+
+# ===========================================================================
+# Fix #1 — reviewer identity-guard snapshot tests
+# ===========================================================================
+
+
+class TestFix1ReviewerIdentityGuard(unittest.TestCase):
+    """Fix #1: _review_inferencer_original snapshot is taken BEFORE any
+    override (reviewer_match_second / fixer_match_winner / super().__attrs_post_init__).
+    This lets _reassign_role_workspace distinguish between "YAML-configured
+    reviewer" (keep its workspace) and "runtime-swapped reviewer" (needs a
+    fresh workspace)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_reviewer_snapshot_captures_yaml_value(self):
+        """When review_inferencer=None (YAML value) and reviewer_match_second
+        overrides it, the snapshot should be None (the original YAML value),
+        NOT the overridden value."""
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            review_inferencer=None,
+            reviewer_match_second=True,
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        # Snapshot should capture the YAML value (None), taken BEFORE override
+        self.assertIsNone(mfdi._review_inferencer_original)
+        # But the live review_inferencer was overridden by reviewer_match_second
+        self.assertIsNotNone(mfdi.review_inferencer)
+        self.assertIs(mfdi.review_inferencer, flow1_inf)
+
+    def test_yaml_configured_reviewer_keeps_workspace(self):
+        """When review_inferencer is explicitly set to a _Scripted instance in
+        YAML, _review_inferencer_original should be that same instance. The
+        identity guard in _reassign_role_workspace should recognise it and
+        skip workspace reassignment."""
+        explicit_reviewer = _Scripted(script=[_approve()])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=_make_minimal_flow_configs(2),
+            multi_flow_aggregator_inferencer=_Scripted(script=[_aggregator_text("x")]),
+            review_inferencer=explicit_reviewer,
+            fixer_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        # Snapshot IS the explicitly configured reviewer
+        self.assertIs(mfdi._review_inferencer_original, explicit_reviewer)
+        # And the live value is also the same (no override happened)
+        self.assertIs(mfdi.review_inferencer, explicit_reviewer)
+
+
+# ===========================================================================
+# Fix #8 — role-contract inheritance (output_is_deliverable on fixer)
+# ===========================================================================
+
+
+class TestFix8RoleContractInheritance(unittest.TestCase):
+    """Fix #8: when fixer_match_winner assigns the winner as fixer,
+    output_is_deliverable must be set to True on the fixer so downstream
+    deliverable-boundary logic treats the fixer's output as the canonical
+    artifact."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_winner_as_fixer_inherits_output_is_deliverable(self):
+        """After _select_reviewer_and_fixer + _reassign_role_workspace with
+        fixer_match_winner=True, fixer_inferencer.output_is_deliverable must
+        be True (set by switch_role via _reassign_role_workspace)."""
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        # Verify both start with the default (False)
+        self.assertFalse(flow0_inf.output_is_deliverable)
+        self.assertFalse(flow1_inf.output_is_deliverable)
+
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            multi_flow_winner_parser=_parse_winner_tag,
+            fixer_match_winner=True,
+            review_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+            workspace=self.tmp,
+        )
+        mfi = mfdi.base_inferencer
+        # Simulate winner = flow_0
+        mfi._last_winner_idx = 0
+        mfdi._select_reviewer_and_fixer()
+        # Mirror _step_propose_impl: call _reassign_role_workspace after dispatch
+        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
+        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
+        self.assertTrue(mfdi.fixer_inferencer.output_is_deliverable)
+
+    def test_alias_dispatched_fixer_inherits_output_is_deliverable(self):
+        """When fixer is assigned via alias dispatch (not fixer_match_winner),
+        output_is_deliverable must also be set to True (via switch_role in
+        _reassign_role_workspace, called from _step_propose_impl)."""
+        flow0_inf = _Scripted(script=["plan_0"])
+        flow1_inf = _Scripted(script=["plan_1"])
+        fixer_inst = _Scripted(script=[])
+        self.assertFalse(fixer_inst.output_is_deliverable)
+
+        agg = _Scripted(script=[
+            _aggregator_text_with_alias("integrated", winner_idx=0, fixer="MyFixer")
+        ])
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            inferencer_pool={"MyFixer": fixer_inst},
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_winner_parser=_parse_winner_tag,
+            multi_flow_fixer_alias_parser=_parse_fixer_tag,
+            multi_flow_response_parser=_parse_finalplan,
+            review_inferencer=_Scripted(script=[_approve()]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+            workspace=self.tmp,
+        )
+        mfdi.infer("master")
+        self.assertIs(mfdi.fixer_inferencer, fixer_inst)
+        self.assertTrue(mfdi.fixer_inferencer.output_is_deliverable)
+
+    def test_output_is_deliverable_resets_on_winner_change(self):
+        """When the winner changes between dispatch calls, the NEW winner
+        gets output_is_deliverable=True (set by switch_role via
+        _reassign_role_workspace). The OLD winner's flag is NOT explicitly
+        cleared (that is by design -- the flag is additive), but the NEW
+        fixer must have it set."""
+        flow0_inf = _Scripted(script=[])
+        flow1_inf = _Scripted(script=[])
+
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": "t0", "initial_inferencer": flow0_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {"input": "t1", "initial_inferencer": flow1_inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+            ],
+            multi_flow_aggregator_inferencer=_Scripted(script=[]),
+            multi_flow_winner_parser=_parse_winner_tag,
+            fixer_match_winner=True,
+            review_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+            workspace=self.tmp,
+        )
+        mfi = mfdi.base_inferencer
+
+        # Round 1: winner = flow_0
+        mfi._last_winner_idx = 0
+        mfdi._select_reviewer_and_fixer()
+        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
+        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
+        self.assertTrue(flow0_inf.output_is_deliverable)
+
+        # Round 2: winner = flow_1
+        mfi._last_winner_idx = 1
+        mfdi._select_reviewer_and_fixer()
+        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
+        self.assertIs(mfdi.fixer_inferencer, flow1_inf)
+        self.assertTrue(flow1_inf.output_is_deliverable)
+
+
+# ===========================================================================
+# Fix #4 — workspace stash auto-invalidation (_DERIVED_FROM_WORKSPACE)
+# ===========================================================================
+
+
+class TestFix4WorkspaceStashInvalidation(unittest.TestCase):
+    """Fix #4: LinearWorkflowInferencer declares _DERIVED_FROM_WORKSPACE =
+    ('_base_followup_workspace',) so that reassigning _workspace auto-pops
+    the stashed base workspace from __dict__, preventing stale paths from
+    surviving across consensus iterations or workspace swaps."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.tmp2 = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(self.tmp2, ignore_errors=True)
+
+    def test_lwi_derived_from_workspace_is_empty(self):
+        """Hierarchical layout: _DERIVED_FROM_WORKSPACE is empty (stash removed)."""
+        self.assertEqual(
+            LinearWorkflowInferencer._DERIVED_FROM_WORKSPACE,
+            (),
+            "_DERIVED_FROM_WORKSPACE should be empty — _base_followup_workspace stash removed",
+        )
+
+    def test_lwi_workspace_propagation_skip_includes_dynamic_children(self):
+        """LWI skips default_initial/followup_inferencer from base propagation."""
+        skip = LinearWorkflowInferencer._workspace_propagation_skip
+        self.assertIn("default_initial_inferencer", skip)
+        self.assertIn("default_followup_inferencer", skip)
+
+    def test_property_setter_preserves_normal_workspace_assignment(self):
+        """For a plain InferencerBase (or _Scripted) that has no
+        _DERIVED_FROM_WORKSPACE entries, reassigning _workspace should
+        work without errors (regression guard)."""
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws1 = InferencerWorkspace(root=self.tmp)
+        ws2 = InferencerWorkspace(root=self.tmp2)
+
+        inf = _Scripted(script=["hello"], workspace=ws1)
+        # _Scripted inherits InferencerBase which has _DERIVED_FROM_WORKSPACE = ()
+        self.assertEqual(InferencerBase._DERIVED_FROM_WORKSPACE, ())
+
+        # Reassignment should not raise
+        inf._workspace = ws2
+        self.assertIs(inf._workspace, ws2)
+
+    def test_invalidation_is_idempotent(self):
+        """Reassigning _workspace when no stash exists must not raise."""
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        ws1 = InferencerWorkspace(root=self.tmp)
+        ws2 = InferencerWorkspace(root=self.tmp2)
+
+        lwi = LinearWorkflowInferencer(
+            dynamic_mode=True,
+            default_initial_inferencer=_Scripted(script=["init"]),
+            default_followup_inferencer=_Scripted(script=["followup"]),
+            end_condition=lambda s, r: True,
+            max_dynamic_steps=1,
+            workspace=ws1,
+        )
+        # No stash set — reassignment should succeed silently
+        self.assertNotIn("_base_followup_workspace", lwi.__dict__)
+        lwi._workspace = ws2  # must not raise
+        self.assertIs(lwi._workspace, ws2)
+
+
+# ---------------------------------------------------------------------------
+# Fix #5 — Flat round layout
+# ---------------------------------------------------------------------------
+
+
+class TestFix5FlatRoundLayout(unittest.TestCase):
+    """Verify followup round workspaces are flat siblings, not nested."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_round_workspace_is_sibling_not_child(self):
+        """Round workspace should be at parent level, not under children/."""
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        base_ws = InferencerWorkspace(root=os.path.join(self.tmp, "flow_0_round01"))
+        parent_dir = os.path.dirname(base_ws.root.rstrip(os.sep))
+        base_name = os.path.basename(base_ws.root.rstrip(os.sep))
+
+        # All rounds are consistent flat siblings: _round00, _round01, ...
+        for step_idx in (0, 1, 2):
+            sibling_name = f"{base_name}_round{step_idx:02d}"
+            sibling_path = os.path.join(parent_dir, sibling_name)
+            self.assertNotIn("children", sibling_path)
+            self.assertEqual(
+                os.path.dirname(sibling_path),
+                os.path.dirname(base_ws.root.rstrip(os.sep)),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Fix #6 — Worker naming hooks
+# ---------------------------------------------------------------------------
+
+
+class TestFix6WorkerNaming(unittest.TestCase):
+    """Verify hook-based _worker_child_name pattern."""
+
+    def test_bta_default_worker_naming(self):
+        """BTA's default worker naming is worker_N."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=_Scripted(script=["q"]),
+        )
+        self.assertEqual(bta._worker_child_name(0), "worker_0")
+        self.assertEqual(bta._worker_child_name(3), "worker_3")
+        self.assertTrue(bta._is_worker_child_name("worker_0"))
+        self.assertFalse(bta._is_worker_child_name("flow_0"))
+
+    def test_mfi_override_uses_flow_n(self):
+        """MultiFlowInferencer overrides to flow_N (hierarchical layout)."""
+        mfi = MultiFlowInferencer(flow_configs=_make_minimal_flow_configs(2))
+        self.assertEqual(mfi._worker_child_name(0), "flow_0")
+        self.assertEqual(mfi._worker_child_name(1), "flow_1")
+        self.assertTrue(mfi._is_worker_child_name("flow_0"))
+        self.assertTrue(mfi._is_worker_child_name("flow_99"))
+        self.assertFalse(mfi._is_worker_child_name("flow_0_workflow"))
+        self.assertFalse(mfi._is_worker_child_name("worker_0"))
 
 
 if __name__ == "__main__":

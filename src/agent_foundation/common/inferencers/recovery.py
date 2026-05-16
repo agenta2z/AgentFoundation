@@ -1,17 +1,11 @@
-"""Recovery prompt templates for streaming inferencer fallback.
+"""Recovery prompt rendering for streaming inferencer fallback.
 
 Provides a lazy-initialized TemplateManager for rendering recovery prompts
 when streaming inference is interrupted and needs cache-based recovery.
-
-Public API:
-    render_recovery_prompt(template_key, prompt, partial_output) — Render by key.
-    DEFAULT_RECOVERY_DIR — Path to the default recovery template directory.
 """
 
-from pathlib import Path
-
-DEFAULT_RECOVERY_DIR = str(
-    Path(__file__).resolve().parent.parent / "resources" / "prompt_templates"
+from agent_foundation.common.inferencers.constants.paths import (
+    DEFAULT_RECOVERY_DIR,
 )
 
 _RECOVERY_TM = None
@@ -44,9 +38,3 @@ def render_recovery_prompt(
             active_template_type=None,
         )
     return _RECOVERY_TM(template_key, prompt=prompt, partial_output=partial_output)
-
-
-__all__ = [
-    "DEFAULT_RECOVERY_DIR",
-    "render_recovery_prompt",
-]

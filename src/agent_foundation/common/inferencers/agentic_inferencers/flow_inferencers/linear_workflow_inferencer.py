@@ -15,8 +15,11 @@ leverage Workflow's checkpoint / loop-resume system.  When
 persists each step's result to disk and can resume from a crash.
 """
 
+import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 from attr import attrib, attrs
 
@@ -167,6 +170,13 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     inferencer_factory: Optional[Callable] = attrib(default=None)
     dynamic_input_builder: Optional[Callable[[dict, Any], Any]] = attrib(default=None)
 
+    _DERIVED_FROM_WORKSPACE = ()
+
+    _workspace_propagation_skip: frozenset = frozenset((
+        "default_initial_inferencer",
+        "default_followup_inferencer",
+    ))
+
     # --- Suppress Workflow constructor parameters (init=False) ---
     result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
     unpack_single_result = attrib(default=False, init=False)
@@ -205,6 +215,116 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             # "dynamic_step_1", "dynamic_step_2", etc. all match the
             # single "dynamic_step" prefix and route to the same factory.
             self.expansion_step_registry = _DynamicStepRegistry(self)
+
+    # ------------------------------------------------------------------
+    # Workspace propagation override (hierarchical layout)
+    # ------------------------------------------------------------------
+
+    def _propagate_workspace_to_children(self, parent_workspace):
+        """LWI override: assign semantic child names in dynamic mode.
+
+        In dynamic mode the initial inferencer gets ``children/initial/``
+        and the followup inferencer gets ``children/round01/``.  Both are
+        listed in ``_workspace_propagation_skip`` so the base walker skips
+        them; this override handles them with semantic names instead of
+        the generic attr-slot names the base walker would use.
+        """
+        if getattr(self, "dynamic_mode", False):
+            from agent_foundation.common.inferencers.inferencer_base import (
+                InferencerBase,
+            )
+            for inf, child_name in (
+                (getattr(self, "default_initial_inferencer", None), "initial"),
+                (getattr(self, "default_followup_inferencer", None), "round01"),
+            ):
+                if inf is None or not isinstance(inf, InferencerBase):
+                    continue
+                if getattr(inf, "_workspace", None) is not None:
+                    continue
+                child_ws = parent_workspace.child(child_name)
+                child_ws.ensure_dirs()
+                inf._workspace = child_ws
+
+        super()._propagate_workspace_to_children(parent_workspace)
+
+        # Fail-loud: detect when dynamic-mode children didn't get a
+        # workspace under THIS LWI's tree (e.g., instance aliased at
+        # a higher level stole the workspace slot).
+        if getattr(self, "dynamic_mode", False):
+            from agent_foundation.common.inferencers.inferencer_base import (
+                InferencerBase,
+            )
+            for inf, child_name in (
+                (getattr(self, "default_initial_inferencer", None), "initial"),
+                (getattr(self, "default_followup_inferencer", None), "round01"),
+            ):
+                if inf is None or not isinstance(inf, InferencerBase):
+                    continue
+                child_ws = getattr(inf, "_workspace", None)
+                if child_ws is None:
+                    raise RuntimeError(
+                        f"LWI dynamic mode: {child_name} inferencer has no "
+                        f"workspace after propagation. The instance may be "
+                        f"aliased at a higher level (e.g., reviewer_match_second "
+                        f"claimed it before flow-level propagation). Ensure "
+                        f"_workspace_propagation_skip includes review/fixer slots "
+                        f"when dynamic dispatch is enabled."
+                    )
+                if not child_ws.root.startswith(parent_workspace.root):
+                    _logger.warning(
+                        "LWI dynamic mode: %s inferencer workspace %r is outside "
+                        "this LWI's tree %r — output may land in the wrong "
+                        "directory. Likely cause: instance shared between flow "
+                        "configs and a higher-level role.",
+                        child_name, child_ws.root, parent_workspace.root,
+                    )
+
+    # ------------------------------------------------------------------
+    # Output finalization (orchestrator override)
+    # ------------------------------------------------------------------
+
+    def _finalize_output(self, response):
+        """LWI override: symlink last dynamic step's output as own.
+
+        In dynamic mode, the last child (initial or roundNN) wrote the
+        full artifact.  Symlinking it to the LWI's own ``outputs/``
+        makes it available to the parent aggregator via
+        ``resolve_canonical_output_path``.  The base ``_finalize_output``
+        would only write the ``<Response>`` summary — the symlink
+        preserves the full artifact.
+        """
+        if getattr(self, "dynamic_mode", False) and self._workspace is not None:
+            results = (self._state or {}).get("dynamic_step_results", [])
+            if results:
+                step_count = len(results)
+                child_name = "initial" if step_count == 1 else f"round{step_count - 1:02d}"
+                child_ws = self._workspace.child(child_name)
+                from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
+                _output_name = self.output_path or DEFAULT_OUTPUT_FILENAME
+                _child_out = child_ws.output_path(_output_name) if hasattr(child_ws, "output_path") else None
+                _child_out_exists = os.path.isfile(_child_out) if _child_out else False
+                self._symlink_child_output(child_ws)
+                _own_out = self._workspace.output_path(_output_name) if hasattr(self._workspace, "output_path") else None
+                self.log_info(
+                    {
+                        "child_name": child_name,
+                        "child_output": _child_out,
+                        "child_exists_before_symlink": _child_out_exists,
+                        "own_ws": self._workspace.root,
+                        "own_output_path": self.output_path,
+                        "own_output": _own_out,
+                        "symlink_exists": os.path.exists(_own_out) if _own_out else False,
+                        "symlink_islink": os.path.islink(_own_out) if _own_out else False,
+                    },
+                    log_type="LWISymlink",
+                )
+                # Emit manifest adjacent to the (symlinked) output
+                resolved = self.resolve_output_path()
+                if resolved and os.path.isfile(resolved):
+                    self._emit_output_manifest(resolved)
+                return response
+        # Non-dynamic mode: fall through to base leaf behavior
+        return super()._finalize_output(response)
 
     # ------------------------------------------------------------------
     # Iteration workspace helpers
@@ -521,6 +641,23 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 else:
                     inp = prev
 
+            # Part D — Per-round workspace isolation (hierarchical layout)
+            # ----------------------------------------------------------------
+            # step 0: uses children/initial/ (pre-assigned by propagation)
+            # step 1: uses children/round01/ (pre-assigned by propagation)
+            # step 2+: creates children/round02/, round03/, etc. on demand
+            if inf_instance is not None and step_index >= 2:
+                lwi_ws = self._workspace
+                if lwi_ws is not None:
+                    consensus_iter = state.get("consensus_iteration_id", 0) if state else 0
+                    iter_suffix = f"_iter{consensus_iter}" if consensus_iter > 0 else ""
+                    child_name = f"round{step_index:02d}{iter_suffix}"
+                    round_ws = lwi_ws.child(child_name)
+                    round_ws.ensure_dirs()
+                    inf_instance._workspace = round_ws
+                    if hasattr(inf_instance, "reset_session"):
+                        inf_instance.reset_session()
+
             # 2. Execute inferencer — forward inference_config and _inference_args
             # (stored by _ainfer at lines 742-743) to match static-mode behavior.
             extra_kwargs = {}
@@ -538,6 +675,12 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 state["dynamic_step_results"] = []
             state["dynamic_step_results"].append(actual_result)
             state["dynamic_step_count"] = len(state["dynamic_step_results"])
+
+            # NOTE: No state channel for output paths is maintained because
+            # no dynamic_input_builder currently reads
+            # state["dynamic_step_output_paths"] — would be speculative
+            # infrastructure with no consumer. Builders can re-derive paths
+            # from inf_instance._workspace if needed.
 
             # 5. Check termination
             should_stop = False

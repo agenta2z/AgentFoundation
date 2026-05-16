@@ -40,7 +40,7 @@ _logger = logging.getLogger(__name__)
 # Transient errors worth retrying for BTA WorkGraph nodes (breakdown, workers,
 # aggregator). Programming errors (TypeError, AttributeError, ValueError from
 # parsers, etc.) deliberately fall through and surface immediately so they're
-# not masked by retry storms. See plan Fix 4.
+# not masked by retry storms.
 TRANSIENT_RETRY_EXCEPTIONS = (
     TimeoutError,           # built-in (also raised by retry helper itself)
     asyncio.TimeoutError,   # asyncio's own (subclass of TimeoutError on 3.11+; listed for safety)
@@ -507,6 +507,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # Protocol: must implement on_graph_topology(event), on_node_status(node_id, status, error).
     # Set by the executor after instantiation. BTA never imports WebSocket code directly.
     graph_reporter: Optional[Any] = attrib(default=None, kw_only=True)
+
+    # === Worker isolation check (Fix #5) ===
+    # When True (default), _validate_worker_isolation() scans all worker
+    # sub-trees after construction and logs a WARNING if any two workers
+    # share a sub-inferencer instance (by Python id). Shared instances
+    # cause cross-worker state pollution (workspace, session, prompt
+    # history). Set to False to suppress (e.g., intentional sharing in
+    # tests or when LazyConfigFactory guarantees fresh instances).
+    worker_isolation_check: bool = attrib(default=True, kw_only=True)
+
     # Guard: emit topology only once per _ainfer() call.
     # Reset at the top of _infer/_ainfer so reused BTA instances work correctly.
     _graph_topology_emitted: bool = attrib(default=False, init=False, repr=False)
@@ -525,6 +535,34 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # (graph is built dynamically in _infer/_ainfer)
     start_nodes = attrib(factory=list)
 
+    # ------------------------------------------------------------------
+    # Worker naming hook (overridable by subclasses)
+    # ------------------------------------------------------------------
+
+    def _worker_child_name(self, index: int) -> str:
+        """Return the workspace child directory name for worker ``index``.
+
+        Default: ``f"worker_{index}"``. Subclasses (e.g.,
+        :class:`MultiFlowInferencer`) override to produce semantically
+        meaningful names (``f"flow_{index}_workflow"``).
+
+        Used by ``_build_subgraph_spec`` for both the on-disk workspace
+        directory and the WorkGraph node name, and by
+        ``_is_worker_child_name`` for boundary/deliverable filtering.
+        """
+        return f"worker_{index}"
+
+    def _is_worker_child_name(self, name: str) -> bool:
+        """Return True if ``name`` matches a worker child directory name.
+
+        Default: ``name.startswith("worker_")``. Subclasses that override
+        ``_worker_child_name`` should also override this to match.
+
+        Used by ``_finalize_response`` for deliverable boundary collection
+        and worker deliverable promotion.
+        """
+        return name.startswith("worker_")
+
     def __attrs_post_init__(self):
         # InferencerBase.__attrs_post_init__ syncs self.workspace → self._workspace.
         # The legacy `workspace_root` shorthand was removed 2026-05-05.
@@ -538,6 +576,15 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # this is the pipeline's aggregation report, not a final deliverable.
         if not self.output_path:
             self.output_path = "aggregation_report.md"
+
+        if (
+            self.breakdown_inferencer is not None
+            and self.max_breakdown is not None
+            and hasattr(self.breakdown_inferencer, "template_extra_feed")
+        ):
+            self.breakdown_inferencer.template_extra_feed.setdefault(
+                "max_breakdown", self.max_breakdown
+            )
 
         # Re-resolve deferred "auto" logger now that workspace is available
         if isinstance(self.logger, str) and self.logger == "auto" and self._workspace:
@@ -602,6 +649,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             and getattr(self.aggregator_inferencer, "has_local_access", False)
         )
         paths = list(worker_output_paths or [])
+        self.log_info(
+            {
+                "bta_name": getattr(self, "name", None),
+                "bta_type": type(self).__name__,
+                "agg_has_local": agg_has_local,
+                "agg_type": type(self.aggregator_inferencer).__name__ if self.aggregator_inferencer else None,
+                "paths": [str(p) if p else None for p in paths],
+                "num_results": len(worker_results) if worker_results else 0,
+            },
+            log_type="AggFormatDecision",
+        )
         parts = []
         for idx, res in enumerate(worker_results):
             path = paths[idx] if idx < len(paths) else None
@@ -633,6 +691,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         target = self.aggregator_inferencer
         if not hasattr(target, "template_extra_feed"):
             return
+        self.log_info(
+            {
+                "bta_name": getattr(self, "name", None),
+                "bta_type": type(self).__name__,
+                "agg_type": type(target).__name__,
+                "num_results": len(worker_results) if worker_results else 0,
+                "paths": [str(p) if p else None for p in (worker_output_paths or [])],
+            },
+            log_type="AggInjectFeed",
+        )
         if target.template_extra_feed is None:
             target.template_extra_feed = {}
 
@@ -640,6 +708,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             worker_results, worker_output_paths
         )
         target.template_extra_feed["upstream_artifacts"] = upstream_text
+        # NOTE: Per-worker output paths are embedded inline within
+        # ``upstream_text`` via ``_format_worker_results_text`` (see
+        # ``(See file: <path>)`` markers). No structured ``worker_output_paths``
+        # variable is injected because no aggregator template currently
+        # consumes it; speculative injection would be infrastructure with
+        # no consumer. If a future template needs the structured list,
+        # add the injection at that time.
 
         guidance = getattr(self, "_last_aggregation_guidance", None)
         if guidance:
@@ -768,7 +843,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         if candidate.exists():
                             output_path = str(candidate)
                             break
-                elif nid.startswith("worker_"):
+                elif _bta_self._is_worker_child_name(nid):
                     for fn in ("facet.md", "result.md", "output.md", "response.md"):
                         candidate = _ws / "children" / nid / "outputs" / fn
                         if candidate.exists():
@@ -966,137 +1041,65 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Output finalization (orchestrator override)
+    # ------------------------------------------------------------------
+
+    def _finalize_output(self, response):
+        """BTA override: symlink to aggregator's output as canonical.
+
+        When aggregator is enabled, the aggregator's output IS the BTA's
+        canonical output.  When aggregator is disabled, workers' outputs
+        are the deliverables (organized under ``workers/``).
+        """
+        agg_inf = self.aggregator_inferencer
+        agg_ws = getattr(agg_inf, "_workspace", None) if agg_inf else None
+
+        if agg_ws is not None:
+            self._symlink_child_output(agg_ws, child_output_name=getattr(agg_inf, "output_path", None))
+            resolved = self.resolve_output_path()
+            if resolved and os.path.isfile(resolved):
+                self._emit_output_manifest(resolved)
+            return response
+        else:
+            # No aggregator: workers' outputs ARE the deliverables
+            if self._workspace and self._workspace.deliverables_dir:
+                workers_dir = os.path.join(
+                    self._workspace.deliverables_dir, "workers")
+                for i, worker in enumerate(
+                    getattr(self, "_worker_instances", [])
+                ):
+                    worker_ws = getattr(worker, "_workspace", None)
+                    if worker_ws and worker_ws.has_deliverables:
+                        self._symlink_or_copy(
+                            worker_ws.deliverables_dir,
+                            os.path.join(
+                                workers_dir, self._worker_child_name(i)),
+                        )
+            # Fall through to base for outputs/output.md summary write
+            return super()._finalize_output(response)
+
     def _finalize_response(self, result):
-        """Route aggregator deliverables to root workspace.
+        """BTA audit bookkeeping (surfacing moved to _finalize_output).
 
-        Deliverables are copied from the aggregator's child workspace outputs/
-        to either:
-          - ``root/final_deliverables/`` (when workspace.use_final_deliverables_folder is set)
-          - ``root/outputs/``            (fallback when no deliverables_dir configured)
-
-        The pipeline report (aggregator's text response) is always written to
-        ``root/outputs/<output_path>`` (default: ``aggregation_report.md``).
-
-        Only runs in workspace mode with output_path set. Idempotent.
+        Only the aggregation report fallback remains: when no deliverables
+        exist, write the aggregator's text response as a report.
         """
         if self._workspace is None or not self.output_path:
             return
 
-        import shutil
-
+        # Check if aggregator produced deliverables (written by leaf's
+        # _finalize_output which runs before this via __ainfer_single_impl)
         agg_inf = self.aggregator_inferencer
         agg_ws = getattr(agg_inf, "_workspace", None) if agg_inf else None
+        has_deliverables = (
+            agg_ws is not None and getattr(agg_ws, "has_deliverables", False)
+        )
 
-        # Determine where to copy deliverables: deliverables_dir or outputs_dir
-        deliverables_dst = self._workspace.deliverables_dir or str(self._workspace.outputs_dir)
-
-        copied_any_deliverable = False
-        if agg_ws is not None:
-            agg_outputs = os.path.join(str(agg_ws.root), "outputs")
-            if os.path.isdir(agg_outputs) and os.listdir(agg_outputs):
-                shutil.copytree(agg_outputs, deliverables_dst, dirs_exist_ok=True)
-                _logger.info(
-                    "Copied aggregator deliverables (recursive) → %s",
-                    deliverables_dst,
-                )
-                copied_any_deliverable = True
-
-        # === v1.7 Deliverable Boundary EXTENSION (Phase 2) ===
-        # Run the boundary collect+aggregate post-step when:
-        #   1. is_deliverable_boundary=True (default for BTA)
-        #   2. workspace has use_final_deliverables_folder=True
-        #   3. Not already handled by promote_worker_deliverables (legacy path)
-        # The legacy promote_worker_deliverables path stays untouched for
-        # backward compatibility.
-        if (
-            self.is_deliverable_boundary
-            and not self.promote_worker_deliverables
-            and self._workspace is not None
-            and self._workspace.deliverables_dir is not None
-        ):
-            from agent_foundation.common.inferencers.deliverable_boundary import (
-                aggregate_into_self_deliverables,
-                collect_child_boundary_deliverables,
-            )
-
-            # Collect from workers (or other configured boundaries)
-            children = collect_child_boundary_deliverables(
-                self._workspace,
-                parent_inferencer=self,
-                boundary_filter=lambda name, ws: name.startswith("worker_"),
-            )
-            if children:
-                report = aggregate_into_self_deliverables(
-                    self._workspace, children,
-                    namespace_strategy=self.deliverable_namespace_strategy,
-                    conflict_strategy=self.deliverable_conflict_strategy,
-                    namespace_root=self.deliverable_collect_namespace_root,
-                )
-                if report.copied:
-                    copied_any_deliverable = True
-                    _logger.info(
-                        "BTA boundary surfaced %d worker deliverable(s) → %s",
-                        len(report.copied), self._workspace.deliverables_dir,
-                    )
-
-            # v1.7.3: Auto-publish own aggregator response to final_deliverables/
-            # when publishes_response_as_deliverable=True. Without this step,
-            # BTA's deliverables_dir would only contain surfaced children but
-            # nothing of BTA's own, breaking the parent boundary's collect.
-            if self.publishes_response_as_deliverable and self.output_path:
-                import shutil
-                src = self._workspace.output_path(self.output_path)
-                dst = self._workspace.deliverable_path(self.output_path)
-                if dst is not None and os.path.isfile(src) and not os.path.exists(dst):
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy2(src, dst)
-                    copied_any_deliverable = True
-                    _logger.info(
-                        "BTA published own response → %s", dst,
-                    )
-
-        if self.promote_worker_deliverables and self._workspace is not None:
-            from rich_python_utils.path_utils.path_listing import (
-                find_conflicting_and_agreed_files,
-                safe_copy_per_file,
-            )
-            children_dir = self._workspace.children_dir
-            if os.path.isdir(children_dir):
-                roots = []
-                root_names = []
-                for child_name in sorted(os.listdir(children_dir)):
-                    if not child_name.startswith("worker_"):
-                        continue
-                    child_root = os.path.join(children_dir, child_name)
-                    child_fd = os.path.join(child_root, "outputs", "final_deliverables")
-                    child_out = os.path.join(child_root, "outputs")
-                    src = child_fd if os.path.isdir(child_fd) else child_out
-                    if os.path.isdir(src) and os.listdir(src):
-                        roots.append(src)
-                        root_names.append(child_name)
-                if roots:
-                    diff = find_conflicting_and_agreed_files(roots, root_names)
-                    # skip_existing=True protects files already written by the
-                    # aggregator (merged conflict resolutions) or auto-promoted
-                    # by the prompt builder. conflict_fallback="largest" handles
-                    # the case where the aggregator failed to write a merged version.
-                    copied = safe_copy_per_file(
-                        diff, deliverables_dst,
-                        skip_existing=True,
-                        conflict_fallback="largest",
-                    )
-                    if copied:
-                        _logger.info(
-                            "Promoted %d worker deliverable(s) → %s",
-                            len(copied), deliverables_dst,
-                        )
-                        copied_any_deliverable = True
-
-        if copied_any_deliverable:
+        if has_deliverables:
             self._deliverables_copied = True
             _logger.info(
-                "Skipping pipeline report — aggregator deliverables copied to %s",
-                deliverables_dst,
+                "Skipping pipeline report — aggregator deliverables handled by _finalize_output",
             )
         else:
             report_dst = self._workspace.output_path(self.output_path)
@@ -1136,11 +1139,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             bd_ws.ensure_dirs()
             self.breakdown_inferencer._workspace = bd_ws
 
-    def _finalize_output(self, response):
-        if getattr(self, "_deliverables_copied", False):
-            return response
-        return super()._finalize_output(response)
-
     def _iter_child_inferencers(self):
         """The aggregator inferencer.
 
@@ -1151,6 +1149,39 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         """
         if self.aggregator_inferencer is not None:
             yield self.aggregator_inferencer
+
+    def _validate_worker_isolation(self, workers):
+        """Check that no two workers share a sub-inferencer instance.
+
+        Scans each worker's full descendant tree (via
+        ``_collect_all_descendant_inferencers``) and warns when the same
+        Python id appears under different worker indices. Shared instances
+        cause cross-worker state pollution (workspace, session, prompt
+        history).
+
+        No-op when ``worker_isolation_check=False`` or when workers are
+        not InferencerBase instances (e.g., plain callables).
+        """
+        if not self.worker_isolation_check:
+            return
+        seen = {}
+        for i, w in enumerate(workers):
+            if not isinstance(w, InferencerBase):
+                continue
+            for inf in w._collect_all_descendant_inferencers():
+                iid = id(inf)
+                if iid in seen and seen[iid] != i:
+                    _logger.warning(
+                        "BTA[%s] workers %d and %d share inferencer %s (id=0x%x). "
+                        "This causes cross-worker state contamination. "
+                        "Ensure the worker_factory field uses LazyConfigFactory "
+                        "(auto-applied for *_factory attrs with _target_:) to "
+                        "produce independent sub-trees per call.",
+                        getattr(self, "name", "?"), seen[iid], i,
+                        type(inf).__name__, iid,
+                    )
+                else:
+                    seen[iid] = i
 
     @staticmethod
     def _unwrap_workgraph_result(result):
@@ -1433,6 +1464,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
         worker_nodes = []
         worker_output_paths = []
+        _worker_instances = []  # Fix #5: collect for isolation check
         _bta_prefix = f"{self.name}." if getattr(self, "name", None) else ""
         use_async = getattr(self, "use_async", False)
 
@@ -1466,12 +1498,32 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     factory = factory_entry["factory"]
                 else:
                     factory = factory_entry
-                if isinstance(factory, functools.partial):
+                from rich_python_utils.config_utils._lazy_config_factory import (
+                    LazyConfigFactory,
+                )
+                if isinstance(factory, functools.partial) and not isinstance(factory, LazyConfigFactory):
+                    _logger.error(
+                        "BTA[%s] worker_factory[%s] is a functools.partial, not a "
+                        "LazyConfigFactory. This causes cross-worker instance "
+                        "sharing. Ensure *_factory attrs use LazyConfigFactory "
+                        "(auto-applied by the config walker for _target_: entries).",
+                        getattr(self, "name", "?"), task_type or "__default__",
+                    )
+                if isinstance(factory, (functools.partial, LazyConfigFactory)):
                     worker = factory()
                 else:
                     worker = factory(sub_query=query_str, index=i)
             else:
-                if isinstance(self.worker_factory, functools.partial):
+                from rich_python_utils.config_utils._lazy_config_factory import (
+                    LazyConfigFactory,
+                )
+                if isinstance(self.worker_factory, functools.partial) and not isinstance(self.worker_factory, LazyConfigFactory):
+                    _logger.error(
+                        "BTA[%s] worker_factory is a functools.partial, not a "
+                        "LazyConfigFactory. This causes cross-worker instance sharing.",
+                        getattr(self, "name", "?"),
+                    )
+                if isinstance(self.worker_factory, (functools.partial, LazyConfigFactory)):
                     worker = self.worker_factory()
                 else:
                     worker = self.worker_factory(sub_query=query_str, index=i)
@@ -1484,7 +1536,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     if prev_ws
                     else False
                 )
-                worker_ws = self._workspace.child(f"worker_{i}")
+                worker_ws = self._workspace.child(self._worker_child_name(i))
                 if use_fdl:
                     from agent_foundation.common.inferencers.inferencer_workspace import (
                         InferencerWorkspace,
@@ -1495,6 +1547,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     )
                 worker_ws.ensure_dirs()
                 worker._workspace = worker_ws
+                self.log_info(
+                    {
+                        "bta_name": getattr(self, "name", None),
+                        "bta_type": type(self).__name__,
+                        "worker_idx": i,
+                        "worker_type": type(worker).__name__,
+                        "worker_child_name": self._worker_child_name(i),
+                        "worker_ws_root": worker_ws.root,
+                        "bta_ws_root": self._workspace.root,
+                    },
+                    log_type="WorkerWsAssigned",
+                )
                 # === v1.7 Phase 3: Wire worker as deliverable boundary ===
                 # Mark each worker as a boundary so its deliverables surface
                 # to this BTA's collect step. Workers may also be flow
@@ -1503,11 +1567,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 # the per-task work-unit. This is purely additive and only
                 # affects behavior when workspace.use_final_deliverables_folder=True.
                 worker.is_deliverable_boundary = True
-                worker_output_paths.append(worker.resolve_output_path())
+                # Output paths computed later in _build_agg_input (after
+                # workers finish, so files and LWI symlinks exist).
+                worker_output_paths.append(None)
             else:
                 worker_output_paths.append(None)
 
-            _node_name = f"{_bta_prefix}worker_{i}"
+            _worker_instances.append(worker)  # Fix #5: track for isolation check
+            _node_name = f"{_bta_prefix}{self._worker_child_name(i)}"
             if isinstance(worker, BreakdownThenAggregateInferencer):
                 worker.name = _node_name
 
@@ -1608,10 +1675,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 worker_manages_resume=_worker_manages_resume,
                 retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
             )
+            _wname = self._worker_child_name(i)
             _raw_label = (
                 str(query_str)[:120] if isinstance(query_str, str)
-                else query_str.get("description", query_str.get("query", f"worker_{i}"))[:120]
-                if isinstance(query_str, dict) else f"worker_{i}"
+                else query_str.get("description", query_str.get("query", _wname))[:120]
+                if isinstance(query_str, dict) else _wname
             )
             _raw_label = _raw_label.replace("**", "").replace("__", "").strip()
             for _prefix in ("Description:", "description:", "Task:", "task:", "Query:", "query:"):
@@ -1630,6 +1698,52 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             _bta_self = self
 
             def _build_agg_input(prompt_builder, worker_results, original_query):
+                nonlocal _captured_paths
+                # Resolve each worker's output path.  Two sources:
+                #   Workspace: from BTA's workspace tree (deterministic)
+                #   Filename:  from the worker's own output_path (each worker
+                #              declares its output filename — NOT _bta_self's,
+                #              which is the BTA's aggregated deliverable name)
+                from agent_foundation.common.inferencers.inferencer_workspace import (
+                    resolve_canonical_output_path,
+                )
+                _bta_ws = _bta_self._workspace
+                if _bta_ws is not None and worker_results:
+                    _captured_paths = []
+                    _diag_workers = []
+                    for idx in range(len(worker_results)):
+                        child_ws = _bta_ws.child(_bta_self._worker_child_name(idx))
+                        _w = _worker_instances[idx]
+                        _w_filename = _w.output_path
+                        p = resolve_canonical_output_path(child_ws, filename=_w_filename)
+                        _captured_paths.append(p)
+                        _winfo = {
+                            "idx": idx,
+                            "child_name": _bta_self._worker_child_name(idx),
+                            "ws_root": child_ws.root,
+                            "worker_output_path": _w_filename,
+                            "resolved": str(p) if p else None,
+                        }
+                        if p is None:
+                            _out = os.path.join(child_ws.root, "outputs", _w_filename)
+                            _winfo["diag_outputs_exists"] = os.path.exists(_out)
+                            _winfo["diag_outputs_islink"] = os.path.islink(_out)
+                            if os.path.islink(_out):
+                                _winfo["diag_link_target"] = os.readlink(_out)
+                                _winfo["diag_target_exists"] = os.path.exists(
+                                    os.readlink(_out)
+                                )
+                        _diag_workers.append(_winfo)
+                    _bta_self.log_info(
+                        {
+                            "bta_name": getattr(_bta_self, "name", None),
+                            "bta_type": type(_bta_self).__name__,
+                            "bta_id": getattr(_bta_self, "id", None),
+                            "paths": [str(p) if p else None for p in _captured_paths],
+                            "workers": _diag_workers,
+                        },
+                        log_type="AggInputPaths",
+                    )
                 # Custom prompt_builder takes precedence — fully responsible
                 # for building the aggregator's input.
                 if prompt_builder is not None:
@@ -1676,6 +1790,19 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 _agg_extra = _inference_args or {}
                 if is_async and hasattr(agg_inf, "ainfer"):
                     async def async_agg_fn(*worker_results, **_kwargs):
+                        # Fix #1: verify aggregator workspace points to canonical
+                        # aggregator/ slot before invocation (guards against drift
+                        # from prior calls on reused instances).
+                        if _bta_self._workspace is not None:
+                            expected = _bta_self._workspace.child("aggregator").root
+                            current = getattr(getattr(agg_inf, "_workspace", None), "root", None)
+                            if current != expected:
+                                from agent_foundation.common.inferencers.inferencer_workspace import (
+                                    InferencerWorkspace,
+                                )
+                                agg_ws = _bta_self._workspace.child("aggregator")
+                                agg_ws.ensure_dirs()
+                                agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
@@ -1694,6 +1821,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     return async_agg_fn
                 else:
                     def agg_fn(*worker_results, **_kwargs):
+                        # Fix #1: verify aggregator workspace (sync path)
+                        if _bta_self._workspace is not None:
+                            expected = _bta_self._workspace.child("aggregator").root
+                            current = getattr(getattr(agg_inf, "_workspace", None), "root", None)
+                            if current != expected:
+                                from agent_foundation.common.inferencers.inferencer_workspace import (
+                                    InferencerWorkspace,
+                                )
+                                agg_ws = _bta_self._workspace.child("aggregator")
+                                agg_ws.ensure_dirs()
+                                agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
@@ -1755,6 +1893,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         all_nodes = list(worker_nodes)
         if agg_node is not None:
             all_nodes.append(agg_node)
+
+        # Fix #5: check for shared sub-inferencer instances across workers
+        self._validate_worker_isolation(_worker_instances)
 
         return SubgraphSpec(
             nodes=all_nodes,
