@@ -9,24 +9,16 @@ You are tasked with carefully and thoroughly reviewing an implementation made by
 {{ input }}
 </OriginalUserRequest>
 
-**Latest Implementation By Another Agent:**
-{%- if prior_output_path %}
-
-The implementation report is saved on disk at:
-  `{{ prior_output_path }}`
-
-You SHOULD inspect it directly via your file-reading tool (e.g.
-`read_file({{ prior_output_path }})`) to ensure your review is based on the
-actual on-disk content rather than only the inline excerpt below.
-{%- endif %}
-
-<CurrentImplementation>
+**Implementation Under Review:**
+<ImplementationUnderReview>
 {{ main_response }}
 
-The implementation report with details is available at file path: `{{ output_path }}`.
-YOU MUST also look into the actual implementation in the codebase.
+{%- if prior_output_path %}
+The implementation report is at: `{{ prior_output_path }}`
+{%- endif %}
 
-</CurrentImplementation>
+YOU MUST also look into the actual implementation in the codebase.
+</ImplementationUnderReview>
 
 **Current Review Iteration Index**: {{ round_index }}
 

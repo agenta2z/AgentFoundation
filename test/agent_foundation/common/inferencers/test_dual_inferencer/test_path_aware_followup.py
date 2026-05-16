@@ -431,8 +431,7 @@ class TestBuildReviewPromptFeedDict(unittest.TestCase):
 class TestFollowupTemplateRendersPathAware(unittest.TestCase):
     """Render the actual plan/main/followup.jinja2 with the feed dict
     produced by _build_followup_prompt and assert the resulting prompt
-    text contains the path, the cp instruction, and a non-empty
-    <ProposedDocument> tag."""
+    text contains the path and a non-empty <PriorVersionArtifact> tag."""
 
     def setUp(self):
         if not (_TEMPLATE_DIR / "followup.jinja2").is_file():
@@ -475,34 +474,33 @@ class TestFollowupTemplateRendersPathAware(unittest.TestCase):
         rendered = self._render_template(feed)
         self.assertIn(self.prior_file, rendered)
 
-    def test_rendered_prompt_contains_cp_instruction(self):
+    def test_rendered_prompt_contains_prior_output_path(self):
+        """The prior_output_path should be rendered into the prompt so the
+        LLM can read or cp it. The exact instruction wording (cp vs read
+        vs paraphrase) is intentionally a prompt-engineering decision —
+        this test only asserts the path itself is reachable to the LLM."""
         feed = self._build_feed(self.prior_file)
-        out = "/tmp/dest/output.md"
-        rendered = self._render_template(feed, output_path=out)
-        # Match `cp <prior_file> <output_path>` allowing surrounding whitespace.
-        pattern = rf"cp\s+{re.escape(self.prior_file)}\s+{re.escape(out)}"
-        self.assertRegex(rendered, pattern)
+        rendered = self._render_template(feed)
+        self.assertIn(self.prior_file, rendered)
 
-    def test_rendered_prompt_proposed_document_tag_populated(self):
+    def test_rendered_prompt_prior_version_artifact_tag_populated(self):
         feed = self._build_feed(self.prior_file)
         rendered = self._render_template(feed)
         # Tag must contain the proposal text — empty-tag bug must NOT recur.
         m = re.search(
-            r"<ProposedDocument>\s*(.*?)\s*</ProposedDocument>",
+            r"<PriorVersionArtifact>\s*(.*?)\s*</PriorVersionArtifact>",
             rendered,
             re.DOTALL,
         )
-        self.assertIsNotNone(m, "Could not find <ProposedDocument> tag")
+        self.assertIsNotNone(m, "Could not find <PriorVersionArtifact> tag")
         self.assertIn("PRIOR PROPOSAL TEXT", m.group(1))
 
     def test_rendered_prompt_falls_back_gracefully_when_path_empty(self):
         feed = self._build_feed(prior_path=None)  # helper returns None → ""
         rendered = self._render_template(feed)
-        # No `cp ` instruction.
-        self.assertNotIn("cp ", rendered)
-        # Fallback wording present.
-        self.assertIn("on-disk path is unavailable", rendered)
-        # Inline content still in <ProposedDocument>.
+        # Path block should NOT appear when prior_output_path is empty.
+        self.assertNotIn("prior version is at:", rendered)
+        # Inline content still in <PriorVersionArtifact>.
         self.assertIn("PRIOR PROPOSAL TEXT", rendered)
 
     def test_rendered_prompt_does_not_leak_literal_None(self):
@@ -557,19 +555,25 @@ class TestReviewTemplateRendersPathAware(unittest.TestCase):
         return env.get_template("review.jinja2").render(**feed)
 
     def test_review_rendered_prompt_contains_prior_output_path(self):
+        """The prior_output_path should appear in the rendered review prompt
+        so the LLM has a concrete path it can read. The specific tool name
+        (read_file vs cat vs cp) is intentionally not asserted — that's a
+        prompt-engineering decision left to the template author."""
         rendered = self._render(self.prior_file)
         self.assertIn(self.prior_file, rendered)
-        self.assertIn("read_file", rendered)
 
     def test_review_rendered_prompt_falls_back_gracefully(self):
+        """When prior_output_path is empty/None, the path-mentioning block
+        should be hidden, but the inline content (DOC TEXT) must still be
+        rendered (graceful fallback for inferencers without workspaces)."""
         rendered = self._render(prior_path=None)
-        self.assertNotIn("read_file", rendered)
+        self.assertNotIn(self.prior_file, rendered)
         self.assertIn("DOC TEXT", rendered)
 
-    def test_review_rendered_prompt_proposed_document_populated(self):
+    def test_review_rendered_prompt_artifact_under_review_populated(self):
         rendered = self._render(self.prior_file)
         m = re.search(
-            r"<ProposedDocument>\s*(.*?)\s*</ProposedDocument>",
+            r"<ArtifactUnderReview>\s*(.*?)\s*</ArtifactUnderReview>",
             rendered,
             re.DOTALL,
         )

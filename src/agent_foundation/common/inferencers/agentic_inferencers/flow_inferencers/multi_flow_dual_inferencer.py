@@ -241,6 +241,12 @@ class MultiFlowDualInferencer(DualInferencer):
     ``parse_ranking_tag`` when ``reviewer_match_second`` is True and no
     explicit parser is provided."""
 
+    # ─── Optional template overrides for role reassignment via switch_role ───
+    review_template_key: Optional[str] = attrib(default=None)
+    review_template_root_space: Optional[str] = attrib(default=None)
+    followup_template_key: Optional[str] = attrib(default=None)
+    followup_template_root_space: Optional[str] = attrib(default=None)
+
     winner_pick: bool = attrib(default=False)
     """Named feature toggle for the winner-pick pattern. When True,
     auto-injects ``include_winner_pick: true`` into
@@ -257,6 +263,14 @@ class MultiFlowDualInferencer(DualInferencer):
     block is emitted and parsed but the parsed index isn't auto-routed."""
 
     def __attrs_post_init__(self):
+        # Snapshot YAML-configured originals BEFORE any override
+        # (reviewer_match_second, fixer_match_winner, or DualInferencer's
+        # super().__attrs_post_init__() defaults). The identity guard in
+        # _reassign_role_workspace compares the current value against these
+        # snapshots to detect runtime role swaps that need workspace isolation.
+        self._fixer_inferencer_original = self.fixer_inferencer
+        self._review_inferencer_original = self.review_inferencer
+
         # Catch the most common misuse early: caller setting base_inferencer.
         if self.base_inferencer is not None:
             raise ValueError(
@@ -363,6 +377,16 @@ class MultiFlowDualInferencer(DualInferencer):
             # 2-agent fallback doesn't kick in unexpectedly.
             self.fixer_inferencer = self.review_inferencer
 
+        # When dynamic dispatch is configured (reviewer_match_second or
+        # fixer_match_winner), review/fixer inferencers may be aliased to
+        # flow_configs entries. Skip construction-time workspace propagation
+        # for them — _reassign_role_workspace assigns the correct workspace
+        # at runtime after each propose step.
+        if self.reviewer_match_second or self.fixer_match_winner:
+            self._workspace_propagation_skip = frozenset(
+                self._workspace_propagation_skip | {"review_inferencer", "fixer_inferencer"}
+            )
+
         # Defer to DualInferencer for prompt-template setup, parser defaults,
         # workspace, sub-inferencer wiring, etc.
         super().__attrs_post_init__()
@@ -373,6 +397,71 @@ class MultiFlowDualInferencer(DualInferencer):
                 "(review_inferencer, review_default, or reviewer_match_second "
                 "are all unset). The review step will fail at runtime."
             )
+
+
+    # ------------------------------------------------------------------
+    # Part B — Workspace isolation for runtime role swaps (added 2026-05-09)
+    # ------------------------------------------------------------------
+
+    def _resolve_role_template(self, role_name):
+        """Resolve template_key and template_root_space for a role name.
+
+        Returns ``(template_key, template_root_space)`` — either from the
+        explicit per-role attribs (``review_template_key``, etc.) or from the
+        canonical :mod:`template_defaults` bundles. Returns ``(None, None)``
+        for unrecognised roles (no template override).
+        """
+        from agent_foundation.common.inferencers.template_defaults import (
+            REVIEW_TEMPLATE_DEFAULTS, FOLLOWUP_TEMPLATE_DEFAULTS)
+        if role_name in ("reviewer", "review_inferencer"):
+            return (self.review_template_key or REVIEW_TEMPLATE_DEFAULTS.template_key,
+                    self.review_template_root_space or getattr(REVIEW_TEMPLATE_DEFAULTS, 'template_root_space', None))
+        elif role_name in ("fixer", "fixer_inferencer"):
+            return (self.followup_template_key or FOLLOWUP_TEMPLATE_DEFAULTS.template_key,
+                    self.followup_template_root_space or getattr(FOLLOWUP_TEMPLATE_DEFAULTS, 'template_root_space', None))
+        return (None, None)
+
+    def _reassign_role_workspace(self, inferencer, role_name: str) -> None:
+        """Force a fresh workspace + session because role has changed.
+
+        When MFDual reuses an instance across roles (e.g., winning flow's
+        initial_inferencer becomes fixer_inferencer), its original workspace
+        (``flow_N_initial/``) belongs to the propose-phase. Continuing to write
+        to it would mix fix-phase artifacts with propose-phase artifacts.
+
+        Delegates to ``inferencer.switch_role()`` which handles workspace
+        assignment, template overrides, session reset, and audit trail in a
+        single call.
+
+        Identity guard: skip reassignment when the inferencer is the role's
+        ORIGINALLY-CONFIGURED instance (snapshot in __attrs_post_init__).
+        Prevents clobbering a deliberately-configured fixer's workspace.
+
+        Args:
+            inferencer: the candidate inferencer to (possibly) reassign.
+            role_name: 'fixer_inferencer' or 'review_inferencer' — used as the
+                child workspace directory name.
+        """
+        if inferencer is None or self._workspace is None:
+            return
+        # Identity guard
+        original = getattr(self, f"_{role_name}_original", None)
+        if inferencer is original:
+            return
+        role_ws = self._workspace.child(role_name)
+        role_ws.ensure_dirs()
+        kwargs = dict(
+            workspace=role_ws,
+            output_is_deliverable=(True if role_name == "fixer_inferencer" else None),
+        )
+        # Pass template kwargs only when the inferencer supports them
+        # (TemplatedInferencerBase subclasses accept template_key etc.)
+        from agent_foundation.common.inferencers.templated_inferencer_base import TemplatedInferencerBase
+        if isinstance(inferencer, TemplatedInferencerBase):
+            new_key, new_root = self._resolve_role_template(role_name)
+            kwargs["template_key"] = new_key
+            kwargs["template_root_space"] = new_root
+        inferencer.switch_role(new_role=role_name, **kwargs)
 
     # ------------------------------------------------------------------
     # Round 7 — dispatch helpers
@@ -610,12 +699,14 @@ class MultiFlowDualInferencer(DualInferencer):
         prev_fixer = self.fixer_inferencer
         result = await DualInferencer._step_propose_impl(self, step_input, state)
         self._select_reviewer_and_fixer()
-        for prev, curr in [
-            (prev_reviewer, self.review_inferencer),
-            (prev_fixer, self.fixer_inferencer),
-        ]:
-            if curr is not prev and hasattr(curr, "reset_session"):
-                curr.reset_session()
+        # Part B: when winner/loser are runtime-assigned to fixer/reviewer roles,
+        # give them a fresh workspace + session so role artifacts don't mix
+        # with propose-phase artifacts in flow_N_initial/. Identity guard inside
+        # the helper protects originally-configured instances.
+        self._reassign_role_workspace(self.review_inferencer, "review_inferencer")
+        self._reassign_role_workspace(self.fixer_inferencer, "fixer_inferencer")
+        # NOTE: reset_session is handled by switch_role() inside
+        # _reassign_role_workspace — no separate call needed here.
 
         mfi = self.base_inferencer
         if isinstance(mfi, MultiFlowInferencer):

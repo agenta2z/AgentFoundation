@@ -37,6 +37,7 @@ Usage::
 """
 
 import logging
+import os
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Union
 
 from attr import attrib, attrs
@@ -325,6 +326,18 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     ``inference_input`` carry the original task. Lets wrapper templates with a
     separate ``{{ upstream_artifacts }}`` slot work cleanly."""
 
+    # Part C — Coordinated stop mode (added 2026-05-09; OPT-IN, default False).
+    # When True, MFInferencer runs flows in lock-step: gather all flows' results
+    # per step, then check for unanimous stop before proceeding. Default False
+    # preserves today's per-flow independent execution via BTA's WorkGraph.
+    # Implementation deferred to PR #2 (see plan §C); this attribute is the
+    # Phase C1 scaffold so that downstream tooling (YAML configs, type hints)
+    # can already reference the public surface area. When set to True with the
+    # current scaffold, a NotImplementedError is raised to prevent silent
+    # fallback to independent mode (no silent failure).
+    coordinated_stop: bool = attrib(default=False)
+    """Opt-in coordinated lock-step execution across flows. See plan §C."""
+
     # Internal state — reset at the top of each ainfer/infer call.
     # Declared as init=False so attrs doesn't include them in __init__.
     _latest_per_flow: Dict[int, Any] = attrib(factory=dict, init=False)
@@ -491,56 +504,36 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # ------------------------------------------------------------------
 
     def _propagate_workspace_to_children(self, parent_workspace):
-        """MultiFlow override: also walk ``flow_configs`` (list of dicts).
+        """MultiFlow override: delegates flow_configs propagation to LWI.
 
-        The base ``_for_each_child_inferencer`` walker iterates list items,
-        but doesn't recurse into dicts inside list items. MultiFlow's
-        ``flow_configs`` is a ``List[dict]`` where each dict carries
-        ``initial_inferencer`` and ``followup_inferencer`` slots — those
-        InferencerBase instances are invisible to the generic walker and
-        need explicit propagation.
-
-        For each ``flow_configs[i]`` entry, this assigns:
-
-        * ``initial_inferencer`` → ``parent_workspace.child(f"flow_{i}_initial")``
-        * ``followup_inferencer`` → ``parent_workspace.child(f"flow_{i}_followup")``
-
-        Direct attrs (e.g., ``aggregator_inferencer`` if set) are still
-        propagated by ``super()._propagate_workspace_to_children``, which
-        is called at the end so this override is purely additive.
-
-        Pre-assignment is respected — if a flow inferencer already has a
-        ``_workspace`` set, this skips it (matches the base walker contract).
+        Flow-internal inferencers (initial_inferencer, followup_inferencer)
+        receive workspaces from LWI's ``_propagate_workspace_to_children``
+        when BTA assigns each LWI worker its workspace. MultiFlow only
+        propagates direct attrs (aggregator_inferencer, etc.) via base.
         """
-        for i, cfg in enumerate(self.flow_configs or []):
-            if not isinstance(cfg, dict):
-                continue
-            for slot, suffix in (
-                ("initial_inferencer", f"flow_{i}_initial"),
-                ("followup_inferencer", f"flow_{i}_followup"),
-            ):
-                child = cfg.get(slot)
-                if child is None:
-                    continue
-                # Duck-typed callables (e.g., partial-wrapped factories) lack
-                # _workspace; skip silently like the base walker does.
-                if not hasattr(child, "_workspace"):
-                    continue
-                if getattr(child, "_workspace", None) is not None:
-                    continue  # respect explicit pre-assignment
-                try:
-                    child_ws = parent_workspace.child(suffix)
-                    child_ws.ensure_dirs()
-                    child._workspace = child_ws
-                except Exception as exc:  # noqa: BLE001 — best-effort
-                    _logger.debug(
-                        "MultiFlow workspace propagation to flow_configs[%d].%s "
-                        "(%s) skipped: %s",
-                        i, slot, type(child).__name__, exc,
-                    )
-
-        # Direct attrs (aggregator_inferencer, etc.) handled by base.
         super()._propagate_workspace_to_children(parent_workspace)
+
+    # ------------------------------------------------------------------
+    # Worker naming override (Fix #6: flow_N_workflow instead of worker_N)
+    # ------------------------------------------------------------------
+
+    def _worker_child_name(self, index: int) -> str:
+        """MultiFlow override: name workers ``flow_N`` instead of ``worker_N``.
+
+        Each flow's LWI worker owns its entire sub-tree::
+
+            base_inferencer/
+            ├── flow_0/               # LWI root (owns children/initial/, round01/, ...)
+            ├── flow_1/
+            └── aggregator/
+        """
+        return f"flow_{index}"
+
+    def _is_worker_child_name(self, name: str) -> bool:
+        """Match ``flow_N`` names produced by the override above."""
+        if not name.startswith("flow_"):
+            return False
+        return name[len("flow_"):].isdigit()
 
     # ------------------------------------------------------------------
     # Per-flow visibility resolution
@@ -550,6 +543,47 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         cfg = self.flow_configs[flow_idx]
         spec = cfg.get("visible_flows", self.visible_flows)
         return _resolve_visible_indices(flow_idx, len(self.flow_configs), spec)
+
+    # ------------------------------------------------------------------
+    # Followup-input formatting (per-step iteration default)
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Part A — Path-aware peer/own-flow visibility (added 2026-05-09)
+    # ------------------------------------------------------------------
+
+    def _resolve_flow_output_path(self, flow_idx: int) -> Optional[str]:
+        """Resolve the on-disk path of flow ``flow_idx``'s most-recent output.
+
+        Returns the deliverable path if the flow has a finalized deliverable,
+        otherwise the working output path; ``None`` if neither is available
+        (e.g., the flow hasn't run yet or its workspace isn't on disk).
+
+        Delegates to the shared ``resolve_canonical_output_path`` helper
+        for canonical 3-tier resolution (Tier 1: deliverables /
+        Tier 2: outputs/output.md / Tier 3: None). Prefers the followup
+        inferencer's workspace (most-recent state) over the initial.
+        """
+        from agent_foundation.common.inferencers.inferencer_workspace import (  # noqa: E501
+            resolve_canonical_output_path,
+        )
+
+        try:
+            cfg = self.flow_configs[flow_idx]
+        except (IndexError, KeyError, TypeError):
+            return None
+        # Try followup_inferencer first (most recent state); fall back to initial
+        for key in ("followup_inferencer", "initial_inferencer"):
+            inferencer = cfg.get(key) if isinstance(cfg, dict) else None
+            if inferencer is None:
+                continue
+            path = resolve_canonical_output_path(
+                getattr(inferencer, "_workspace", None),
+                deliverables_fallback="first_match",
+            )
+            if path is not None:
+                return path
+        return None
 
     # ------------------------------------------------------------------
     # Followup-input formatting (per-step iteration default)
@@ -577,19 +611,40 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         ``cfg["followup_prompt"]`` (legacy template path) or
         ``cfg["dynamic_input_builder"]`` (full callback).
         """
-        parts = [
-            _FOLLOWUP_OWN_PREVIOUS_HEADER.format(
-                flow_idx=flow_idx,
-                prev_step_idx=step_idx - 1,
-                your_prev=your_prev,
-            ),
-        ]
-        if visible_plans:
-            peer_blocks = "\n\n".join(
-                f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n"
-                f"{plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER}"
-                for idx, plan in visible_plans.items()
+        # Part A: include own-flow's prior output PATH so the LLM can read the
+        # full file content rather than rely solely on the (possibly summarized)
+        # text excerpt embedded in the prompt.
+        own_path = self._resolve_flow_output_path(flow_idx)
+        own_block = _FOLLOWUP_OWN_PREVIOUS_HEADER.format(
+            flow_idx=flow_idx,
+            prev_step_idx=step_idx - 1,
+            your_prev=your_prev,
+        )
+        if own_path:
+            own_block += (
+                f"\n\nYour previous full artifact is on disk at:\n"
+                f"  `{own_path}`\n"
+                f"You may re-read or copy this file as a starting point for incremental edits."
             )
+        parts = [own_block]
+        if visible_plans:
+            # Part A: also include each peer's on-disk path so cross-flow
+            # cross-pollination can leverage the full peer artifact, not just
+            # its inline text summary.
+            peer_segments = []
+            for idx, plan in visible_plans.items():
+                segment = (
+                    f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n"
+                    f"{plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER}"
+                )
+                peer_path = self._resolve_flow_output_path(idx)
+                if peer_path:
+                    segment += (
+                        f"\n\nThe full peer artifact is available at:\n"
+                        f"  `{peer_path}`"
+                    )
+                peer_segments.append(segment)
+            peer_blocks = "\n\n".join(peer_segments)
             parts.append(f"{_FOLLOWUP_PEER_INTRO}\n\n{peer_blocks}")
         else:
             parts.append(_FOLLOWUP_NO_PEERS)
@@ -638,7 +693,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 "input": original_query or "",
                 "worker_plans": worker_plans,
                 "all_judgments_summary": all_judgments_summary,
-                "worker_output_paths": list(worker_output_paths or []),
+                # NOTE: worker_output_paths kept in builder signature for
+                # BTA call-compatibility but not fed into the template
+                # because DEFAULT_AGGREGATOR_PROMPT_TEMPLATE doesn't use it.
             }
 
             template = outer.aggregator_prompt or DEFAULT_AGGREGATOR_PROMPT_TEMPLATE
@@ -659,6 +716,11 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     if target.template_extra_feed is None:
                         target.template_extra_feed = {}
                     target.template_extra_feed["upstream_artifacts"] = rendered
+                    # NOTE: Per-flow output paths are embedded inline within
+                    # ``rendered`` upstream_artifacts text. No structured
+                    # ``worker_output_paths`` variable is injected because no
+                    # MFI aggregator template currently consumes it — would
+                    # be speculative infrastructure with no consumer.
                 return original_query or ""
 
             return rendered
@@ -818,10 +880,12 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     return text
                 cfg_response_builder = _last_dynamic_step_text
 
+            _initial = cfg.get("initial_inferencer")
             return LinearWorkflowInferencer(
                 dynamic_mode=True,
-                default_initial_inferencer=cfg.get("initial_inferencer"),
+                default_initial_inferencer=_initial,
                 default_followup_inferencer=cfg.get("followup_inferencer"),
+                output_path=getattr(_initial, "output_path", None),
                 end_condition=cfg.get("end_condition"),
                 max_dynamic_steps=cfg.get("max_dynamic_steps", 10),
                 inferencer_factory=cfg.get("inferencer_factory"),
@@ -1123,7 +1187,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     async def ainfer(self, inference_input, inference_config=None, **_inference_args):
         """Override: reset dispatch state ONCE per top-level call (not per
         retry attempt). Cross-flow worker state is still reset per-attempt
-        in :meth:`_ainfer`. See plan Fix 2 for lifetime split rationale.
+        in :meth:`_ainfer`.
         """
         self._reset_dispatch_state_for_call()
         return await super().ainfer(inference_input, inference_config, **_inference_args)
@@ -1161,6 +1225,18 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         self.predefined_sub_queries = [c["input"] for c in self.flow_configs]
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
+        # Part C: loud failure when coordinated_stop is opted into but the
+        # lock-step implementation hasn't shipped yet. Prevents silent fallback
+        # to independent mode (which would defeat the purpose of opting in).
+        # See plan §C; full implementation deferred to PR #2.
+        if self.coordinated_stop:
+            raise NotImplementedError(
+                "MultiFlowInferencer.coordinated_stop=True is opt-in but the "
+                "lock-step implementation is deferred to a follow-up PR (see "
+                "_docs/_plans/mfdual_hygiene_INTEGRATED_plan.md §C). Set "
+                "coordinated_stop=False (default) to use today's per-flow "
+                "independent execution via BTA's WorkGraph."
+            )
         self._apply_runtime_input_propagation(inference_input)
         self._reset_cross_flow_state()
         raw = await BreakdownThenAggregateInferencer._ainfer(
@@ -1173,6 +1249,13 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         return self._maybe_strip_response(raw)
 
     def _infer(self, inference_input, inference_config=None, **_inference_args):
+        # Part C: same loud-failure as _ainfer (see comment there).
+        if self.coordinated_stop:
+            raise NotImplementedError(
+                "MultiFlowInferencer.coordinated_stop=True is opt-in but the "
+                "lock-step implementation is deferred to a follow-up PR (see "
+                "_docs/_plans/mfdual_hygiene_INTEGRATED_plan.md §C)."
+            )
         self._apply_runtime_input_propagation(inference_input)
         self._reset_cross_flow_state()
         raw = BreakdownThenAggregateInferencer._infer(

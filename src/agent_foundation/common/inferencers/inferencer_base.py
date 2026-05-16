@@ -175,11 +175,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
     #
     # The boundary mechanism only ACTIVATES when use_final_deliverables_folder
     # is True on the workspace. With the default workspace (no flag), the
-    # boundary attribute is read but no surfacing happens (graceful no-op).
-    #
-    # See: agent_foundation/common/inferencers/deliverable_boundary.py for
-    # the surfacing helpers, and OpenStartup/_dev/_plan/
-    # deliverable-boundary-semantics-plan.md for the design rationale.
+    # Legacy boundary attr — kept for backward compatibility but no longer
+    # used by the unified _finalize_output symlink architecture.
     is_deliverable_boundary: bool = attrib(default=False)
 
     # === Template-based prompt rendering (opt-in) ===
@@ -235,6 +232,65 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if value is not None:
             self._configure_for_workspace(value)
             self._propagate_workspace_to_children(value)
+        # Auto-invalidate derived state when workspace changes.
+        for attr in getattr(type(self), '_DERIVED_FROM_WORKSPACE', ()):
+            self.__dict__.pop(attr, None)
+
+    # Subclasses may override this tuple to declare instance attributes that
+    # are derived from ``_workspace`` and must be invalidated (removed from
+    # ``__dict__``) whenever the workspace is reassigned.  This prevents
+    # stale cached paths from surviving across consensus iterations or
+    # workspace swaps.
+    _DERIVED_FROM_WORKSPACE: tuple = ()
+
+    # Attrs whose values are semantically relevant when switching roles.
+    # Subclasses extend this tuple in their own class body.
+    _ROLE_RELEVANT_ATTRS: tuple = ("output_is_deliverable", "is_deliverable_boundary")
+
+    def switch_role(self, new_role: str, *, workspace=None,
+                    output_is_deliverable=None, is_deliverable_boundary=None,
+                    reset_session=True):
+        """Transition this inferencer to a new semantic role.
+
+        Centralises the workspace-swap + session-reset + flag-update pattern
+        that orchestrators (MFDual, PTI, ...) previously performed inline.
+        The base layer handles workspace assignment, deliverable flags, and
+        session reset; TemplatedInferencerBase extends with template attrs.
+
+        Args:
+            new_role: human-readable role name (e.g. 'fixer_inferencer').
+            workspace: if not None, assigned via the _workspace property
+                setter (triggers _configure_for_workspace cascade).
+            output_is_deliverable: if not None, overrides the flag.
+            is_deliverable_boundary: if not None, overrides the flag.
+            reset_session: if True, calls self.reset_session() (when available).
+        """
+        import time
+        # 1. Workspace assignment FIRST — triggers cascade
+        if workspace is not None:
+            self._workspace = workspace
+        # 2. Override deliverable flags
+        for attr, val in {"output_is_deliverable": output_is_deliverable,
+                          "is_deliverable_boundary": is_deliverable_boundary}.items():
+            if val is not None:
+                setattr(self, attr, val)
+        # 3. Session reset
+        if reset_session and hasattr(self, "reset_session"):
+            self.reset_session()
+        # 4. Audit trail (_role_history, lazy-init)
+        history = getattr(self, "_role_history", None)
+        if history is None:
+            history = []
+            object.__setattr__(self, "_role_history", history)
+        changes = {**({"workspace": str(workspace.root)} if workspace else {}),
+                   **{k: v for k, v in {"output_is_deliverable": output_is_deliverable,
+                      "is_deliverable_boundary": is_deliverable_boundary}.items() if v is not None}}
+        # Merge template-layer changes stashed by TemplatedInferencerBase.switch_role
+        pending = getattr(self, "_pending_role_changes", None)
+        if pending:
+            changes.update(pending)
+            object.__setattr__(self, "_pending_role_changes", None)
+        history.append({"to_role": new_role, "at": time.time(), "changes": changes})
 
     # Subclasses may override this class attribute to declare which attrs
     # they manage workspace assignment for themselves (e.g., PTI's runtime
@@ -336,6 +392,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         logger_val = getattr(self, "logger", None)
         if isinstance(logger_val, str) and logger_val == "auto":
             self._normalize_loggers()
+        elif getattr(self, "_logger_awaiting_workspace", False):
+            self._logger_awaiting_workspace = False
+            self._add_workspace_logger(workspace)
         elif isinstance(logger_val, dict):
             self._redirect_loggers_to_workspace(workspace)
 
@@ -364,6 +423,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self.logger = new_loggers
 
     def __attrs_post_init__(self):
+        if self.logger is None:
+            self.logger = "auto"
+
         # Convenience shorthand: allow `workspace="<path>"` as a synonym for
         # `workspace=InferencerWorkspace(root="<path>")` (with default flags).
         # Lets simple YAML/Python sites stay terse:
@@ -577,6 +639,26 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         return iter(())
 
+    def _collect_all_descendant_inferencers(self, _seen=None):
+        """Recursively yield self and all descendant inferencers (DFS).
+
+        Cycle-safe via id-based seen set. Used by
+        :meth:`BreakdownThenAggregateInferencer._validate_worker_isolation`
+        to detect shared sub-inferencer instances across workers.
+
+        Yields:
+            Each unique InferencerBase instance reachable from self
+            (including self), in depth-first order.
+        """
+        if _seen is None:
+            _seen = set()
+        if id(self) in _seen:
+            return
+        _seen.add(id(self))
+        yield self
+        for child in self._iter_child_inferencers():
+            yield from child._collect_all_descendant_inferencers(_seen=_seen)
+
     async def pre_retry(
         self,
         attempt: int,
@@ -660,24 +742,37 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """Resolve ``logger='auto'`` to a JsonLogger at workspace.logs_dir.
 
         Called by ``Debuggable._normalize_loggers()`` when ``logger='auto'``.
-        If no workspace is available yet, returns without resolving (deferred).
-        BTA calls ``_normalize_loggers()`` again after assigning child workspaces.
+        If no workspace is available yet, falls back to Debuggable's builtin
+        console logger and sets a flag so ``_configure_for_workspace`` can
+        upgrade to JsonLogger when workspace becomes available.
         """
         if self._workspace is None:
-            return  # deferred — will be called again after workspace assignment
+            super()._resolve_auto_logger()
+            self._logger_awaiting_workspace = True
+            return
+        self._logger_awaiting_workspace = False
+        self._add_workspace_logger(self._workspace)
+
+    def _add_workspace_logger(self, workspace):
+        """Create a JsonLogger at workspace.logs_dir and add it to self.logger."""
         from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
         from rich_python_utils.common_objects.debuggable import LoggerConfig
-        log_dir = self._workspace.logs_dir
+        log_dir = workspace.logs_dir
         os.makedirs(log_dir, exist_ok=True)
-        self.logger = [
-            (JsonLogger(
-                file_path=os.path.join(log_dir, "session.jsonl"),
-                append=True,
-                is_artifact=True,
-                parts_min_size=0,
-                space_ext_mode=SpaceExtMode.MOVE,
-            ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
-        ]
+        json_entry = (JsonLogger(
+            file_path=os.path.join(log_dir, "session.jsonl"),
+            append=True,
+            is_artifact=True,
+            parts_min_size=0,
+            space_ext_mode=SpaceExtMode.MOVE,
+        ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
+        if isinstance(self.logger, dict):
+            self.logger["_workspace"] = json_entry[0]
+            if not hasattr(self, "_resolved_logger_configs"):
+                self._resolved_logger_configs = {}
+            self._resolved_logger_configs["_workspace"] = json_entry[1]
+        else:
+            self.logger = [json_entry]
 
     # -- Template rendering & output finalization -------------------------
     #
@@ -704,66 +799,161 @@ class InferencerBase(Debuggable, Resumable, ABC):
         return inference_input
 
     def _finalize_output(self, response: Any) -> Any:
-        """Post-process output: extract <Response> and write to output_path.
+        """Finalize outputs after inference: promote deliverables, write summary.
 
-        Gate: ``has_local_access=True`` OR ``output_path`` unresolved →
-        no-op (return response unchanged). Otherwise: extract
-        ``<Response>``-delimited content and write to the resolved
-        absolute output path; return cleaned text.
+        Principle: everything the agent wrote to ``outputs/`` IS the
+        deliverable.  The framework only writes ``output_path`` (the
+        ``<Response>``-extracted summary) when the agent didn't.
 
-        Called by ``_infer_single`` / ``_ainfer_single`` after ``_infer``
-        returns but before ``response_post_processor``.
-
-        The gate is workspace-related (``output_path`` + ``has_local_access``),
-        not template-related. The previous gate ``template_manager is None``
-        was a coincidence — file-writing is conceptually independent of
-        whether the inferencer rendered through a template. This decoupling
-        lets orchestrators that don't render templates (e.g., BTA) still
-        write their aggregated output to ``workspace/outputs/<file>``.
-        """
-        if self.has_local_access:
-            # Local-access inferencer writes the file itself (e.g.,
-            # ClaudeCodeCli via Bash/Edit/Write tools).
-            return response
-        resolved = self.resolve_output_path()
-        if not resolved or not os.path.isabs(resolved):
-            return response
-        # Non-local: extract <Response> content and save to file
-        from agent_foundation.common.response_parsers import extract_delimited
-        cleaned = extract_delimited(str(response))
-        os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(cleaned)
-        return cleaned
-
-    def _post_finalize_deliverable_and_manifest(self) -> None:
-        """Promote output to final_deliverables/ and/or emit manifest.
-
-        Called after _finalize_output() regardless of has_local_access.
+        Sequence:
+        1. If ``output_is_deliverable``: MOVE all agent-written content
+           from ``outputs/`` to ``outputs/final_deliverables/``.
+        2. Check ``output_path``: if the agent already wrote it (now in
+           ``final_deliverables/``), done.  If not, extract ``<Response>``
+           and write to ``outputs/output_path`` as a summary reference
+           (this summary stays in ``outputs/``, not in deliverables).
+        3. Emit manifest if applicable.
         """
         import shutil as _shutil
 
         ws = self._workspace
-        if ws is None:
-            return
-
         resolved = self.resolve_output_path()
-        if not resolved or not os.path.isfile(resolved):
-            return
 
-        if self.output_is_deliverable:
+        # -- Step 1: Move agent-written outputs to final_deliverables/ --
+        agent_wrote_output_path = False
+        if ws is not None and self.output_is_deliverable:
             fd = getattr(ws, "deliverables_dir", None)
             if fd is not None:
-                dst = os.path.join(fd, os.path.basename(resolved))
-                os.makedirs(fd, exist_ok=True)
-                if not os.path.exists(dst):
-                    _shutil.copy2(resolved, dst)
-                marker = os.path.join(fd, ".self_promoted")
-                if not os.path.exists(marker):
-                    open(marker, "w").close()
+                outputs_dir = ws.outputs_dir
+                if os.path.isdir(outputs_dir):
+                    fd_basename = os.path.basename(fd)
+                    entries = [e for e in os.listdir(outputs_dir)
+                               if e != fd_basename]
+                    if entries:
+                        os.makedirs(fd, exist_ok=True)
+                        for entry in entries:
+                            src = os.path.join(outputs_dir, entry)
+                            dst = os.path.join(fd, entry)
+                            if not os.path.exists(dst):
+                                _shutil.move(src, dst)
+                        # output_path was moved with everything else
+                        if resolved:
+                            moved_path = os.path.join(
+                                fd, os.path.basename(resolved))
+                            if os.path.isfile(moved_path):
+                                agent_wrote_output_path = True
 
-        if self.output_manifest_index or self.output_is_deliverable:
-            self._emit_output_manifest(resolved)
+        # -- Step 2: Write <Response> summary if agent didn't write output_path --
+        if resolved and os.path.isabs(resolved) and not agent_wrote_output_path:
+            if os.path.isfile(resolved) and os.path.getsize(resolved) > 0:
+                pass
+            else:
+                from agent_foundation.common.response_parsers import (
+                    extract_delimited,
+                )
+                cleaned = extract_delimited(str(response))
+                os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
+                with open(resolved, "w", encoding="utf-8") as f:
+                    f.write(cleaned)
+                response = cleaned
+
+        # -- Step 3: Emit manifest --
+        manifest_source = resolved
+        if ws is not None and self.output_is_deliverable:
+            fd = getattr(ws, "deliverables_dir", None)
+            if fd and resolved:
+                candidate = os.path.join(fd, os.path.basename(resolved))
+                if os.path.isfile(candidate):
+                    manifest_source = candidate
+        if manifest_source and os.path.isfile(manifest_source):
+            if self.output_manifest_index or self.output_is_deliverable:
+                self._emit_output_manifest(manifest_source)
+
+        return response
+
+    _output_finalized: bool = False
+
+    def _complete_inference(self, response: Any = None, *, force: bool = False) -> Any:
+        """Centralized output-finalization hook.
+
+        Calls ``_finalize_output(response)``.
+        Idempotent — safe to call multiple times; first call acts,
+        subsequent are no-ops.
+        """
+        if self._output_finalized and not force:
+            return response
+        if response is not None:
+            response = self._finalize_output(response)
+        self._output_finalized = True
+        return response
+
+    # -- Orchestrator symlink helpers ------------------------------------
+
+    @staticmethod
+    def _symlink_or_copy(src: str, dst: str) -> None:
+        """Create a symlink from *dst* → *src*, falling back to copy on
+        platforms that don't support symlinks (Windows without developer mode).
+        """
+        import shutil as _shutil
+        if os.path.lexists(dst):
+            if os.path.islink(dst) and not os.path.exists(dst):
+                os.unlink(dst)
+            else:
+                return
+        os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+        try:
+            os.symlink(os.path.abspath(src), dst,
+                       target_is_directory=os.path.isdir(src))
+        except (OSError, NotImplementedError):
+            if os.path.isdir(src):
+                _shutil.copytree(src, dst)
+            else:
+                _shutil.copy2(src, dst)
+
+    def _symlink_child_output(self, child_workspace, child_output_name=None) -> None:
+        """Symlink a canonical child's output and deliverables as own.
+
+        Used by orchestrator ``_finalize_output`` overrides to surface
+        the canonical child's work as the orchestrator's own output.
+
+        For outputs: finds the child's file using ``child_output_name``
+        (the filename the child wrote), then symlinks it into the
+        orchestrator's own ``outputs/`` under ``self.output_path``
+        (the filename the orchestrator declares).
+
+        When ``child_output_name`` is ``None``, assumes the child uses
+        the same filename as the orchestrator (``self.output_path``).
+
+        For deliverables: symlinks each entry in the child's
+        ``final_deliverables/`` into the orchestrator's own
+        ``final_deliverables/``.
+        """
+        ws = self._workspace
+        if ws is None or child_workspace is None:
+            return
+
+        from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
+        own_name = self.output_path or DEFAULT_OUTPUT_FILENAME
+        child_name = child_output_name or own_name
+
+        # Symlink the output file (check deliverables first — leaf may have moved it)
+        child_deliv = getattr(child_workspace, "deliverable_path", lambda x: None)(child_name)
+        child_output = child_workspace.output_path(child_name) if hasattr(child_workspace, "output_path") else None
+        src = child_deliv if (child_deliv and os.path.isfile(child_deliv)) else child_output
+        if src and os.path.isfile(src):
+            own_output = ws.output_path(own_name)
+            self._symlink_or_copy(src, own_output)
+
+        # Symlink deliverable entries
+        child_fd = getattr(child_workspace, "deliverables_dir", None)
+        own_fd = getattr(ws, "deliverables_dir", None)
+        if child_fd and own_fd and os.path.isdir(child_fd) and os.listdir(child_fd):
+            os.makedirs(own_fd, exist_ok=True)
+            for entry in os.listdir(child_fd):
+                self._symlink_or_copy(
+                    os.path.join(child_fd, entry),
+                    os.path.join(own_fd, entry),
+                )
 
     def _emit_output_manifest(self, output_path: str) -> None:
         """Walk workspace logs/session and emit output_manifest.json."""
@@ -946,7 +1136,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if resume_result is not None:
             # Run the same post-processing tail as the normal path
             resume_result = self._finalize_output(resume_result)
-            self._post_finalize_deliverable_and_manifest()
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
@@ -1100,9 +1289,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         self.log_debug(inference_response, "InferenceResponse")
 
-        # Template output finalization (extract <Response>, save to file)
+        # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
-        self._post_finalize_deliverable_and_manifest()
 
         # Update state graphs from response
         if self.state_graphs:
@@ -1552,7 +1740,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if resume_result is not None:
             # Run the same post-processing tail as the normal path
             resume_result = self._finalize_output(resume_result)
-            self._post_finalize_deliverable_and_manifest()
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
@@ -1724,9 +1911,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         self.log_debug(inference_response, "InferenceResponse")
 
-        # Template output finalization (extract <Response>, save to file)
+        # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
-        self._post_finalize_deliverable_and_manifest()
 
         # Update state graphs from response
         if self.state_graphs:

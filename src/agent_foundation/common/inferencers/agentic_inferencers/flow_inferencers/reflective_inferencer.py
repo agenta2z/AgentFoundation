@@ -7,7 +7,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ReflectionStyles,
     ResponseSelectors,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.constants import (
+from agent_foundation.common.inferencers.constants import (
     DEFAULT_PLACEHOLDER_INFERENCE_PROMPT,
     DEFAULT_PLACEHOLDER_INFERENCE_RESPONSE,
     DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE,
@@ -271,6 +271,10 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
     def _process_reflection_input(
         self, inference_input, reflection_input, inference_config
     ):
+        # NOTE: No structured base_response_path is injected because no
+        # reflection template currently consumes it as a variable.
+        # The reflection_input itself is the base response text — the
+        # reflection inferencer iterates on that content directly.
         return self.reflection_prompt_formatter(
             feed={
                 self.reflection_prompt_placeholder_inferencer_input: inference_input,

@@ -384,3 +384,36 @@ class TemplatedInferencerBase(InferencerBase):
             )
 
         self._for_each_child_inferencer(_on_instance, _on_partial)
+
+    # ------------------------------------------------------------------
+    # Layered switch_role() — template-aware extension
+    # ------------------------------------------------------------------
+
+    _ROLE_RELEVANT_ATTRS = InferencerBase._ROLE_RELEVANT_ATTRS + (
+        "template_key", "template_root_space", "template_extra_feed",
+        "template_variables", "template_version", "modes",
+    )
+
+    def switch_role(self, new_role, *, template_key=None, template_root_space=None,
+                    template_extra_feed=None, template_variables=None,
+                    template_version=None, modes=None, **base_kwargs):
+        """Template-aware role switch: apply template attrs BEFORE the base
+        layer's workspace + session reset, so the new template state is in
+        place when the inferencer next renders.
+
+        Template attrs that are not None are set on self and stashed in
+        ``_pending_role_changes`` so the base layer's audit trail merges them.
+
+        All remaining ``**base_kwargs`` are forwarded to
+        ``InferencerBase.switch_role()`` (workspace, deliverable flags, etc.).
+        """
+        changes = {}
+        for attr, val in {"template_key": template_key, "template_root_space": template_root_space,
+                          "template_extra_feed": template_extra_feed, "template_variables": template_variables,
+                          "template_version": template_version, "modes": modes}.items():
+            if val is not None:
+                setattr(self, attr, val)
+                changes[attr] = val
+        if changes:
+            object.__setattr__(self, "_pending_role_changes", changes)
+        super().switch_role(new_role, **base_kwargs)

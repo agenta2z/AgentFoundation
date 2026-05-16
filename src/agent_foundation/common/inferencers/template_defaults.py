@@ -290,7 +290,13 @@ want only the universal aggregator preamble use
 REVIEW_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
     template_key=KEY_REVIEW,
 )
-"""For any review slot: render the canonical ``review`` template variant."""
+"""For any review slot: render the canonical ``review`` template variant.
+
+Template variables (``task_instructions``, ``task_preamble``, etc.) are
+auto-discovered by the TemplateManager's ``predefined_variables: true``
+infrastructure — no explicit ``variable_names`` needed.  The
+VariableLoader's Pass-3 folder-default fallback finds
+``_variables/<name>/default.jinja2`` even when ``version=""``."""
 
 
 FOLLOWUP_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
@@ -298,12 +304,9 @@ FOLLOWUP_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
 )
 """For any followup/fixer slot: render the canonical ``followup`` template variant.
 
-Phase 1 of the leaf-owned template rendering refactor — defined here but
-NOT yet wired into ``Dual.SLOT_DEFAULTS``. Wiring happens atomically in
-Phase 2 (combined with Dual stop-rendering its own followup template) to
-avoid double-rendering during migration. Until Phase 2 ships, callers
-that want the fixer to template via SLOT_DEFAULTS must wire this manually.
-"""
+Wired into ``Dual.SLOT_DEFAULTS["fixer_inferencer"]`` so the fixer leaf
+renders ``plan/main/followup.jinja2`` (or the active space equivalent)
+with auto-discovered template variables."""
 
 
 def _aggregation_applicable(parent: dict) -> bool:

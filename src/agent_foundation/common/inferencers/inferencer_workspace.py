@@ -27,6 +27,8 @@ from typing import List, Optional, Union
 
 from attr import attrib, attrs
 
+DEFAULT_OUTPUT_FILENAME = "output.md"
+
 
 @attrs
 class InferencerWorkspace:
@@ -175,6 +177,7 @@ class InferencerWorkspace:
         src_root = source_workspace.deliverables_dir
 
         for root_dir, _dirs, files in os.walk(src_root):
+            _dirs[:] = [d for d in _dirs if d != "final_deliverables"]  # v4.8: prevent nesting
             for f in files:
                 src_path = os.path.join(root_dir, f)
                 rel_path = os.path.relpath(src_path, src_root)
@@ -338,3 +341,144 @@ class InferencerWorkspace:
         ):
             if os.path.isfile(path):
                 os.remove(path)
+
+
+# =============================================================================
+# Module-level path resolution helper for orchestrators that need to pass a
+# child inferencer's output path downstream (e.g., BTA aggregator, PTI executor,
+# MFDual peer flows). Provides canonical 3-tier resolution with explicit
+# fallback semantics — see resolve_canonical_output_path() below.
+# =============================================================================
+
+
+def resolve_canonical_output_path(
+    workspace: Optional["InferencerWorkspace"],
+    *,
+    filename: str = DEFAULT_OUTPUT_FILENAME,
+    deliverables_fallback: str = "first_match",
+) -> Optional[str]:
+    """Returns the ABSOLUTE on-disk path to an inferencer's canonical
+    output file, or ``None``.
+
+    Implements the **THREE-tier resolution** used by ``DualInferencer``'s
+    ``_resolve_prior_proposer_output_path`` (the reference implementation),
+    so it works for BOTH orchestrators (which have ``final_deliverables/``)
+    AND leaf CLI inferencers (which write only to ``outputs/output.md``).
+
+    **Critical**: Without Tier 2, this helper returns ``None`` for the most
+    common production case (RovoDevCli, ClaudeCodeCli) which write to
+    ``outputs/output.md`` but typically don't promote to
+    ``final_deliverables/``. Tier 2 ensures leaf inferencers also resolve.
+
+    Tiers (in order):
+      Tier 1 — Deliverable file (preferred for orchestrators):
+        If ``workspace.has_deliverables``, try ``final_deliverables/<filename>``.
+        On miss, apply ``deliverables_fallback`` policy.
+      Tier 2 — Outputs file (canonical for leaf inferencers):
+        Try ``outputs/<filename>`` directly. This catches CLI inferencers
+        and any case where the deliverable hasn't been promoted yet.
+      Tier 3 — None: no usable file exists.
+
+    Parameters
+    ----------
+    workspace : InferencerWorkspace or None
+        The inferencer's ``_workspace``. ``None`` returns ``None``.
+    filename : str
+        Preferred filename (default ``"output.md"``).
+    deliverables_fallback : {"first_match", "alphabetical_scan", "none"}
+        Behavior WITHIN Tier 1 when the preferred filename is missing:
+          * ``"first_match"`` (DEFAULT, MFDual semantics):
+            return ``deliverable_paths()[0]``
+          * ``"alphabetical_scan"`` (DualInferencer semantics):
+            return first non-dotfile deliverable in sorted order
+            (filters ``.self_promoted`` etc.)
+          * ``"none"``: skip Tier 1 fallback; proceed to Tier 2 immediately
+
+        (Note: this controls fallback WITHIN Tier 1 only. Tier 2 always runs
+        when Tier 1 produces no result.)
+
+    Returns
+    -------
+    Optional[str]
+        ABSOLUTE filesystem path (CWD-independent; safe for resume; safe
+        for shell ``cp``), or ``None`` if no usable output file exists.
+
+    Notes
+    -----
+    * **Returns absolute paths via ``os.path.abspath`` (NOT ``os.path.realpath``)**:
+      Symlinks are PRESERVED, not resolved. This matches downstream usage —
+      templates do ``cp '{{ prior_output_path }}' '{{ output_path }}'`` and
+      callers expect to operate on the alias the orchestrator captured, not
+      its symlink target.
+    * Returns ``None`` (not ``""``) so callers can branch cleanly. Plan
+      contract: orchestrators inject ``None`` (not empty string) into
+      ``template_extra_feed`` for "no deliverable".
+    * **TOCTOU caveat**: ``os.path.isfile`` checks happen at call time. A
+      file deleted between this call and consumption returns a stale path
+      reference. Long-running consumers should re-validate before use.
+    * **Filename contract**: Caller MUST pass a non-empty, non-absolute
+      filename (e.g. ``"output.md"``). No validation here.
+    * Does NOT escape for shell — templates MUST single-quote: ``'{{ p }}'``
+    * Never raises — all exceptions caught and treated as "not found".
+    """
+    if workspace is None:
+        return None
+
+    # === Tier 1: deliverable file ===
+    if getattr(workspace, "has_deliverables", False):
+        deliverables_dir = getattr(workspace, "deliverables_dir", None)
+        if deliverables_dir:
+            candidate = os.path.join(str(deliverables_dir), filename)
+            if os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+
+            if deliverables_fallback != "none":
+                try:
+                    deliverable_paths_fn = getattr(
+                        workspace, "deliverable_paths", None
+                    )
+                    deliverable_paths = (
+                        deliverable_paths_fn()
+                        if callable(deliverable_paths_fn)
+                        else []
+                    )
+                except Exception:
+                    deliverable_paths = []
+
+                if deliverable_paths:
+                    chosen: Optional[str] = None
+                    if deliverables_fallback == "alphabetical_scan":
+                        non_dotfiles = sorted(
+                            p
+                            for p in deliverable_paths
+                            if not os.path.basename(p).startswith(".")
+                        )
+                        if non_dotfiles:
+                            chosen = non_dotfiles[0]
+                    else:  # "first_match" (DEFAULT)
+                        chosen = deliverable_paths[0]
+
+                    if chosen:
+                        # deliverable_paths() may return basenames or full paths
+                        if not os.path.isabs(chosen):
+                            try:
+                                chosen = workspace.deliverable_path(chosen)
+                            except Exception:
+                                chosen = None
+                        if chosen and os.path.isfile(chosen):
+                            return os.path.abspath(chosen)
+
+    # === Tier 2: outputs/<filename> (CRITICAL for leaf CLI inferencers) ===
+    try:
+        out_path = (
+            workspace.output_path(filename)
+            if hasattr(workspace, "output_path")
+            else None
+        )
+    except Exception:
+        out_path = None
+    if out_path and os.path.isfile(out_path):
+        return os.path.abspath(out_path)
+
+    # === Tier 3: nothing on disk ===
+    return None

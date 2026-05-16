@@ -31,7 +31,9 @@ from agent_foundation.common.inferencers.template_defaults import (
     BREAKDOWN_TEMPLATE_DEFAULTS,
     ConditionalTemplateDefaults,
     FOLLOWUP_AGGREGATION_DEFAULTS,
+    FOLLOWUP_TEMPLATE_DEFAULTS,
     InferencerTemplateDefaults,
+    InferencerTemplateVersionDefaults,
     REVIEW_TEMPLATE_DEFAULTS,
     STRUCTURED_AGGREGATION_DEFAULTS,
     _aggregation_applicable,
@@ -364,6 +366,36 @@ class TestModuleConstants:
             FOLLOWUP_AGGREGATION_DEFAULTS.template_variables
             == STRUCTURED_AGGREGATION_DEFAULTS.template_variables
         )
+
+
+# ---------------------------------------------------------------------------
+# Fix #9: Review/Followup template defaults
+# ---------------------------------------------------------------------------
+
+
+class TestReviewFollowupDefaults:
+    """Fix #9: REVIEW_TEMPLATE_DEFAULTS and FOLLOWUP_TEMPLATE_DEFAULTS
+    set the correct template_key; variable auto-discovery is handled by
+    the TemplateManager's predefined_variables infrastructure (no explicit
+    variable_names or template_version needed)."""
+
+    def test_review_followup_are_plain_defaults(self):
+        """Both are plain InferencerTemplateDefaults (not VersionDefaults).
+        Variable discovery relies on TemplateManager's predefined_variables,
+        not on explicit variable_names declarations."""
+        assert isinstance(REVIEW_TEMPLATE_DEFAULTS, InferencerTemplateDefaults)
+        assert isinstance(FOLLOWUP_TEMPLATE_DEFAULTS, InferencerTemplateDefaults)
+        assert not REVIEW_TEMPLATE_DEFAULTS.template_variables
+        assert not FOLLOWUP_TEMPLATE_DEFAULTS.template_variables
+
+    def test_review_default_template_key_is_review(self):
+        """REVIEW_TEMPLATE_DEFAULTS has template_key='review'."""
+        assert REVIEW_TEMPLATE_DEFAULTS.template_key == KEY_REVIEW
+
+    def test_followup_default_template_key_is_followup(self):
+        """FOLLOWUP_TEMPLATE_DEFAULTS has template_key='followup'."""
+        from agent_foundation.common.inferencers.template_constants import KEY_FOLLOWUP
+        assert FOLLOWUP_TEMPLATE_DEFAULTS.template_key == KEY_FOLLOWUP
 
 
 if __name__ == "__main__":

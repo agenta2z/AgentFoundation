@@ -46,10 +46,8 @@ from agent_foundation.common.inferencers.inferencer_base import (
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
-from agent_foundation.common.inferencers.prompt_templates import (
-    DEFAULT_RECOVERY_DIR,
-    render_recovery_prompt,
-)
+from agent_foundation.common.inferencers.constants.paths import DEFAULT_RECOVERY_DIR
+from agent_foundation.common.inferencers.recovery import render_recovery_prompt
 
 logger: logging.Logger = logging.getLogger(__name__)
 
