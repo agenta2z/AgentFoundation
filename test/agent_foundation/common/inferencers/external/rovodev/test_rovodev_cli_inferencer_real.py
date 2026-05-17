@@ -43,7 +43,7 @@ def _init_git_repo(path):
 def _make_inferencer(tmp_path, **kwargs):
     out_file = str(tmp_path / "rovodev_output.txt")
     defaults = dict(
-        working_dir=str(tmp_path),
+        target_path=str(tmp_path),
         output_file=out_file,
         idle_timeout_seconds=DEFAULT_TIMEOUT,
         tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
@@ -54,7 +54,7 @@ def _make_inferencer(tmp_path, **kwargs):
 
 def _make_non_legacy_inferencer(tmp_path, **kwargs):
     defaults = dict(
-        working_dir=str(tmp_path),
+        target_path=str(tmp_path),
         enable_legacy=False,
         idle_timeout_seconds=DEFAULT_TIMEOUT,
         tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
@@ -173,7 +173,7 @@ class TestRealMultiTurn:
 
         out_file = str(tmp_path / "rovodev_output.txt")
         mk = lambda: RovoDevCliInferencer(
-            working_dir=str(tmp_path), output_file=out_file,
+            target_path=str(tmp_path), output_file=out_file,
             idle_timeout_seconds=DEFAULT_TIMEOUT, tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
         )
 
@@ -242,7 +242,7 @@ class TestStreaming:
 
 class TestErrorHandling:
     def test_invalid_acli_path_in_command(self, tmp_path):
-        inf = RovoDevCliInferencer(acli_path="/nonexistent/acli", working_dir=str(tmp_path))
+        inf = RovoDevCliInferencer(acli_path="/nonexistent/acli", target_path=str(tmp_path))
         cmd = inf.construct_command("hello")
         assert "/nonexistent/acli" in cmd
 

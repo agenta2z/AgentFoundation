@@ -279,7 +279,7 @@ def create_app(
 
     # Single inferencer instance — reused across requests for session continuity
     _inferencer = RovoDevCliInferencer(
-        working_dir=working_dir,
+        target_path=working_dir,
         acli_path=acli_path,
         site_url=site_url,
         yolo=yolo,

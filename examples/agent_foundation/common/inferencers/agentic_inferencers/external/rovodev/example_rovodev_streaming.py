@@ -47,7 +47,7 @@ def create_inferencer(working_dir: str, output_file: str | None = None):
     )
 
     return RovoDevCliInferencer(
-        working_dir=working_dir,
+        target_path=working_dir,
         output_file=output_file,
         idle_timeout_seconds=600,
         tool_use_idle_timeout_seconds=600,

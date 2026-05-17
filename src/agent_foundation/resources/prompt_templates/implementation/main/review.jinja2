@@ -113,6 +113,7 @@ If the implementation has no meaningful issues, return an empty `issues` array a
 - Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. Read the actual code changes, not just the report.
 - However, stay focused on the implementation and the files it claims to modify. DO NOT explore the entire codebase.
 - Every issue must cite concrete evidence (such as file paths, line numbers, actual behavior) with careful reasoning — DO NOT raise issues based on speculation.
+- {{ instructions.behavior.file_reading_fallback_for_review }}
 - Verify if there is any missing implementation or broken code, and flag them.
 - Verify if all required tests and benchmarks have been executed — flag if no actual tests or benchmarks were run, or results appear mocked or fabricated.
 - If files referenced in the implementation report (tests, benchmarks, code changes) are not found in the expected directory, conclude they were never created. Do NOT search the entire repository for them.

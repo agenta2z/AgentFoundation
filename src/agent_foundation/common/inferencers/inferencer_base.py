@@ -131,8 +131,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     # === Workspace (opt-in) ===
     # Construction-time workspace. Synced to ``_workspace`` (property) in
-    # ``__attrs_post_init__``, which auto-configures cache_folder, working_dir,
+    # ``__attrs_post_init__``, which auto-configures cache_folder
     # and logger via ``_configure_for_workspace()``.
+    # (Subprocess cwd is derived at call time via effective_cwd, not stored.)
     #
     # For RUNTIME workspace assignment (e.g., orchestrators assigning child
     # workspaces), use ``child._workspace = ws`` directly — the property setter
@@ -160,6 +161,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
     #      in ``__attrs_post_init__``)
     # All three are valid inputs.
     workspace: Optional[Any] = attrib(default=None)
+
+    # === Source path (auto-detected) ===
+    # Where this inferencer's own source code lives (project root).
+    # Auto-detected via _detect_source_root() in __attrs_post_init__
+    # if not explicitly set. Returns None for test stubs, pip-installed
+    # packages, or non-src-layout projects — this is intentional.
+    source_path: Optional[str] = attrib(default=None)
 
     # === Deliverable Boundary Semantics (v1.7) ===
     # Whether this inferencer is a Deliverable Boundary. When True, the
@@ -242,6 +250,29 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # stale cached paths from surviving across consensus iterations or
     # workspace swaps.
     _DERIVED_FROM_WORKSPACE: tuple = ()
+
+    @classmethod
+    def _detect_source_root(cls) -> "Optional[str]":
+        """Auto-detect the project root for this inferencer class.
+
+        Walks up from the class's source file to find the nearest parent
+        of a ``src`` directory (standard Python src-layout). Returns None
+        for test stubs, examples, pip-installed packages, or non-src-layout
+        projects. Subclasses may override for non-standard layouts.
+        """
+        import inspect
+        try:
+            source_file = inspect.getfile(cls)
+        except (TypeError, OSError):
+            return None
+        current = os.path.dirname(os.path.abspath(source_file))
+        while True:
+            parent = os.path.dirname(current)
+            if parent == current:
+                return None
+            if os.path.basename(current) == "src":
+                return parent
+            current = parent
 
     # Attrs whose values are semantically relevant when switching roles.
     # Subclasses extend this tuple in their own class body.
@@ -346,8 +377,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             try:
                 child_ws = parent_workspace.child(child_name)
                 # Critical: create the on-disk dirs before assigning. Otherwise
-                # `_configure_for_workspace` will set working_dir to a
-                # non-existent path, and any subprocess inferencer (e.g.
+                # `_configure_for_workspace` will set cache_folder to a
+                # non-existent path, and effective_cwd may resolve to a
                 # ClaudeCodeCli) will fail with NotADirectoryError when it
                 # tries to launch with cwd=workspace.root. Mirrors BTA's
                 # explicit `worker_ws.ensure_dirs()` before assignment.
@@ -367,22 +398,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
     def _configure_for_workspace(self, workspace):
         """Auto-configure infrastructure when a workspace is assigned.
 
-        Called by the ``_workspace`` setter. Sets ``working_dir`` (for terminal
-        inferencers), ``cache_folder``, and resolves deferred loggers.
+        Called by the ``_workspace`` setter. Sets ``cache_folder`` and
+        resolves deferred loggers. Subprocess cwd is no longer stored —
+        it is derived at call time via ``effective_cwd`` (target_path >
+        workspace.root > os.getcwd()).
         """
         import os
-
-        if hasattr(self, "working_dir"):
-            new_wd = str(workspace.root)
-            # Windows CreateProcessW enforces MAX_PATH=260 on lpCurrentDirectory
-            # regardless of the registry's LongPathsEnabled flag, and Python's
-            # subprocess does not honor the \\?\ prefix for cwd (bpo-40671).
-            # When workspace.root exceeds the limit, leave working_dir at its
-            # previously-resolved value (typically target_path) so subprocess
-            # inferencers can still launch; framework writes use workspace.root
-            # explicitly via resolve_output_path() rather than relying on cwd.
-            if sys.platform != "win32" or len(new_wd) < 240:
-                self.working_dir = new_wd
 
         if hasattr(self, "cache_folder"):
             self.cache_folder = os.path.join(
@@ -425,6 +446,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
     def __attrs_post_init__(self):
         if self.logger is None:
             self.logger = "auto"
+
+        if self.source_path is None:
+            self.source_path = type(self)._detect_source_root()
 
         # Convenience shorthand: allow `workspace="<path>"` as a synonym for
         # `workspace=InferencerWorkspace(root="<path>")` (with default flags).

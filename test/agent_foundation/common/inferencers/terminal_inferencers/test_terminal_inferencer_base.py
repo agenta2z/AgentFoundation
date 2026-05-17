@@ -380,14 +380,14 @@ class TestWorkingDirectory(unittest.TestCase):
     def test_default_working_dir(self):
         """Test default working directory is current directory."""
         inferencer = EchoInferencer()
-        self.assertEqual(inferencer.working_dir, os.getcwd())
+        self.assertEqual(inferencer.effective_cwd, os.getcwd())
 
     def test_custom_working_dir(self):
         """Test custom working directory is used."""
         temp_dir = tempfile.mkdtemp()
         try:
-            inferencer = EchoInferencer(working_dir=temp_dir)
-            self.assertEqual(inferencer.working_dir, temp_dir)
+            inferencer = EchoInferencer(target_path=temp_dir)
+            self.assertEqual(inferencer.effective_cwd, temp_dir)
 
             result = inferencer._execute_command(["pwd"])
             self.assertEqual(result["stdout"].strip(), temp_dir)

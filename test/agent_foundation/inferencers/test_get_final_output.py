@@ -84,7 +84,7 @@ class TestRovoDevCliInferencerGetFinalOutput:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
             RovoDevCliInferencer,
         )
-        defaults = dict(working_dir="/tmp", enable_legacy=True)
+        defaults = dict(target_path="/tmp", enable_legacy=True)
         defaults.update(kwargs)
         return RovoDevCliInferencer(**defaults)
 

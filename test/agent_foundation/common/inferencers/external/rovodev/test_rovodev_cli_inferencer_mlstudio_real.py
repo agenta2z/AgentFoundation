@@ -150,7 +150,7 @@ REPORT_OUTPUT_SCHEMA = json.dumps({
 def _make_inferencer(working_dir: str, output_file: str | None = None) -> RovoDevCliInferencer:
     """Create a RovoDevCliInferencer pointed at the ML Studio working dir."""
     return RovoDevCliInferencer(
-        working_dir=working_dir,
+        target_path=working_dir,
         output_file=output_file,
         output_schema=REPORT_OUTPUT_SCHEMA,
         idle_timeout_seconds=DEFAULT_TIMEOUT,

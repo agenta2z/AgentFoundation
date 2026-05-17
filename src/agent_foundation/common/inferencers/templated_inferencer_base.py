@@ -2,17 +2,28 @@
 TemplatedInferencerBase - InferencerBase variant for inferencers that render
 their own ``inference_input`` through a Jinja ``TemplateManager`` before LLM call.
 
-Architectural role::
+Architectural role (post axes-refactor 2026-05-16)::
 
     InferencerBase (template-free)
-    ├── TemplatedInferencerBase  ← THIS FILE — leaves & their bases inherit
-    │   ├── ApiInferencerBase    (and the leaves under it)
-    │   ├── StreamingInferencerBase
-    │   ├── RemoteInferencerBase
-    │   └── TerminalInferencerBase
+    ├── TemplatedInferencerBase  ← THIS FILE — one of three orthogonal axes
+    ├── StreamingInferencerBase  — streaming axis (decoupled)
+    ├── TerminalInferencerBase   — terminal-exec axis (decoupled)
+    │
+    ├── TerminalTemplatedInferencerBase(TIB, TemplatedIB) — MI convenience
+    ├── TerminalSessionInferencerBase(TIB, SIB)           — MI convenience
+    ├── TerminalSessionTemplatedInferencerBase(TSIB, TemplatedIB) — MI convenience
+    │
+    ├── ApiInferencerBase(TemplatedIB)       — API leaves inherit directly
+    ├── RemoteInferencerBase(TemplatedIB)    — remote leaves inherit directly
+    │
     └── (orchestrators) — Dual, BTA, LWI, PTI, MultiFlow, MultiFlowDual,
-        Conversational* — DO NOT inherit from this; they delegate inference
-        to children rather than rendering their own input.
+        Conversational* — inherit InferencerBase directly, not this class.
+
+    Leaves opt into templating via direct inheritance from this class OR
+    via the convenience MI classes. StreamingInferencerBase and
+    TerminalInferencerBase no longer inherit from this class; streaming-only
+    and terminal-only leaves are no longer accidental recipients of
+    cascaded template state.
 
 Why a separate base?
     Cascade injection of ``_template_manager`` via ``_-prefix`` (in
@@ -67,6 +78,20 @@ from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
     TEMPLATE_EXTRA_FEED_ATTR,
 )
+
+
+def _deep_merge_into(target: dict, source: dict) -> None:
+    """Recursively merge ``source`` into ``target``. Dicts at matching keys
+    merge; non-dict leaves overwrite. Used to fold ``load_variables`` output
+    into the feed without clobbering sibling sub-namespaces (e.g., mode
+    injection must not wipe out ``feed["instructions"]["behavior"]``).
+    """
+    for k, v in source.items():
+        existing = target.get(k)
+        if isinstance(existing, dict) and isinstance(v, dict):
+            _deep_merge_into(existing, v)
+        else:
+            target[k] = v
 
 
 @attrs(slots=False)
@@ -156,121 +181,52 @@ class TemplatedInferencerBase(InferencerBase):
                     f"Caller must remove these keys before passing extra_feed."
                 )
         feed: dict = {}
-        # Resolve template_variables via load_variables() (unified batch API
-        # with cascade: space/type → space → global _variables/).
-        # Prefix conventions: "@variant" = strict, "=literal" = force literal,
-        # "variant" = try file then fall back to literal, None = use template_version.
-        if self.template_variables and self.template_manager:
-            if hasattr(self.template_manager, "load_variables"):
+
+        # Build effective specs: user template_variables + per-enabled-mode
+        # entries, unified into a single load_variables call. Multi-dot keys
+        # (e.g., "instructions.modes.deep_mode") are handled natively by the
+        # enhanced load_variables (which splits on ALL dots, not just the first).
+        effective_specs: dict = dict(self.template_variables or {})
+
+        # enable_<name> flags are set unconditionally so {%- if enable_X %}
+        # can short-circuit even when False. Mode content is loaded only for
+        # enabled modes via load_variables.
+        for mode_name, enabled in (self.modes or {}).items():
+            feed[f"enable_{mode_name}"] = bool(enabled)
+            if enabled:
+                effective_specs.setdefault(
+                    f"instructions.modes.{mode_name}", None
+                )
+
+        if effective_specs and self.template_manager and hasattr(self.template_manager, "load_variables"):
+            try:
                 resolved = self.template_manager.load_variables(
-                    variable_specs=self.template_variables,
-                    root_space=self.template_root_space,
+                    variable_specs=effective_specs,
+                    root_space=self.template_root_space or "",
                     default_version=self.template_version or "",
                 )
-                feed.update(resolved)
-            else:
-                for var_name, value in self.template_variables.items():
-                    feed[var_name] = value if value else ""
+            except FileNotFoundError as e:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Variable not found, degrading gracefully: %s", e
+                )
+                resolved = {}
+            _deep_merge_into(feed, resolved)
+        elif self.template_variables:
+            for var_name, value in (self.template_variables or {}).items():
+                feed[var_name] = value if value else ""
+
         feed.update(self.template_extra_feed)
-        # Phase 1 (leaf-owned rendering): per-call extra_feed merge — wins
-        # over class-level template_extra_feed but loses to {{ input }} and
-        # __template_space__ (sacrosanct, set after this).
         if extra_feed:
             feed.update(extra_feed)
-        # Inject __template_space__ so .variables.yaml aliases like
-        # `__action__: __template_space__` resolve to the active space
-        # ("plan" / "implementation" / "task_breakdown"). Sourced from
-        # template_root_space (semantically the same value).
         if self.template_root_space:
             feed["__template_space__"] = self.template_root_space
-
-        # Mode handling: for each declared mode, set enable_<name> bool
-        # and (if enabled) load instruction content into nested dict for
-        # {{ instructions.modes.<name> }} Jinja2 access.
-        # Note: load_variables() in TemplateManager only splits on the
-        # FIRST dot (so "instructions.modes.deep_mode" resolves wrong).
-        # We use _cascade_load_variable directly for proper nested access.
-        if self.modes:
-            self._inject_mode_flags_and_content(feed)
 
         feed["input"] = inference_input
         resolved = self.resolve_output_path()
         if resolved and os.path.isabs(resolved) and self.has_local_access:
             feed["output_path"] = resolved
         return feed
-
-    def _inject_mode_flags_and_content(self, feed: dict) -> None:
-        """Populate `enable_<name>` flags and `instructions.modes.<name>`
-        content from `self.modes`.
-
-        Flag derivation is unconditional (so `{%- if enable_X %}` can
-        check the value even when False/missing). Content loading happens
-        only for enabled modes — disabled modes contribute nothing.
-
-        Errors are handled defensively but observably:
-          - FileNotFoundError → debug log (mode declared but no instruction
-            file; rendering proceeds, the conditional block emits nothing
-            of value).
-          - Any other exception → warning log (don't silently swallow real
-            bugs; explicitly NOT `except Exception: pass`).
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        for mode_name, enabled in self.modes.items():
-            feed[f"enable_{mode_name}"] = bool(enabled)
-            if not enabled:
-                continue
-            if not self.template_manager:
-                continue
-            # Use _cascade_load_variable for proper nested-folder lookup.
-            # Args: var_name (folder path with /), version (file stem),
-            #       root_space, tmpl_type.
-            try:
-                content = self.template_manager._cascade_load_variable(
-                    "instructions/modes",
-                    mode_name,
-                    self.template_root_space or "",
-                    "main",
-                )
-            except FileNotFoundError:
-                logger.debug(
-                    "Mode '%s' enabled but no instruction file at "
-                    "_variables/instructions/modes/%s.jinja2 — "
-                    "{{ instructions.modes.%s }} will render empty.",
-                    mode_name, mode_name, mode_name,
-                )
-                continue
-            except Exception as e:
-                logger.warning(
-                    "Failed to load mode instructions for '%s': %s",
-                    mode_name, e,
-                )
-                continue
-
-            if content is None:
-                # File doesn't exist (cascade returned None, didn't raise).
-                continue
-
-            # Merge into feed as {"instructions": {"modes": {<name>: <content>}}}
-            instructions = feed.setdefault("instructions", {})
-            if not isinstance(instructions, dict):
-                # Don't clobber a non-dict 'instructions' set by extra_feed
-                logger.warning(
-                    "feed['instructions'] is %s, not dict — cannot inject "
-                    "modes.%s. Skipping.",
-                    type(instructions).__name__, mode_name,
-                )
-                continue
-            modes_ns = instructions.setdefault("modes", {})
-            if not isinstance(modes_ns, dict):
-                logger.warning(
-                    "feed['instructions']['modes'] is %s, not dict — "
-                    "cannot inject modes.%s. Skipping.",
-                    type(modes_ns).__name__, mode_name,
-                )
-                continue
-            modes_ns[mode_name] = content
 
     # ------------------------------------------------------------------
     # Stub overrides — provide real implementations for InferencerBase's
