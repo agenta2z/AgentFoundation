@@ -9,39 +9,42 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
 from attr import attrib, attrs
 
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TemplatedInferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
 
 @attrs
-class TerminalInferencerBase(TemplatedInferencerBase):
+class TerminalInferencerBase(InferencerBase):
     """
     Abstract base class for executing terminal commands as inference.
 
-    This class extends InferencerBase to provide a framework for executing
-    CLI commands with built-in retry logic, timeout handling, and output capture.
+    One of three orthogonal axes (terminal-exec, streaming, templating).
+    Provides subprocess execution machinery: target_path, effective_cwd,
+    pre/post-exec scripts, env_vars, timeout, output capture.
 
     Subclasses should implement:
         - construct_command(): Build the CLI command from inference input
         - parse_output(): Parse the command output into desired format
 
     Attributes:
-        working_dir (str): Directory to execute commands in. Defaults to current dir.
-        timeout (int): Command execution timeout in seconds. Defaults to 300 (5 min).
-        output_file (str): Optional file path to save output. If None, uses temp file.
+        target_path (Optional[str]): The directory the CLI agent operates on
+            (e.g., the repo it edits). Distinct from workspace.root (artifact
+            storage). Defaults to None — DO NOT default to os.getcwd(); this
+            is load-bearing for effective_cwd's workspace.root fallback.
+        effective_cwd (property): Subprocess cwd, derived at call time:
+            target_path > workspace.root > os.getcwd().
+        timeout (Optional[int]): Command execution timeout in seconds.
+            None = no timeout. Default: None.
+        output_file (str): Optional file path to save output.
         capture_stderr (bool): Whether to capture stderr. Defaults to True.
         env_vars (dict): Additional environment variables for command execution.
         pre_exec_scripts (List[str]): Shell scripts to run BEFORE the main command.
-            Useful for setup like 'cd /path/to/repo', 'export VAR=value', etc.
         post_exec_scripts (List[str]): Shell scripts to run AFTER the main command.
-            Useful for cleanup or post-processing.
-        fail_on_pre_script_error (bool): If True, abort if pre-script fails. Default True.
-        fail_on_post_script_error (bool): If True, fail if post-script fails. Default False.
+        fail_on_pre_script_error (bool): If True, abort if pre-script fails.
+        fail_on_post_script_error (bool): If True, fail if post-script fails.
     """
 
-    working_dir: str = attrib(default=None)
-    timeout: int = attrib(default=300)
+    target_path: Optional[str] = attrib(default=None)
+    timeout: Optional[int] = attrib(default=None)
     output_file: Optional[str] = attrib(default=None)
     capture_stderr: bool = attrib(default=True)
     env_vars: Dict[str, str] = attrib(factory=dict)
@@ -52,10 +55,29 @@ class TerminalInferencerBase(TemplatedInferencerBase):
     fail_on_pre_script_error: bool = attrib(default=True)
     fail_on_post_script_error: bool = attrib(default=False)
 
+    # Streaming output state (promoted from implicit instance attributes)
+    _last_streaming_output: str = attrib(default="", init=False, repr=False)
+    _last_streaming_return_code: int = attrib(default=0, init=False, repr=False)
+
+    @property
+    def effective_cwd(self) -> str:
+        """The subprocess cwd, derived at call time.
+
+        Priority: target_path > workspace.root > os.getcwd().
+        Replaces the old ``working_dir`` stored field.
+        """
+        if self.target_path is not None:
+            return self.target_path
+        ws = self._workspace
+        if ws is not None and hasattr(ws, "root"):
+            return str(ws.root)
+        return os.getcwd()
+
     def __attrs_post_init__(self):
-        """Initialize working directory if not set."""
-        if self.working_dir is None:
-            self.working_dir = os.getcwd()
+        """target_path stays None if the leaf didn't set it — this is
+        load-bearing for effective_cwd's workspace.root fallback
+        (orchestrator-spawned children get cwd = workspace.root).
+        """
         super().__attrs_post_init__()
 
     def _resolve_subprocess_cwd(self, cwd: Optional[str] = None) -> Optional[str]:
@@ -70,7 +92,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
         paths remain unchanged and Linux/macOS are no-ops.
         """
         if cwd is None:
-            cwd = self.working_dir
+            cwd = self.effective_cwd
         if not cwd or sys.platform != "win32":
             return cwd
         if cwd.startswith("\\\\?\\"):
@@ -141,6 +163,9 @@ class TerminalInferencerBase(TemplatedInferencerBase):
         self.log_debug(f"Executing script: {script}", "Script")
 
         try:
+            run_kwargs = {}
+            if self.timeout is not None:
+                run_kwargs["timeout"] = self.timeout
             result = subprocess.run(
                 script,
                 shell=True,
@@ -148,7 +173,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                **run_kwargs,
             )
 
             return {
@@ -262,9 +287,12 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             self.log_debug(f"Executing shell command: {command}", "Command")
         else:
             self.log_debug(f"Executing command: {' '.join(command)}", "Command")
-        self.log_debug(f"Working directory: {self.working_dir}", "WorkingDir")
+        self.log_debug(f"Working directory: {self.effective_cwd}", "WorkingDir")
 
         try:
+            run_kwargs = {}
+            if self.timeout is not None:
+                run_kwargs["timeout"] = self.timeout
             result = subprocess.run(
                 command,
                 shell=use_shell,
@@ -272,7 +300,7 @@ class TerminalInferencerBase(TemplatedInferencerBase):
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                **run_kwargs,
             )
 
             return {
@@ -472,6 +500,21 @@ class TerminalInferencerBase(TemplatedInferencerBase):
         self.log_debug(f"Output saved to: {filepath}", "OutputFile")
         return filepath
 
+    def _wrap_parse_output(self, parsed: Any) -> Any:
+        """Hook for subclasses to wrap parse_output result. Default: identity."""
+        return parsed
+
+    def _run_pre_exec_scripts_in_subprocess_shell(self) -> bool:
+        """Whether pre_exec_scripts should be chained into the main subprocess
+        shell (True, env propagates) or run as a separate pre-step (False, env
+        does NOT propagate). Default False = TIB behavior (separate step).
+
+        TerminalSessionInferencerBase overrides this to True because its
+        streaming paths chain pre-scripts via '&&' in the main shell for
+        env-var propagation.
+        """
+        return False
+
     def _infer(
         self, inference_input: Any, inference_config: Any = None, **kwargs
     ) -> Any:
@@ -479,39 +522,31 @@ class TerminalInferencerBase(TemplatedInferencerBase):
         Execute the terminal command and return parsed output.
 
         This method:
-        1. Runs pre-execution scripts (if any)
+        1. Runs pre-execution scripts (if any, and if not handled inline)
         2. Constructs the command using construct_command()
         3. Executes the command using _execute_command()
         4. Runs post-execution scripts (if any)
         5. Optionally saves output to file
-        6. Parses output using parse_output()
-
-        Args:
-            inference_input: Input for the inference (passed to construct_command).
-            inference_config: Optional configuration (currently unused).
-            **kwargs: Additional arguments passed to construct_command.
-                - pre_exec_scripts: Override pre-execution scripts
-                - post_exec_scripts: Override post-execution scripts
+        6. Parses and wraps output
 
         Returns:
-            Parsed output from parse_output().
+            Parsed output from parse_output(), wrapped by _wrap_parse_output().
         """
         # Get pre/post scripts (allow override via kwargs)
         pre_scripts = kwargs.pop("pre_exec_scripts", self.pre_exec_scripts)
         post_scripts = kwargs.pop("post_exec_scripts", self.post_exec_scripts)
 
-        # 1. Run pre-execution scripts
-        if pre_scripts:
+        # 1. Run pre-execution scripts (only if not handled inline by subclass)
+        if pre_scripts and not self._run_pre_exec_scripts_in_subprocess_shell():
             self.log_debug(f"Running {len(pre_scripts)} pre-execution script(s)", "Pre")
             pre_result = self._execute_scripts(pre_scripts, script_type="pre")
 
             if not pre_result["success"] and self.fail_on_pre_script_error:
-                # Return early with error if pre-script fails
-                return self.parse_output(
+                return self._wrap_parse_output(self.parse_output(
                     stdout="",
                     stderr=f"Pre-execution script failed: {pre_result.get('error', '')}",
                     return_code=-1,
-                )
+                ))
 
         # 2. Construct the command
         command = self.construct_command(inference_input, **kwargs)
@@ -528,7 +563,6 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             post_result = self._execute_scripts(post_scripts, script_type="post")
 
             if not post_result["success"] and self.fail_on_post_script_error:
-                # Append post-script error to stderr
                 result["stderr"] = (
                     result.get("stderr", "")
                     + f"\nPost-execution script failed: {post_result.get('error', '')}"
@@ -542,15 +576,35 @@ class TerminalInferencerBase(TemplatedInferencerBase):
             if result.get("stdout"):
                 self._save_output(result["stdout"], output_path)
 
-        # 6. Parse and return
+        # 6. Parse, wrap, and return
         parsed_result = self.parse_output(
             stdout=result.get("stdout", ""),
             stderr=result.get("stderr", ""),
             return_code=result.get("return_code", -1),
         )
 
-        # Override success if post-script failed and fail_on_post_script_error is True
         if post_script_failed:
             parsed_result["success"] = False
 
-        return parsed_result
+        return self._wrap_parse_output(parsed_result)
+
+
+# === Convenience MI class: terminal + templates (no streaming) ===
+
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
+
+
+@attrs
+class TerminalTemplatedInferencerBase(TerminalInferencerBase, TemplatedInferencerBase):
+    """Sync terminal + templates (no streaming/session).
+
+    MRO: TTIB → TIB → TemplatedIB → IB → Debuggable → Resumable → ABC.
+
+    Use this for non-streaming terminal inferencers that need templated
+    prompts. No production leaves use this today; provided for completeness
+    of the axes design.
+    """
+
+    pass

@@ -7,11 +7,11 @@ Follows the same pattern as ``ClaudeCodeCliInferencer``.
 Usage::
 
     # Single-turn:
-    inf = RovoDevCliInferencer(working_dir="/path/to/repo")
+    inf = RovoDevCliInferencer(target_path="/path/to/repo")
     result = inf("What does this repo do?")
 
     # Multi-turn (auto-resume):
-    inf = RovoDevCliInferencer(working_dir="/repo")
+    inf = RovoDevCliInferencer(target_path="/repo")
     r1 = inf.new_session("My number is 42")
     r2 = inf("What is my number?")  # auto-resumes last session
 
@@ -24,7 +24,7 @@ Usage::
 
     # Structured output:
     inf = RovoDevCliInferencer(
-        working_dir="/repo",
+        target_path="/repo",
         output_schema='{"type":"object","properties":{"answer":{"type":"string"}}}',
     )
     result = inf("What is 2+2?")
@@ -56,7 +56,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.co
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalInferencerResponse,
-    TerminalSessionInferencerBase,
+    TerminalSessionTemplatedInferencerBase,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ _NON_LEGACY_OUTPUT_SCHEMA = '{"type":"object","properties":{"response":{"type":"
 
 
 @attrs
-class RovoDevCliInferencer(TerminalSessionInferencerBase):
+class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     """Rovo Dev CLI inferencer (``acli rovodev legacy`` or ``acli rovodev``).
 
     Supports two CLI modes controlled by ``enable_legacy``:
@@ -112,11 +112,12 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
     acli_path: Optional[str] = attrib(default=None)
     config_file: Optional[str] = attrib(default=None)
     config_override: Optional[str] = attrib(
-        default='{"agent": {"modelId": "anthropic:claude-opus-4-6"}}'
+        default='{"agent": {"modelId": "anthropic:claude-opus-4-7"}}'
     )
     cloud_id: Optional[str] = attrib(default=None)
     yolo: bool = attrib(default=True)
     enable_deep_plan: bool = attrib(default=False)
+    efficiency_level: Optional[str] = attrib(default=None)
     xid: Optional[str] = attrib(default=None)
     output_schema: Optional[str] = attrib(default=None)
     output_file: Optional[str] = attrib(default=None)
@@ -142,8 +143,6 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
             import shutil
 
             self.acli_path = shutil.which(ACLI_BINARY)
-        if self.working_dir is None:
-            self.working_dir = os.getcwd()
         super().__attrs_post_init__()
 
     # =========================================================================
@@ -334,7 +333,7 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
             shell=True,
             capture_output=True,
             text=True,
-            cwd=self.working_dir,
+            cwd=self._resolve_subprocess_cwd(),
             env=env,
         )
         result_dict = self.parse_output(
@@ -621,12 +620,12 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         # Extract the real session ID from the sessions directory.
         # After a successful run, the most recently modified session in
         # ~/.rovodev/sessions/ is the one we just created/used.
-        session_id_found = find_latest_session_id(workspace_path=self.working_dir)
+        session_id_found = find_latest_session_id(workspace_path=self.effective_cwd)
         if session_id_found:
             self.active_session_id = session_id_found
             self.log_debug(f"Captured session ID: {session_id_found}", "Async")
             ensure_session_metadata(
-                session_id_found, workspace_path=self.working_dir
+                session_id_found, workspace_path=self.effective_cwd
             )
 
         # Note: temp output file cleanup is handled by ainfer_streaming() itself
@@ -675,12 +674,12 @@ class RovoDevCliInferencer(TerminalSessionInferencerBase):
         # Extract the real session ID from the sessions directory.
         if getattr(result, "success", False):
             session_id_found = find_latest_session_id(
-                workspace_path=self.working_dir
+                workspace_path=self.effective_cwd
             )
             if session_id_found:
                 self.active_session_id = session_id_found
                 self.log_debug(f"Captured session ID: {session_id_found}", "Sync")
                 ensure_session_metadata(
-                    session_id_found, workspace_path=self.working_dir
+                    session_id_found, workspace_path=self.effective_cwd
                 )
         return result

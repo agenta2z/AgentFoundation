@@ -269,5 +269,9 @@ class NamespacedGraphReporter:
     def node_interactive(self, node_id: str) -> "NodeStreamInteractive":
         return self._parent.node_interactive(self._qualify(node_id))
 
+    async def on_graph_reconcile(self, node_statuses: dict) -> None:
+        qualified = {self._qualify(nid): status for nid, status in node_statuses.items()}
+        await self._parent.on_graph_reconcile(qualified)
+
     def child_reporter(self, parent_node_id: str) -> "NamespacedGraphReporter":
         return NamespacedGraphReporter(self._parent, self._qualify(parent_node_id))

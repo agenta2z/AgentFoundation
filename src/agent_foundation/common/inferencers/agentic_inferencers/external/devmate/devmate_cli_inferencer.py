@@ -19,7 +19,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.co
     SessionMode,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
-    TerminalSessionInferencerBase,
+    TerminalSessionTemplatedInferencerBase,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _looks_like_tool_use_corruption(error_text: str) -> bool:
 
 
 @attrs
-class DevmateCliInferencer(TerminalSessionInferencerBase):
+class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     """
     DevMate CLI inferencer for executing DevMate CLI commands.
 
@@ -199,9 +199,9 @@ class DevmateCliInferencer(TerminalSessionInferencerBase):
         if self.repo_path is None:
             self.repo_path = os.path.expanduser("~/fbsource")
 
-        # Set working_dir to repo_path for command execution
-        if self.working_dir is None:
-            self.working_dir = self.repo_path
+        # Mirror repo_path into target_path so TIB's effective_cwd derives from it
+        if self.target_path is None:
+            self.target_path = self.repo_path
 
         # Set up pre-execution script to cd to repo directory
         # This is required because devmate needs to be run from within the repo

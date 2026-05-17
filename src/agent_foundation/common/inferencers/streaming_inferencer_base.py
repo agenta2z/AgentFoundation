@@ -41,10 +41,8 @@ from attr import attrib, attrs
 import contextvars
 
 from agent_foundation.common.inferencers.inferencer_base import (
+    InferencerBase,
     _current_fallback_state,
-)
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TemplatedInferencerBase,
 )
 from agent_foundation.common.inferencers.constants.paths import DEFAULT_RECOVERY_DIR
 from agent_foundation.common.inferencers.recovery import render_recovery_prompt
@@ -101,8 +99,13 @@ def _read_partial_from_cache(cache_path: str) -> Optional[str]:
 
 
 @attrs
-class StreamingInferencerBase(TemplatedInferencerBase):
-    """Base class for streaming inferencers with idle timeout, caching, and session management.
+class StreamingInferencerBase(InferencerBase):
+    """Streaming + cache-based recovery base. Inherits from InferencerBase.
+
+    One of three orthogonal axes (streaming, terminal-exec, templating).
+    Recovery-prompt rendering uses ``template_manager`` if present
+    (duck-typed via ``getattr``) and falls back to a module-level
+    Jinja-only renderer otherwise.
 
     Provides:
     - ``ainfer_streaming()`` — async streaming with per-chunk idle timeout + cache
@@ -222,12 +225,13 @@ class StreamingInferencerBase(TemplatedInferencerBase):
 
     def __attrs_post_init__(self):
         super().__attrs_post_init__()
-        if self.use_default_prompt_templates and self.template_manager is not None:
+        tm = getattr(self, "template_manager", None)
+        if self.use_default_prompt_templates and tm is not None:
             from rich_python_utils.string_utils.formatting.template_manager import (
                 TemplateRootPriority,
             )
 
-            self.template_manager.add_template_root(
+            tm.add_template_root(
                 _DEFAULT_RECOVERY_DIR, priority=TemplateRootPriority.LOWEST
             )
 
@@ -243,11 +247,9 @@ class StreamingInferencerBase(TemplatedInferencerBase):
         fall through to RESTART).
         """
         key = f"{self.fallback_recovery_template_key}/{mode.value}"
-        if self.template_manager is not None:
-            # Pass active_template_type="" to bypass the type suffix.
-            # Without this, a TM with active_template_type="main" would look
-            # for "recovery/main/continue" instead of "recovery/continue".
-            return self.template_manager(
+        tm = getattr(self, "template_manager", None)
+        if tm is not None:
+            return tm(
                 key,
                 active_template_type="",
                 prompt=prompt,

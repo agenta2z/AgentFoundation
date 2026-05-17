@@ -19,6 +19,9 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
+    TerminalInferencerBase,
+)
 
 _MAX_STDOUT_LINE_BYTES: int = 16 * 1024 * 1024  # 16 MB
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
@@ -54,23 +57,21 @@ def _convert_large_input_mode(value: Any) -> LargeInputMode:
 
 
 @attrs
-class TerminalSessionInferencerBase(StreamingInferencerBase):
-    """Base for CLI/terminal-based streaming inferencers.
+class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerBase):
+    """Async-streaming terminal inferencer with session management.
 
-    Executes commands via subprocess and streams stdout line-by-line.
+    Multiple inheritance: TerminalInferencerBase provides subprocess
+    execution (effective_cwd, target_path, pre/post_exec_scripts, env_vars,
+    timeout, _execute_command, _resolve_subprocess_cwd). StreamingInferencerBase
+    provides streaming/cache scaffolding and recovery.
+
+    MRO: TSIB → TIB → SIB → IB → Debuggable → Resumable → ABC.
+
     Subclasses implement ``construct_command()``, ``parse_output()``,
     and ``_build_session_args()``.
-
-    Attributes:
-        working_dir: Working directory for subprocess execution.
-        pre_exec_scripts: Shell commands to run before the main command.
-        session_arg_name: CLI argument name for session ID.
-        resume_arg_name: CLI argument name for resume flag.
     """
 
-    # Terminal-specific attributes
-    working_dir: Optional[str] = attrib(default=None)
-    pre_exec_scripts: Optional[List[str]] = attrib(default=None)
+    # Session-specific attributes (effective_cwd, pre_exec_scripts inherited from TIB)
     session_arg_name: str = attrib(default="--session-id")
     resume_arg_name: str = attrib(default="--resume")
 
@@ -85,10 +86,9 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
     # Polling interval (seconds) for checking if the subprocess has exited.
     _subprocess_exit_poll_interval: float = attrib(default=0.5, repr=False)
 
-    # Internal state for streaming result
-    _last_streaming_output: str = attrib(default="", init=False, repr=False)
+    # Internal state (_last_streaming_output and _last_streaming_return_code
+    # are inherited from TerminalInferencerBase; only stderr is TSIB-specific)
     _last_streaming_stderr: str = attrib(default="", init=False, repr=False)
-    _last_streaming_return_code: int = attrib(default=0, init=False, repr=False)
 
     # === Abstract Methods ===
 
@@ -134,27 +134,7 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         """
         raise NotImplementedError
 
-    def _resolve_subprocess_cwd(self, cwd: Optional[str] = None) -> Optional[str]:
-        """Return ``cwd`` adapted for the platform's CreateProcess limit.
-
-        On Windows, ``CreateProcessW``'s ``lpCurrentDirectory`` enforces
-        MAX_PATH=260 even when the registry's ``LongPathsEnabled`` flag is
-        set — that flag only lifts the limit for file APIs, not process
-        creation. The documented escape hatch is the ``\\\\?\\`` namespace
-        prefix, which raises the cap to ~32K wide chars. Applied lazily
-        only when the path is long enough to risk truncation, so short
-        paths remain unchanged and Linux/macOS are no-ops.
-        """
-        if cwd is None:
-            cwd = self.working_dir
-        if not cwd or sys.platform != "win32":
-            return cwd
-        if cwd.startswith("\\\\?\\"):
-            return cwd
-        absolute = os.path.abspath(cwd)
-        if len(absolute) < 240:
-            return absolute
-        return "\\\\?\\" + absolute
+    # _resolve_subprocess_cwd is inherited from TerminalInferencerBase
 
     # === Helpers: subprocess pipe-hang prevention ===
 
@@ -470,33 +450,31 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
         return_code = self._last_streaming_return_code
 
         result_dict = self.parse_output(stdout, stderr, return_code)
-        return TerminalInferencerResponse.from_dict(result_dict)
+        return self._wrap_parse_output(result_dict)
 
-    def _infer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
-    ) -> Any:
-        """Sync execution via subprocess.run().
+    # _infer is inherited from TerminalInferencerBase (richer pipeline with
+    # timeout, env_vars, pre/post-exec scripts, output file saving).
+    # Return-type wrapping handled by _wrap_parse_output below.
 
-        Args:
-            inference_input: Input data for inference.
-            inference_config: Optional configuration (unused).
-            **kwargs: Additional arguments passed to ``construct_command()``.
+    def _wrap_parse_output(self, parsed):
+        """Wrap parsed output in TerminalInferencerResponse.
 
-        Returns:
-            TerminalInferencerResponse wrapping ``parse_output()`` result.
+        Handles both dict (standard parse_output return) and
+        TerminalInferencerResponse (if parse_output already wrapped).
         """
-        command = self.construct_command(inference_input, **kwargs)
-        full_command = self._build_full_command(command)
+        if isinstance(parsed, TerminalInferencerResponse):
+            return parsed
+        return TerminalInferencerResponse.from_dict(parsed)
 
-        result = subprocess.run(
-            full_command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=self._resolve_subprocess_cwd(),
-        )
-        result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
-        return TerminalInferencerResponse.from_dict(result_dict)
+    def _run_pre_exec_scripts_in_subprocess_shell(self) -> bool:
+        """Session subclasses chain pre-scripts via '&&' in the main shell
+        (env-vars propagate to the main command). This disables TIB's
+        separate _execute_scripts call to avoid double-execution.
+
+        The streaming paths (_ainfer_streaming, _infer_streaming) call
+        _build_full_command() which handles the chaining.
+        """
+        return True
 
     # === Concrete: _infer_streaming (sync subprocess line streaming) ===
 
@@ -592,3 +570,26 @@ class TerminalSessionInferencerBase(StreamingInferencerBase):
             await self._safe_process_cleanup(process)
             self._last_streaming_output = "".join(collected)
             self._last_streaming_return_code = process.returncode
+
+
+# === Convenience MI class: terminal + streaming + templates ===
+
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
+
+
+@attrs
+class TerminalSessionTemplatedInferencerBase(
+    TerminalSessionInferencerBase, TemplatedInferencerBase,
+):
+    """Terminal + streaming + templates.
+
+    MRO: TSTIB → TSIB → TIB → SIB → TemplatedIB → IB → Debuggable → Resumable → ABC.
+
+    Use this for CLI inferencers that need all three axes (ClaudeCode, Kiro,
+    Devmate, RovoDev). Use TerminalSessionInferencerBase directly if you
+    don't want templates (Metamate).
+    """
+
+    pass

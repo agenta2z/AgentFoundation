@@ -21,14 +21,14 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
-    TerminalSessionInferencerBase,
+    TerminalSessionTemplatedInferencerBase,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 @attrs
-class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
+class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     """Claude Code CLI as a terminal-based streaming inferencer with session continuation.
 
     Inherits from TerminalSessionInferencerBase which provides:
@@ -63,7 +63,7 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     Attributes:
         target_path: Absolute path to the target repository/workspace where the
             Claude Code CLI agent operates (e.g., ``"/data/users/me/fbsource"``).
-            Used as the ``working_dir`` for the CLI subprocess, so Claude's
+            Used as the ``effective_cwd`` for the CLI subprocess, so Claude's
             file operations are rooted here.
             Defaults to ``~/fbsource`` if not specified.
         model_name: Model alias or full name (default: "sonnet").
@@ -90,7 +90,6 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
     idle_timeout_seconds: int = attrib(default=1800)
     tool_use_idle_timeout_seconds: int = attrib(default=7200)
     empty_line_mode: EmptyLineMode = attrib(default=EmptyLineMode.SUPPRESS_LEADING)
-    target_path: Optional[str] = attrib(default=None)
     model_name: str = attrib(default="sonnet")
     claude_command: str = attrib(default="claude")
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
@@ -117,8 +116,6 @@ class ClaudeCodeCliInferencer(TerminalSessionInferencerBase):
 
         if self.target_path is None:
             self.target_path = os.path.expanduser("~/fbsource")
-        if self.working_dir is None:
-            self.working_dir = self.target_path
         self.model_name = resolve_model_tag(self.model_name)
         self._resolve_claude_command()
         super().__attrs_post_init__()

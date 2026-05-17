@@ -34,7 +34,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.ro
 @pytest.fixture
 def inferencer(tmp_path):
     """Create an inferencer with a fake acli path."""
-    return RovoDevCliInferencer(acli_path="/usr/bin/acli", working_dir=str(tmp_path))
+    return RovoDevCliInferencer(acli_path="/usr/bin/acli", target_path=str(tmp_path))
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def inferencer_with_all_options(tmp_path):
     """Create an inferencer with all options set."""
     return RovoDevCliInferencer(
         acli_path="/usr/bin/acli",
-        working_dir=str(tmp_path),
+        target_path=str(tmp_path),
         config_file="/tmp/config.yml",
         cloud_id="abc-123",
         yolo=True,
@@ -74,7 +74,7 @@ class TestConstructCommand:
     def test_yolo_disabled(self, tmp_path):
         """No --yolo when yolo=False."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path), yolo=False
+            acli_path="/usr/bin/acli", target_path=str(tmp_path), yolo=False
         )
         cmd = inf.construct_command("Hello")
         assert "--yolo" not in cmd
@@ -141,7 +141,7 @@ class TestConstructCommand:
 
     def test_acli_not_found(self, tmp_path):
         """RovoDevNotFoundError when acli path is invalid."""
-        inf = RovoDevCliInferencer(acli_path=None, working_dir=str(tmp_path))
+        inf = RovoDevCliInferencer(acli_path=None, target_path=str(tmp_path))
         inf.acli_path = None  # Force None after __attrs_post_init__
         with pytest.raises(RovoDevNotFoundError):
             inf.construct_command("Hello")
@@ -415,7 +415,7 @@ class TestRegistration:
 def non_legacy_inferencer(tmp_path):
     """Create a non-legacy (TUI) mode inferencer."""
     return RovoDevCliInferencer(
-        acli_path="/usr/bin/acli", working_dir=str(tmp_path), enable_legacy=False
+        acli_path="/usr/bin/acli", target_path=str(tmp_path), enable_legacy=False
     )
 
 
@@ -437,7 +437,7 @@ class TestNonLegacyConstructCommand:
     def test_user_schema_preserved(self, tmp_path):
         """User's output_schema is used instead of auto-injected."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, output_schema='{"type":"object","properties":{"answer":{"type":"string"}}}',
         )
         cmd = inf.construct_command("Hello")
@@ -448,7 +448,7 @@ class TestNonLegacyConstructCommand:
     def test_no_auto_schema_when_raw_off(self, tmp_path):
         """No auto-injection when raw_output_to_file=False."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, raw_output_to_file=False,
         )
         cmd = inf.construct_command("Hello")
@@ -462,7 +462,7 @@ class TestNonLegacyConstructCommand:
     def test_jira_skipped(self, tmp_path, caplog):
         """--jira absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, jira="https://jira/PROJ-1",
         )
         with caplog.at_level(logging.WARNING):
@@ -473,7 +473,7 @@ class TestNonLegacyConstructCommand:
     def test_deep_plan_skipped(self, tmp_path, caplog):
         """--enable-deep-plan absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, enable_deep_plan=True,
         )
         with caplog.at_level(logging.WARNING):
@@ -484,7 +484,7 @@ class TestNonLegacyConstructCommand:
     def test_agent_mode_skipped(self, tmp_path, caplog):
         """--agent-mode absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, agent_mode="ask",
         )
         with caplog.at_level(logging.WARNING):
@@ -500,7 +500,7 @@ class TestNonLegacyConstructCommand:
     def test_xid_present(self, tmp_path):
         """--xid works in non-legacy mode (hidden flag in TUI)."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, xid="test-xid",
         )
         cmd = inf.construct_command("Hello")
@@ -517,7 +517,7 @@ class TestNonLegacyConstructCommand:
     def test_config_override(self, tmp_path):
         """--config-override included in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, config_override='{"agent":{"modelId":"opus"}}',
         )
         cmd = inf.construct_command("Hello")
@@ -526,7 +526,7 @@ class TestNonLegacyConstructCommand:
     def test_enable_legacy_default_true(self, tmp_path):
         """Default enable_legacy is True (backward compat)."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
         )
         assert inf.enable_legacy is True
         cmd = inf.construct_command("Hello")
@@ -606,7 +606,7 @@ class TestNonLegacyParseOutput:
     def test_user_schema_skips_json_extraction(self, tmp_path):
         """When user sets output_schema, JSON extraction is skipped."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", working_dir=str(tmp_path),
+            acli_path="/usr/bin/acli", target_path=str(tmp_path),
             enable_legacy=False, output_schema='{"type":"object"}',
         )
         stdout = '{"response": "should not extract"}'

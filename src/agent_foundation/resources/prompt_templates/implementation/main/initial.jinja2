@@ -49,6 +49,7 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * DO NOT re-investigate the entire codebase from scratch.
 - Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
   * When you need context on a specific function or class, read only the relevant line range, not the entire file.
+- {{ instructions.behavior.file_reading_fallback }}
 - After writing your execution/implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * The execution/implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.

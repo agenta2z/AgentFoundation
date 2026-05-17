@@ -7,7 +7,6 @@ TerminalSessionInferencerBase implementation.
 """
 
 import logging
-import os
 import subprocess
 from typing import Any, Dict, List, Optional
 
@@ -15,14 +14,14 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
-    TerminalSessionInferencerBase,
+    TerminalSessionTemplatedInferencerBase,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 @attrs
-class KiroCliInferencer(TerminalSessionInferencerBase):
+class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
     """Kiro CLI as a terminal-based streaming inferencer with session continuation.
 
     Inherits from TerminalSessionInferencerBase which provides:
@@ -52,7 +51,7 @@ class KiroCliInferencer(TerminalSessionInferencerBase):
 
     Attributes:
         target_path: Absolute path to the target repository/workspace where the
-            Kiro CLI agent operates. Used as the ``working_dir`` for the CLI
+            Kiro CLI agent operates. Used as the ``effective_cwd`` for the CLI
             subprocess. Defaults to ``os.getcwd()`` if not specified.
         agent_name: Optional custom agent via ``--agent``.
         model_name: Model to use via ``--model`` (default: ``"auto"``).
@@ -71,7 +70,6 @@ class KiroCliInferencer(TerminalSessionInferencerBase):
     """
 
     # Kiro CLI-specific attributes
-    target_path: Optional[str] = attrib(default=None)
     agent_name: Optional[str] = attrib(default=None)
     model_name: str = attrib(default="auto")
     trust_mode: str = attrib(default="all")
@@ -87,10 +85,6 @@ class KiroCliInferencer(TerminalSessionInferencerBase):
             resolve_model_tag,
         )
 
-        if self.target_path is None:
-            self.target_path = os.getcwd()
-        if self.working_dir is None:
-            self.working_dir = self.target_path
         if self.model_name and self.model_name != "auto":
             self.model_name = resolve_model_tag(self.model_name)
         super().__attrs_post_init__()
@@ -265,7 +259,7 @@ class KiroCliInferencer(TerminalSessionInferencerBase):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=self.working_dir,
+                cwd=self._resolve_subprocess_cwd(),
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
