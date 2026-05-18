@@ -189,6 +189,12 @@ class RovoChatInferencer(StreamingInferencerBase):
     def __attrs_post_init__(self) -> None:
         super().__attrs_post_init__()
         self._resolve_connection_from_env()
+        # ``model_id`` (cascaded from YAML ``_model_id:``) has NO effect on
+        # RovoChat — the upstream API does NOT accept a per-call model
+        # parameter. Model selection is determined server-side by the
+        # configured ``agent_named_id`` / ``agent_id``. We warn loudly when
+        # ``model_id`` is set so configuration mistakes don't go silent.
+        self._warn_if_model_id_set()
         auth_mode = "Basic" if (self.email and self.api_token) else ("UCT" if self.uct_token else ("ASAP" if self.asap_issuer else "none"))
         self.log_info(
             f"base_url={self.base_url}, cloud_id={self.cloud_id}, "
@@ -198,6 +204,35 @@ class RovoChatInferencer(StreamingInferencerBase):
             f"total_timeout={self.total_timeout_seconds}s",
             "Config",
         )
+
+    def _warn_if_model_id_set(self) -> None:
+        """Log a one-time warning if ``model_id`` is set on this inferencer.
+
+        RovoChat does NOT support per-call model selection. The HTTP API
+        (``send_message_stream``) accepts only ``conversation_id``,
+        ``agent_id``, and ``agent_named_id`` — no ``model``, ``modelId``,
+        or equivalent. Model selection is determined server-side by the
+        agent configuration.
+
+        Callers can:
+        - Set ``agent_named_id`` to select a different agent (and thus a
+          different server-side model binding)
+        - Coordinate with the RovoChat team to register a new agent if a
+          specific model is required
+
+        Setting ``model_id`` is silently ignored by the API — this warning
+        surfaces the mistake at construction time so it's not missed.
+        """
+        mid = getattr(self, "model_id", "") or ""
+        if mid:
+            self.log_warning(
+                f"model_id={mid!r} is set but RovoChat IGNORES it — the "
+                "API has no per-call model parameter. Model selection is "
+                "server-side via agent_named_id/agent_id. Either remove "
+                "model_id from the cascade or set agent_named_id to "
+                "select a different agent.",
+                "ModelIdIgnored",
+            )
 
     # === Internal Helpers ===
 

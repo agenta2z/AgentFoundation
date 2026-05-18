@@ -144,7 +144,74 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             import shutil
 
             self.acli_path = shutil.which(ACLI_BINARY)
+        # Translate inherited ``model_id`` (from InferencerBase) into the
+        # RovoDev-specific ``config_override.agent.modelId`` field.
+        #
+        # YAML cascade contract: ``_model_id: <id>`` at any ancestor cascades
+        # to every leaf inferencer's ``model_id``. RovoDev's actual model
+        # selection mechanism is ``config_override.agent.modelId``, so we
+        # translate here. When ``model_id`` is empty (the inherited default),
+        # ``config_override`` is left at its own framework default
+        # (``claude-opus-4-7``), preserving back-compat for callers that
+        # don't set ``model_id`` and rely on the legacy ``config_override``.
+        self._translate_model_id_to_config_override()
         super().__attrs_post_init__()
+
+    def _translate_model_id_to_config_override(self) -> None:
+        """Translate ``self.model_id`` → ``config_override.agent.modelId``.
+
+        RovoDev's CLI uses ``--config-override <json>`` to drive model
+        selection. The inherited ``model_id`` attribute (declared by
+        ``InferencerBase``) is the canonical cascade target; this helper
+        bridges it to RovoDev's native format.
+
+        Resolution rules (in priority order):
+
+        1. If ``model_id`` is empty → no-op (legacy default
+           ``config_override`` wins; preserves backward compat for callers
+           that never set ``model_id``).
+        2. If ``model_id`` is set → upsert ``agent.modelId`` in the existing
+           ``config_override`` JSON, preserving any other keys (e.g.,
+           ``toolPermissions``).
+
+        Model ID format:
+
+        - ``model_id`` should be a bare Anthropic ID like
+          ``claude-opus-4-7`` or ``claude-sonnet-4-6``. The ``anthropic:``
+          prefix is added automatically.
+        - Alias forms like ``opus[1m]`` from ``ClaudeModels`` are
+          PASSED THROUGH UNCHANGED — if RovoDev's router accepts them,
+          they work; if not, RovoDev errors loudly. Translation does NOT
+          attempt alias resolution because RovoDev owns its own router.
+
+        Examples::
+
+            model_id="claude-opus-4-7"
+              → config_override="{\\"agent\\": {\\"modelId\\":
+                \\"anthropic:claude-opus-4-7\\"}}"
+
+            model_id="anthropic:claude-opus-4-7"  # already prefixed
+              → config_override="{\\"agent\\": {\\"modelId\\":
+                \\"anthropic:claude-opus-4-7\\"}}"  # unchanged
+        """
+        mid = getattr(self, "model_id", "") or ""
+        if not mid:
+            return  # no-op: keep current config_override default
+        try:
+            base = (
+                json.loads(self.config_override)
+                if self.config_override
+                else {}
+            )
+            if not isinstance(base, dict):
+                base = {}
+        except (json.JSONDecodeError, TypeError):
+            base = {}
+        # Auto-prefix with anthropic: if missing (matches existing default)
+        normalized = mid if ":" in mid else f"anthropic:{mid}"
+        agent = base.setdefault("agent", {})
+        agent["modelId"] = normalized
+        self.config_override = json.dumps(base)
 
     # =========================================================================
     # Config override composition (merges base allowed_paths into acli config)
