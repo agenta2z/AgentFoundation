@@ -5,6 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from functools import partial
+from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Iterable, Iterator, List, Optional, Sequence, Type, Union
 
 from attr import attrib, attrs
@@ -12,6 +13,7 @@ from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 from rich_python_utils.common_utils import dict_, iter__, resolve_environ
 from rich_python_utils.common_utils.function_helper import FallbackMode, execute_with_retry
+from rich_python_utils.path_utils import AllowedPath, PathAccess
 
 # Retry prompt mode constants
 RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
@@ -118,6 +120,26 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # on flow inferencers), resolves to workspace.outputs_dir/<output_path>.
     # Simple API inferencers leave this as None.
     output_path: Optional[str] = attrib(default=None)
+
+    # Paths the inferencer (and any child subprocess it may spawn) should be
+    # permitted to access in addition to its default scope (e.g., subprocess
+    # cwd, API-provided context). Backend-neutral DATA slot — subclasses with
+    # a native path-allowlist concept (e.g., RovoDevCliInferencer with acli's
+    # toolPermissions.allowedExternalPaths) translate this list into their
+    # native flag in their command/request construction; subclasses without
+    # such a concept (mock, in-process Python, ...) simply ignore it.
+    #
+    # Orchestrators (LinearWorkflowInferencer, BreakdownThenAggregateInferencer,
+    # ...) also carry the field so callers can set it once at the top level and
+    # propagate to descendants alongside _workspace.
+    #
+    # Read effective values via ``effective_allowed_paths`` which auto-includes
+    # the leaf's own ``workspace.root`` (with PathAccess.ALL) when a workspace
+    # is set — that's a free safety net so an inferencer can always reach its
+    # own workspace tree, regardless of how target_path / cwd are configured.
+    # Cross-subtree reads (e.g., a leaf reading a SIBLING's artifacts) require
+    # the orchestrator/executor to plumb the top task root explicitly.
+    additional_allowed_paths: List[AllowedPath] = attrib(factory=list)
 
     output_is_deliverable: bool = attrib(default=False)
     """When True, output file is copied into final_deliverables/ after
@@ -250,6 +272,71 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # stale cached paths from surviving across consensus iterations or
     # workspace swaps.
     _DERIVED_FROM_WORKSPACE: tuple = ()
+
+    @property
+    def effective_allowed_paths(self) -> List[AllowedPath]:
+        """All extra paths granted to this inferencer beyond its default scope.
+
+        Combines explicit ``additional_allowed_paths`` with an auto-included
+        entry for ``workspace.root`` (when a workspace is set), using
+        ``PathAccess.ALL`` for the auto-included entry. Dedupes by resolved
+        absolute path; silently drops malformed paths (e.g., embedded null
+        bytes). Preserves order — user entries first, then auto-included
+        workspace.root last.
+
+        Subclasses with a native path-allowlist concept should read THIS
+        property (not the raw ``additional_allowed_paths`` field) when
+        translating into backend-specific flags. Subclasses without one
+        simply ignore it.
+
+        Scope note: this only auto-includes the leaf inferencer's OWN
+        ``workspace.root`` (e.g., for a deeply-nested fix step, that's the
+        fix step's narrow subtree). Cross-subtree reads (e.g., reading the
+        prior aggregator's output that lives at a SIBLING subtree) require
+        the orchestrator/executor to explicitly populate
+        ``additional_allowed_paths`` with the topmost task root, which then
+        flows through this property unchanged.
+
+        The base implementation does NOT compare against any "current scope"
+        (e.g., subprocess cwd) — that comparison is backend-specific. The
+        redundant case where ``workspace.root`` happens to equal the
+        subprocess cwd is harmless: any backend that enforces the allowlist
+        will either ignore the duplicate (cwd is implicitly allowed) or
+        dedupe it at translation time.
+        """
+        seen_resolved: set[str] = set()
+        result: List[AllowedPath] = []
+
+        # 1. User-provided entries first (preserve order; honor their access flags).
+        for ap in self.additional_allowed_paths or []:
+            if not ap or not ap.path:
+                continue
+            try:
+                resolved = str(Path(ap.path).resolve(strict=False))
+            except (OSError, ValueError):
+                # Pathologically bad paths (e.g., embedded null bytes): drop.
+                continue
+            if resolved in seen_resolved:
+                continue
+            seen_resolved.add(resolved)
+            result.append(ap)
+
+        # 2. Auto-include workspace.root when set (always, regardless of cwd).
+        # Redundant-with-cwd case is harmless — see docstring.
+        ws = self._workspace
+        ws_root_raw = (
+            str(ws.root) if (ws is not None and hasattr(ws, "root") and ws.root) else None
+        )
+        if ws_root_raw:
+            try:
+                ws_root_resolved = str(Path(ws_root_raw).resolve(strict=False))
+            except (OSError, ValueError):
+                ws_root_resolved = None
+            if ws_root_resolved and ws_root_resolved not in seen_resolved:
+                seen_resolved.add(ws_root_resolved)
+                result.append(AllowedPath(ws_root_resolved, access=PathAccess.ALL))
+
+        return result
 
     @classmethod
     def _detect_source_root(cls) -> "Optional[str]":
@@ -786,8 +873,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
         json_entry = (JsonLogger(
             file_path=os.path.join(log_dir, "session.jsonl"),
             append=True,
-            is_artifact=True,
-            parts_min_size=0,
             space_ext_mode=SpaceExtMode.MOVE,
         ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
         if isinstance(self.logger, dict):
@@ -1226,7 +1311,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_info(inference_input, "InferenceInput")
+        self.log_info(inference_input, "InferenceInput", is_artifact=True)
         self.log_info(inference_args, "InferenceArgs")
 
         # Convert 0 → None for timeout parameters (0 = disabled)
@@ -1311,7 +1396,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         finally:
             _current_fallback_state.reset(token)
 
-        self.log_debug(inference_response, "InferenceResponse")
+        self.log_debug(inference_response, "InferenceResponse", is_artifact=True)
 
         # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
@@ -1323,7 +1408,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.response_post_processor is not None:
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
-            self.log_debug(processed_response, "PostProcessedResponse")
+            self.log_debug(processed_response, "PostProcessedResponse", is_artifact=True)
             return processed_response
 
         return inference_response
@@ -1469,7 +1554,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if self.post_response_merger is not None:
                 all_responses = list(iterator_result)
                 merged_response = self.post_response_merger(all_responses)
-                self.log_debug(merged_response, "MergedResponse")
+                self.log_debug(merged_response, "MergedResponse", is_artifact=True)
                 return merged_response
             else:
                 return iterator_result
@@ -1841,7 +1926,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_info(inference_input, "InferenceInput")
+        self.log_info(inference_input, "InferenceInput", is_artifact=True)
         self.log_info(inference_args, "InferenceArgs")
 
         # Convert 0 → None for timeout parameters (0 = disabled)
@@ -1933,7 +2018,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         finally:
             _current_fallback_state.reset(token)
 
-        self.log_debug(inference_response, "InferenceResponse")
+        self.log_debug(inference_response, "InferenceResponse", is_artifact=True)
 
         # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
@@ -1945,7 +2030,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.response_post_processor is not None:
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
-            self.log_debug(processed_response, "PostProcessedResponse")
+            self.log_debug(processed_response, "PostProcessedResponse", is_artifact=True)
             return processed_response
 
         return inference_response
@@ -2004,7 +2089,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             if self.post_response_merger is not None:
                 merged = self.post_response_merger(all_results)
-                self.log_debug(merged, "MergedResponse")
+                self.log_debug(merged, "MergedResponse", is_artifact=True)
                 return merged
             return all_results
         else:
