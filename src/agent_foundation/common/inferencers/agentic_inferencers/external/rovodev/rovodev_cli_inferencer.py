@@ -30,6 +30,7 @@ Usage::
     result = inf("What is 2+2?")
 """
 
+import json
 import logging
 import os
 import contextvars
@@ -146,6 +147,81 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         super().__attrs_post_init__()
 
     # =========================================================================
+    # Config override composition (merges base allowed_paths into acli config)
+    # =========================================================================
+
+    def _compose_config_override_for_cli(self) -> Optional[str]:
+        """Return the ``--config-override`` JSON string to pass to acli.
+
+        Starts from ``self.config_override`` (the user's / default override),
+        then deep-merges the resolved ``effective_allowed_paths`` from the
+        base class into ``toolPermissions.allowedExternalPaths``.
+
+        acli's allowedExternalPaths is a flat path list with no R/W
+        distinction, so the ``access`` field on each ``AllowedPath`` is
+        intentionally ignored here — every path is granted whatever acli's
+        binary "external" semantics imply. If/when acli gains per-path R/W
+        scoping, this is the place to translate ``access`` accordingly.
+
+        The union with any user-supplied ``toolPermissions.allowedExternalPaths``
+        in ``config_override`` is computed at the leaf-list level so we don't
+        clobber what the user explicitly asked for.
+
+        Returns:
+            Composed JSON string, or None if both the override and the path
+            list are empty (caller should then skip the flag entirely).
+        """
+        try:
+            base = json.loads(self.config_override) if self.config_override else {}
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "config_override is not valid JSON, ignoring base and using only "
+                "effective_allowed_paths: %s",
+                e,
+            )
+            base = {}
+
+        # Collect every distinct path the inferencer wants the agent to access.
+        # `effective_allowed_paths` already auto-includes workspace.root and
+        # deduplicates by resolved absolute path.
+        path_strs = [ap.path for ap in self.effective_allowed_paths if ap and ap.path]
+
+        if not path_strs:
+            return self.config_override if base else None
+
+        if not isinstance(base, dict):
+            logger.warning(
+                "config_override is not a JSON object, ignoring base and using only "
+                "effective_allowed_paths"
+            )
+            base = {}
+
+        tool_perms = base.setdefault("toolPermissions", {})
+        if not isinstance(tool_perms, dict):
+            # Defensive: caller wrote a non-dict at toolPermissions. Replace.
+            tool_perms = {}
+            base["toolPermissions"] = tool_perms
+
+        existing = tool_perms.get("allowedExternalPaths") or []
+        if not isinstance(existing, list):
+            existing = []
+
+        # Union, preserving order: existing-first, then any new from path_strs.
+        seen = set()
+        merged: List[str] = []
+        for p in list(existing) + path_strs:
+            if not isinstance(p, str) or not p:
+                continue
+            if p in seen:
+                continue
+            seen.add(p)
+            merged.append(p)
+
+        tool_perms["allowedExternalPaths"] = merged
+
+        return json.dumps(base)
+
+    # =========================================================================
     # Abstract method implementations
     # =========================================================================
 
@@ -222,9 +298,12 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 parts.append("--enable-deep-plan")
             if self.agent_mode:
                 parts.extend(["--agent-mode", self.agent_mode])
-            # config_override works in both legacy and non-legacy modes
-            if self.config_override:
-                parts.extend(["--config-override", shlex.quote(self.config_override)])
+            # config_override works in both legacy and non-legacy modes; we
+            # compose it dynamically so effective_allowed_paths (from the base)
+            # gets merged into toolPermissions.allowedExternalPaths.
+            composed_override = self._compose_config_override_for_cli()
+            if composed_override:
+                parts.extend(["--config-override", shlex.quote(composed_override)])
         else:
             # Non-legacy: auto-inject --output-schema for clean output capture
             # when user hasn't set their own schema and raw_output_to_file is on.
@@ -232,9 +311,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 parts.extend(["--output-schema", shlex.quote(_NON_LEGACY_OUTPUT_SCHEMA)])
                 kwargs["_auto_output_schema"] = True
 
-            # config_override works in both legacy and non-legacy modes
-            if self.config_override:
-                parts.extend(["--config-override", shlex.quote(self.config_override)])
+            # config_override works in both legacy and non-legacy modes; see above.
+            composed_override = self._compose_config_override_for_cli()
+            if composed_override:
+                parts.extend(["--config-override", shlex.quote(composed_override)])
 
             # Warn about legacy-only flags that were set
             for flag_name, flag_val in [

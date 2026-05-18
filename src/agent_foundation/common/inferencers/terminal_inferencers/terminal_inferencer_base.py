@@ -41,6 +41,11 @@ class TerminalInferencerBase(InferencerBase):
         post_exec_scripts (List[str]): Shell scripts to run AFTER the main command.
         fail_on_pre_script_error (bool): If True, abort if pre-script fails.
         fail_on_post_script_error (bool): If True, fail if post-script fails.
+
+    See also: ``InferencerBase.additional_allowed_paths`` /
+    ``InferencerBase.effective_allowed_paths`` — base-level slot for extra
+    paths the subprocess should be permitted to access (translated into
+    the backend's native flag by subclasses like ``RovoDevCliInferencer``).
     """
 
     target_path: Optional[str] = attrib(default=None)
