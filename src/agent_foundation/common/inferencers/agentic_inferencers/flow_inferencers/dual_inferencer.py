@@ -28,7 +28,6 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     InferencerResponse,
     ReflectionStyles,
     ResponseSelectors,
-    Severity,
     severity_at_most,
 )
 from agent_foundation.common.inferencers.constants import (
@@ -393,7 +392,7 @@ class DualInferencer(LinearWorkflowInferencer):
         if self.response_parser is None:
             self.response_parser = DualInferencer._default_response_parser
         if self.consensus_checker is None:
-            self.consensus_checker = DualInferencer._default_check_consensus
+            self.consensus_checker = self._default_check_consensus
 
         # Workspace setup. Pass the full `workspace=InferencerWorkspace(...)`
         # object (declarative form) — the legacy `workspace_root: str`
@@ -1862,17 +1861,24 @@ class DualInferencer(LinearWorkflowInferencer):
         cleaned = re.sub(r"```json\s*[\s\S]*?\s*```", "", raw).strip()
         return cleaned if cleaned else raw
 
-    @staticmethod
-    def _default_check_consensus(parsed_review: dict, threshold: Severity) -> bool:
-        """Check if consensus is reached based on review feedback."""
+    def _default_check_consensus(self, parsed_review: dict, threshold) -> bool:
+        """Check if consensus is reached based on review feedback.
+
+        Individual issues with severity above *threshold* block consensus
+        even when the reviewer set ``approved: true``.
+        """
+        levels = self.consensus_config.severity_levels
+
+        for issue in parsed_review.get("issues", []):
+            issue_sev = issue.get("severity")
+            if issue_sev is not None and not severity_at_most(issue_sev, threshold, levels):
+                return False
+
         if parsed_review.get("approved", False):
             return True
-        severity_str = parsed_review.get("severity", "MAJOR")
-        try:
-            review_severity = Severity(severity_str)
-        except ValueError:
-            return False
-        return severity_at_most(review_severity, threshold)
+
+        severity_str = parsed_review.get("severity", levels[-1] if levels else "MAJOR")
+        return severity_at_most(severity_str, threshold, levels)
 
     # endregion
 

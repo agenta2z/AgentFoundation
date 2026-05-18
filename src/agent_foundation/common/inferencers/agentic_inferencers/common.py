@@ -217,18 +217,32 @@ class Severity(StrEnum):
 _SEVERITY_ORDER = {s: i for i, s in enumerate(Severity)}
 
 
-def severity_at_most(severity: Severity, threshold: Severity) -> bool:
+def severity_at_most(severity, threshold, severity_levels=None) -> bool:
     """Check if severity is at or below the threshold level.
 
     Args:
         severity: The severity to check.
         threshold: The maximum acceptable severity.
+        severity_levels: Optional ordered sequence of severity values
+            (least to most severe). When provided, ordering is derived
+            from this sequence instead of the default Severity enum.
 
     Returns:
-        True if severity <= threshold in the ordering
-        (NONE < COSMETIC < MINOR < MAJOR < CRITICAL).
+        True if severity <= threshold in the ordering.
+        False if either value is not found in the ordering.
     """
-    return _SEVERITY_ORDER[severity] <= _SEVERITY_ORDER[threshold]
+    if severity_levels is not None:
+        order = {s: i for i, s in enumerate(severity_levels)}
+    else:
+        order = _SEVERITY_ORDER
+    sev_idx = order.get(severity)
+    thr_idx = order.get(threshold)
+    if sev_idx is None or thr_idx is None:
+        return False
+    return sev_idx <= thr_idx
+
+
+_DEFAULT_SEVERITY_LEVELS = ('NONE', 'COSMETIC', 'MINOR', 'MAJOR', 'CRITICAL')
 
 
 @attrs
@@ -238,14 +252,26 @@ class ConsensusConfig:
     Attributes:
         max_iterations: Maximum propose-review-fix cycles per attempt.
         max_consensus_attempts: Maximum fresh-start attempts if consensus fails.
+        severity_levels: Ordered severity values from least to most severe.
+            Allows custom severity scales (e.g. numeric ``(0, 1, 2, 3)`` or
+            domain-specific labels). Defaults to the standard 5-level scale.
         consensus_threshold: Maximum acceptable severity level for consensus.
+            Must be a value present in ``severity_levels``.
         enable_counter_feedback: Whether fixer can reject reviewer issues.
     """
 
     max_iterations: int = attrib(default=5)
     max_consensus_attempts: int = attrib(default=1)
-    consensus_threshold: Severity = attrib(default=Severity.COSMETIC)
+    severity_levels: tuple = attrib(default=_DEFAULT_SEVERITY_LEVELS)
+    consensus_threshold = attrib(default='COSMETIC')
     enable_counter_feedback: bool = attrib(default=True)
+
+    def __attrs_post_init__(self):
+        if self.consensus_threshold not in self.severity_levels:
+            raise ValueError(
+                f"consensus_threshold={self.consensus_threshold!r} is not in "
+                f"severity_levels={self.severity_levels!r}"
+            )
 
 
 @attrs

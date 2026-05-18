@@ -39,12 +39,10 @@ def _make_mock_inferencer(response=None, side_effect=None):
     return inf
 
 
-def _review_json(approved: bool, severity: str = "COSMETIC") -> str:
+def _review_json(approved: bool, severity: str = "COSMETIC", issues=None) -> str:
     """Standard review-response JSON envelope."""
-    review = {
-        "approved": approved,
-        "severity": severity,
-        "issues": ([] if approved else [
+    if issues is None:
+        issues = ([] if approved else [
             {
                 "severity": severity,
                 "category": "test",
@@ -52,7 +50,11 @@ def _review_json(approved: bool, severity: str = "COSMETIC") -> str:
                 "location": "N/A",
                 "suggestion": "Fix it",
             }
-        ]),
+        ])
+    review = {
+        "approved": approved,
+        "severity": severity,
+        "issues": issues,
         "reasoning": "Test reasoning.",
     }
     return f"```json\n{json.dumps(review, indent=2)}\n```"
@@ -207,6 +209,219 @@ class TestCounterFeedbackPropagation(unittest.IsolatedAsyncioTestCase):
             UNIQUE_MARKER, captured_review_inputs[1],
             "Counter-feedback content from fixer should appear in next review's prompt",
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue-level severity blocking (E-03 bug fix)
+# ---------------------------------------------------------------------------
+
+
+class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
+    """approved=True must be overridden when any issue exceeds threshold."""
+
+    async def test_approved_with_major_issue_blocks_consensus(self):
+        """approved=True but a MAJOR issue exists → consensus blocked, fixer runs."""
+        fixer = _make_mock_inferencer("fixed proposal")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(side_effect=[
+                _review_json(
+                    approved=True, severity="COSMETIC",
+                    issues=[{
+                        "severity": "MAJOR",
+                        "category": "logic",
+                        "description": "Wrong classification",
+                        "location": "line 10",
+                        "suggestion": "Reclassify",
+                    }],
+                ),
+                _review_json(approved=True),
+            ]),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(
+                max_iterations=3,
+                consensus_threshold=Severity.COSMETIC,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        self.assertEqual(fixer.ainfer.call_count, 1)
+
+    async def test_approved_with_cosmetic_issues_reaches_consensus(self):
+        """approved=True + only COSMETIC issues → consensus reached."""
+        fixer = _make_mock_inferencer("should not run")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(
+                _review_json(
+                    approved=True, severity="COSMETIC",
+                    issues=[{
+                        "severity": "COSMETIC",
+                        "category": "style",
+                        "description": "Typo",
+                        "location": "line 5",
+                        "suggestion": "Fix typo",
+                    }],
+                ),
+            ),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(
+                max_iterations=3,
+                consensus_threshold=Severity.COSMETIC,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        fixer.ainfer.assert_not_called()
+
+    async def test_approved_no_issues_reaches_consensus(self):
+        """approved=True + empty issues list → consensus reached."""
+        fixer = _make_mock_inferencer("should not run")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(
+                _review_json(approved=True, issues=[]),
+            ),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(
+                max_iterations=3,
+                consensus_threshold=Severity.COSMETIC,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        fixer.ainfer.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Generic severity_levels
+# ---------------------------------------------------------------------------
+
+
+class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
+    """severity_levels allows custom severity scales."""
+
+    async def test_numeric_severity_levels(self):
+        """Numeric-string severity scale: severity ≤ threshold → consensus."""
+        fixer = _make_mock_inferencer("fixed")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(
+                _review_json(approved=False, severity="1", issues=[]),
+            ),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(
+                severity_levels=("0", "1", "2", "3", "4", "5"),
+                consensus_threshold="2",
+                max_iterations=3,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        fixer.ainfer.assert_not_called()
+
+    async def test_numeric_severity_above_threshold_blocks(self):
+        """Numeric-string severity scale: severity > threshold → fixer runs."""
+        fixer = _make_mock_inferencer("fixed")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(side_effect=[
+                _review_json(approved=False, severity="4", issues=[]),
+                _review_json(approved=True, issues=[]),
+            ]),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(
+                severity_levels=("0", "1", "2", "3", "4", "5"),
+                consensus_threshold="2",
+                max_iterations=3,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        self.assertEqual(fixer.ainfer.call_count, 1)
+
+    async def test_custom_string_severity_levels(self):
+        """Custom string labels: LOW/MEDIUM/HIGH scale."""
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(
+                _review_json(approved=False, severity="LOW", issues=[]),
+            ),
+            consensus_config=ConsensusConfig(
+                severity_levels=('LOW', 'MEDIUM', 'HIGH'),
+                consensus_threshold='LOW',
+                max_iterations=3,
+            ),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+
+    async def test_unknown_severity_blocks_consensus(self):
+        """Issue with severity not in severity_levels blocks consensus."""
+        fixer = _make_mock_inferencer("fixed")
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer("proposal"),
+            review_inferencer=_make_mock_inferencer(side_effect=[
+                _review_json(
+                    approved=True, severity="COSMETIC",
+                    issues=[{
+                        "severity": "UNKNOWN_LEVEL",
+                        "category": "test",
+                        "description": "Test",
+                        "location": "N/A",
+                        "suggestion": "N/A",
+                    }],
+                ),
+                _review_json(approved=True, issues=[]),
+            ]),
+            fixer_inferencer=fixer,
+            consensus_config=ConsensusConfig(max_iterations=3),
+        )
+
+        result = await dual._ainfer("request")
+
+        self.assertTrue(result.consensus_achieved)
+        self.assertEqual(fixer.ainfer.call_count, 1)
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestSeverityBackwardCompat(unittest.TestCase):
+    """Existing Severity enum usage must continue working."""
+
+    def test_severity_enum_still_works_as_threshold(self):
+        """ConsensusConfig(consensus_threshold=Severity.COSMETIC) still works."""
+        config = ConsensusConfig(consensus_threshold=Severity.COSMETIC)
+        self.assertEqual(config.consensus_threshold, "COSMETIC")
+        self.assertIn(config.consensus_threshold, config.severity_levels)
+
+    def test_default_severity_levels(self):
+        """Default severity_levels matches the standard 5-level scale."""
+        config = ConsensusConfig()
+        self.assertEqual(
+            config.severity_levels,
+            ('NONE', 'COSMETIC', 'MINOR', 'MAJOR', 'CRITICAL'),
+        )
+
+    def test_invalid_threshold_raises(self):
+        """consensus_threshold not in severity_levels raises ValueError."""
+        with self.assertRaises(ValueError):
+            ConsensusConfig(consensus_threshold='INVALID')
 
 
 if __name__ == "__main__":
