@@ -1,4 +1,3 @@
-
 # @nocommit - base_module="" is required for simple relative imports
 
 load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
@@ -13,15 +12,32 @@ python_library(
     visibility = ["PUBLIC"],
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/beautifulsoup4:beautifulsoup4",
         "fbsource//third-party/pypi/boto3:boto3",
         "fbsource//third-party/pypi/botocore:botocore",
+        "fbsource//third-party/pypi/claude-agent-sdk:claude-agent-sdk",
         "fbsource//third-party/pypi/dash:dash",
         "fbsource//third-party/pypi/dash-bootstrap-components:dash-bootstrap-components",
-        "fbsource//third-party/pypi/dash-cytoscape:dash-cytoscape",
+        # NOTE: dash-cytoscape removed — not present in third-party/pypi.
+        # The agent_foundation inferencer code doesn't need it; UI components
+        # that reference it will fail at runtime if instantiated.
+        "fbsource//third-party/pypi/flask:flask",
+        "fbsource//third-party/pypi/httpx:httpx",
+        "fbsource//third-party/pypi/jinja2:jinja2",
+        "fbsource//third-party/pypi/lancedb:lancedb",
         "fbsource//third-party/pypi/plotly:plotly",
         "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pydantic-core:pydantic-core",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/requests:requests",
-        "//_tony_dev/SciencePythonUtils/src:rich_python_utils",
+        "fbsource//third-party/pypi/websockets:websockets",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        "//devai/devmate_sdk/python:devmate_python_sdk",
         "//gen_ai/metagen/pymetagen/lib:metagen",
+        # MetaMate inferencer sources are sub-packaged (see
+        # agentic_inferencers/external/metamate/BUCK) and would otherwise
+        # be excluded from the glob above by the BUCK-package boundary.
+        # Re-attach them here so existing imports still work transparently.
     ],
 )

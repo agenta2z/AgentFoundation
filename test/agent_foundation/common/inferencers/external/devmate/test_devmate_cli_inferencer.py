@@ -14,11 +14,19 @@ class DevmateCliInferencerInitTest(unittest.TestCase):
     """Test initialization of DevmateCliInferencer."""
 
     def test_default_initialization(self):
-        """Test inferencer can be created with default values."""
+        """Test inferencer can be created with default values.
+
+        The default ``model_name`` is Devmate's ``claude-opus-4.7-1m``
+        (Claude Opus 4.7 with 1M context window) — the latest Anthropic
+        model at the time of writing. This is the Devmate-native form;
+        callers using ``model_id`` (the canonical InferencerBase attr,
+        e.g. ``ClaudeModels.CLAUDE_47_OPUS_1M = 'claude-opus-4-7[1m]'``)
+        get the same resolved value via ``resolve_model_tag``.
+        """
         inferencer = DevmateCliInferencer()
 
-        self.assertEqual(inferencer.model_name, "claude-sonnet-4.5")
-        self.assertEqual(inferencer.max_tokens, 32768)
+        self.assertEqual(inferencer.model_name, "claude-opus-4.7-1m")
+        self.assertEqual(inferencer.max_tokens, 65536)
         self.assertTrue(inferencer.no_create_commit)
         self.assertIsNone(inferencer.context_files)
         self.assertFalse(inferencer.headless)
@@ -78,8 +86,8 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
         self.assertIn("devmate run", command)
         self.assertIn("freeform", command)
         self.assertIn('"prompt=Hello world"', command)
-        self.assertIn('"model_name=claude-sonnet-4.5"', command)
-        self.assertIn('"max_tokens=32768"', command)
+        self.assertIn('"model_name=claude-opus-4.7-1m"', command)
+        self.assertIn('"max_tokens=65536"', command)
         self.assertIn("--no-create-commit", command)
 
     def test_construct_command_with_headless(self):
@@ -305,11 +313,13 @@ Finished session abc123-def456
 
             inferencer._output_file = dump_file
 
-            stdout = "Session ID: fallback-123\nFallback response"
+            # NOTE: session_id must be a hex UUID-style string to match the
+            # _extract_session_id regex r"Session ID:\s*([a-f0-9-]+)".
+            stdout = "Session ID: abc12345-def6-7890-abcd-ef0123456789\nFallback response"
             result = inferencer.parse_output(stdout, "", 0)
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["session_id"], "fallback-123")
+            self.assertEqual(result["session_id"], "abc12345-def6-7890-abcd-ef0123456789")
             self.assertIn("Fallback response", result["output"])
             self.assertNotIn("dump_data", result)
 
@@ -399,7 +409,12 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
     """Test session management methods."""
 
     def test_resume_session_with_active_session(self):
-        """Test resuming with active session."""
+        """Test resuming with active session.
+
+        ``resume_session`` passes ``session_id`` only; the inferencer's
+        ``infer`` resolves ``resume=True`` internally based on the presence
+        of ``session_id`` (see ``_infer``'s session resolution).
+        """
         inferencer = DevmateCliInferencer(repo_path="/test/repo")
         inferencer.active_session_id = "active-session-123"
 
@@ -411,7 +426,6 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
             mock_infer.assert_called_once_with(
                 "follow up",
                 session_id="active-session-123",
-                resume=True,
             )
 
     def test_resume_session_without_session_raises(self):
@@ -425,7 +439,12 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
         self.assertIn("No session_id provided", str(context.exception))
 
     def test_new_session_clears_active_session(self):
-        """Test that new_session clears the active session."""
+        """Test that new_session clears the active session.
+
+        ``new_session`` clears ``active_session_id`` and delegates to
+        ``infer`` with the ``new_session=True`` flag (which the inferencer
+        uses internally to force a fresh session).
+        """
         inferencer = DevmateCliInferencer(repo_path="/test/repo")
         inferencer.active_session_id = "old-session-123"
 
@@ -435,7 +454,7 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
             inferencer.new_session("new prompt")
 
             self.assertIsNone(inferencer.active_session_id)
-            mock_infer.assert_called_once_with("new prompt", resume=False)
+            mock_infer.assert_called_once_with("new prompt", new_session=True)
 
 
 class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):

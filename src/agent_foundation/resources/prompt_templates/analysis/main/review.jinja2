@@ -1,0 +1,120 @@
+{% if session_root_path %}
+## Target Codebase
+You are operating on the codebase at: `{{ session_root_path }}`
+All relative file paths should be resolved from this root.
+{% endif %}
+
+You are tasked with carefully and thoroughly reviewing an analysis produced by another agent.
+
+<AnalysisContext>
+**Original User Request:**
+{{ input }}
+
+**Implementation Plan:** {{ implementation_plan }}
+
+**Implementation Summary:** {{ implementation_output_path }}
+
+**{{ result_type | capitalize }} Results:** {{ result_path }}
+</AnalysisContext>
+
+{% if previous_iteration_paths and "Iteration" in previous_iteration_paths %}
+<PreviousIterationContext>
+{{ previous_iteration_paths }}
+</PreviousIterationContext>
+{% endif %}
+
+**Latest Proposed Analysis By Another Agent:**
+<ProposedAnalysis>
+{{ main_response }}
+
+The proposed analysis is available at file path: `{{ output_path }}`.
+</ProposedAnalysis>
+
+**Current Review Round Index**: {{ round_index }}
+
+{% if counter_feedback %}
+**Previous Counter-Feedback from Analyzer:**
+<CounterFeedback>
+{{ counter_feedback }}
+</CounterFeedback>
+
+The analyzer has provided counter-feedback on your previous review. Consider their reasoning carefully.
+Only re-raise issues if you have NEW evidence or the analyzer misunderstood.
+{% endif %}
+
+---
+
+## Your Task: Critical Review of the {{ result_type }} Analysis
+
+You are an expert reviewer. Read the actual {{ result_type }} results and implementation to **fact-check** the analysis. Do NOT review only the text — verify claims against the source data/files.
+
+1. **Accurate** — Are findings factually correct? Cross-check specific numbers, test outcomes, and benchmark metrics against the actual result files.
+2. **Complete** — Does the analysis cover all {{ result_type }} outputs? Are there results the analyzer missed or dismissed without justification?
+3. **Sound Decision** — Is the `should_continue` decision justified by evidence? Would stopping prematurely miss important issues? Would continuing waste resources on trivial problems?
+4. **Actionable** — If `should_continue=true`, is the `next_iteration_request` specific and aligned with the analysis findings?
+
+## Response Format
+
+Wrap your response in `<Response>` tags with a JSON review.
+
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary.
+
+For each issue found, assign an `issue_id` in the format `<round_index>-<issue_index>` and rate its `severity`:
+- **CRITICAL**: Analysis is fundamentally wrong; decision must be reversed
+- **MAJOR**: Significant gap or misinterpretation requiring revision
+- **MINOR**: Small improvement needed but analysis is workable
+- **COSMETIC**: Trivial suggestion only
+
+<Response>
+[Your natural language analysis of the proposed analysis]
+```json
+{
+  "issues": [
+    {
+      "issue_id": "<round_index>-<issue_index>",
+      "severity": "<CRITICAL|MAJOR|MINOR|COSMETIC>",
+      "description": "<detailed description of the issue>",
+      "location": "<which section of the analysis>",
+      "suggestion": "<how to fix this issue>",
+      "estimated_fix_impact": "<local: ~N lines in 1 section | multi-section: ~N lines across M sections>"
+    }
+  ],
+  "reasoning": "<overall assessment and reasoning for your verdict>",
+  "overall_severity": "<CRITICAL|MAJOR|MINOR|COSMETIC|NONE>",
+  "approve": <true if no CRITICAL/MAJOR issues>
+}
+```
+</Response>
+
+Now start your review.
+
+---
+
+## NOTES (Meta-specific environment):
+- **NEVER run recursive searches (`grep -rn`, `find`, etc.) on top-level directories like the repo root, `fbcode/`, `www/`, or entire alternate repo checkouts (e.g., `fbs_*/fbcode/`).** These contain millions of files — the search will hang for 30+ minutes and time out, especially on EdenFS-mounted checkouts which may have slow or unresponsive I/O.
+- Always target **specific files or narrow subdirectories**:
+  * GOOD: `grep -n "pattern" /path/to/specific_file.py`
+  * GOOD: `grep -rn "pattern" /path/to/specific/module/` (small directory)
+  * BAD: `grep -rn "pattern" /data/users/.../fbcode/` (entire repo — will hang)
+  * BAD: `find /data/users/.../fbsource*/` (repo root — will hang on EdenFS)
+  * BAD: `find /data/users/.../fbsource*/ -maxdepth N` (still too broad — EdenFS lazily materializes directories, even depth-limited `find` triggers millions of FUSE operations)
+- If a search command seems to hang (no output for >300 seconds), it is likely stuck on slow I/O. Do NOT wait — move on and try a more targeted search.
+
+## NOTES (on accessing files outside the repo root):
+- Result files, implementation reports, and workspace artifacts are often outside the repo root.
+- We can first try more efficient `read_file`, `search_files`, `list_files` or other similar file-reading tools. If they fail with a path error (e.g., "Paths must be within root" or "Invalid path"), the path is likely outside the tool's allowed directory scope.
+- **Fallback**: Use `execute_command` with command-line tools instead like `cat`, `grep`, `sed`, `ls`, etc.:
+  * Read file: `cat /path/to/file.py`
+  * Read specific lines: `sed -n '100,200p' /path/to/file.py`
+  * List directory: `ls /path/to/dir/`
+  * Search: `grep -rn "pattern" /path/to/dir/`
+
+## NOTES (emphasizing requirements):
+- Every issue must cite concrete evidence (such as specific numbers from result files, file paths, actual behavior) with careful reasoning — DO NOT raise issues based on speculation.
+- Do NOT fabricate or hallucinate benchmark numbers. If a result file cannot be read, state that explicitly rather than guessing.
+- Verify the analyzer's claims against the source data. If the analysis says "latency improved by 20%", check the actual result files to confirm this number.
+
+## NOTES (on agent behavior):
+- Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. Read the actual {{ result_type }} result files, not just the analysis text.
+- However, stay focused on the result files and implementation relevant to the user request. DO NOT explore the entire codebase.
+- If files referenced in the implementation report (tests, benchmarks, code changes) are not found in the expected directory, conclude they were never created. Do NOT search the entire repository for them.

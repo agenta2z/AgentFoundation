@@ -16,7 +16,11 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     MaxIterationsExhaustedError,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
+    generate_config_with_allowed_commands,
+    get_source_repo_root,
+    resolve_model_tag,
     SessionMode,
+    sync_config_to_target,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionTemplatedInferencerBase,
@@ -162,10 +166,26 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # Existing attributes
     repo_path: Optional[str] = attrib(default=None)
-    model_name: str = attrib(default="claude-sonnet-4.5")
+    source_path: Optional[str] = attrib(default=None)
+    # ``model_name`` is the Devmate-native model identifier (dot-separated,
+    # e.g. ``claude-opus-4.7-1m``) that gets passed verbatim to the
+    # ``devmate run`` CLI as a template variable. Prefer setting the
+    # inherited ``model_id`` (from ``InferencerBase``) — it's the canonical
+    # cross-inferencer attribute and the YAML-cascade target. When
+    # ``model_id`` is non-empty, ``__attrs_post_init__`` translates it via
+    # ``resolve_model_tag`` and overwrites ``model_name`` (model_id wins).
+    # When ``model_id`` is empty, this default is used as-is.
+    model_name: str = attrib(default="claude-opus-4.7-1m")
     max_tokens: int = attrib(default=65536)
     no_create_commit: bool = attrib(default=True)
     context_files: Optional[List[str]] = attrib(default=None)
+
+    # Shell-tool gating (mirrors ClaudeCode + rankevolve devmate inferencers).
+    # ``enable_shell`` controls whether the shell/execute_command tool is exposed
+    # at all. ``allowed_shell_commands`` (when non-empty) restricts that tool to
+    # a whitelist of executables via a generated config that extends the base.
+    enable_shell: bool = attrib(default=True)
+    allowed_shell_commands: Optional[List[str]] = attrib(default=None)
 
     # Enhanced CLI options
     headless: bool = attrib(default=False)
@@ -174,6 +194,37 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     config_name: str = attrib(default="freeform")
     privacy_type: Optional[str] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
+    # Binary to invoke. Default ``"devmate"`` resolves via PATH to
+    # ``/usr/local/bin/devmate`` (the system shell wrapper that execs
+    # ``srconveyor devmate``). Point this at the standalone Rust binary
+    # (``devmate_standalone/devai/devmate_terminal:devmate_terminal``,
+    # also published as ``dmt``) and set ``cli_mode="print"`` to use its
+    # headless non-interactive mode.
+    cli_binary: str = attrib(default="devmate")
+    # CLI invocation style. Controls how ``construct_command`` shapes
+    # the argv:
+    #   ``"run"``  — canonical devmate: ``devmate run <config>
+    #                "prompt=$PROMPT" "key=value"...``. The prompt is
+    #                passed as a template variable. This is what the
+    #                system ``devmate`` wrapper expects.
+    #   ``"print"`` — standalone dmt headless: ``dmt print "<PROMPT>"
+    #                -c <config> -- "key=value"...``. The prompt is a
+    #                positional arg; remaining template vars come after
+    #                ``--``. Use this when ``cli_binary`` points at the
+    #                ``devmate_terminal`` binary — its ``run`` subcommand
+    #                drops into the TUI which panics in non-interactive
+    #                contexts.
+    cli_mode: str = attrib(
+        default="run",
+        validator=lambda _self, _attr, v: v in ("run", "print")
+        or (_ for _ in ()).throw(
+            ValueError(f"cli_mode must be 'run' or 'print', got {v!r}")
+        ),
+    )
+    # Whether the configured ``cli_binary`` honors ``--no-create-commit``.
+    # System ``devmate`` does; the standalone binary does not (it disables
+    # commit creation internally via ``SessionOptions.with_create_commit_override(false)``).
+    supports_no_create_commit_flag: bool = attrib(default=True)
 
     # Fault-tolerance attributes
     use_file_for_large_arg_exceeding_size: Union[bool, int] = attrib(default=100_000)
@@ -194,14 +245,50 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     _output_file: Optional[str] = attrib(default=None, init=False, repr=False)
 
     def __attrs_post_init__(self):
-        """Set repo_path and configure pre-execution script to cd to repo."""
-        # Default repo_path to ~/fbsource if not specified
+        """Translate model_id, set paths, generate/sync shell config, configure cd."""
+        # Translate inherited ``model_id`` (from InferencerBase) into the
+        # Devmate-native ``model_name`` (dot-form, ``-1m`` suffix).
+        # Mirrors rovodev's ``_translate_model_id_to_config_override`` pattern.
+        # Precedence: when ``model_id`` is non-empty, it wins and overwrites
+        # ``model_name`` so the YAML cascade contract (``_model_id`` →
+        # leaf ``model_id``) selects the actual model for every inferencer.
+        # When ``model_id`` is empty, the existing ``model_name`` default
+        # (or caller-set value) is used unchanged.
+        self._translate_model_id_to_model_name()
+
+        # Default repo_path to ~/fbsource if not specified. Accept ``target_path``
+        # as an alias (the base class also defines ``target_path``); whichever is
+        # populated first wins, and the other mirrors it.
+        if self.repo_path is None and self.target_path is not None:
+            self.repo_path = self.target_path
         if self.repo_path is None:
             self.repo_path = os.path.expanduser("~/fbsource")
-
-        # Mirror repo_path into target_path so TIB's effective_cwd derives from it
         if self.target_path is None:
             self.target_path = self.repo_path
+
+        # Auto-detect source_path (where this inferencer code + custom configs live).
+        if self.source_path is None:
+            self.source_path = get_source_repo_root()
+
+        # If both shell controls are set, generate an extended config that
+        # restricts execute_command to the allowed commands. If only
+        # ``allowed_shell_commands`` is set but ``enable_shell=False``,
+        # log a precedence warning (the disable wins).
+        if self.allowed_shell_commands and not self.enable_shell:
+            logger.warning(
+                "enable_shell=False takes precedence over allowed_shell_commands=%s "
+                "(shell tool will be disabled).",
+                self.allowed_shell_commands,
+            )
+        elif self.allowed_shell_commands and self.enable_shell:
+            # Sync base config first (before we mutate self.config_name).
+            sync_config_to_target(self.config_name, self.source_path, self.target_path)
+            self.config_name = generate_config_with_allowed_commands(
+                self.config_name, self.allowed_shell_commands, self.source_path
+            )
+
+        # Sync the (possibly updated) config to the target repo if they differ.
+        sync_config_to_target(self.config_name, self.source_path, self.target_path)
 
         # Set up pre-execution script to cd to repo directory
         # This is required because devmate needs to be run from within the repo
@@ -214,6 +301,44 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             self.pre_exec_scripts.insert(0, cd_script)
 
         super().__attrs_post_init__()
+
+    def _translate_model_id_to_model_name(self) -> None:
+        """Translate ``self.model_id`` → ``self.model_name`` via ``resolve_model_tag``.
+
+        The inherited ``model_id`` attribute (declared by ``InferencerBase``)
+        is the canonical cross-inferencer model selector and the YAML cascade
+        target. Devmate's CLI takes the model as a template variable named
+        ``model_name`` whose accepted values are defined by Devmate's
+        server-side ``ModelName`` enum (e.g. ``claude-opus-4.7-1m``). This
+        helper bridges between the two.
+
+        Resolution rules (in priority order):
+
+        1. If ``model_id`` is empty → no-op (legacy default
+           ``model_name`` wins; preserves backward compat for callers that
+           never set ``model_id``).
+        2. If ``model_id`` is set → resolve it via :func:`resolve_model_tag`
+           and overwrite ``self.model_name`` with the result. ``model_id``
+           always wins when both are set.
+
+        Accepted ``model_id`` formats (all 10 ``ClaudeModels`` enum values
+        verified — see ``test_model_id_translation`` for the full matrix):
+
+        - Anthropic API IDs: ``claude-opus-4-7``,
+          ``claude-sonnet-4-5-20250929`` (date suffix stripped)
+        - 1M-context bracket form: ``claude-opus-4-7[1m]`` →
+          ``claude-opus-4.7-1m``
+        - Short "latest" aliases: ``opus`` → ``claude-opus-4.7``,
+          ``opus[1m]`` → ``claude-opus-4.7-1m``
+
+        Unmapped values pass through unchanged — if Devmate's server rejects
+        them, the failure surfaces as a server-side error at infer time
+        (preserves the rovodev "errors loudly downstream" contract).
+        """
+        mid = getattr(self, "model_id", "") or ""
+        if not mid:
+            return  # no-op: keep current model_name (legacy default or caller-set)
+        self.model_name = resolve_model_tag(mid)
 
     def _build_session_args(self, session_id: str, is_resume: bool) -> str:
         """
@@ -283,9 +408,51 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             .replace("`", "\\`")  # Escape command substitution (backticks)
         )
 
-        # Build the shell command string
-        # Base: devmate run
-        command_parts = ["devmate", "run"]
+        # Build the shell command string. ``self.cli_binary`` lets callers
+        # swap in a different binary (e.g. the standalone devmate_terminal
+        # Rust binary) without rewriting construct_command. ``self.cli_mode``
+        # selects between the canonical ``devmate run`` shape and the
+        # standalone ``dmt print`` shape (the standalone's ``run`` subcommand
+        # drops into the TUI and panics in non-interactive contexts).
+        if self.cli_mode == "print":
+            # Standalone DMT print mode:
+            #   dmt print "<PROMPT>" -c <config> [--resume-session-id <ID>]
+            #            [--stream] -- key=value...
+            # Prompt is positional; remaining template vars come after ``--``.
+            command_parts = [self.cli_binary, "print", f'"{escaped_prompt}"']
+            command_parts.append(f"-c {self.config_name}")
+            # Note: --stream would be appended here for streaming use; the
+            # streaming path uses a separate construct path so we leave this
+            # for callers that need explicit streaming.
+            # Resume the named session if requested. The standalone CLI
+            # accepts ``--resume-session-id <UUID>`` (added to plumb through
+            # SessionOptions.with_resume(true).with_resume_existing_session_id).
+            if is_resume and session_id:
+                command_parts.append(f"--resume-session-id {session_id}")
+            command_parts.append("--")
+            # Template vars (no "prompt=..." here — prompt is positional).
+            command_parts.extend(
+                [
+                    f'"model_name={model}"',
+                    f'"max_tokens={max_tokens}"',
+                    f'"enable_shell={str(self.enable_shell).lower()}"',
+                ]
+            )
+            if context_files:
+                for file_path in context_files:
+                    command_parts.append(f'"context_file={file_path}"')
+            # Standalone print mode does not support --no-create-commit
+            # (that's a server-side override set via SessionOptions). Skip
+            # the no_create_commit and other server-side flags here.
+            # dump_output / headless / sandcastle / privacy are also not
+            # part of the standalone print interface — they'd cause
+            # "unknown argument" errors.
+            if self.extra_cli_args:
+                command_parts.extend(self.extra_cli_args)
+            return " ".join(command_parts)
+
+        # Default cli_mode == "run" — canonical devmate invocation.
+        command_parts = [self.cli_binary, "run"]
 
         # Add session args if resuming (before config name)
         if is_resume and session_id:
@@ -301,6 +468,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 f'"prompt={escaped_prompt}"',
                 f'"model_name={model}"',
                 f'"max_tokens={max_tokens}"',
+                f'"enable_shell={str(self.enable_shell).lower()}"',
             ]
         )
 
@@ -329,8 +497,11 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         if self.privacy_type:
             command_parts.append(f"--privacy-type {self.privacy_type}")
 
-        # Add no_create_commit flag at the END (like the working bash script)
-        if self.no_create_commit:
+        # Add no_create_commit flag at the END (like the working bash script).
+        # Suppressed for binaries that don't accept this flag (e.g. the
+        # standalone devmate_terminal sets create-commit-override=false via
+        # SessionOptions internally and rejects unknown CLI flags).
+        if self.no_create_commit and self.supports_no_create_commit_flag:
             command_parts.append("--no-create-commit")
 
         # Add extra CLI args (caller responsible for shell-safe values)
@@ -371,11 +542,22 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 - dump_data (dict, optional): Full dump data if dump_output enabled
                 - error (str, optional): Error message if failed
         """
+        # ``success`` normally derives from return_code == 0. But the
+        # standalone ``devmate_terminal`` (``cli_mode="print"``) is known to
+        # exit with SIGABRT (return_code = -6 / 134) during teardown when
+        # stdin isn't a TTY, even though the response was emitted to stdout
+        # cleanly. Treat that specific case as success so subprocess-driven
+        # invocations of the standalone CLI behave normally.
+        is_standalone_print_abort = (
+            self.cli_mode == "print"
+            and return_code in (-6, 134)
+            and bool(stdout and stdout.strip())
+        )
         result = {
             "raw_output": stdout.strip() if stdout else "",
             "stderr": stderr.strip() if stderr else "",
             "return_code": return_code,
-            "success": return_code == 0,
+            "success": return_code == 0 or is_standalone_print_abort,
         }
 
         # Try dump file first (more reliable when enabled)
@@ -414,6 +596,19 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             if trajectory_url:
                 result["trajectory_url"] = trajectory_url
 
+        # In standalone print mode, the session_id is emitted to stderr as
+        # ``DMT_SESSION_ID=<uuid>``. Prefer that when present — it's set
+        # unconditionally by the standalone binary regardless of TTY, while
+        # the stdout regex relies on hyperlink escapes that only show in
+        # canonical devmate. Falls through to the existing parsed value
+        # (if any) when no marker is found.
+        if self.cli_mode == "print":
+            standalone_sid = self._extract_session_id_from_stderr(
+                result.get("stderr", "")
+            )
+            if standalone_sid:
+                result["session_id"] = standalone_sid
+
         # Extract finish_reason from diagnostic output
         finish_reason_match = re.search(
             r"FinishReason\.([A-Z_]+)", result.get("raw_output", "")
@@ -441,7 +636,12 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             return ""
 
     def _cleanup_output_file(self) -> None:
-        """Clean up temporary output file."""
+        """Clean up temporary output file and clear state.
+
+        Always clears ``self._output_file`` to None, even if the file path
+        was already missing — leaving stale state would mislead subsequent
+        calls into thinking a dump file is still active.
+        """
         if self._output_file and os.path.exists(self._output_file):
             try:
                 os.remove(self._output_file)
@@ -450,16 +650,63 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 )
             except OSError as e:
                 self.log_debug(f"Failed to clean up output file: {e}", "Cleanup")
-            finally:
-                self._output_file = None
+        self._output_file = None
 
-    def _extract_session_id(self, output: str) -> Optional[str]:
-        """Extract session ID from DevMate output."""
+    def _extract_session_id_from_stderr(self, stderr: str) -> Optional[str]:
+        """Pull the ``DMT_SESSION_ID=<uuid>`` marker from standalone stderr.
+
+        The standalone ``devmate_terminal`` always emits
+        ``DMT_SESSION_ID=<uuid>`` on stderr at the start of every print-mode
+        session (regardless of TTY) so subprocess callers can capture the
+        session id without having to fake a PTY. Returns None when not found.
+        """
+        if not stderr:
+            return None
         import re
 
-        match = re.search(r"Session ID:\s*([a-f0-9-]+)", output)
-        if match:
-            return match.group(1)
+        m = re.search(r"DMT_SESSION_ID=([0-9a-fA-F-]{36})", stderr)
+        return m.group(1) if m else None
+
+    def _extract_session_id(self, output: str) -> Optional[str]:
+        """Extract session ID from DevMate output.
+
+        Devmate wraps the session UUID in OSC8 hyperlink escape codes when
+        writing to a terminal-like stream — the raw text looks like::
+
+            Session ID: \\x1b]8;;https://...\\x1b\\<UUID>\\x1b]8;;\\x1b\\
+
+        The literal ``Session ID:`` label can therefore be separated from the
+        UUID by ESC bytes that ``[a-f0-9-]`` won't match. We first try to
+        locate the canonical UUID v4 pattern anywhere AFTER the ``Session ID:``
+        marker, then fall back to the first bare UUID in the whole output, and
+        finally to a permissive ``Session ID: <hex>`` match for tests that use
+        non-UUID fixtures.
+        """
+        import re
+
+        # 1. UUID v4 (or any 8-4-4-4-12 hex grouping) anywhere after a
+        #    ``Session ID:`` marker — survives OSC8 escape codes.
+        uuid_pattern = (
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        )
+        m = re.search(
+            r"Session ID:.*?(" + uuid_pattern + r")", output, flags=re.DOTALL
+        )
+        if m:
+            return m.group(1)
+
+        # 2. Bare UUID anywhere in the output (e.g. ``Started session <UUID>``
+        #    line printed by some devmate versions).
+        m = re.search(uuid_pattern, output)
+        if m:
+            return m.group(0)
+
+        # 3. Permissive fallback for hex-only fixtures used in unit tests
+        #    (covers ``Session ID: abc123-def456-789``-style stubs).
+        m = re.search(r"Session ID:\s*([a-f0-9-]+)", output)
+        if m:
+            return m.group(1)
+
         return None
 
     def _extract_trajectory_url(self, output: str) -> Optional[str]:
@@ -576,11 +823,14 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         else:
             return result.get("error", "Unknown error occurred")
 
-    async def ainfer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs
-    ) -> Dict[str, Any]:
-        """Async inference with session-mode policies and fault-tolerance."""
-        # --- Session-mode policy application ---
+    def _apply_session_policy(self, kwargs: Dict[str, Any]) -> None:
+        """Resolve ``new_session`` / ``session_id`` / ``resume`` into kwargs.
+
+        Mirrors what ``ainfer`` used to do inline so the sync ``infer`` path
+        gets the same session resolution (without this, ``inferencer(prompt)``
+        in sync mode silently ignores ``active_session_id`` and never sends
+        ``--resume --session-id`` to devmate).
+        """
         new_session = kwargs.pop("new_session", False)
         if self.session_mode == SessionMode.NEW_SESSION_PER_CALL:
             new_session = True
@@ -606,18 +856,59 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
+    def infer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs
+    ) -> Any:
+        """Sync inference with session-mode policy + active-session propagation.
+
+        Without this override, the sync ``__call__`` path (i.e.,
+        ``inferencer(prompt)``) would skip the session-id resolution and
+        devmate would never see ``--resume --session-id``, silently
+        creating a new session on every call.
+        """
+        self._apply_session_policy(kwargs)
+        result = super().infer(inference_input, inference_config, **kwargs)
+
+        # Propagate the response's session_id back into ``active_session_id``
+        # so chained calls auto-resume. (Async path already does this; the
+        # sync path didn't.)
+        def _field(obj: Any, name: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(name, default)
+            return getattr(obj, name, default)
+
+        result_session_id = _field(result, "session_id")
+        if result_session_id and result_session_id != self.active_session_id:
+            self.active_session_id = result_session_id
+
+        return result
+
+    async def ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs
+    ) -> Dict[str, Any]:
+        """Async inference with session-mode policies and fault-tolerance."""
+        # Session-mode policy application (shared with sync path).
+        self._apply_session_policy(kwargs)
+
         result = await self._ainfer(inference_input, inference_config, **kwargs)
 
-        result_session_id = (
-            result.get("session_id") if isinstance(result, dict) else None
-        )
+        # ``_ainfer`` may return either a plain dict (legacy path) or a
+        # ``TerminalInferencerResponse`` (current path). Accept both so the
+        # session-id propagation and error-promotion logic work in either case.
+        def _field(obj: Any, name: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(name, default)
+            return getattr(obj, name, default)
+
+        result_session_id = _field(result, "session_id")
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
 
         # --- Fault-tolerance: promote failures to exceptions ---
-        if isinstance(result, dict) and not result.get("success", True):
+        result_success = _field(result, "success", True)
+        if not result_success:
             self._consecutive_error_count += 1
-            error_text = result.get("error", "") or ""
+            error_text = _field(result, "error", "") or ""
 
             if self.session_mode == SessionMode.NEW_SESSION_ON_ERROR:
                 self.active_session_id = None
@@ -634,17 +925,17 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 _m = _re.search(r"Max iterations of (\d+) reached", error_text)
                 raise MaxIterationsExhaustedError(
                     tool="devmate",
-                    return_code=result.get("return_code"),
-                    stderr=result.get("stderr", "") or "",
+                    return_code=_field(result, "return_code"),
+                    stderr=_field(result, "stderr", "") or "",
                     error=error_text,
                     max_iterations=int(_m.group(1)) if _m else None,
-                    session_id=result.get("session_id"),
+                    session_id=_field(result, "session_id"),
                 )
 
             raise InferencerExecutionError(
                 tool="devmate",
-                return_code=result.get("return_code"),
-                stderr=result.get("stderr", "") or "",
+                return_code=_field(result, "return_code"),
+                stderr=_field(result, "stderr", "") or "",
                 error=error_text,
             )
 

@@ -1,0 +1,71 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Every binary uses ``# @autodeps-skip`` because autodeps only follows
+# *direct* import edges and would strip the ``:agent_foundation`` parent
+# dep (the examples import from ``...external.metamate`` which lives in
+# ``:metamate_lib``, not directly from terminal_inferencers). The MetaMate
+# inferencer modules themselves cross-package-import ``terminal_inferencers``
+# at runtime, so the parent lib MUST be in every binary's transitive graph.
+
+# MetaMate CLI streaming demo — sync + async streaming + sync streaming modes.
+# Subprocess fan-out via ``buck run :query_metamate -- --query ...``, so
+# this binary doesn't need ``//msl/metamate/cli:metamate_graphql`` itself.
+python_binary(
+    # @autodeps-skip
+    name = "example_metamate_cli_streaming",
+    srcs = ["example_metamate_cli_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate.example_metamate_cli_streaming.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# MetaMate CLI single-turn limitation demo — proves the CLI does NOT carry
+# context across ``buck run`` invocations.
+python_binary(
+    # @autodeps-skip
+    name = "example_metamate_cli_session_resume",
+    srcs = ["example_metamate_cli_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate.example_metamate_cli_session_resume.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# MetaMate SDK streaming demo — depends on the MetaMate GraphQL client
+# (``//msl/metamate/cli:metamate_graphql``) at runtime via a lazy import
+# inside ``MetamateSDKInferencer._ainfer_streaming``.
+python_binary(
+    # @autodeps-skip
+    name = "example_metamate_sdk_streaming",
+    srcs = ["example_metamate_sdk_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate.example_metamate_sdk_streaming.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/cli:metamate_graphql",
+    ],
+)
+
+# MetaMate SDK session-resume demo — multi-turn via ``aresume_session``.
+python_binary(
+    # @autodeps-skip
+    name = "example_metamate_sdk_session_resume",
+    srcs = ["example_metamate_sdk_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate.example_metamate_sdk_session_resume.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/cli:metamate_graphql",
+    ],
+)

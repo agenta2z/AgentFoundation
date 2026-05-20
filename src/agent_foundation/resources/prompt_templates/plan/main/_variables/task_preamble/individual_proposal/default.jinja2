@@ -1,0 +1,80 @@
+You have been given the results of a deep research investigation.
+{% if docs_path %}
+Analyze the research findings alongside the documentation at {{ docs_path }},
+its implementation ({{ workflow_target_path }}) and direct dependencies.
+{% else %}
+Analyze the research findings alongside the code at
+{{ workflow_target_path }} and all its direct dependencies.
+{% endif %}
+
+Your goal is to translate these research findings into concrete, actionable
+proposals by bridging the gap between what the research recommends and what
+the code currently does. You MUST ground your proposals in the real code —
+do not propose changes to code you haven't read.
+
+{% if research_output_path %}
+## Research Report
+
+The full deep research report is at: `{{ research_output_path }}`
+You MUST read this file first — it contains the complete analysis with
+detailed evidence, citations, and findings. Do not rely only on the summary
+in the user request.
+{% endif %}
+
+## Your Strategy
+
+### Phase 1: Research & Codebase Analysis
+
+Before proposing anything:
+
+1. **Read the research report**{% if research_output_path %} at
+   `{{ research_output_path }}`{% endif %}. Extract key techniques, results,
+   and opportunities relevant to the target system.
+
+2. **Investigate the actual code**. Read the relevant files, trace the
+   architecture, and understand how things work today.
+
+3. **Identify optimization surfaces**: Based on research + code, enumerate
+   areas where improvement is plausible. Map specific research findings to
+   specific code components.
+
+### Phase 2: Proposal Generation
+
+For each proposal:
+- **Problem Statement**: What specific problem does this address?
+- **Current State**: What the code does today (cite file paths and line numbers)
+- **Proposed Approach**: Detailed technical approach with specific code changes
+- **Motivation**: Cite specific research findings AND code observations that
+  support this proposal. Do NOT invent findings — all claims must trace back
+  to provided research or code observations.
+- **Expected Impact**: High / Medium / Low, with quantitative estimates where
+  possible (cite research benchmarks)
+- **Success Probability**: High (>70%) / Medium (40-70%) / Low (<40%)
+- **Implementation Complexity**: Low / Medium / High
+- **Risks & Mitigations**: What could go wrong and how to handle it
+- **Implementation Steps**: Concrete ordered steps, with file paths
+- **Validation Plan**: How to verify the change works (tests, benchmarks, metrics)
+
+### Phase 3: Prioritization
+
+After generating all proposals:
+
+1. **Rank by expected value**: Balance impact, success probability, and
+   implementation cost.
+
+2. **Flag quick wins**: Proposals that are low-cost and high-confidence,
+   suitable for early experimentation.
+
+3. **Flag high-risk/high-reward**: Proposals that are uncertain but potentially
+   impactful, suitable for later exploration.
+
+4. **Note dependencies**: If any proposals should be tested sequentially or
+   are mutually exclusive.
+
+5. **Produce a priority ranking table**:
+
+| Rank | ID | Name | Impact | Probability | Complexity | Notes |
+|------|----|------|--------|-------------|------------|-------|
+| 1    | P1 | ...  | High   | High        | Low        | Quick win |
+
+6. **Suggest experiment order**: Based on dependencies and expected value.

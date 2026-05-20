@@ -9,9 +9,15 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from attr import attrib, attrs
+from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
+    generate_config_with_allowed_commands,
+    get_source_repo_root,
+    resolve_model_tag,
+    sync_config_to_target,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
@@ -79,14 +85,74 @@ class DevmateSDKInferencer(StreamingInferencerBase):
     # idle_timeout_seconds overridden to 2400 — Devmate sessions can be slower than Claude Code
     idle_timeout_seconds: int = attrib(default=2400)
     root_folder: Optional[str] = attrib(default=None)
+    source_path: Optional[str] = attrib(default=None)
     config_file_path: str = attrib(default="freeform")
     usecase: str = attrib(default="dual_agent_coding")
-    model_name: str = attrib(default="claude-sonnet-4-5")
+    # ``model_name`` is the Devmate-native model identifier (dot-form,
+    # ``-1m`` suffix for 1M-context variants). Prefer setting the
+    # inherited ``model_id`` (from ``InferencerBase``) — when non-empty,
+    # ``__attrs_post_init__`` translates it via ``resolve_model_tag`` and
+    # overwrites this attribute (model_id wins). When ``model_id`` is
+    # empty, this default is used as-is.
+    model_name: str = attrib(default="claude-opus-4.7-1m")
     config_vars: Dict[str, Any] = attrib(factory=dict)
+
+    # Shell-tool gating (mirrors DevmateCliInferencer + ClaudeCode SDK).
+    enable_shell: bool = attrib(default=True)
+    allowed_shell_commands: Optional[List[str]] = attrib(default=None)
 
     # Internal state
     _client: Any = attrib(default=None, init=False, repr=False)
     _last_token_count: int = attrib(default=0, init=False, repr=False)
+
+    def __attrs_post_init__(self):
+        """Translate model_id, auto-detect source_path, wire shell-allowlist config."""
+        # Translate inherited ``model_id`` (from InferencerBase) into the
+        # Devmate-native ``model_name``. See ``DevmateCliInferencer``'s
+        # ``_translate_model_id_to_model_name`` for full precedence rules
+        # — the SDK applies identical translation so model selection is
+        # consistent across CLI/SDK and YAML-cascade compatible.
+        self._translate_model_id_to_model_name()
+
+        # Auto-detect source_path (where this inferencer code + custom configs live).
+        if self.source_path is None:
+            self.source_path = get_source_repo_root()
+
+        target_path = self.root_folder or self.source_path
+
+        # If both shell controls are set, generate an extended config that
+        # restricts execute_command to the allowed commands. If only
+        # ``allowed_shell_commands`` is set but ``enable_shell=False``,
+        # log a precedence warning (the disable wins).
+        if self.allowed_shell_commands and not self.enable_shell:
+            logger.warning(
+                "enable_shell=False takes precedence over allowed_shell_commands=%s "
+                "(shell tool will be disabled).",
+                self.allowed_shell_commands,
+            )
+        elif self.allowed_shell_commands and self.enable_shell:
+            # Sync base config first (before we mutate self.config_file_path).
+            sync_config_to_target(self.config_file_path, self.source_path, target_path)
+            self.config_file_path = generate_config_with_allowed_commands(
+                self.config_file_path, self.allowed_shell_commands, self.source_path
+            )
+
+        # Sync the (possibly updated) config to the target repo if they differ.
+        sync_config_to_target(self.config_file_path, self.source_path, target_path)
+
+        super().__attrs_post_init__()
+
+    def _translate_model_id_to_model_name(self) -> None:
+        """Translate ``self.model_id`` → ``self.model_name`` via ``resolve_model_tag``.
+
+        Mirrors ``DevmateCliInferencer._translate_model_id_to_model_name``.
+        See that method's docstring for the precedence rules, accepted
+        ``model_id`` formats, and rationale.
+        """
+        mid = getattr(self, "model_id", "") or ""
+        if not mid:
+            return  # no-op: keep current model_name
+        self.model_name = resolve_model_tag(mid)
 
     # === Streaming Primitive ===
 
@@ -104,13 +170,26 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         Yields:
             Text deltas as they arrive from Devmate.
         """
+        # Try canonical namespace first (``//devai/devmate_sdk/python:devmate_python_sdk``),
+        # then fall back to the OSS-portable standalone namespace
+        # (``//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk``).
+        # The standalone uses a different ``base_module`` so the import path
+        # differs, but the class API is identical (verified via diff —
+        # only ``from devai.*`` → ``from devmate_standalone.devai.*`` lines change).
         try:
             from devai.devmate_sdk.python.devmate_client import DevmateSDKClient
-        except ImportError as e:
-            raise RuntimeError(
-                f"Devmate SDK not available: {e}. "
-                "Ensure //devai/devmate_sdk/python:devmate_client is in deps."
-            ) from e
+        except ImportError:
+            try:
+                from devmate_standalone.devai.devmate_sdk.python.devmate_client import (
+                    DevmateSDKClient,
+                )
+            except ImportError as e:
+                raise RuntimeError(
+                    f"Devmate SDK not available: {e}. Ensure one of these is in deps:\n"
+                    "  //devai/devmate_sdk/python:devmate_python_sdk (canonical)\n"
+                    "  //devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk "
+                    "(standalone/OSS-portable)"
+                ) from e
 
         config_vars = {**self.config_vars, "prompt": prompt}
         if self.model_name:

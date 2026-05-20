@@ -75,7 +75,7 @@ def demo_sync(inferencer, query: str) -> None:
     print()
     print("Response:")
     print("-" * 60)
-    output = response.output if response.success else response.get("error", "Unknown error")
+    output = response.output if response.success else (response.error or "Unknown error")
     print(output)
     print("-" * 60)
     print()
@@ -191,7 +191,7 @@ def main():
     print("🤖 Claude Code CLI Inferencer Demo")
     print(f"   Claude command: {inferencer.claude_command}")
     print(f"   Model:          {inferencer.model_name}")
-    print(f"   Working dir:    {inferencer.working_dir}")
+    print(f"   Working dir:    {inferencer.effective_cwd}")
     print()
 
     # Demo 1: Sync

@@ -17,15 +17,24 @@ class DevmateSDKInferencerInitTest(unittest.TestCase):
     """Test initialization of DevmateSDKInferencer."""
 
     def test_default_initialization(self):
-        """Test inferencer can be created with default values."""
+        """Test inferencer can be created with default values.
+
+        Default ``model_name`` is Devmate's ``claude-opus-4.7-1m`` (Claude
+        Opus 4.7 with 1M context) — same canonical default as
+        ``DevmateCliInferencer``. Use the inherited ``model_id`` to
+        override via the ``ClaudeModels`` enum.
+        """
         inferencer = DevmateSDKInferencer()
 
         self.assertIsNone(inferencer.root_folder)
         self.assertEqual(inferencer.config_file_path, "freeform")
-        self.assertEqual(inferencer.usecase, "sdk_inferencer")
-        self.assertEqual(inferencer.model_name, "claude-sonnet-4-5")
+        self.assertEqual(inferencer.usecase, "dual_agent_coding")
+        self.assertEqual(inferencer.model_name, "claude-opus-4.7-1m")
         self.assertEqual(inferencer.total_timeout_seconds, 1800)
-        self.assertEqual(inferencer.idle_timeout_seconds, 600)
+        # idle_timeout_seconds default is 2400 — overridden in
+        # DevmateSDKInferencer because Devmate sessions can be slower than
+        # Claude Code (the parent default is 600).
+        self.assertEqual(inferencer.idle_timeout_seconds, 2400)
         self.assertEqual(inferencer.config_vars, {})
 
     def test_custom_initialization(self):

@@ -1,0 +1,116 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Real integration tests for MetaMate inferencers — exercised against the
+# live MetaMate backend (``engine_start_v2`` / ``get_conversation_for_stream``).
+# These are NOT unittest-style; they run as python_binary scripts and print
+# pass/fail to stdout. Mirrors the precedent in
+# ``test/agent_foundation/common/inferencers/terminal_inferencers/BUCK``
+# (e.g. ``test_devmate_inferencer_live``).
+#
+# Run examples:
+#   buck2 run //_tony_dev/CoreProjects/AgentFoundation/test/agent_foundation/common/inferencers/external/metamate:test_metamate_cli_inferencer_real
+#   buck2 run //_tony_dev/CoreProjects/AgentFoundation/test/agent_foundation/common/inferencers/external/metamate:test_metamate_sdk_inferencer_real -- --mode async
+#
+# Every target below uses ``# @autodeps-skip`` because autodeps only follows
+# *direct* import edges — it would strip the ``:agent_foundation`` parent
+# dep since these test scripts import from
+# ``agent_foundation.common.inferencers.agentic_inferencers.external.metamate``
+# (which lives in ``:metamate_lib``) but not directly from
+# ``agent_foundation.common.inferencers.terminal_inferencers``. The MetaMate
+# inferencer modules themselves do the cross-package import at runtime,
+# so the parent lib MUST be in every binary's transitive graph.
+
+# CLI real-inference test — single + streaming + deep-research modes via
+# the ``query_metamate`` buck target (subprocess fan-out).
+python_binary(
+    # @autodeps-skip
+    name = "test_metamate_cli_inferencer_real",
+    srcs = ["test_metamate_cli_inferencer_real.py"],
+    base_module = "",
+    main_function = "test_metamate_cli_inferencer_real.main",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# CLI deep-research test — exercises ``SPACES_DEEP_RESEARCH_AGENT`` and
+# ``METAMATE_MDR`` agents with a long-form research prompt.
+python_binary(
+    # @autodeps-skip
+    name = "test_metamate_cli_deep_research",
+    srcs = ["test_metamate_cli_deep_research.py"],
+    base_module = "",
+    main_function = "test_metamate_cli_deep_research.main",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# Quick test that runs deep research with a prompt loaded from
+# ``_inputs/deep_research_hardcoded_constants.txt``. Bundled as a resource
+# so direct ``buck run`` works without extra arguments.
+python_binary(
+    # @autodeps-skip
+    name = "test_deep_research_from_file",
+    srcs = ["test_deep_research_from_file.py"],
+    base_module = "",
+    main_function = "test_deep_research_from_file.main",
+    resources = glob(["_inputs/*.txt"]),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# SDK real-inference test — direct GraphQL via ``MetamateGraphQLClient``.
+# Needs the Meta-internal ``//msl/metamate/cli:metamate_graphql`` Buck dep
+# because the SDK inferencer imports it lazily at call time.
+python_binary(
+    # @autodeps-skip
+    name = "test_metamate_sdk_inferencer_real",
+    srcs = ["test_metamate_sdk_inferencer_real.py"],
+    base_module = "",
+    main_function = "test_metamate_sdk_inferencer_real.main",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/cli:metamate_graphql",
+    ],
+)
+
+# Standalone inferencer test — same SDK inferencer, but uses
+# ``//metamate_standalone`` as the source of MetamateGraphQLClient
+# (via ``MetamateSDKInferencer(use_standalone=True)``). Verifies the
+# whole inferencer + standalone client path works end to end against
+# the live MetaMate backend.
+python_binary(
+    # @autodeps-skip
+    name = "test_metamate_standalone_inferencer",
+    srcs = ["test_metamate_standalone_inferencer.py"],
+    base_module = "",
+    main_function = "test_metamate_standalone_inferencer.main",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        # Test fixture only: mints a CAT to feed the BYO-CAT standalone via
+        # the METAMATE_CAT env var. The library under test (:metamate_standalone)
+        # has zero libfb/crypto deps; this dep lives on the TEST so the
+        # standalone's purity is preserved.
+        "//libfb/py/interngraph/auth:interngraph_crypto_auth_token_util",
+        # The standalone client (replaces //msl/metamate/cli:metamate_graphql
+        # for this binary). The inferencer's resolver picks it up via
+        # ``use_standalone=True``.
+        "//metamate_standalone:metamate_standalone",
+    ],
+)

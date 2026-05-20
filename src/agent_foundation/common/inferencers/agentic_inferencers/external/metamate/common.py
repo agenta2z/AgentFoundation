@@ -15,9 +15,76 @@ Uses ``getattr()`` duck-typing throughout, consistent with
 
 import enum
 import logging
-from typing import Any, List, Optional
+import os
+from typing import Any, List, Optional, Type
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Client-class resolver (upstream vs metamate_standalone)
+# ---------------------------------------------------------------------------
+# The MetaMate GraphQL client can be sourced from either:
+#   - Upstream: ``msl.metamate.cli.metamate_graphql.MetamateGraphQLClient``
+#     (the canonical //msl/metamate/cli:metamate_graphql library)
+#   - Standalone: ``metamate_standalone.cli.metamate_graphql.MetamateGraphQLClient``
+#     (the extracted //metamate_standalone/cli:metamate_graphql library)
+#
+# The two are API-compatible (the standalone is a verbatim copy with the
+# thrift namespace re-anchored to ``metamate_standalone.sdk``). Selection
+# is controlled by, in priority order:
+#   1. ``use_standalone=True`` passed to ``MetamateSDKInferencer.__init__``
+#   2. ``METAMATE_USE_STANDALONE=1`` environment variable
+#   3. Default: upstream
+#
+# Binaries that opt into the standalone MUST add
+# ``//metamate_standalone:metamate_standalone`` (or directly
+# ``//metamate_standalone/cli:metamate_graphql``) to their Buck deps —
+# the lazy import inside ``resolve_metamate_client_cls`` will otherwise
+# raise ``ImportError`` at call time, not build time.
+
+ENV_USE_STANDALONE: str = "METAMATE_USE_STANDALONE"
+
+
+def _env_truthy(name: str) -> bool:
+    raw = os.environ.get(name, "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def resolve_metamate_client_cls(use_standalone: Optional[bool] = None) -> Type[Any]:
+    """Return the active ``MetamateGraphQLClient`` class.
+
+    Args:
+        use_standalone: When True, force the standalone import. When False,
+            force the upstream import. When None (default), check the
+            ``METAMATE_USE_STANDALONE`` env var; absent/falsy → upstream.
+
+    Returns:
+        The ``MetamateGraphQLClient`` class object (NOT an instance).
+
+    Raises:
+        RuntimeError: If the requested module isn't available (typical
+            cause: the Buck dep wasn't declared on the consuming binary).
+    """
+    if use_standalone is None:
+        use_standalone = _env_truthy(ENV_USE_STANDALONE)
+    module_path = (
+        "metamate_standalone.cli.metamate_graphql"
+        if use_standalone
+        else "msl.metamate.cli.metamate_graphql"
+    )
+    try:
+        from importlib import import_module
+
+        mod = import_module(module_path)
+    except ImportError as e:
+        flavor = "standalone" if use_standalone else "upstream"
+        raise RuntimeError(
+            f"MetaMate {flavor} client not available: {e}. "
+            f"Ensure the binary's Buck deps include "
+            f"{'//metamate_standalone:metamate_standalone' if use_standalone else '//msl/metamate/cli:metamate_graphql'}."
+        ) from e
+    return mod.MetamateGraphQLClient
+
 
 # ---------------------------------------------------------------------------
 # API defaults (mirror query_metamate.py)

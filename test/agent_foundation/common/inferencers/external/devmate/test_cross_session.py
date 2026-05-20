@@ -65,9 +65,9 @@ async def test_cross_session_sdk():
 
     print(f"\n    Sessions are different: {session_a != session_b}")
 
-    if session_a == session_b:
-        print("\n❌ CRITICAL ERROR: Session A and B have same ID!")
-        return False
+    assert session_a != session_b, (
+        f"CRITICAL: Session A and B have same ID: {session_a!r}"
+    )
 
     # === RESUME SESSION A: Ask about number ===
     print("\n[3] RESUME SESSION A: Ask 'What is my favorite number?'")
@@ -100,7 +100,11 @@ async def test_cross_session_sdk():
     print(
         f"\n{'✅ PASSED' if success else '❌ FAILED'} - DevmateSDKInferencer Cross-Session"
     )
-    return success
+    assert number_remembered, "Session A should recall '42'"
+    assert color_remembered, "Session B should recall 'blue'"
+    assert session_a != session_b, "Sessions A and B should have distinct IDs"
+    # Intentionally no ``return`` — pytest 7+ warns on non-None test returns.
+    # Script mode (``main`` below) wraps the call in try/except instead.
 
 
 async def test_cross_session_cli():
@@ -142,9 +146,9 @@ async def test_cross_session_cli():
 
     print(f"\n    Sessions are different: {session_a != session_b}")
 
-    if session_a == session_b:
-        print("\n❌ CRITICAL ERROR: Session A and B have same ID!")
-        return False
+    assert session_a != session_b, (
+        f"CRITICAL: Session A and B have same ID: {session_a!r}"
+    )
 
     # === RESUME SESSION A: Ask about number ===
     print("\n[3] RESUME SESSION A: Ask 'What is my favorite number?'")
@@ -154,7 +158,13 @@ async def test_cross_session_cli():
         session_id=session_a,
     )
     print(f"    ✓ Time: {time.time() - start:.2f}s")
-    output_a2 = str(result_a2.get("output", ""))
+    # ``result_a2`` may be either a dict (legacy) or a ``TerminalInferencerResponse``
+    # (current). ``str(...)`` works for both: dict's str() is unhelpful but
+    # TerminalInferencerResponse.__str__ returns the cleaned output text.
+    output_a2 = (
+        result_a2.get("output", "") if isinstance(result_a2, dict)
+        else getattr(result_a2, "output", "") or str(result_a2)
+    )
     print(f"    ✓ Response: {output_a2[:200]}...")
 
     number_remembered = "42" in output_a2
@@ -168,7 +178,10 @@ async def test_cross_session_cli():
         session_id=session_b,
     )
     print(f"    ✓ Time: {time.time() - start:.2f}s")
-    output_b2 = str(result_b2.get("output", ""))
+    output_b2 = (
+        result_b2.get("output", "") if isinstance(result_b2, dict)
+        else getattr(result_b2, "output", "") or str(result_b2)
+    )
     print(f"    ✓ Response: {output_b2[:200]}...")
 
     color_remembered = "blue" in output_b2.lower()
@@ -179,7 +192,11 @@ async def test_cross_session_cli():
     print(
         f"\n{'✅ PASSED' if success else '❌ FAILED'} - DevmateCliInferencer Cross-Session"
     )
-    return success
+    assert number_remembered, "Session A should recall '42'"
+    assert color_remembered, "Session B should recall 'blue'"
+    assert session_a != session_b, "Sessions A and B should have distinct IDs"
+    # Intentionally no ``return`` — pytest 7+ warns on non-None test returns.
+    # Script mode (``main`` below) wraps the call in try/except instead.
 
 
 async def test_cross_session_claude():
@@ -272,22 +289,42 @@ async def test_cross_session_claude():
         print("   Cross-session may not be supported by the underlying SDK")
         # Still check if memory works within context
         success = number_remembered or color_remembered
+        assert success, (
+            "Without session IDs we still expect at least one of the two follow-ups "
+            "to recall its fact via in-context memory."
+        )
     else:
         success = number_remembered and color_remembered and (session_a != session_b)
+        assert number_remembered, "Session A should recall '42'"
+        assert color_remembered, "Session B should recall 'blue'"
+        assert session_a != session_b, "Sessions A and B should have distinct IDs"
 
     print(
         f"\n{'✅ PASSED' if success else '❌ FAILED'} - ClaudeCodeSdkInferencer Cross-Session"
     )
-    return success
+    # Intentionally no ``return`` — script mode uses try/except below.
+
+
+async def _run_test_safely(test_fn) -> bool:
+    """Run an async test function; True if it passes, False on assertion/exception."""
+    try:
+        await test_fn()
+        return True
+    except AssertionError as e:
+        print(f"\n❌ AssertionError: {e}")
+        return False
+    except Exception as e:
+        print(f"\n❌ {type(e).__name__}: {e}")
+        return False
 
 
 async def run_all_tests():
     """Run cross-session tests for all inferencers."""
     results = {}
 
-    results["DevmateSDKInferencer"] = await test_cross_session_sdk()
-    results["DevmateCliInferencer"] = await test_cross_session_cli()
-    results["ClaudeCodeSdkInferencer"] = await test_cross_session_claude()
+    results["DevmateSDKInferencer"] = await _run_test_safely(test_cross_session_sdk)
+    results["DevmateCliInferencer"] = await _run_test_safely(test_cross_session_cli)
+    results["ClaudeCodeSdkInferencer"] = await _run_test_safely(test_cross_session_claude)
 
     return results
 
@@ -310,13 +347,13 @@ def main():
     print(f"Testing: {args.inferencer}")
 
     if args.inferencer == "sdk":
-        result = asyncio.run(test_cross_session_sdk())
+        result = asyncio.run(_run_test_safely(test_cross_session_sdk))
         results = {"DevmateSDKInferencer": result}
     elif args.inferencer == "cli":
-        result = asyncio.run(test_cross_session_cli())
+        result = asyncio.run(_run_test_safely(test_cross_session_cli))
         results = {"DevmateCliInferencer": result}
     elif args.inferencer == "claude":
-        result = asyncio.run(test_cross_session_claude())
+        result = asyncio.run(_run_test_safely(test_cross_session_claude))
         results = {"ClaudeCodeSdkInferencer": result}
     else:  # all
         results = asyncio.run(run_all_tests())
