@@ -112,6 +112,12 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
     sdk_env: Dict[str, str] = attrib(factory=dict)
     permission_mode: Optional[PermissionModeLiteral] = attrib(default=None)
     effort: Optional[EffortLevel] = attrib(default="max")
+    # Shell-tool gating. ``enable_shell=False`` filters "Bash" out of
+    # ``allowed_tools``; if that leaves an empty list, raise — the SDK
+    # treats ``allowed_tools=[]`` as allow-all, which is the opposite of
+    # what the caller intended.
+    enable_shell: bool = attrib(default=True)
+    allowed_shell_commands: Optional[List[str]] = attrib(default=None)
 
     # Internal state
     _client: Any = attrib(default=None, init=False, repr=False)
@@ -119,6 +125,33 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
     _connected_loop: Any = attrib(default=None, init=False, repr=False)
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
     _last_tool_use_count: int = attrib(default=0, init=False, repr=False)
+
+    def __attrs_post_init__(self) -> None:
+        """Enforce enable_shell on allowed_tools and emit shell-gating logs."""
+        if not self.enable_shell:
+            filtered = [t for t in self.allowed_tools if t != "Bash"]
+            if not filtered:
+                raise ValueError(
+                    "enable_shell=False with allowed_tools=['Bash'] would leave "
+                    "allowed_tools=[], which the SDK treats as allow-all. "
+                    "Either keep at least one non-Bash tool, or set enable_shell=True."
+                )
+            self.allowed_tools = filtered
+
+        if self.allowed_shell_commands and not self.enable_shell:
+            logger.warning(
+                "enable_shell=False takes precedence over allowed_shell_commands=%s "
+                "(shell tool will be disabled).",
+                self.allowed_shell_commands,
+            )
+        elif self.allowed_shell_commands:
+            logger.info(
+                "ClaudeCodeSdkInferencer: allowed_shell_commands set to %s "
+                "(informational — no equivalent SDK option).",
+                self.allowed_shell_commands,
+            )
+
+        super().__attrs_post_init__()
 
     # === Option-routing helper (also exercised by unit tests) ===
 

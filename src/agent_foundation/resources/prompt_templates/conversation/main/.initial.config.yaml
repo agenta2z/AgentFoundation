@@ -1,0 +1,15 @@
+# Config for initial.jinja2 — rendering and display settings.
+
+rendering:
+  # structural_xml_tags: Tag names whose opening/closing markers should be
+  #   escaped (wrapped in backticks) when the rendered prompt is displayed
+  #   in the WebUI's MarkdownRenderer.  Only tags that:
+  #     1. appear on their own line,
+  #     2. do NOT nest other XML tag pairs inside,
+  #   are actually escaped.  Tags not listed here are left as-is (and will
+  #   be silently stripped by react-markdown, which is fine for tags that
+  #   serve as LLM output format instructions like <ActionTools>).
+  structural_xml_tags:
+    - WorkflowDescription
+    - WorkflowStatus
+    - WorkflowNextStepGuidance

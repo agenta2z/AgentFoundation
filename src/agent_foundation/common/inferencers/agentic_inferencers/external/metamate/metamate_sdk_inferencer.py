@@ -20,13 +20,6 @@ import time
 import uuid as uuid_mod
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
-from agent_foundation.common.inferencers.streaming_inferencer_base import (
-    StreamingInferencerBase,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
-    SDKInferencerResponse,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.common import (
     _TERMINAL_STATUSES,
     AUTO_CONTINUE_REPLY,
@@ -41,7 +34,15 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
     needs_continuation,
     parse_assistant_text,
     resolve_conversation_fbid,
+    resolve_metamate_client_cls,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
+    SDKInferencerResponse,
+)
+from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    StreamingInferencerBase,
+)
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -102,6 +103,13 @@ class MetamateSDKInferencer(StreamingInferencerBase):
     timeout_seconds: int = attrib(default=DEFAULT_TIMEOUT)
     total_timeout_seconds: int = attrib(default=1800)
     idle_timeout_seconds: int = attrib(default=600)
+    # Source of MetamateGraphQLClient. None = honor METAMATE_USE_STANDALONE env
+    # var (default off → upstream //msl/metamate/cli:metamate_graphql). True
+    # forces //metamate_standalone/cli:metamate_graphql. The binary's Buck
+    # deps must declare the chosen library or import-time resolution fails
+    # with a clear RuntimeError; see ``resolve_metamate_client_cls`` for the
+    # full contract.
+    use_standalone: Optional[bool] = attrib(default=None)
 
     # Internal state
     _conversation_uuid: Optional[str] = attrib(default=None, init=False, repr=False)
@@ -141,13 +149,7 @@ class MetamateSDKInferencer(StreamingInferencerBase):
         Yields:
             Text deltas as they arrive from MetaMate.
         """
-        try:
-            from msl.metamate.cli.metamate_graphql import MetamateGraphQLClient
-        except ImportError as e:
-            raise RuntimeError(
-                f"MetaMate SDK not available: {e}. "
-                "Ensure //msl/metamate/cli:metamate_graphql is in deps."
-            ) from e
+        MetamateGraphQLClient = resolve_metamate_client_cls(self.use_standalone)
 
         client = MetamateGraphQLClient(cat=self.cat_token)
         request_id = str(uuid_mod.uuid4())
@@ -337,10 +339,11 @@ class MetamateSDKInferencer(StreamingInferencerBase):
             logger.debug("Starting new conversation (new_session=True)")
         elif explicit_session_id:
             kwargs["conversation_uuid"] = explicit_session_id
-            # Look up FBID for the conversation UUID
+            # Look up FBID for the conversation UUID via the same client
+            # source the streaming path uses (upstream vs standalone).
             try:
-                from msl.metamate.cli.metamate_graphql import MetamateGraphQLClient
-            except ImportError:
+                MetamateGraphQLClient = resolve_metamate_client_cls(self.use_standalone)
+            except RuntimeError:
                 kwargs["conversation_fbid"] = None
             else:
                 client = MetamateGraphQLClient(cat=self.cat_token)

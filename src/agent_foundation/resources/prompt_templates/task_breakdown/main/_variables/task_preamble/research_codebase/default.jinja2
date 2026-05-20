@@ -1,0 +1,22 @@
+{% if docs_path %}
+Analyze the documentation at {{ docs_path }} alongside its implementation
+({{ workflow_target_path }}) and direct dependencies.
+{% else %}
+Analyze the code at {{ workflow_target_path }} and all its direct dependencies.
+{% endif %}
+
+Your goal is to identify concrete improvement opportunities worth deeper investigation.
+
+For each opportunity, explain:
+1. What the current behavior or design is
+2. What the gap, inefficiency, or limitation is
+3. Why it matters (impact on performance, reliability, maintainability, or user experience)
+4. What alternatives exist, and what are the tradeoffs of each?
+5. What a deeper investigation would need to answer
+
+{% if docs_path %}
+You may leverage existing opportunity studies available under {{ docs_path }}
+if any, but only as a starting point.
+{% endif %}
+DO NOT constrain your horizon to what is already covered. Go as far as possible
+with your innovation and imagination and surface inspiring new opportunities.

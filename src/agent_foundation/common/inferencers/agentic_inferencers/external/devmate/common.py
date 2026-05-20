@@ -253,7 +253,12 @@ DEVMATE_MAX_OUTPUT_TOKENS: int = 64000
 # Explicit mapping for Anthropic API / ClaudeModels values and Claude Code
 # short aliases whose Devmate ModelName cannot be derived by simple regex.
 # Covers legacy 3.x naming where the Devmate enum omits the dash between
-# "claude" and the major version (e.g. "claude3.5-sonnet").
+# "claude" and the major version (e.g. "claude3.5-sonnet"), the bracket
+# form for 1M-context variants ("[1m]" in Anthropic SDK → "-1m" in Devmate),
+# and the Anthropic "latest" alias ("opus" → most recent Claude Opus).
+#
+# These are verified against Devmate's server-side ``ModelName`` enum in
+# fbcode/devai/config/llm_config.py.
 _KNOWN_ALIASES: dict[str, str] = {
     # Legacy 3.x full API names → Devmate plugboard names
     # NOTE: claude-3-opus-20240229 (Claude 3 Opus) has no Devmate equivalent;
@@ -269,19 +274,38 @@ _KNOWN_ALIASES: dict[str, str] = {
     # 4.0 single-version (different ordering in Devmate)
     "claude-sonnet-4-20250514": "claude4-sonnet",
     "claude-sonnet-4": "claude4-sonnet",
+    # 1M-context bracket form ("[1m]") → Devmate dash-form ("-1m").
+    # Anthropic SDK uses "claude-opus-4-7[1m]" while Devmate's ModelName
+    # enum uses "claude-opus-4.7-1m" (CLAUDE_OPUS_4_7_1M_PLUGBOARD).
+    "claude-opus-4-6[1m]": "claude-opus-4.6-1m",
+    "claude-opus-4-7[1m]": "claude-opus-4.7-1m",
+    "claude-opus-4.6[1m]": "claude-opus-4.6-1m",  # already-dotted variant
+    "claude-opus-4.7[1m]": "claude-opus-4.7-1m",
+    # Anthropic "latest" short aliases → current latest Devmate model.
+    # Update these when a newer Claude generation supersedes 4.7.
+    "opus": "claude-opus-4.7",
+    "opus[1m]": "claude-opus-4.7-1m",
 }
 
 # Pattern: trailing -YYYYMMDD (8-digit date suffix)
 _DATE_SUFFIX_RE = re.compile(r"-\d{8}$")
 
-# Pattern: digit-digit NOT followed by 3+ more digits (version separator)
-_DASH_VERSION_RE = re.compile(r"(\d)-(\d)(?!\d{3,})")
+# Pattern: digit-dash-digit that's a VERSION SEPARATOR (e.g. ``4-7`` in
+# ``claude-opus-4-7``), NOT a context-window suffix (e.g. ``7-1`` in
+# ``claude-opus-4.7-1m``) or a date prefix.
+#
+# Restrictions:
+#   ``(?!\d{3,})`` - reject when followed by 3+ more digits (date suffix)
+#   ``(?![a-zA-Z])`` - reject when followed by a letter, which would
+#     indicate a suffix like ``-1m`` (context-window) or ``-sonnet`` etc.
+#     where the dash is meaningful and must be preserved.
+_DASH_VERSION_RE = re.compile(r"(\d)-(\d)(?!\d{3,})(?![a-zA-Z])")
 
 
 def resolve_model_tag(model_tag: str) -> str:
     """Normalize a model tag for Devmate CLI / SDK.
 
-    Handles three input formats:
+    Handles four input formats:
 
     1. **Anthropic API / ClaudeModels** (full date-qualified)::
 
@@ -295,19 +319,34 @@ def resolve_model_tag(model_tag: str) -> str:
         claude-sonnet-4-5          → claude-sonnet-4.5
         claude-3-5-sonnet          → claude3.5-sonnet
 
-    3. **Already-correct Devmate format** (no-op)::
+    3. **1M-context bracket form** (Anthropic SDK style) ::
+
+        claude-opus-4-7[1m]        → claude-opus-4.7-1m
+        claude-opus-4-6[1m]        → claude-opus-4.6-1m
+        opus[1m]                   → claude-opus-4.7-1m
+
+    4. **Anthropic "latest" short aliases**::
+
+        opus                       → claude-opus-4.7   (current latest)
+        opus[1m]                   → claude-opus-4.7-1m
+
+    5. **Already-correct Devmate format** (no-op)::
 
         claude-opus-4.6            → claude-opus-4.6
         claude3.5-sonnet           → claude3.5-sonnet
+        claude-opus-4.7-1m         → claude-opus-4.7-1m
 
     Args:
         model_tag: Model tag string in any format.
 
     Returns:
         Model tag normalized for Devmate server (dot-separated versions,
-        no date suffix).
+        no date suffix, ``-1m`` suffix for 1M-context variants). Returns
+        the input unchanged if no rule matches — callers should validate
+        against Devmate's server-side ``ModelName`` enum if they want to
+        catch unmapped values.
     """
-    # 1. Check explicit alias table first (handles legacy naming)
+    # 1. Check explicit alias table first (handles legacy naming + brackets)
     if model_tag in _KNOWN_ALIASES:
         return _KNOWN_ALIASES[model_tag]
 
@@ -320,5 +359,12 @@ def resolve_model_tag(model_tag: str) -> str:
 
     # 4. Convert dash-separated version digits to dots
     result = _DASH_VERSION_RE.sub(r"\1.\2", result)
+
+    # 5. Re-check alias table once more after dash→dot conversion. This
+    #    catches inputs like ``claude-opus-4-7[1m]`` where the regex
+    #    transforms the version portion to ``4.7`` and the resulting
+    #    ``claude-opus-4.7[1m]`` is in the alias table.
+    if result in _KNOWN_ALIASES:
+        return _KNOWN_ALIASES[result]
 
     return result

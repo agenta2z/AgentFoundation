@@ -1,0 +1,69 @@
+# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+oncall("ml_oncall")
+
+# Re-export all MetaMate inferencer sources as a python_library.
+#
+# This file lives at a BUCK-package boundary — the parent
+# ``//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation``
+# library's ``glob(["agent_foundation/**/*.py"])`` STOPS at any directory
+# containing another BUCK file. Without this library, the metamate
+# sources would silently disappear from the agent_foundation Python
+# package, breaking every consumer that imports
+# ``agent_foundation.common.inferencers.agentic_inferencers.external.metamate``.
+#
+# This library is added as a ``deps`` entry of the parent agent_foundation
+# library so its modules are bundled alongside the rest of the package.
+# The cross-package import (``from agent_foundation.common.inferencers.
+# terminal_inferencers...``) resolves at runtime via the binary's
+# transitive dep graph — at this library level we intentionally declare
+# **no** deps to avoid a build-time cycle with the parent.
+python_library(
+    # @autodeps-skip — Manually maintained. Cannot autodep ``//...:agent_foundation``
+    # because the parent depends on ``:metamate_lib`` (this target) to re-attach
+    # the sub-packaged sources; declaring it back here would form a cycle.
+    # Cross-package imports (``from agent_foundation.common.inferencers.
+    # terminal_inferencers...``) resolve at runtime via the consumer binary's
+    # transitive dep graph instead of at build time.
+    name = "metamate_lib",
+    srcs = glob([
+        "*.py",
+        "adapters/*.py",
+        "clients/*.py",
+    ]),
+    # Anchor the import path so ``types.py``, ``common.py`` etc. land under
+    # ``agent_foundation.common.inferencers.agentic_inferencers.external.metamate.*``
+    # instead of at the Python root — otherwise ``metamate/types.py`` would
+    # shadow stdlib ``types`` and break Python interpreter startup
+    # (``ImportError: cannot import name 'MappingProxyType' from partially
+    # initialized module 'types'``).
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    typing = False,
+    visibility = ["PUBLIC"],
+    deps = [],
+)
+
+# Standalone CLI binary for sending a single query to MetaMate.
+# ``MetamateCliInferencer`` launches this via
+# ``buck run <target> -- --query ...`` as a subprocess.
+#
+# ``query_metamate.py`` imports ``MetamateGraphQLClient`` at module
+# top-level, so the Meta-internal ``//msl/metamate/cli:metamate_graphql``
+# dep MUST be declared here (it is intentionally absent from the parent
+# agent_foundation library to keep its dep surface narrow / vendor-neutral).
+python_binary(
+    # @autodeps-skip — see ``:metamate_lib`` note above. The parent
+    # ``:agent_foundation`` dep is load-bearing for the runtime imports in
+    # ``MetamateCliInferencer`` / ``MetamateSDKInferencer`` (autodeps would
+    # only see the direct ``msl.metamate.cli.metamate_graphql`` import).
+    name = "query_metamate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate.query_metamate.main",
+    deps = [
+        ":metamate_lib",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//msl/metamate/cli:metamate_graphql",
+    ],
+)

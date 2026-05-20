@@ -1,0 +1,80 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Devmate CLI streaming demo — sync + async streaming + sync streaming modes.
+# Run with: buck2 run //_tony_dev/CoreProjects/AgentFoundation/examples/agent_foundation/common/inferencers/agentic_inferencers/external/devmate:example_devmate_cli_streaming
+python_binary(
+    name = "example_devmate_cli_streaming",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_streaming.main",
+    srcs = ["example_devmate_cli_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Devmate CLI session-resume demo — proves multi-turn memory + session isolation.
+python_binary(
+    name = "example_devmate_cli_session_resume",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_session_resume.main",
+    srcs = ["example_devmate_cli_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Devmate SDK streaming demo — depends on devai.devmate_sdk (Buck-only Meta dep).
+python_binary(
+    name = "example_devmate_sdk_streaming",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
+    srcs = ["example_devmate_sdk_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//devai/devmate_sdk/python:devmate_python_sdk",
+    ],
+)
+
+# Devmate SDK session-resume demo — depends on devai.devmate_sdk.
+python_binary(
+    name = "example_devmate_sdk_session_resume",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
+    srcs = ["example_devmate_sdk_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//devai/devmate_sdk/python:devmate_python_sdk",
+    ],
+)
+
+# ============================================================
+# Standalone variants — same example sources, but the SDK dep
+# points at the OSS-portable //devmate_standalone tree instead
+# of the canonical //devai. The inferencer's fallback import
+# (devmate_sdk_inferencer.py:_ainfer_streaming) picks up the
+# standalone class transparently.
+# ============================================================
+
+python_binary(
+    name = "example_devmate_sdk_streaming_via_standalone",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
+    srcs = ["example_devmate_sdk_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk",
+    ],
+)
+
+python_binary(
+    name = "example_devmate_sdk_session_resume_via_standalone",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
+    srcs = ["example_devmate_sdk_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk",
+    ],
+)

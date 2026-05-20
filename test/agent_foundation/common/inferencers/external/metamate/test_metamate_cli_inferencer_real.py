@@ -64,7 +64,7 @@ def test_sync_single_call(query: str):
         print(f"\n✓ Got response in {elapsed:.2f}s:")
         print(f"  Response type: {type(result)}")
         print(f"  Output length: {len(output)} chars")
-        print(f"  Return code: {result.get('return_code')}")
+        print(f"  Return code: {getattr(result, 'return_code', None)}")
         print("-" * 40)
         print(output[:500] + "..." if len(output) > 500 else output)
         print("-" * 40)
@@ -278,7 +278,9 @@ def run_compare(query: str):
 
     print(f"\nRegular response ({len(regular_output)} chars, {regular_elapsed:.2f}s):")
     print("-" * 40)
-    print(regular_output[:3000] + "..." if len(regular_output) > 3000 else regular_output)
+    print(
+        regular_output[:3000] + "..." if len(regular_output) > 3000 else regular_output
+    )
     print("-" * 40)
 
     # --- Deep research mode ---
@@ -310,10 +312,16 @@ def run_compare(query: str):
     print("COMPARISON SUMMARY (CLI)")
     print("#" * 60)
     print(f"  Query:                 {query[:80]}...")
-    print(f"  Regular response:      {len(regular_output)} chars in {regular_elapsed:.2f}s")
+    print(
+        f"  Regular response:      {len(regular_output)} chars in {regular_elapsed:.2f}s"
+    )
     print(f"  Deep research response: {len(deep_output)} chars in {deep_elapsed:.2f}s")
     if regular_output and deep_output:
-        ratio = len(deep_output) / len(regular_output) if len(regular_output) > 0 else float("inf")
+        ratio = (
+            len(deep_output) / len(regular_output)
+            if len(regular_output) > 0
+            else float("inf")
+        )
         print(f"  Deep/Regular ratio:    {ratio:.1f}x")
     print(f"  Regular has headings:  {'#' in regular_output}")
     print(f"  Deep has headings:     {'#' in deep_output}")

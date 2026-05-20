@@ -97,6 +97,11 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     append_system_prompt: Optional[str] = attrib(default=None)
     allowed_tools: Optional[List[str]] = attrib(default=None)
     enable_shell: bool = attrib(default=True)
+    # When set with ``enable_shell=True``, this is an informational hint about
+    # which executables the Bash tool should allow. The CLI doesn't enforce
+    # the list itself (Claude Code has no equivalent flag), but its presence
+    # is logged for downstream tooling (e.g. devmate config generation).
+    allowed_shell_commands: Optional[List[str]] = attrib(default=None)
     permission_mode: PermissionModeLiteral = attrib(default="bypassPermissions")
     effort: Optional[EffortLevel] = attrib(default="max")
     max_budget_usd: Optional[float] = attrib(default=None)
@@ -118,6 +123,22 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
             self.target_path = os.path.expanduser("~/fbsource")
         self.model_name = resolve_model_tag(self.model_name)
         self._resolve_claude_command()
+
+        # Shell-allowlist logging (no CLI flag equivalent, but downstream tools
+        # such as devmate config generation may consume the list).
+        if self.allowed_shell_commands and not self.enable_shell:
+            logger.warning(
+                "enable_shell=False takes precedence over allowed_shell_commands=%s "
+                "(shell tool will be disabled).",
+                self.allowed_shell_commands,
+            )
+        elif self.allowed_shell_commands:
+            logger.info(
+                "ClaudeCodeCliInferencer: allowed_shell_commands set to %s "
+                "(informational — no equivalent CLI flag).",
+                self.allowed_shell_commands,
+            )
+
         super().__attrs_post_init__()
 
     def _resolve_claude_command(self) -> None:

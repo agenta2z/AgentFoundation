@@ -13,20 +13,23 @@ import logging
 import shlex
 from typing import Any, List, Optional
 
-from attr import attrib, attrs
-from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
-    TerminalInferencerResponse,
-    TerminalSessionInferencerBase,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.common import (
     DEFAULT_API_KEY,
     DEFAULT_TIMEOUT,
     MetamateAgent,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
+    TerminalInferencerResponse,
+    TerminalSessionInferencerBase,
+)
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-_BUCK_TARGET: str = "fbcode//agent_foundation/common/inferencers/agentic_inferencers/external/metamate:query_metamate"
+_BUCK_TARGET: str = (
+    "fbcode//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/"
+    "common/inferencers/agentic_inferencers/external/metamate:query_metamate"
+)
 
 
 @attrs

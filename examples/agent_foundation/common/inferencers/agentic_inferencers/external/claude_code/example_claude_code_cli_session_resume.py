@@ -66,7 +66,7 @@ def send_and_print(inferencer, message, label=""):
     response = inferencer(message)
     elapsed = time.time() - start
 
-    output = response.output if response.success else response.get("error", "Error")
+    output = response.output if response.success else (response.error or "Error")
     session_id = response.session_id if hasattr(response, "session_id") else None
 
     # Truncate long responses for readability
