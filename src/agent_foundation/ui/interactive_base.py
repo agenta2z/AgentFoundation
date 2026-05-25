@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import asyncio
 from enum import StrEnum
 from typing import Tuple, Any, Union, Dict, Iterable, List
 
@@ -193,3 +194,16 @@ class InteractiveBase(Debuggable):
             self._send_pending_message()
 
         self.reset_input(flag)
+
+    async def aget_input(self) -> Any:
+        """Async wrapper around get_input(); subclasses with native async override."""
+        return await asyncio.to_thread(self.get_input)
+
+    async def asend_response(
+        self,
+        response: Union[Any, List, Tuple],
+        flag: InteractionFlags = InteractionFlags.TurnCompleted,
+        **kwargs,
+    ) -> None:
+        """Async wrapper around send_response(); subclasses with native async override."""
+        await asyncio.to_thread(self.send_response, response, flag, **kwargs)

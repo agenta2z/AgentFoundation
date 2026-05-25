@@ -21,6 +21,7 @@ class InputMode(StrEnum):
 class ChoiceOption:
     label: str
     value: str
+    description: str = ''  # Short description shown in dropdown menus / rich selectors
     follow_up_prompt: str = ''  # If non-empty, prompt for additional input after selection
     needs_user_copilot: bool = False  # If True, user interacted with browser; discard stale action_results
 
@@ -50,6 +51,7 @@ class InputModeConfig:
         elif self.mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICE):
             d['options'] = [
                 {'label': o.label, 'value': o.value,
+                 **(({'description': o.description} if o.description else {})),
                  **(({'follow_up_prompt': o.follow_up_prompt} if o.follow_up_prompt else {})),
                  **(({'needs_user_copilot': True} if o.needs_user_copilot else {}))}
                 for o in self.options
@@ -67,7 +69,14 @@ class InputModeConfig:
     def from_dict(cls, d: Optional[Dict[str, Any]]) -> 'InputModeConfig':
         if not d:
             return cls()
-        mode = InputMode(d.get('mode', 'free_text'))
+        raw_mode = d.get('mode', 'free_text')
+        try:
+            mode = InputMode(raw_mode)
+        except ValueError:
+            if raw_mode == 'multiple_choices':
+                mode = InputMode.MULTIPLE_CHOICE
+            else:
+                raise
         config = cls(mode=mode, prompt=d.get('prompt', ''))
         if mode == InputMode.EXACT_STRING:
             config.expected_string = d.get('expected_string', '')
@@ -75,6 +84,7 @@ class InputModeConfig:
         elif mode in (InputMode.SINGLE_CHOICE, InputMode.MULTIPLE_CHOICE):
             config.options = [
                 ChoiceOption(label=o['label'], value=o['value'],
+                             description=o.get('description', ''),
                              follow_up_prompt=o.get('follow_up_prompt', ''),
                              needs_user_copilot=o.get('needs_user_copilot', False))
                 for o in d.get('options', [])

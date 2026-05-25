@@ -1,14 +1,20 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Widget exports — re-exported from @agent-foundation/shared-ui.
  *
- * Widget exports — registry + all core widgets.
+ * Canonical source: AgentFoundation/src/agent_foundation/ui/react-shared/src/inputs/
  */
 
-export { default as WidgetRegistry, getWidget } from './WidgetRegistry';
-export { default as SingleChoiceWidget } from './SingleChoiceWidget';
-export { default as MultipleChoiceWidget } from './MultipleChoiceWidget';
-export { default as TextInputWidget } from './TextInputWidget';
-export { default as ToggleWidget } from './ToggleWidget';
-export { default as DropdownWidget } from './DropdownWidget';
-export { default as ToolArgumentFormWidget } from './ToolArgumentFormWidget';
-export { default as DefaultWidget } from './DefaultWidget';
+export {
+  registerWidget,
+  getWidget,
+  SingleChoiceWidget,
+  MultipleChoiceWidget,
+  TextInputWidget,
+  ToggleWidget,
+  DropdownWidget,
+  ToolArgumentFormWidget,
+  DefaultWidget,
+  MultiInputWidget,
+  ConfirmationWidget,
+  GroupedWidget,
+} from '@agent-foundation/shared-ui';

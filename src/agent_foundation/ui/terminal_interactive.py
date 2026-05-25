@@ -4,7 +4,6 @@ from typing import Any
 from attr import attrs, attrib
 
 from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
-from webaxon.html_utils.common import is_html_string
 
 
 @attrs
@@ -75,6 +74,12 @@ class TerminalInteractive(InteractiveBase, ABC):
         """
 
         response = str(response)
+
+        try:
+            from webaxon.html_utils.common import is_html_string
+        except ImportError:
+            def is_html_string(_s):
+                return False
 
         if is_html_string(response):
             import tempfile

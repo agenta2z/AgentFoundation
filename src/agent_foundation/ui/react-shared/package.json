@@ -1,0 +1,45 @@
+{
+  "name": "@agent-foundation/shared-ui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.cjs"
+    },
+    "./theme": {
+      "import": "./dist/esm/theme.mjs",
+      "require": "./dist/cjs/theme.cjs"
+    },
+    "./protocol": {
+      "import": "./dist/esm/protocol.mjs",
+      "require": "./dist/cjs/protocol.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "sync": "python scripts/sync_widget_types.py",
+    "sync:check": "python scripts/sync_widget_types.py --check"
+  },
+  "peerDependencies": {
+    "@emotion/react": "^11.0.0",
+    "@emotion/styled": "^11.0.0",
+    "@mui/material": ">=5.0.0 <8.0.0",
+    "@mui/icons-material": ">=5.0.0 <8.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "dependencies": {
+    "react-markdown": "^9.0.0",
+    "react-syntax-highlighter": "^15.5.0",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "vitest": "^1.0.0",
+    "@testing-library/react": "^14.0.0"
+  }
+}

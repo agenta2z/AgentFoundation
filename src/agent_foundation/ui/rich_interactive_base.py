@@ -8,7 +8,7 @@ Handles:
 Transport subclasses read self._current_input_mode in their _send_response().
 UI clients send structured dicts; this class maps them to agent-ready values.
 """
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from attr import attrs, attrib
 
@@ -40,6 +40,17 @@ class RichInteractiveBase(InteractiveBase):
     # Internal state -- not constructor params
     _current_input_mode: Any = attrib(default=None, init=False)
     _pending_input_mode: Any = attrib(default=None, init=False)
+
+    @property
+    def supports_widgets(self) -> bool:
+        """Whether this transport supports rich widget-based input.
+        Default is False. Override in subclasses that support widget rendering."""
+        return False
+
+    @property
+    def pending_input_mode(self) -> Optional[InputModeConfig]:
+        """The InputModeConfig the agent is currently waiting on, or None."""
+        return self._pending_input_mode
 
     # -- send_response side ---------------------------------------------------
 

@@ -1,20 +1,19 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Common components — re-exported from @agent-foundation/shared-ui.
  *
- * Common components barrel exports
+ * Canonical source: AgentFoundation/src/agent_foundation/ui/react-shared/src/common/
  */
 
-// Existing components
-export { MarkdownRenderer, CodeComponent } from './MarkdownRenderer';
-export { LoadingIndicator } from './LoadingIndicator';
-export { WelcomeScreen } from './WelcomeScreen';
-export { PlanModeSelector } from './PlanModeSelector';
-export { ClickToEditMarkdown } from './ClickToEditMarkdown';
-
-// Shared dashboard components
-export { StatusBadge } from './StatusBadge';
-export { ProgressBar } from './ProgressBar';
-export { PersonChip } from './PersonChip';
-export { QuickLinkButton } from './QuickLinkButton';
-export { SectionCard } from './SectionCard';
-export { EmptyState } from './EmptyState';
+export {
+  MarkdownRenderer,
+  LoadingIndicator,
+  WelcomeScreen,
+  PlanModeSelector,
+  ClickToEditMarkdown,
+  StatusBadge,
+  ProgressBar,
+  PersonChip,
+  QuickLinkButton,
+  SectionCard,
+  EmptyState,
+} from '@agent-foundation/shared-ui';
