@@ -78,7 +78,7 @@ from agent_foundation.common.inferencers.flow_parsers import (
 )
 from agent_foundation.common.inferencers.template_defaults import (
     FOLLOWUP_AGGREGATION_DEFAULTS,
-    STRUCTURED_AGGREGATION_DEFAULTS,
+    AGGREGATION_DEFAULTS,
 )
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
@@ -142,7 +142,7 @@ class MultiFlowDualInferencer(DualInferencer):
         # multi_flow_aggregator + per-flow followup both depend on the full
         # structured-aggregation triplet — task_response_format renders the
         # winner_pick / iteration_judgment schemas when their flags fire.
-        "multi_flow_aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
+        "multi_flow_aggregator_inferencer": AGGREGATION_DEFAULTS,
         "flow_configs.*.followup_inferencer": FOLLOWUP_AGGREGATION_DEFAULTS,
     }
 

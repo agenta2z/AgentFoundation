@@ -1,0 +1,9 @@
+{
+  "name": "exit_workflow",
+  "description": "Suspend the focused (or specified) workflow instance.",
+  "tool_type": "Action",
+  "category": "workflow",
+  "parameters": [
+    {"name": "instance_id", "type": "string", "description": "Instance to suspend (defaults to focused)"}
+  ]
+}

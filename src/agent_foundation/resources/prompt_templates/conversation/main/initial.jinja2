@@ -3,6 +3,18 @@
 {{ employee.mindset }}
 {% endif %}
 
+{# Available workflows (shown like tools/skills — always rendered when present) #}
+{% if available_workflows is defined and available_workflows %}
+## Available Workflows
+{{ available_workflows }}
+{% endif %}
+
+{# Ongoing/suspended workflow instances #}
+{% if ongoing_workflows is defined and ongoing_workflows %}
+## Ongoing Workflows
+{{ ongoing_workflows }}
+{% endif %}
+
 {# Guard workflow variables — shown when workflow_description is set (always for rovodev backend) #}
 {% if workflow_description is defined and workflow_description %}
 ## Workflow Context
@@ -91,7 +103,7 @@ Your user-facing answer goes inside `<Response>` tags. This is what the user eve
 
 [Your reasoning/analysis here — classification, status diff, etc. This part is auto-collapsed in the UI.]
 
-<Response>
+<ResponseSchema>
 [User-facing natural language — concise, helpful, complete sentences that read naturally on their own. Do NOT end with a lead-in to the tool block.]
 
 ```json ToolsToInvoke
@@ -99,7 +111,9 @@ Your user-facing answer goes inside `<Response>` tags. This is what the user eve
 {"type": "conversation", "name": "single_choice", "arguments": {"prompt": "pick one", "choices": [...]}, "output": ["var3"]}
 {"type": "action", "name": "tool_name", "arguments": {"param1": "value1", "param2": "value2", "param3": "__var1__", "param4": "__var3__"}, "output": [...]}
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 NOTES:
 - If a user's request requires an action (run a task, search knowledge, change settings), use the appropriate tool inside `<Response>`.

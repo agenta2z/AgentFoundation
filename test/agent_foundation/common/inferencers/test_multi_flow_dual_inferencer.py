@@ -35,11 +35,45 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
     MultiFlowDualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
-    DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-    DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
+
+# Inline Jinja fixtures for tests that need to exercise the aggregator-prompt
+# and followup-prompt code paths. The renderer just needs any non-empty Jinja
+# string with the right placeholders to produce a non-empty prompt feed for
+# the aggregator / followup mocks.
+_TEST_AGGREGATOR_PROMPT = """\
+Original task:
+{{ input }}
+
+Each team's final output:
+{% for idx, plan in worker_plans.items() %}
+=== Flow {{ idx }} ===
+{{ plan if plan else '(no output)' }}
+
+{% endfor %}\
+Produce a final integrated synthesis.
+"""
+
+_TEST_FOLLOWUP_PROMPT = """\
+Original task:
+{{ input }}
+
+Your previous output:
+{{ your_prev }}
+
+{% if visible_plans %}
+Other teams' latest outputs:
+{% for idx, plan in visible_plans.items() %}
+--- Flow {{ idx }} ---
+{{ plan if plan else '(no output yet)' }}
+
+{% endfor %}
+{% endif %}\
+Continue iterating; integrate the best ideas from any other teams' outputs.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -211,14 +245,14 @@ class TestT2AttrForwarding(unittest.TestCase):
         mfdi = MultiFlowDualInferencer(
             flow_configs=_make_minimal_flow_configs(2),
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_followup_prompt="my_followup_template",
             review_inferencer=_Scripted(script=[_approve()]),
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
         )
         self.assertEqual(
-            mfdi.base_inferencer.aggregator_prompt, DEFAULT_AGGREGATOR_PROMPT_TEMPLATE
+            mfdi.base_inferencer.aggregator_prompt, _TEST_AGGREGATOR_PROMPT
         )
         self.assertEqual(
             mfdi.base_inferencer.multiflow_followup_prompt, "my_followup_template"
@@ -285,8 +319,8 @@ def _build_hand_wired(
         flow_configs=flow_configs,
         visible_flows="all",
         aggregator_inferencer=agg,
-        aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-        multiflow_followup_prompt=DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
+        aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
+        multiflow_followup_prompt=_TEST_FOLLOWUP_PROMPT,
         response_parser=_parse_finalplan,
         checkpoint_dir=workspace_dir,
     )
@@ -316,8 +350,8 @@ def _build_convenience(
         flow_configs=flow_configs,
         visible_flows="all",
         multi_flow_aggregator_inferencer=agg,
-        multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-        multi_flow_followup_prompt=DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
+        multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
+        multi_flow_followup_prompt=_TEST_FOLLOWUP_PROMPT,
         multi_flow_response_parser=_parse_finalplan,
         review_inferencer=reviewer,
         fixer_inferencer=fixer,
@@ -373,7 +407,7 @@ class TestT3EquivalenceToHandWired(unittest.TestCase):
             flow_configs=flow_configs_hand,
             visible_flows="all",
             aggregator_inferencer=agg_hand,
-            aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             response_parser=_parse_finalplan,
             checkpoint_dir=self.hand_dir,
         )
@@ -394,7 +428,7 @@ class TestT3EquivalenceToHandWired(unittest.TestCase):
             flow_configs=flow_configs_conv,
             visible_flows="all",
             multi_flow_aggregator_inferencer=agg_conv,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=rev_conv,
             fixer_inferencer=fix_conv,
@@ -434,7 +468,7 @@ class TestT4EndToEnd(unittest.TestCase):
             flow_configs=_make_minimal_flow_configs(2),
             visible_flows="all",
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=rev,
             fixer_inferencer=fix,
@@ -457,7 +491,7 @@ class TestT4EndToEnd(unittest.TestCase):
             flow_configs=_make_minimal_flow_configs(3),
             visible_flows="all",
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=rev,
             fixer_inferencer=fix,
@@ -603,7 +637,7 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_default=flow1_inf,                # SAME as winner → avoidance
@@ -634,7 +668,7 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_default=reviewer_default,         # NOT same as winner
@@ -661,7 +695,7 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_default=flow1_inf,                # SAME as winner
@@ -696,7 +730,7 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=reviewer,
@@ -736,7 +770,7 @@ class TestT9AliasDispatch(unittest.TestCase):
             ],
             inferencer_pool={"Kiro": kiro_inst, "Claude": _Scripted(script=[])},
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_default="Kiro",                   # alias → resolves to kiro_inst
@@ -768,7 +802,7 @@ class TestT9AliasDispatch(unittest.TestCase):
             ],
             inferencer_pool={"Kiro": kiro_inst, "Claude": claude_inst},
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_reviewer_alias_parser=_parse_reviewer_tag,
             multi_flow_response_parser=_parse_finalplan,
@@ -800,7 +834,7 @@ class TestT9AliasDispatch(unittest.TestCase):
             ],
             inferencer_pool={"Kiro": kiro_inst},     # no MysteryAgent
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_reviewer_alias_parser=_parse_reviewer_tag,
             multi_flow_response_parser=_parse_finalplan,
@@ -1081,7 +1115,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             reviewer_match_second=True,
             fixer_inferencer=_Scripted(script=[]),
@@ -1112,7 +1146,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             reviewer_match_second=True,
             fixer_inferencer=_Scripted(script=[]),
@@ -1139,7 +1173,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             reviewer_match_second=True,
@@ -1167,7 +1201,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
             reviewer_match_second=True,
             fixer_match_winner=True,
@@ -1407,7 +1441,7 @@ class TestFix8RoleContractInheritance(unittest.TestCase):
             ],
             inferencer_pool={"MyFixer": fixer_inst},
             multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_fixer_alias_parser=_parse_fixer_tag,
             multi_flow_response_parser=_parse_finalplan,

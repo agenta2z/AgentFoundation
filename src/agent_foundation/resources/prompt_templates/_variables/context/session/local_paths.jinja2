@@ -1,0 +1,8 @@
+{%- if has_local_access is defined and has_local_access -%}
+{% if session_root_path %}
+The following are session-wide local paths related to the current user request
+- session_root_path: {{ session_root_path }}
+{% if workflow_target_path %}- workflow_target_path: {{ workflow_target_path }}{% endif %}
+{% if docs_path %}- docs_path: {{ docs_path }}{% endif %}
+{% endif %}
+{% endif %}

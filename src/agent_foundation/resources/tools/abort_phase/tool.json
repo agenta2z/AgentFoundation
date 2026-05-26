@@ -1,0 +1,9 @@
+{
+  "name": "abort_phase",
+  "description": "Abort the current SOP phase. Called on user confirmation refusal. SOP-scoped.",
+  "tool_type": "Action",
+  "category": "workflow",
+  "parameters": [
+    {"name": "reason", "type": "string", "required": true, "positional": true, "description": "Reason for aborting"}
+  ]
+}

@@ -106,6 +106,10 @@ class ConversationalInferencer(InferencerBase):
     )  # ContextCompressorCallable
     prior_context: dict[str, Any] = attrib(factory=dict, kw_only=True)
 
+    # --- Workflow integration ---
+    workflow_manager: Any = attrib(default=None, kw_only=True)  # WorkflowManager
+    yolo_mode: bool = attrib(default=False, kw_only=True)
+
     # --- Configuration ---
     compression_threshold: int = attrib(default=8000, kw_only=True)
     context_budget: ContextBudget = attrib(factory=ContextBudget, kw_only=True)
@@ -690,6 +694,15 @@ class ConversationalInferencer(InferencerBase):
             except Exception as e:
                 logger.warning("SOP evaluation failed: %s", e)
 
+        # Workflow manager sections (added AFTER prior_context so they
+        # cannot be overridden by prior_context keys)
+        workflow_sections: dict[str, str] = {}
+        if self.workflow_manager is not None:
+            try:
+                workflow_sections = self.workflow_manager.render_prompt_sections()
+            except Exception as e:
+                logger.warning("Workflow prompt rendering failed: %s", e)
+
         feed = {
             **template_vars,
             "workflow_nextstep_guidance": nextstep_guidance,
@@ -699,6 +712,8 @@ class ConversationalInferencer(InferencerBase):
             "conversation_history": messages,
             "current_turn": {"role": "user", "content": current_message},
             "conversation_tools": conversation_tools_text,
+            # Workflow sections after prior_context to prevent override
+            **workflow_sections,
         }
 
         # Resolve feed values that are themselves templates (e.g., SOP guidance

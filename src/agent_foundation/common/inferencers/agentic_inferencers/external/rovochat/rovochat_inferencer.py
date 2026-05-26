@@ -66,6 +66,9 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
@@ -100,9 +103,27 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.t
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-@attrs
-class RovoChatInferencer(StreamingInferencerBase):
+@attrs(slots=False)
+class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     """RovoChat as an async-native streaming inferencer with auto-continuation.
+
+    .. note:: **Multiple Inheritance Rationale**
+
+       RovoChat inherits from BOTH ``StreamingInferencerBase`` (for NDJSON
+       streaming + session management) AND ``TemplatedInferencerBase`` (for
+       Jinja2 template rendering via ``template_key``/``template_root_space``).
+
+       MRO order: ``RovoChatInferencer → StreamingInferencerBase →
+       TemplatedInferencerBase → InferencerBase``.
+
+       Templates are rendered automatically by the framework's ``__ainfer__``
+       chain via ``self._render_prompt()``, which resolves via MRO to
+       ``TemplatedInferencerBase._render_prompt()``. No explicit rendering
+       call is needed in this class.
+
+       ``slots=False`` matches ``TemplatedInferencerBase`` to avoid attrs
+       layout conflicts under MI.
+
 
     Sends natural language queries to the RovoChat REST API and streams
     responses via NDJSON parsing. Creates conversations automatically on

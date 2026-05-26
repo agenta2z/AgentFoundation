@@ -37,10 +37,26 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
     DualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
-    DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
+
+# Inline Jinja fixture for the aggregator-prompt code path. The renderer just
+# needs any non-empty Jinja string with the right placeholders to produce a
+# non-empty prompt feed for the aggregator mock.
+_TEST_AGGREGATOR_PROMPT = """\
+Original task:
+{{ input }}
+
+Each team's final output:
+{% for idx, plan in worker_plans.items() %}
+=== Flow {{ idx }} ===
+{{ plan if plan else '(no output)' }}
+
+{% endfor %}\
+Produce a final integrated synthesis.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +190,7 @@ def _build_multi_flow(
         flow_configs=flow_configs,
         visible_flows=visible_flows,
         aggregator_inferencer=aggregator,
-        aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+        aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
         response_parser=_parse_finalplan_tag,
         checkpoint_dir=workspace_dir,
     )

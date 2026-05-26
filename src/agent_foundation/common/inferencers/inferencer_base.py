@@ -961,6 +961,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     extract_delimited,
                 )
                 cleaned = extract_delimited(str(response))
+                if cleaned is None:
+                    _logger.warning(
+                        "extract_delimited returned None for output_path=%s; "
+                        "writing raw response as fallback (likely prompt-template echo).",
+                        resolved,
+                    )
+                    cleaned = str(response)
                 os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
                 with open(resolved, "w", encoding="utf-8") as f:
                     f.write(cleaned)
@@ -1312,7 +1319,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             on_retry_callback = _internal_retry_callback
 
         self.log_info(inference_input, "InferenceInput", is_artifact=True)
-        self.log_info(inference_args, "InferenceArgs")
+        self.log_info(inference_args, "InferenceArgs", is_artifact=True)
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None
@@ -1927,7 +1934,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             on_retry_callback = _internal_retry_callback
 
         self.log_info(inference_input, "InferenceInput", is_artifact=True)
-        self.log_info(inference_args, "InferenceArgs")
+        self.log_info(inference_args, "InferenceArgs", is_artifact=True)
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None

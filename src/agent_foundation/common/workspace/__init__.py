@@ -15,3 +15,8 @@ from agent_foundation.common.workspace.layout import (
     get_request_text,
     validate_workspace_subpath,
 )
+from agent_foundation.common.workspace.allocator import (
+    find_runtime_root,
+    make_workspace_dirname,
+    allocate_tool_workspace,
+)

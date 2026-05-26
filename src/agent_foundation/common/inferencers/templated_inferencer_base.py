@@ -125,6 +125,12 @@ class TemplatedInferencerBase(InferencerBase):
     # flows into ``load_variable`` for variable lookups made by THIS
     # inferencer.
     template_version: Optional[str] = attrib(default=None)
+    # Master version for variable lookups. When set, the variable cascade
+    # searches inside a ``{name}/{master_version}/`` subdirectory instead of
+    # flat ``{name}/{version}.ext``. Orthogonal to ``template_version``:
+    # master selects the *family* (e.g., "aggregation"), version selects the
+    # *variant* within that family (e.g., "create_role").
+    template_master_version: Optional[str] = attrib(default=None)
     # Mode flags (e.g. "deep_mode", "elegant_mode") that toggle conditional
     # blocks in templates AND auto-load instruction text from
     # ``_variables/instructions/modes/<name>.jinja2``. For each entry:
@@ -204,6 +210,7 @@ class TemplatedInferencerBase(InferencerBase):
                     variable_specs=effective_specs,
                     root_space=self.template_root_space or "",
                     default_version=self.template_version or "",
+                    master_version=self.template_master_version,
                 )
             except FileNotFoundError as e:
                 import logging
@@ -223,9 +230,22 @@ class TemplatedInferencerBase(InferencerBase):
             feed["__template_space__"] = self.template_root_space
 
         feed["input"] = inference_input
+        # Expose ``has_local_access`` so templates can gate shell/filesystem-only
+        # advice (e.g., ``{% if has_local_access %}...{% endif %}``).  Critical
+        # for prompts shared between CLI agents (RovoDev, ClaudeCodeCli) and
+        # API-only inferencers (RovoChat, Claude API) — the latter cannot run
+        # shell commands, so advice about ``grep``/``find``/``cat`` is noise.
+        # Coerced to bool via ``getattr`` to handle property-style overrides
+        # uniformly and default safely to False for any rare subclass that
+        # doesn't define the attribute.
+        feed["has_local_access"] = bool(getattr(self, "has_local_access", False))
         resolved = self.resolve_output_path()
         if resolved and os.path.isabs(resolved) and self.has_local_access:
             feed["output_path"] = resolved
+        ws = getattr(self, "_workspace", None)
+        if ws is not None and hasattr(ws, "root") and feed["has_local_access"]:
+            feed["workspace_root"] = str(ws.root)
+            feed["workspace_outputs"] = os.path.join(str(ws.root), "outputs")
         return feed
 
     # ------------------------------------------------------------------
@@ -294,6 +314,7 @@ class TemplatedInferencerBase(InferencerBase):
         return self.template_manager(
             self.template_key,
             active_template_root_space=self.template_root_space,
+            master_version=self.template_master_version,
             **feed,
         )
 
@@ -304,6 +325,12 @@ class TemplatedInferencerBase(InferencerBase):
         set by the orchestrator overrides yaml defaults on children. Each
         ``InferencerBase`` does this 1 layer; recursive inference naturally
         propagates through the full hierarchy.
+
+        ``template_version`` and ``template_master_version`` are deliberately
+        NOT propagated. They are slot-specific: a BTA's aggregator needs
+        ``master_version="aggregation"`` but its breakdown and workers do not.
+        Per-slot targeting is handled by ``SLOT_DEFAULTS`` at Hydra
+        instantiation time, not by parent-to-child cascade.
 
         Uses ``_for_each_child_inferencer`` (defined on InferencerBase, the
         generic walker) to discover child instances, partials, and duck-typed
@@ -347,12 +374,14 @@ class TemplatedInferencerBase(InferencerBase):
 
     _ROLE_RELEVANT_ATTRS = InferencerBase._ROLE_RELEVANT_ATTRS + (
         "template_key", "template_root_space", "template_extra_feed",
-        "template_variables", "template_version", "modes",
+        "template_variables", "template_version", "template_master_version",
+        "modes",
     )
 
     def switch_role(self, new_role, *, template_key=None, template_root_space=None,
                     template_extra_feed=None, template_variables=None,
-                    template_version=None, modes=None, **base_kwargs):
+                    template_version=None, template_master_version=None,
+                    modes=None, **base_kwargs):
         """Template-aware role switch: apply template attrs BEFORE the base
         layer's workspace + session reset, so the new template state is in
         place when the inferencer next renders.
@@ -366,7 +395,8 @@ class TemplatedInferencerBase(InferencerBase):
         changes = {}
         for attr, val in {"template_key": template_key, "template_root_space": template_root_space,
                           "template_extra_feed": template_extra_feed, "template_variables": template_variables,
-                          "template_version": template_version, "modes": modes}.items():
+                          "template_version": template_version, "template_master_version": template_master_version,
+                          "modes": modes}.items():
             if val is not None:
                 setattr(self, attr, val)
                 changes[attr] = val

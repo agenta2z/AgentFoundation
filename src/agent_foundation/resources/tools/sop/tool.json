@@ -1,0 +1,42 @@
+{
+  "name": "sop",
+  "description": "Execute a Standard Operating Procedure end-to-end. Can run in yolo mode (auto-confirm all gates) or interactive mode.",
+  "tool_type": "Action",
+  "category": "workflow",
+  "asynchronous": true,
+  "is_bridge": true,
+  "parameters": [
+    {
+      "name": "workflow",
+      "type": "string",
+      "required": true,
+      "positional": true,
+      "description": "Workflow definition ID (e.g., 'code_optimization') or path to SOP file"
+    },
+    {
+      "name": "--yolo",
+      "type": "flag",
+      "description": "Auto-resolve all non-mandatory confirmation gates"
+    },
+    {
+      "name": "--model",
+      "type": "string",
+      "description": "Override the LLM model for all phase inferencers"
+    },
+    {
+      "name": "--params",
+      "type": "string",
+      "description": "JSON key-value parameters for the SOP (e.g., '{\"target_path\": \"src/foo\"}')"
+    },
+    {
+      "name": "--max-concurrency",
+      "type": "int",
+      "description": "Max parallel phases for __branch__ fan-out (default: 1)"
+    }
+  ],
+  "executor": "agent_foundation.resources.tools.sop.executor:execute",
+  "examples": [
+    "/sop code_optimization --params '{\"target_path\": \"src/foo\"}'",
+    "/sop code_optimization --yolo --model sonnet"
+  ]
+}

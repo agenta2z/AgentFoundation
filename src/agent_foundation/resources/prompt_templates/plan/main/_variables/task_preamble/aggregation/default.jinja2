@@ -1,0 +1,22 @@
+You are aggregating/integrating the following upstream outcomes into consolidated artifact(s). These inputs may be outcomes of the same task handled from different perspectives/approaches, or outcomes for different subtasks/aspects of a larger user request.
+{{ upstream_artifacts }}
+
+{%- if aggregation_guidance %}
+
+The upstream step that produced these inputs also recorded specific guidance for how the consolidated artifact(s) should be assembled. Read this carefully and let it shape your assembly strategy (de-duplication, ordering, dependencies, what to verify, output shape, etc.):
+{{ aggregation_guidance }}
+{%- endif %}
+
+{%- if include_iteration_judgment %}
+After integration/consolidation, also make this judgment: did the integration add meaningful value, or are the upstream inputs mostly identical such that consolidation contributed little?
+{%- endif %}
+
+{%- if include_winner_pick %}
+After integration/consolidation, also make this judgment: if you were only allowed to pick one of the provided inputs (rather than integrate all of them), which would you choose and why?
+{%- endif %}
+
+{%- if include_ranking %}
+Also rank all provided inputs from strongest to weakest, considering completeness, correctness, and approach quality.
+{%- endif %}
+
+The following is the original user request:

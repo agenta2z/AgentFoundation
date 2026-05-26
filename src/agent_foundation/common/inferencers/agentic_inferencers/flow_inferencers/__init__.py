@@ -12,8 +12,6 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.li
     WorkflowStepConfig,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: F401
-    DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-    DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (  # noqa: F401

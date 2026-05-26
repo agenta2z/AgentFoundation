@@ -108,18 +108,35 @@ def parse_decision_stop(state: Any, result: Any) -> bool:
     return m.group(1).strip().lower() in _STOP_TOKENS
 
 
-def parse_finalplan_tag(s: Any) -> str:
-    """Extract content from ``<FinalPlan>...</FinalPlan>``.
+def parse_finalplan_tag(s: Any) -> Optional[str]:
+    """Extract content from ``<FinalPlan>...</FinalPlan>`` with prompt-echo defense.
 
     Falls back to the original string when no tag is present (graceful — the
     aggregator output is used verbatim if it didn't wrap properly). Used as
     ``MultiFlowDual.multi_flow_response_parser`` so the outer Dual reviewer
     receives the cleaned plan body.
+
+    Three return modes (matching ``DualInferencer._default_response_parser``):
+    1. No matches        -> str(s) unchanged (passthrough).
+    2. >=1 clean matches -> most-recent clean match's content.
+    3. All matches echo  -> None (hard-failure signal).
+
+    See forensics_round_template_echo_bug for the originating incident.
     """
-    if not isinstance(s, str):
-        return s
-    m = _FINALPLAN_RE.search(s)
-    return m.group(1).strip() if m else s
+    from agent_foundation.common.response_parsers.delimiter_parser import (
+        _PROMPT_ECHO_MARKERS,
+    )
+
+    text = str(s) if not isinstance(s, str) else s
+    matches = list(_FINALPLAN_RE.finditer(text))
+    if not matches:
+        return text
+    for match in reversed(matches):
+        content = match.group(1).strip()
+        if all(marker in content for marker in _PROMPT_ECHO_MARKERS):
+            continue
+        return content
+    return None
 
 
 def parse_ranking_tag(s: Any) -> Optional[List[int]]:

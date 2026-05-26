@@ -5,10 +5,8 @@
 
 You are tasked with executing or implementing the following user request:
 
-**Original User Request:**
 <UserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ context.user_request_with_task_preamble }}
 </UserRequest>
 
 ---
@@ -23,32 +21,30 @@ You are tasked with executing or implementing the following user request:
 
 ## Output Requirements
 
-- Write your **execution report** or **implementation report** to: `{{ output_path }}`. This is a report, not the execution or implementation itself (they might have other output paths to store the actual deliverables). Follow the UserRequest and any plan/todos therein to execute the actual execution/implementation.
+- Write your **execution report** or **implementation report** to: `{{ output_path }}`. This is a report, not the execution or implementation itself (they might have other places to store the actual deliverables). Follow the UserRequest and any plan/todos therein to execute.
 - The report should thoroughly index the execution/implementation: files created/modified, key updates/changes, testing and/or benchmarking results, with concise descriptions. Also report any potential concerns.
-- If the execution/implementation report is too large for a single write, split it into smaller chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
-- If the user request involves/requires testing and/or benchmarking, the report MUST include a **"Testing/Benchmarking Results"** section with actual numeric results. DO NOT just report "tests passed", "benchmarks completed". For example:
-  * how many tests, how many passed/failed
-  * latency, speedup ratios, memory
-  * precision, recall, NDCG, MRR, etc., for scientific benchmarking 
-  * any other relevant metrics
+- If the user request involves/requires validation/testing/benchmarking, the report MUST include a section with insightful details. 
+  * DO NOT just shallowly say "tests passed", "benchmarks completed".
+  * Example metrics: (1) general statistics such like how many total validations/tests, how many passed/failed; (2) latency, speedup ratios, memory, etc., if applicable; (3) precision, recall, NDCG, MRR, etc., for scientific benchmarking, if applicable; (4) any other resonably relevant metrics.
 
 ## Response Format
 
-In addition to above output, YOU MUST generate a **concise summary** (NOT the full execution/implementation report) wrapped in `<Response>` tags:
+In addition to above output, YOU MUST generate a **concise summary** (NOT the full execution/implementation report) wrapped in `<Response>` tags.
 
-**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, and may cause downstream failures.
 
-<Response>
-[Your concise natural language summary of what you implemented, key results, and any concerns. Do NOT repeat the full report here — it is already in the file above.]
-</Response>
+<ResponseSchema>
+[Your concise natural language summary of what you implemented, key results, and any concerns. Do NOT repeat the full report here — it is already in the output file above.]
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 
 ## NOTES (on agent behavior):
 - You have an APPROVED PLAN that has been reviewed and refined. Follow it and only make new investigation when in doubt.
   * DO NOT re-investigate the entire codebase from scratch.
-- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
-  * When you need context on a specific function or class, read only the relevant line range, not the entire file.
+- {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback }}
 - After writing your execution/implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * The execution/implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
@@ -59,5 +55,7 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * Your careful decision to choose right file format for the output artifacts (e.g. CSV for tabular metrics data, JSON for structured details, etc.).
 
 {{ notes.local_search_efficiency }}
+
+{{ notes.large_file_writing }}
 
 Now start your implementation work.

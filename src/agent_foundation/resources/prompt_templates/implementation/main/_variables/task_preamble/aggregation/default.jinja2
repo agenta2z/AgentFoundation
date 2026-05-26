@@ -1,0 +1,10 @@
+You are aggregating/integrating the following upstream outcomes into consolidated deliverable(s). These inputs may be outcomes of the same task handled from different perspectives/approaches, or outcomes for different subtasks/aspects of a larger user request.
+{{ upstream_artifacts }}
+
+{%- if aggregation_guidance %}
+
+The upstream step that produced these inputs also recorded specific guidance for how the consolidated deliverable(s) should be assembled. Read this carefully and let it shape your assembly strategy (de-duplication, ordering, dependencies, what to verify, output shape, etc.):
+{{ aggregation_guidance }}
+{%- endif %}
+
+The following is the original user request:

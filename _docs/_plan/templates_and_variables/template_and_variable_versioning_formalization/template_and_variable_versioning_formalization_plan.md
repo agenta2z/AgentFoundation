@@ -1,0 +1,1094 @@
+# Formalize Variable/Template Versioning — FileSpaceManager + master_version + Sidecar + File Migration
+
+> **Status**: ACTIVE
+> **Plan version**: v3.8 (F22 retracted as architecturally misguided — confirmed by implementation agent: `template_master_version` is a per-slot attribute set via `SLOT_DEFAULTS` (e.g., `AGGREGATOR_PREAMBLE_DEFAULTS`/`STRUCTURED_AGGREGATION_DEFAULTS`), NOT a hierarchy-wide attribute like `template_extra_feed`/`modes`. Propagating it through `_propagate_to_children()` would corrupt non-aggregator children (breakdown/workers would incorrectly inherit the aggregator's master). Decision: F22 RETRACTED. Acceptance criteria reduced to F1–F21 (21 total). `switch_role()` parameter gap was a real bug — fixed in implementation. Builds on v3.7 (second critical-thinking patch: corrected residual stale counts — acceptance "16"→"22"; file count "7"→"8" across §0/§1/§5.3/F7; §5.2 stale role_setup.jinja2 filename; §4.2 `hit.path` → `hit.read_text()` matches ResolvedContent API; §12 "Plan A vs Plan B" stale bullets replaced with integrated-rationale list. Builds on v3.6 fixes for: explicit `master_version` in `FieldBackend.resolve()` per OQ4; `_find_version_only_across_roots` clarification; F-criteria sequence repair; F22 for `_propagate_to_children()`; `role_setup_report.jinja2` filename correction.)
+> **Source plans**: Integrates Plan A v3 (`understand-this-context-stateless-kahan.md`, 154-line reference: constraints checklist + correctness callouts + 415-test audit with file-level granularity) with Plan B v3.3 (this file's prior version, ~915 lines: backend abstraction + URI scheme + locked design)
+> **Change history**: see §11 Provenance; per-decision version index in §11.1
+
+> **One-paragraph summary**: Build a single canonical file-space resolver — `FileSpaceManager` in `RichPythonUtils.common_objects` — with explicit `master_version` axis, `FieldBackend` Protocol for future YAML/JSON/HTTP backends, URI-shape `ResolvedContent`, and `read(parser=None) → Any` signature that returns natural raw decoded objects. Refactor `TemplateManager` and `FileBasedVariableManager` to delegate file location to this resolver. Migrate 8 files (7 distinct + 1 sibling copy in `implementation/` for `role_setup_report`) to `{name}/{master}/{version}.ext` layout. Fix the aggregator-input regression via three coordinated changes (master_version propagation, `enable_templated_feed=True` gating, deletion of stale `ROLE_SYNTHESIS_INSTRUCTIONS` constant). Lock in 15 design decisions; ship 22 acceptance criteria (F1–F22 contiguous); mitigate 15 risks; preserve all 415+ tests audited in §6.7's 5-action-class table.
+
+## §0 Executive Summary
+
+Variable resolution today is **duplicated across two parallel implementations** (`TemplateManager._cascade_load_variable_path()` and `FileBasedVariableManager._get_cascade_paths()` + `_find_variable_file()`), and the runtime `default_version` is **inconsistently applied to dotted-key wrapper variables**, producing the A14a aggregator regression where `master_version="aggregation"` fails to inject `aggregation.jinja2` into wrapper variables like `context.user_request_with_task_preamble`.
+
+This plan builds a single canonical resolver — **`FileSpaceManager`** in `RichPythonUtils.common_objects` — that:
+
+1. **Eliminates duplication**: both managers delegate cascade + folder-search + version-search to one module
+2. **Adds `master_version`**: a NEW axis orthogonal to `version`, enabling `master/version.ext` paths (e.g., `aggregation/create_role.jinja2`)
+3. **Defines `FieldBackend` Protocol**: pluggable backend chain (FILE today; YAML/JSON sidecars later) without breaking the API
+4. **Returns URI-shape `ResolvedContent`**: `(name, kind, uri, path, field, mime, content)` — diagnostics-friendly, cache-friendly, lazy-read-friendly
+5. **Migrates 8 files** (7 distinct migrations + 1 sibling copy for `role_setup_report` in `implementation/main/...`) to `master/version` subdirectory layout (`aggregation.jinja2` → `aggregation/default.jinja2`)
+6. **Fixes A14a end-to-end**: `create_role/executor.py` + `role_setup/executor.py` adopt `template_master_version="aggregation"` + `template_version="create_role"`; stale `ROLE_SYNTHESIS_INSTRUCTIONS` constant + custom `agg_prompt_builder` removed
+7. **Locks in 15 design decisions** with explicit rationale (`.config.yaml` local-only, prefix equivalence, files-first, subdir-fallback Constraint H, etc.)
+
+### Why Now
+
+| Driver | Detail |
+|---|---|
+| **A14a regression actively breaks production** | Aggregator's `(See file: …)` references are missing; `aggregation.jinja2` task_preamble not injected |
+| **3 mechanisms doing the same job** | `template_version` (blanket), per-variable `version`, file path — confused even senior contributors |
+| **No urgency for quick fix; high urgency for correctness** | "We need to first get the mechanism right to avoid coming back to fix again in the future" (user direction) |
+| **Field-backed sidecars (yaml/json) coming** | If we don't define the Protocol now, we'll break API again in 3 months |
+
+---
+
+## §1 Scope Boundary
+
+### In Scope
+
+| Item | Disposition |
+|---|---|
+| Variable resolution duplication | ✅ Consolidated into `FileSpaceManager` |
+| `master_version` axis | ✅ Added end-to-end (Protocol → Manager → Inferencer → SLOT_DEFAULTS → YAML) |
+| `FieldBackend` Protocol | ✅ Defined (interface + 1 impl: `FileBackend`) |
+| URI-shape `ResolvedContent` | ✅ Returned from day 1 |
+| File migrations (8 files: 7 distinct + 1 implementation/ sibling copy) | ✅ Move flat `master.ext` → `master/default.ext` subdirs |
+| A14a executor fix | ✅ `create_role` + `role_setup` adopt new mechanism |
+| `_variables` ↔ `.variables` prefix equivalence | ✅ Configurable canonical + prefix list |
+| `.config.yaml` LOCAL-only semantics | ✅ Explicit design decision |
+| Lock-in unit tests (~40 new) | ✅ FileSpaceManager + master_version + sidecar + cascade + edge cases |
+
+### Out Of Scope (Deferred)
+
+| Item | Why deferred | Target version |
+|---|---|---|
+| YAML-field backend implementation | Protocol shape is what we need now; YAML reader can ship later | future |
+| JSON-field backend implementation | Same | future |
+| HTTP/env/git-revision backends | Speculative; YAGNI today | future |
+| `.config.yaml` cascade (cross-level inheritance) | Decision: LOCAL-only is the right design (§3.8) | Never |
+| Template content rendering changes | Not needed — A14a fix is at resolution layer, not template layer | N/A |
+| `TemplateManager`'s deep-merge-at-construction model | TM uses a different model (flat dict lookup) — does not benefit from this refactor at variable-content layer (§2.2) | N/A |
+
+### Explicit Non-Goal
+
+- We do NOT collapse `TemplateManager` and `VariableManager` into one class. They serve different domains (rendering vs. variable resolution). They DELEGATE to `FileSpaceManager` for their shared concern (cascade + version + file-discovery), but remain separate orchestrators.
+
+---
+
+## §2 Current State (Verified)
+
+### §2.1 Duplication Sites (Both Reads Confirmed)
+
+| Site | File | Lines | What It Does |
+|---|---|---|---|
+| Site A | `template_manager.py::_cascade_load_variable_path()` | 657-711 | 2-pass cascade (version + default) over `space/type/_variables/name/version.ext` |
+| Site B | `template_manager.py` module-level `_find_in_variable_folder()` | 43-89 | Folder-internal lookup with extension priority + `.config.yaml` alias |
+| Site C | `file_based.py::_find_variable_file()` | 671-… | 3-pass cascade + underscore-split + flat-versioned subdir fallback |
+| Site D | `file_based.py::_find_in_variable_folder()` | 620-669 | Same as Site B (acknowledged duplicate in source comment) |
+| Site E | `file_based.py::_get_cascade_paths()` | 552-560 | Cascade folder builder for FileBasedVariableManager |
+
+Sites B + D are **acknowledged self-duplicates** (the docstring on Site B literally says *"Mirrors FileBasedVariableManager._find_in_variable_folder"*).
+
+### §2.2 What This Refactor Does NOT Help
+
+`TemplateManager.process_template()` reads templates via a **flat-dict lookup** populated at construction (deep-merged from all roots). The cascade-at-render-time model is variable-specific. Templates do NOT participate in the cascade mechanism this plan formalizes, and they will NOT use `FileSpaceManager`. Two parallel audits confirmed this. This plan's scope is intentionally limited to the variable side.
+
+### §2.3 The A14a Regression — Mechanical Trace
+
+Concrete reproduction (`/Users/tchen7/MyProjects/CoreProjects/OpenStartup/_runtime/tasks/create_role/create_role_20260521_181230_29041e31/children/aggregator/logs/session/RovoDevCliInferencer-f54dc46d.jsonl.parts/InferenceInput/20260521_181733_1b3dfbb6.txt`):
+
+| Check | Expected (Healthy) | Actual (Broken) |
+|---|---|---|
+| `(See file: ...)` references count | 3 | **0** |
+| `## Aggregating the following upstream artifacts` keyword | Present | **Absent** |
+| Total prompt lines | ~250 | **130** (truncated; aggregation task_preamble missing) |
+
+**Root cause** (verified in `template_manager.py:880` flat-key branch):
+- Flat keys (`task_preamble`) cascade `default_version` correctly: `"aggregation"` → `aggregation.jinja2`
+- Dotted keys (`context.user_request_with_task_preamble`) bypass `default_version` and load `default.jinja2` instead
+- The wrapper variable's nested `{{ task_preamble }}` then resolves against **the same broken cascade** → wrong file
+
+`master_version` makes the cascade UNIFORM: when set, the manager looks in `master/` subdir for both flat AND dotted keys.
+
+### §2.4 Why Three Mechanisms Confused Past Coding Agents
+
+The system has **three superficially-similar mechanisms** for selecting which variable file to load:
+
+| Mechanism | Where Set | What It Controls |
+|---|---|---|
+| M1: `template_version` on inferencer | `attrib(default=None)` | **Blanket default** — every variable with `value=None` uses this as the file selector |
+| M2: per-variable `version` | `template_variables={"task_preamble": "aggregation"}` | **Per-variable override** — wins over M1 for THIS variable |
+| M3: file path | Directly in `_variables/{name}/{version}.jinja2` | **Disk reality** — what physically exists |
+
+A coding agent looking at `template_version="aggregation"` could not tell whether the file should be:
+- `_variables/task_preamble/aggregation.jinja2` (M1 as version)
+- `_variables/aggregation/task_preamble.jinja2` (M1 as space/folder)
+- `_variables/aggregation/task_preamble/default.jinja2` (M1 as master)
+
+This ambiguity is RESOLVED by the explicit `master_version` axis: the master is its own slot, separate from version. The disk layout becomes self-documenting.
+
+---
+
+## §3 `FileSpaceManager` Design
+
+### §3.0 Design Constraints Checklist (Acceptance Gate Per Phase)
+
+Every implementation phase MUST satisfy ALL of these. Use this as a pre-merge gate. Each constraint maps to a canonical test in §6.
+
+| # | Constraint | Canonical test / check (§6) |
+|---|---|---|
+| **A** | `{name}/{version}.ext` flat search is enabled ONLY when `master_version` is unset | T-A1 `test_resolve_master_version_no_flat_fallback` |
+| **B** | Public API is concrete + keyword-only: `resolve(*, name=, master_version=, version=)` | T-A2 `FileSpaceManager` public signature |
+| **C** | **Version specificity beats proximity**: a version-specific match at a more general cascade level wins over a default at a more specific level | T-A3 `test_multi_root_specificity_beats_proximity` (mirrors existing `TestVersionAnywhereBeatsUnversionedLocally`) |
+| **D** | Multi-root cascade is interleaved at each level (specificity > root priority > backend type) | T-A4 `test_build_cascade_multi_root` + `test_multi_root_first_wins_same_level` |
+| **E** | `.config.yaml` is LOCAL-only — affects only the folder it lives in, never cascades | T-A5 `test_config_yaml_local_only_no_cascade` |
+| **F** | `_variables` ↔ `.variables` equivalence (both prefixes recognized; `_` preferred) | T-A6 `test_prefix_equivalence_underscore_preferred` + `test_prefix_equivalence_dot_fallback` |
+| **G** | Sidecar convention: `_variables` → `.variables.yaml` (sibling). Files-first: filesystem always wins over sidecar at same cascade level | T-A7 `test_backend_protocol_chain_files_first` |
+| **H** | **Subdirectory fallback (backward-compat)**: when `master_version=None`, `find_in_folder()` first checks `{folder}/{version}.ext`; if not found AND `{folder}/{version}/` exists as a directory, falls back to `{folder}/{version}/default.ext`. This makes the flat→subdirectory file migration transparent. | T-A8 `test_subdir_fallback_when_master_unset` |
+
+---
+
+### §3.1 Conceptual Model
+
+The filesystem is treated as a **hierarchical dict**:
+
+```
+{root}/{space}/{type}/{subfolder}/{name}/{master_version}/{version}.ext → content
+```
+
+Each axis has clear semantics:
+
+| Axis | Role | Required? |
+|---|---|---|
+| `root` | Top-level mount point (multiple supported via priority-ordered list) | Yes |
+| `space` | Domain/persona separator (e.g., `"plan"`, `"implementation"`) | No (skipped if `""`) |
+| `type` | Sub-domain (e.g., `"main"`) | No (skipped if `""`) |
+| `subfolder` | Reserved namespace marker (e.g., `"_variables"`) | No (skipped if `""`) |
+| `name` | Variable name (e.g., `"task_preamble"`) | Yes for `resolve()` |
+| `master_version` | masters subdir under `name/` (e.g., `"aggregation"`) — orthogonal to `version` | No |
+| `version` | File stem (e.g., `"create_role"`, `"default"`) | No (defaults to `"default"`) |
+
+### §3.2 Public API
+
+```python
+Parser = Callable[[Any], Any] # optional post-processor for raw decoded objects
+
+
+@runtime_checkable
+class FieldBackend(Protocol):
+ """A backend resolves field-like lookups from a content source.
+
+ The MVP ships `FileBackend` only. Future iterations add `YamlFieldBackend`, `JsonFieldBackend`, etc.
+ All backends MUST be side-effect free for resolution; reads can be lazy.
+
+ The `read()` method returns a backend's **natural raw decoded object** when
+ `parser=None` — `str` for text files, `list | dict | int | float | str | bool | None`
+ for YAML/JSON, `bytes` for binary backends. When a `parser` is provided, the raw
+ object is passed through `parser(raw)` and the result is returned as-is. This
+ allows callers to either consume the native type or coerce/validate it without
+ forcing the backend to know about caller-specific schemas (Pydantic models,
+ custom dataclasses, etc.).
+ """
+ scheme: str # e.g., "file", "yaml-field", "json-field"
+
+ def can_resolve(self, *, path: Path, name: str, version: str) -> bool: ...
+ def resolve(self, *, path: Path, name: str, version: str, master_version: Optional[str] = None, **kwargs) -> Optional["ResolvedContent"]: ...
+ def read(self, resolved: "ResolvedContent", parser: Optional[Parser] = None) -> Any:
+ """Read content from a previously-resolved ResolvedContent.
+
+ Args:
+ resolved: produced by `resolve(...)`.
+ parser: optional post-processor applied to the raw decoded object.
+ If None, returns the backend's natural raw type
+ (str | list | dict | int | float | bool | None | bytes).
+ If callable, returns `parser(raw)` — caller is responsible for
+ any conversion / validation / wrapping.
+
+ Returns:
+ The raw decoded object, OR `parser(raw)` if `parser` is provided.
+
+ Raises:
+ IOError: if the underlying source is unreadable.
+ ParseError (backend-specific): if decoding fails (e.g., malformed YAML).
+ """
+ ...
+
+
+@dataclass(frozen=True)
+class ResolvedContent:
+ """Result of a successful resolve().
+ Carries enough info to read the content lazily AND diagnose where it came from.
+ """
+ name: str # original logical name (e.g., "task_preamble")
+ kind: str # "file" | "field" | future kinds
+ uri: str # e.g., "file:///abs/path.jinja2" or "yaml-field:///abs/.variables.yaml#name.version"
+ path: Path # filesystem path (for files: the file; for fields: the container)
+ field: Optional[str] # None for files; "name.master.version" for fields
+ mime: Optional[str] # e.g., "text/x-jinja", "application/yaml"
+ _backend: FieldBackend # backend that produced this — used for lazy .read()
+
+ def read(self, parser: Optional[Parser] = None) -> Any:
+ """Lazily read the content via the resolving backend.
+
+ Args:
+ parser: optional post-processor (see `FieldBackend.read`). Default None
+ returns the raw decoded object (str for files; native types for
+ structured backends).
+
+ Returns:
+ Raw object OR `parser(raw)`.
+
+ Note:
+ Safe to call repeatedly (backends MAY cache decoded objects internally).
+ For backward compatibility, str-only callsites use `.read()` (default
+ parser=None) and `FileBackend` returns `str`, so existing
+ code remains unchanged.
+ """
+ return self._backend.read(self, parser=parser)
+
+ def read_text(self) -> str:
+ """Convenience helper enforcing str return; raises TypeError if backend
+ cannot produce str. Useful for callers that genuinely need a string and
+ want to fail loud if a backend was misconfigured.
+ """
+ raw = self.read()
+ if not isinstance(raw, str):
+ raise TypeError(
+ f"ResolvedContent.read_text() expected str from backend "
+ f"{self._backend.scheme!r} but got {type(raw).__name__}"
+ )
+ return raw
+
+
+class FileSpaceManager:
+ def __init__(
+ self,
+ roots: List[Union[str, Path]],
+ reserved_subfolder_canonical: str = "variables", # the canonical name (NO prefix)
+ reserved_subfolder_prefixes: Sequence[str] = ("_", "."), # accepted prefix variants
+ file_extensions: Sequence[str] = (".jinja2", ".jinja", ".j2", ".hbs", ".txt", ""),
+ enable_overrides: bool = False,
+ override_suffix: str = ".override",
+ backends: Optional[Sequence[FieldBackend]] = None, # defaults to [FileBackend()]
+ encoding: str = "utf-8",
+ ): ...
+
+ # --- Low-level primitives (shared by both TemplateManager and FileBasedVariableManager) ---
+
+ def build_cascade(self, space: str = "", type_: str = "") -> List[Path]:
+ """Build cascade folder list (most-specific → general, per root, interleaved across roots).
+
+ Returns folders WITHOUT name/version — caller resolves the rest.
+
+ Cascade order (for each root in priority order, interleaved by level):
+ Level 1: {root}/{space}/{type_}/{subfolder}/ (most specific)
+ Level 2: {root}/{space}/{subfolder}/ (space-level)
+ Level 3: {root}/{subfolder}/ (global / cross-space)
+
+ Subfolder is resolved via reserved_subfolder_canonical + prefix list:
+ tries `_variables`, then `.variables` (configurable). First existing wins.
+
+ Cross-space is naturally supported: Level 3 is visible to all spaces.
+ Edge cases: space="" skips Level 2; subfolder="" omits subfolder.
+ """
+
+ def find_in_folder(self, folder: Path, name: Optional[str]) -> Optional[Path]:
+ """Find a file by name inside a single folder. Returns Path or None.
+ Resolution order:
+ 1. {folder}/{name}{override_suffix}{ext} (if enable_overrides)
+ 2. {folder}/{name}{ext} (direct file)
+ 3. {folder}/.config.yaml[{name}] → alias (LOCAL-only alias map)
+ """
+
+ # --- High-level resolve (TemplateManager + FileBasedVariableManager both use this) ---
+
+ def resolve(
+ self,
+ *,
+ space: str = "",
+ type_: str = "",
+ name: str,
+ version: str = "",
+ master_version: Optional[str] = None,
+ ) -> Optional[ResolvedContent]:
+ """Full cascade + master + version + backend resolution.
+ Returns ResolvedContent (lazy-readable) or None.
+ See §3.5 for full search order.
+ """
+
+ def read(
+ self,
+ resolved: ResolvedContent,
+ parser: Optional[Parser] = None,
+ ) -> Any:
+ """Convenience: read content from a ResolvedContent.
+
+ Args:
+ resolved: from a prior `resolve(...)`.
+ parser: optional post-processor (see §3.2 FieldBackend.read). Default
+ None returns the backend's natural raw type (str for FileBackend
+ today; native YAML/JSON types when those backends ship).
+
+ Returns:
+ Raw decoded object, OR parser(raw).
+
+ Equivalent to `resolved.read(parser=parser)`.
+ """
+
+ # --- Diagnostics ---
+
+ def explain(
+ self,
+ *,
+ space: str = "",
+ type_: str = "",
+ name: str,
+ version: str = "",
+ master_version: Optional[str] = None,
+ ) -> List[Tuple[str, str, bool]]:
+ """Return a list of (cascade_level_desc, search_uri, found) tuples.
+ Used by tests AND for runtime diagnostic logging when a resolve fails unexpectedly.
+ """
+```
+
+### §3.3 Cascade Levels (Per Root, Interleaved Across Roots)
+
+For `space="plan"`, `type_="main"`, `subfolder="_variables"`, `roots=[consumer, framework]`:
+
+```
+Level 1 (type-level, most specific):
+ consumer/plan/main/_variables/ ← root 1, highest priority
+ framework/plan/main/_variables/ ← root 2
+Level 2 (space-level):
+ consumer/plan/_variables/
+ framework/plan/_variables/
+Level 3 (global / cross-space):
+ consumer/_variables/
+ framework/_variables/ ← lowest priority
+```
+
+**Specificity beats proximity**: a type-level match in root 2 wins over a space-level match in root 1. Within the same level, first root wins.
+
+**Cross-space**: Level 3 is the cross-space level. `FileBasedVariableManager.config.cross_space_root` migrates to `roots=[base, cross_space]` — no separate mechanism needed.
+
+### §3.4 Search Order Within A Single `resolve()` Call
+
+Pseudo-code (all branches verified against Plan A's reference implementation §1.1):
+
+```
+cascade = build_cascade(space, type_) # e.g., [L1_consumer, L1_framework, L2_consumer, ...]
+if master_version:
+ search_folders = [c / name / master_version for c in cascade]
+else:
+ search_folders = [c / name for c in cascade]
+
+# Pass 1: version-specific (if version provided)
+if version:
+ for folder in search_folders:
+ for backend in backends: # FileBackend first; future YAML/JSON later
+ hit = backend.resolve(path=folder, name=version, ...)
+ if hit: return hit
+ # ─ Constraint H: subdirectory fallback (backward-compat for flat→subdir migration) ─
+ # ONLY active when master_version is None (i.e., caller used legacy flat lookup)
+ # Mirrors existing FileBasedVariableManager._find_variable_file() Phase 1.c (file_based.py:757-762)
+ if master_version is None:
+ subdir = folder / version
+ if subdir.is_dir():
+ for backend in backends:
+ hit = backend.resolve(path=subdir, name="default", ...)
+ if hit: return hit
+
+# Pass 2: default fallback
+for folder in search_folders:
+ for backend in backends:
+ hit = backend.resolve(path=folder, name="default", ...)
+ if hit: return hit
+
+return None
+```
+
+**Key invariants**:
+- `master_version` set → NO flat fallback (no `{folder}/version.ext` outside `master/`). This is intentional: if you ask for `master/`, you mean it.
+- `master_version` unset → subdir fallback in Pass 1 ensures `load_variables({"task_instructions": "aggregation"})` keeps finding `aggregation/default.jinja2` after migration (zero test breakage; preserves backward-compat for ALL existing callers).
+- Files-first within a backend chain: `FileBackend` is FIRST in the default `backends` list. Field backends (future) sit AFTER.
+- Sidecar opt-out: pass `backends=[FileBackend()]` (the default) → field backends never consulted.
+
+### §3.5 Resolution Order With Backend Chain (Future YAML Sidecar Preview)
+
+When `YamlFieldBackend(sidecar_suffix=".variables.yaml")` is added later:
+
+```
+for folder in search_folders:
+ # Pass A: FileBackend
+ hit = FileBackend.resolve(path=folder, name=version_or_default)
+ if hit: return hit # files always win
+
+ # Pass B: YamlFieldBackend (future)
+ sidecar = derive_sibling(folder, suffix=".variables.yaml") # e.g., _variables/ → .variables.yaml
+ hit = YamlFieldBackend.resolve(path=sidecar, name=version_or_default, master=master_version)
+ if hit: return hit # field is "name.master.version" or "name.version"
+```
+
+This is **fully forward-compatible**: today's callers see no difference; future iterations unlock YAML sidecars by passing `backends=[FileBackend(), YamlFieldBackend()]` at construction.
+
+### §3.6 Reserved Subfolder Prefix Equivalence (`_variables` ↔ `.variables`)
+
+`reserved_subfolder_canonical="variables"` + `reserved_subfolder_prefixes=("_", ".")` means `FileSpaceManager` will:
+
+1. Try `{cascade}/_variables/` first (canonical with `_` prefix)
+2. Fall back to `{cascade}/.variables/` (alternate with `.` prefix)
+3. First existing wins per cascade level
+
+**Anti-precedent**: prefix list is FIXED (`["_", "."]`), NOT user-extensible to arbitrary chars like `~` or `@`. This keeps the contract enumerable, testable, code-reviewable.
+
+**Rationale**:
+- `_` follows Python convention for "private" namespace
+- `.` follows POSIX convention for "metadata" / hidden
+- Both are widely-used in template-engine ecosystems
+- Forcing one disrupts existing repos; supporting both is cheap
+
+### §3.7 `.config.yaml` Is Strictly Level-Local (No Cascade)
+
+A `.config.yaml` in folder X affects ONLY folder X's lookups. It is NOT inherited by subfolders, parent folders, or any other cascade level.
+
+**Why**:
+1. WYSIWYG mental model — see the file, know its scope
+2. No precedence ambiguity (no question of which `.config.yaml` wins)
+3. O(1) lookup (no need to walk up the tree)
+4. Aliases tend to be folder-local conventions (e.g., "in THIS folder, `aggregator` means `aggregation`")
+
+**Anti-precedent**: We do NOT support `.config.yaml` cascade. Sidecars (`.variables.yaml`) that contain actual variable content DO cascade naturally because they ARE keyed by scope — but a per-folder config-file is a different concept (folder-local rules), not content.
+
+### §3.8 The A14a Bug Resolution (Triple Root Cause)
+
+**A14a observed symptom** (in `create_role` runs): Aggregator's `InferenceInput/*.txt` shows `## Planning Context` (default task_preamble) instead of `## Aggregation Context` (the canonical aggregation task_preamble). Workers' output files exist on disk but aggregator's prompt has no `(See file: ...)` references — so synthesized output is hollow.
+
+**Three independent root causes** (all must be fixed for A14a to disappear):
+
+| # | Root Cause | Where | Fix |
+|---|------------|-------|----------|
+| RC1 | `template_version` doesn't propagate to aggregator | `create_role/executor.py` constructs a custom `aggregator_prompt_builder` that bypasses `_build_template_feed()` entirely; aggregator's `template_version="aggregation"` is set but never consulted | §5 deletes the custom prompt builder + wires aggregator to standard template pipeline with `template_master_version="aggregation"` |
+| RC2 | `enable_templated_feed=True` missing | `create_role/executor.py:_build_template_manager()` (line ~261) constructs `TemplateManager(...)` WITHOUT `enable_templated_feed=True`. Wrapper variables (e.g., `{{ context.user_request_with_task_preamble }}`) contain nested `{{ input }}` and `{{ task_preamble }}` that NEVER get resolved | §5 adds `enable_templated_feed=True` to `_build_template_manager()`; audit (§9 R-new) checks ALL Python-constructed TMs in OpenStartup |
+| RC3 | Stale `ROLE_SYNTHESIS_INSTRUCTIONS` constant | `create_role/executor.py` lines 94-162 hardcode an old version of task_instructions that diverges from the canonical `plan/main/_variables/task_instructions/create_role.jinja2`. Even if RC1+RC2 were fixed, this stale constant would override | §5 deletes `ROLE_SYNTHESIS_INSTRUCTIONS` constant entirely; canonical template file becomes source of truth |
+
+**Mechanism after fix**:
+1. `template_master_version="aggregation"` set on aggregator inferencer (via SLOT_DEFAULTS auto-applied by `template_defaults.py`)
+2. `_build_template_feed()` passes it as `master_version` kwarg to `load_variables()`
+3. `FileSpaceManager.resolve(master_version="aggregation", name="task_preamble", version="create_role")` finds `plan/main/_variables/task_preamble/aggregation/create_role.jinja2` (after §6 migration)
+4. Wrapper variable's nested `{{ task_preamble }}` resolves through the SAME `master_version="aggregation"` cascade — uniform behavior
+5. No stale constant overrides — canonical template wins
+
+### §3.9 Locked-In Design Decisions (15 total)
+
+| # | Decision | Section | Why |
+|---|---|---|---|
+| 1 | `.config.yaml` is LOCAL-only (no cascade) | §3.7 | WYSIWYG, O(1) lookup, no precedence ambiguity |
+| 2 | Sidecar variables cascade naturally | §3.5 | They're already keyed by scope |
+| 3 | `_variables` ↔ `.variables` prefix equivalence (FIXED list) | §3.6 | Convention parity, enumerable contract |
+| 4 | `ResolvedContent` returns URI shape from day 1 | §3.2 | Diagnostics, caching, lazy I/O, forward-compat |
+| 5 | `FieldBackend` Protocol DEFINED in MVP; only `FileBackend` IMPLEMENTED | §3.2 | Lock API NOW so future field backends are non-breaking |
+| 6 | YAML/JSON field backends → future (deferred) | §1 | Avoid scope creep; protocol is what matters |
+| 7 | Files-first resolution (`FileBackend` is FIRST in chain) | §3.5 | Backward compat; explicit files always win |
+| 8 | `explain()` diagnostic method on public API | §3.2 | Eliminates "why didn't this resolve?" debugging time |
+| 9 | `master_version` set → NO flat fallback | §3.4 | If caller asks for master, they mean it (explicitness) |
+| 10 | URI scheme is open-set (`file://`, `yaml-field://`, future …) | §3.2 | Standard pattern; integrates with `urlparse` and tooling |
+| 11 | **Constraint C: "Version specificity beats proximity"** — version-specific match at ANY cascade level wins over an unversioned local match | §3.4 | Locked by `TestVersionAnywhereBeatsUnversionedLocally`; prevents subtle regression where local-default shadows specific-aggregation |
+| 12 | **YAML sidecar STORAGE stays in `FileBasedVariableManager`** (the override layer) | §4 | Separation of concerns — FSM is read-only resolver; sidecar mutation/persistence is policy layer above |
+| 13 | **Sidecar field-key convention (forward-compat)**: nested as `{name}.{master_version}.{version}` in YAML/JSON | §3.5 | When future implements `YamlFieldBackend`, lookup is uniform: `data[name][master][version]` (fall back to `data[name][version]` → `data[name]["default"]`) |
+| **14** | **`FieldBackend.read(resolved, parser=None) → Any`** — backends return their **natural raw decoded object** when `parser=None` (str for files, list/dict/scalars for YAML/JSON, bytes for binary); when `parser` is provided, the raw object goes through `parser(raw)` and the result is returned as-is. `ResolvedContent.read_text()` exists as a strict str-enforcer convenience. | §3.2 | Locks `read()` signature BEFORE structured backends multiply. Each backend stays naïve about caller schemas; callers compose parsers (`yaml.safe_load`, `MyModel.parse_obj`, `int`, `lambda d: d["foo"]`) without backend changes. Preserves the default str behavior for `FileBackend` (parser=None → str) so no callsite changes are needed. Concrete forward-compat examples: `vm.get("limits.timeout", read=int)`, `vm.get("config", read=MyConfig.parse_obj)`, `tm.get_jinja_template(...).read_text()`. |
+| **15** | **Constraint H: Subdirectory fallback in resolve() Pass 1 when master_version=None** — if {folder}/{version}.ext misses AND {folder}/{version}/ is a directory, try {folder}/{version}/default.ext. Mirrors FileBasedVariableManager._find_variable_file() Phase 1.c (file_based.py:757-762). Inactive when master_version is set (Constraint A wins). | §3.4 | Makes the flat→subdirectory file migration TRANSPARENT to existing callers. Without this, every load_variables({"task_instructions": "aggregation"}) callsite breaks after migration. Risk R15 mitigation. |
+
+---
+
+## §4 Implementation Plan
+
+### §4.1 New Module Layout
+
+```
+RichPythonUtils/src/rich_python_utils/common_objects/file_space/
+├── __init__.py # public exports: FileSpaceManager, ResolvedContent, FieldBackend, FileBackend
+├── manager.py # FileSpaceManager class (~250 LOC)
+├── resolved_content.py # ResolvedContent dataclass (~40 LOC)
+├── backends/
+│ ├── __init__.py
+│ ├── protocol.py # FieldBackend Protocol (~30 LOC)
+│ └── file_backend.py # FileBackend implementation (~80 LOC)
+└── _cascade.py # cascade builder helpers (~80 LOC)
+```
+
+### §4.2 `TemplateManager` Migration
+
+**File**: `RichPythonUtils/src/rich_python_utils/string_utils/formatting/template_manager/template_manager.py`
+
+**In `__attrs_post_init__` (~line 453)** — instantiate FileSpaceManager:
+```python
+from rich_python_utils.common_objects.file_space import FileSpaceManager, FileBackend
+
+self._file_space = FileSpaceManager(
+ roots=self._original_templates_paths,
+ reserved_subfolder_canonical="variables",
+ reserved_subfolder_prefixes=("_", "."),
+ file_extensions=_VARIABLE_FILE_EXTENSIONS,
+ backends=[FileBackend()], # MVP: file-only; future may add YamlFieldBackend()
+)
+```
+
+**Replace `_cascade_load_variable_path()` (lines 657-711)** — full delegation:
+```python
+def _cascade_load_variable_path(
+ self, var_name, version, root_space, tmpl_type,
+ master_version: Optional[str] = None,
+):
+ resolved = self._file_space.resolve(
+ space=root_space, type_=tmpl_type, name=var_name,
+ version=version, master_version=master_version,
+ )
+ if resolved is None:
+ return (None, None)
+ return (resolved.read(), resolved.path)
+```
+
+**Remove module-level `_find_in_variable_folder()` (lines 43-89)** — replaced by `FileSpaceManager.find_in_folder()`.
+
+**Update `_find_version_only_across_roots()` (lines 616-655)** — replace inner manual scan with `self._file_space.find_in_folder()` for the cascade_path/path_variant folder. Today this method is called from `__call__()` (line ~2035) passing `self.template_version` as the `version`, NOT a `master_version`. It does NOT need a `master_version` parameter; the caller's `self.template_master_version` is applied at the higher-level `resolve()` call in `_render_template()`, not here:
+```python
+# Inside _find_version_only_across_roots (no new params)
+folder = cascade_path / path_variant
+hit = self._file_space.find_in_folder(folder, version) # version = self.template_version per existing contract
+return hit.read_text() if hit else None # hit is ResolvedContent (not Path) — original method returns str content
+```
+
+**Thread `master_version` through `__call__()` path instead** (the public entry-point):
+- `__call__(template_key, …, master_version=None, …)` — already accepts via `self.template_master_version` attribute, no new param needed at signature level
+- Internally, `_render_template()` passes `master_version=self.template_master_version` to `self._file_space.resolve(...)` for the OUTER template lookup
+- `_find_version_only_across_roots()` stays focused on its single responsibility (find a specific filename across cascade roots)
+
+**Add `master_version` parameter to `load_variables()` (line ~745)** — new keyword-only param, threads to `_load_and_compose()` → `_cascade_load_variable_path()` for variable-resolution paths only. Independent of the template-rendering path above.
+
+### §4.3 `FileBasedVariableManager` Migration
+
+**File**: `RichPythonUtils/src/rich_python_utils/common_objects/variable_manager/file_based.py`
+
+**In `__init__`** — instantiate FileSpaceManager:
+```python
+self._file_space = FileSpaceManager(
+ roots=[self.base_path] + ([self.config.cross_space_root] if self.config.cross_space_root else []),
+ reserved_subfolder_canonical=self.config.variables_folder_name.lstrip("_."),
+ reserved_subfolder_prefixes=("_", "."),
+ file_extensions=self.config.file_extensions,
+ enable_overrides=self.config.enable_overrides,
+ override_suffix=self.config.override_suffix,
+)
+```
+
+**Replace `_find_in_variable_folder()` method (lines 620-669)** — delegate to `self._file_space.find_in_folder()`.
+
+**Replace cascade construction in `_get_cascade_paths()` (lines 552-560)** — delegate the default (no scope modifier) case to `self._file_space.build_cascade()`. Keep scope-specific logic (`^`, `.`) in the method since those are FileBasedVariableManager-specific features.
+
+**Keep `_find_variable_file()` as-is** — its higher-level features (3-pass, underscore-splits, flat-versioned subdir fallback) layer ON TOP of the resolver and belong in this manager.
+
+### §4.4 `TemplatedInferencerBase` Wiring
+
+**File**: `AgentFoundation/src/agent_foundation/common/inferencers/templated_inferencer_base.py`
+
+**Add new attrib (~line 127)**:
+```python
+template_master_version: Optional[str] = attrib(default=None)
+```
+
+**Update `_build_template_feed()` (lines 201-207)** — pass master:
+```python
+resolved = self.template_manager.load_variables(
+ variable_specs=effective_specs,
+ root_space=self.template_root_space or "",
+ default_version=self.template_version or "",
+ master_version=self.template_master_version, # NEW
+)
+```
+
+**Add `"template_master_version"` to `_ROLE_RELEVANT_ATTRS` tuple (~line 357)** — so role switches preserve master.
+
+### §4.5 `template_defaults.py` SLOT_DEFAULTS
+
+**File**: `AgentFoundation/src/agent_foundation/common/inferencers/template_defaults.py`
+
+Add `template_master_version: Optional[str] = None` to:
+- `InferencerTemplateDefaults.__init__()` (~line 67) + store as `self.template_master_version`
+- `InferencerTemplateDefaults.apply_to()` (~line 108) — add fill logic guarded by `not in node`:
+ ```python
+ FIELD_TEMPLATE_MASTER_VERSION = "template_master_version"
+ if (self.template_master_version is not None
+ and FIELD_TEMPLATE_MASTER_VERSION not in node):
+ node[FIELD_TEMPLATE_MASTER_VERSION] = self.template_master_version
+ ```
+- `InferencerTemplateVersionDefaults.__init__()` (~line 125) — accept + pass to parent
+
+**Update constants (~line 255)**:
+```python
+AGGREGATOR_PREAMBLE_DEFAULTS = InferencerTemplateVersionDefaults(
+ template_version=VARIANT_AGGREGATION,
+ template_master_version=VARIANT_AGGREGATION, # NEW
+ variable_names=[VAR_TASK_PREAMBLE],
+)
+
+STRUCTURED_AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
+ template_version=VARIANT_AGGREGATION,
+ template_master_version=VARIANT_AGGREGATION, # NEW
+ variable_names=[VAR_TASK_PREAMBLE, VAR_TASK_INSTRUCTIONS, VAR_TASK_RESPONSE_FORMAT],
+)
+
+FOLLOWUP_AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
+ template_version=VARIANT_AGGREGATION,
+ template_master_version=VARIANT_AGGREGATION, # NEW
+ ...
+)
+```
+
+---
+
+## §5 File Migration (Filesystem Moves)
+
+### §5.1 AgentFoundation — 5 Files
+
+```
+implementation/main/_variables/
+ task_preamble/aggregation.jinja2 → task_preamble/aggregation/default.jinja2
+ task_instructions/aggregation.jinja2 → task_instructions/aggregation/default.jinja2
+
+plan/main/_variables/
+ task_preamble/aggregation.jinja2 → task_preamble/aggregation/default.jinja2
+ task_instructions/aggregation.jinja2 → task_instructions/aggregation/default.jinja2
+ task_response_format/aggregation.jinja2 → task_response_format/aggregation/default.jinja2
+```
+
+### §5.2 OpenStartup — 2 Files
+
+```
+plan/main/_variables/
+ task_instructions/create_role.jinja2 → task_instructions/aggregation/create_role.jinja2
+ task_instructions/role_setup_report.jinja2 → task_instructions/aggregation/role_setup_report.jinja2 (EXISTS in both plan/ AND implementation/ — must migrate BOTH)
+```
+
+**Semantic shift**: `create_role.jinja2` and `role_setup_report.jinja2` are aggregation-CONTEXT instructions (the aggregator is doing role synthesis / role-setup synthesis). Placing them under `aggregation/` reflects this.
+
+### §5.3 Full Move Table (8 files: rows 1–7 distinct migrations + row 7b sibling copy for `role_setup_report` in `implementation/`)
+
+| # | Old Path | New Path | Repo |
+|---|---|---|---|
+| 1 | `implementation/main/_variables/task_preamble/aggregation.jinja2` | `…/task_preamble/aggregation/default.jinja2` | AF |
+| 2 | `implementation/main/_variables/task_instructions/aggregation.jinja2` | `…/task_instructions/aggregation/default.jinja2` | AF |
+| 3 | `plan/main/_variables/task_preamble/aggregation.jinja2` | `…/task_preamble/aggregation/default.jinja2` | AF |
+| 4 | `plan/main/_variables/task_instructions/aggregation.jinja2` | `…/task_instructions/aggregation/default.jinja2` | AF |
+| 5 | `plan/main/_variables/task_response_format/aggregation.jinja2` | `…/task_response_format/aggregation/default.jinja2` | AF |
+| 6 | `plan/main/_variables/task_instructions/create_role.jinja2` | `…/task_instructions/aggregation/create_role.jinja2` | OS |
+| 7 | `plan/main/_variables/task_instructions/role_setup_report.jinja2` | `…/task_instructions/aggregation/role_setup_report.jinja2` | OS (VERIFIED EXISTS) |
+| 7b | `implementation/main/_variables/task_instructions/role_setup_report.jinja2` | `…/task_instructions/aggregation/role_setup_report.jinja2` | OS (VERIFIED EXISTS — must migrate too) |
+
+`_archive/` copies of the original `aggregation.jinja2` files are LEFT IN PLACE for historical reference (they're not in the cascade tree).
+
+### §5.4 Executor Fixes — A14a Resolution
+
+**`OpenStartup/src/openteam/server/resources/tools/create_role/executor.py`:**
+
+1. **Add `enable_templated_feed=True` to `_build_template_manager()` (~line 261)**:
+ ```python
+ return TemplateManager(
+ templates=[root, str(_AF_TEMPLATES_ROOT)],
+ active_template_type="main",
+ predefined_variables=True,
+ cross_root_variable_lookup=True,
+ enable_templated_feed=True, # ADD — required for wrapper variables
+ )
+ ```
+
+2. **Configure aggregator with `master_version` (~lines 434-446)**:
+ ```python
+ aggregator_inf.template_manager = tm
+ aggregator_inf.template_key = "initial"
+ aggregator_inf.template_root_space = "plan"
+ aggregator_inf.template_master_version = "aggregation" # NEW
+ aggregator_inf.template_version = "create_role"
+ aggregator_inf.template_variables = {
+ "task_preamble": None,
+ "task_instructions": None,
+ "task_response_format": None,
+ }
+ ```
+ Apply to BOTH RovoDev and non-RovoDev branches.
+
+3. **Remove `ROLE_SYNTHESIS_INSTRUCTIONS` constant (lines 94-162)** — canonical content now lives at `plan/main/_variables/task_instructions/aggregation/create_role.jinja2`.
+
+4. **Remove custom `agg_prompt_builder` function (lines 447-504)** + the `aggregator_prompt_builder=…` kwarg from the BTA constructor — modern BTA path (`inject_upstream_artifacts_to_aggregator=True`) handles worker injection.
+
+**`OpenStartup/src/openteam/server/resources/tools/role_setup/executor.py`:** Same pattern as create_role, but applied to BOTH aggregators with their own `template_version`:
+- **Inner aggregator** (per-facet): `template_master_version="aggregation"`, `template_version="role_setup_report"`, `template_root_space="implementation"`. Reads `implementation/main/_variables/task_instructions/aggregation/role_setup_report.jinja2` (post-migration).
+- **Outer aggregator** (final synthesis): `template_master_version="aggregation"`, `template_version="role_setup_report"`, `template_root_space="plan"`. Reads `plan/main/_variables/task_instructions/aggregation/role_setup_report.jinja2`.
+- Same RC1/RC2/RC3 fixes as create_role: delete any stale `*_SYNTHESIS_INSTRUCTIONS`-style constant, delete any custom `agg_prompt_builder` that bypasses `_build_template_feed()`, ensure `enable_templated_feed=True` is set on the constructed `TemplateManager`.
+
+---
+
+## §6 Test Plan
+
+### §6.1 New: `test_file_space_manager.py` (RichPythonUtils)
+
+**Location**: `RichPythonUtils/test/rich_python_utils/common_objects/test_file_space_manager.py`
+
+| # | Test | Validates |
+|---|---|---|
+| T1 | `test_build_cascade_three_levels` | space+type → space → global, per root |
+| T2 | `test_build_cascade_multi_root` | multiple roots interleave correctly |
+| T3 | `test_build_cascade_empty_space` | space="" skips Level 2 |
+| T4 | `test_build_cascade_empty_type` | type_="" still produces valid Level 1 |
+| T5 | `test_build_cascade_empty_subfolder` | subfolder skipped when canonical=""/None |
+| T6 | `test_build_cascade_deduplication` | empty space+type doesn't duplicate Level 1 = Level 3 |
+| T7 | `test_find_in_folder_direct_file` | `{name}.jinja2` direct match |
+| T8 | `test_find_in_folder_extension_priority` | `.jinja2` beats `.txt` per `file_extensions` order |
+| T9 | `test_find_in_folder_config_alias` | `.config.yaml` LOCAL alias map resolution |
+| T10 | `test_find_in_folder_override_wins` | `{name}.override.ext` wins when `enable_overrides=True` |
+| T11 | `test_find_in_folder_missing` | returns None for missing folder/file |
+| T12 | `test_resolve_version_specific` | `version="create_role"` finds exact file |
+| T13 | `test_resolve_version_default_fallback` | missing version → `default.jinja2` |
+| T14 | `test_resolve_master_version_basic` | `master_version="aggregation"` searches `aggregation/` subdir |
+| T15 | `test_resolve_master_version_with_version` | `master_version + version` → `aggregation/create_role.jinja2` |
+| T16 | `test_resolve_master_version_default_fallback` | missing version inside master → `aggregation/default.jinja2` |
+| T17 | `test_resolve_master_version_no_flat_fallback` | master set but folder missing → None (NO flat fallback per §3.4) |
+| T18 | `test_resolve_cascade_cross_level` | found at space level when missing at type level |
+| T19 | `test_resolve_cross_space_via_multi_root` | second root used as cross-space fallback |
+| T20 | `test_resolved_content_uri_shape_file` | `kind="file"`, `uri="file:///…"`, `field=None`, `path` is real path |
+| T21 | `test_resolved_content_lazy_read` | `.read()` returns content; safe to call twice |
+| T22 | `test_resolved_content_explain` | `explain()` returns list of (level, uri, found) tuples |
+| T23 | `test_multi_root_specificity_beats_proximity` | root2 L1 beats root1 L2 |
+| T24 | `test_multi_root_first_wins_same_level` | within same level, first root wins |
+| T25 | `test_prefix_equivalence_underscore_preferred` | `_variables` chosen when both present |
+| T26 | `test_prefix_equivalence_dot_fallback` | `.variables` chosen when `_variables` missing |
+| T27 | `test_config_yaml_local_only_no_cascade` | `.config.yaml` in folder A does NOT affect folder A's sibling B (cascade not respected for `.config.yaml`) |
+| T28 | `test_backend_protocol_file_backend_can_resolve` | `FileBackend.can_resolve()` returns True for existing files |
+| T29 | `test_backend_protocol_chain_files_first` | when chain has [File, MockField], file always wins |
+| T30 | `test_backend_protocol_chain_field_fallback` | when File misses, MockField hit returned |
+| T31 | `test_subdir_fallback_when_master_unset` | `resolve(name="task_instructions", version="aggregation", master_version=None)` finds `task_instructions/aggregation/default.jinja2` after migration (subdir fallback) AND `task_instructions/aggregation.jinja2` before migration (flat) — same call works through transition |
+| T32 | `test_subdir_fallback_inactive_when_master_set` | `resolve(name="task_instructions", version="aggregation", master_version="aggregation")` does NOT trigger subdir fallback (Constraint A; flat search disabled) |
+
+### §6.2 Updates To `test_template_manager_load_variable.py`
+
+Add `TestMasterVersion` class:
+
+| Test | Validates |
+|---|---|
+| `test_master_version_finds_versioned_file` | end-to-end through `load_variables(master_version="aggregation", version="create_role")` |
+| `test_master_version_falls_back_to_default` | missing version → `aggregation/default.jinja2` |
+| `test_master_version_none_preserves_flat_behavior` | `master_version=None` uses pre-existing flat layout |
+| `test_master_version_no_flat_fallback_when_set` | master set but folder missing → None |
+| `test_master_version_with_wrapper_variable` | wrapper variable `context.X` ALSO gets master cascade (A14a fix) |
+| `test_master_version_cross_root_priority` | higher-priority root wins under master cascade |
+
+### §6.3 Existing Tests Must Pass (Regression Guard)
+
+All existing RPU tests should pass WITHOUT modification — the resolver migration is INTERNAL refactor:
+- `test_template_manager_load_variable.py` (existing tests)
+- `test_variable_two_pass_search.py`
+- `test_variable_folder_helpers.py`
+- `test_wrapper_variable_version_cascade.py`
+- `test_cross_root_variable_lookup.py`
+- All `test_dotted_*.py` and `test_template_kwarg_*.py` files
+
+### §6.4 AgentFoundation SLOT_DEFAULTS Tests
+
+**`test_slot_defaults_real_orchestrators.py`** — add assertion:
+```python
+assert obj.aggregator_inferencer.template_master_version == "aggregation"
+```
+
+**`test_template_defaults.py`** — add test cases for `template_master_version` fill logic in `apply_to()`:
+- Sets when absent from node
+- Does NOT overwrite when explicitly set on node
+- Threads through `InferencerTemplateVersionDefaults`
+
+### §6.5 OpenStartup Integration Test
+
+**New file**: `OpenStartup/test/openteam/resources/test_template_split_integration.py`
+
+| Test | Validates |
+|---|---|
+| `test_create_role_aggregator_resolves_aggregation_create_role` | TM with both roots resolves `task_instructions` with `master_version="aggregation"`, `version="create_role"` → `aggregation/create_role.jinja2` from OS root |
+| `test_create_role_aggregator_falls_back_to_aggregation_default` | when `version="unknown"`, falls back to `aggregation/default.jinja2` from AF root |
+| `test_wrapper_variable_with_master_version` | `context.user_request_with_task_preamble` rendered under `master_version="aggregation"` contains "aggregating" keyword |
+
+### §6.6 A14a Smoke Verification
+
+Run create_role + role_setup smoke E2E. Assert aggregator's `InferenceInput/*.txt`:
+
+| Check | Pass Criterion |
+|---|---|
+| Contains `(See file: ...)` references | ✅ 3+ |
+| Contains `aggregating` keyword | ✅ Yes |
+| Total lines ≥ 200 | ✅ Yes (full aggregation context restored) |
+| Contains role-specific sections from `aggregation/create_role.jinja2` | ✅ Yes |
+| Does NOT contain stale `ROLE_SYNTHESIS_INSTRUCTIONS` constant content | ✅ Yes (constant removed) |
+
+---
+
+### §6.7 Test Audit — Granular Per-File Impact Map (415 tests)
+
+This audit categorizes ALL tests touching template/variable resolution into **4 action classes**, with exact per-file counts. Every existing logically-correct test MUST continue passing through the migration; classes 1-3 require zero or additive changes; class 4 requires only cosmetic comment updates.
+
+#### Class 1: SAFE — No Changes Needed (236+ tests)
+
+These tests use public API (`load_variables`, `get`) or test invariants preserved by FSM delegation. Default `master_version=None` keeps behavior identical.
+
+| Test File | Repo | Count | Constraint(s) | Why Safe |
+|---|---|---|---|---|
+| `test_template_manager_load_variable.py` | RPU | 47 | A, B, C, D, H | Public `load_variables()`; flat fixtures; `master_version=None` default |
+| `test_variable_manager.py` | RPU | 46 | A, B, F | Public API + kept internals (`_generate_underscore_splits`) |
+| `test_file_based_variable_manager.py` | RPU | 80+ | A, B, C, D, H | Public API only; cascade unchanged when `master_version=None` |
+| `test_cross_root_variable_lookup.py` | RPU | 11 | D | Public TemplateManager API |
+| `test_add_template_root.py` | RPU | 15+ | D | Template management, not variable resolution |
+| `test_multi_root_templates.py` | RPU | 8 | D | Tests `_OriginTaggedStr` |
+| `test_predefined_variables_integration.py` | RPU | 5 | A, B | Public API |
+| `test_behavior_variable_injection.py` | AF | 9 | A | `load_variables()` without `master_version`; default preserves behavior |
+| `test_context_shared_variables.py` | AF | — | C | Files NOT being moved |
+| `test_template_split_verification.py` | AF | — | — | Does NOT reference `aggregation.jinja2` |
+
+#### Class 2: SAFE — Internal Methods Delegated Transparently (59 tests)
+
+These tests call internal methods that STAY on the manager and delegate to FSM. Same interface, same behavior.
+
+| Test File | Repo | Count | Methods Called | Why Safe |
+|---|---|---|---|---|
+| `test_variable_folder_helpers.py` | RPU | 23 | `manager._find_in_variable_folder()`, `_read_variable_folder_config()` | Methods STAY on manager; delegate internally; same interface |
+| `test_variable_two_pass_search.py` | RPU | 29 | `manager._find_variable_file()` | Plan §4.2: "Keep `_find_variable_file()` as-is"; method stays |
+| `test_wrapper_variable_version_cascade.py` | RPU | 7 | `loader._find_variable_file()` | Same — method stays |
+
+#### Class 3: SAFE — `_build_template_feed()` Backward-Compatible (43+ tests)
+
+Tests of the templated-inferencer feed builder. `master_version` defaults to `None`; call signature unchanged.
+
+| Test File | Repo | Count | Why Safe |
+|---|---|---|---|
+| `test_templated_inferencer_modes.py` | AF | 23 | `master_version` defaults to `None`; call signature unchanged |
+| `test_leaf_owned_template_rendering.py` | AF | 20 | Same |
+
+#### Class 4: SAFE + ADD Assertions (77 tests)
+
+Existing assertions pass (additive change). For each constant/orchestrator that gets a new `template_master_version` attr, ADD a single assertion line per test.
+
+| Test File | Repo | Count | Action |
+|---|---|---|---|
+| `test_template_defaults.py` | AF | 34 | Existing assertions pass. ADD: `assert X.template_master_version == "aggregation"` (or correct value) per constant |
+| `test_slot_defaults_real_orchestrators.py` | AF | 43 | Existing `template_version` assertions pass. ADD: `assert .template_master_version == "aggregation"` per orchestrator |
+
+#### Class 5: UPDATE Comments Only — Cosmetic, Not Functional
+
+NO test logic changes. Update comment strings to reference new layout post-migration.
+
+| Test File | Repo | Lines | Action |
+|---|---|---|---|
+| `test_task_real_cli.py` | OS | 479, 498, 631, 653, 656, 665 | Comment update: `aggregation.jinja2` → `aggregation/default.jinja2` |
+| `test_task_real_cli.py` | OS | **492, 625** | **NO change needed** IF Constraint H subdir fallback works as designed |
+| `test_slot_defaults_real_orchestrators.py` | AF | 819-820 | Cosmetic comment update |
+
+#### Mitigation Strategy (Gating P8 File Migration)
+
+1. ✅ Before P8: Run full suite against HEAD → record baseline pass-rate (415+ tests)
+2. ✅ After P1-P3 (FSM module + delegation): re-run full suite → ZERO new failures allowed
+3. ✅ After P8 (file migration): re-run full suite → ZERO new failures allowed (Constraint H is the gate)
+4. ✅ R15 mitigation gates merge; F21 acceptance gates phase completion
+5. ✅ For Class 4 tests: implementer adds assertions in P8 commit alongside the migration (one-line additions per test)
+
+If ANY step fails: **STOP MIGRATION** and investigate. Do NOT proceed without Constraint H working as designed.
+
+#### Verdict
+
+**ZERO logically-correct tests broken** — IF Constraint H (subdirectory fallback in `resolve()` Pass 1) is implemented.
+
+Without Constraint H: **2 test call sites break** (`test_task_real_cli.py:492` and `:625`) plus any production code that calls `load_variables(version="aggregation")` without `master_version`.
+
+Constraint H is **NOT optional** — it IS the backward-compatibility mechanism that makes the file migration safe.
+
+---
+
+## §7 Phased Implementation Order
+
+| Phase | Description | Deliverable | Est. Time | Blocks |
+|---|---|---|---|---|
+| **P1** | New `FileSpaceManager` module + `FieldBackend` Protocol + `FileBackend` + `ResolvedContent` + `explain()` | RPU PR #1 | 3h | none |
+| **P2** | Unit tests T1-T30 (FileSpaceManager isolation) | RPU PR #1 test file | 2h | P1 |
+| **P3** | Migrate `TemplateManager._cascade_load_variable_path()` to FileSpaceManager + thread `master_version` through `load_variables()` | RPU PR #1 cont. | 1h | P1 |
+| **P4** | Migrate `FileBasedVariableManager` to FileSpaceManager | RPU PR #1 cont. | 1h | P1 |
+| **P5** | Run RPU full test suite — verify NO regression | green CI | 30m | P3, P4 |
+| **P6** | `TemplatedInferencerBase.template_master_version` + `_build_template_feed` plumb + `_ROLE_RELEVANT_ATTRS` | AF PR #1 | 30m | P3 |
+| **P7** | `template_defaults.py` SLOT_DEFAULTS + AGGREGATOR/STRUCTURED/FOLLOWUP `template_master_version=VARIANT_AGGREGATION` | AF PR #1 cont. | 30m | P6 |
+| **P8** | File migrations: 5 AF moves + 2 OS moves (§5.3) | AF + OS PRs | 30m | P7 |
+| **P9** | `create_role/executor.py` fix: `enable_templated_feed=True` + aggregator master_version wiring + remove `ROLE_SYNTHESIS_INSTRUCTIONS` + remove `agg_prompt_builder` | OS PR | 1h | P8 |
+| **P10** | `role_setup/executor.py` fix: same pattern (inner + outer aggregators) | OS PR | 1h | P8 |
+| **P11** | Integration test §6.5 + SLOT_DEFAULTS tests §6.4 | AF + OS test PRs | 1h | P9, P10 |
+| **P12** | A14a smoke E2E (create_role + role_setup live CLI runs) + audit per VERIFICATION.md | green smoke | 30m | P11 |
+
+**Total**: ~12 hours, distributed across 4 PRs (RPU PR #1, AF PR #1, OS create_role PR, OS role_setup PR).
+
+**Branch strategy**: All phases land on a single feature branch `formalize-template-variable-versioning` per repo. PRs merge sequentially in dependency order (RPU → AF → OS).
+
+### §7.1 Stop-Gates Between Phases
+
+Each phase has a hard stop-gate — if the gate fails, STOP and investigate before proceeding. Do NOT skip ahead or paper over.
+
+| Gate | After Phase | Check | Action If Fail |
+|---|---|---|---|
+| **G1** | P5 | RPU full test suite green (zero regressions) | HALT — revert P3/P4 migration, investigate which test broke, fix the root cause before continuing |
+| **G2** | P7 | Round-trip: instantiate aggregator from YAML → assert `inf.template_master_version == "aggregation"` (set via SLOT_DEFAULTS) | HALT — SLOT_DEFAULTS wiring is broken; do not migrate files yet (file moves are irreversible-ish without git) |
+| **G3** | P8 | `find … -name "aggregation.jinja2"` outside `_archive/` returns 0 results in both AF + OS active trees | HALT — incomplete migration; missing files will silently fail to resolve and aggregator will fall back to default |
+| **G4** | P9 | Standalone unit test: build TM via `_build_template_manager()` → render aggregator's `task_preamble` → assert "aggregating" keyword present | HALT — `enable_templated_feed=True` not effective; do NOT launch live E2E (will burn LLM credits on broken state) |
+| **G5** | P11 | All new integration tests green | HALT — fix before P12 live run |
+| **G6** | P12 | A14a smoke E2E: aggregator prompt contains `(See file: ...)` + "aggregating" keyword + canonical-template section names ("Domain Operational Artifacts" or "AI-Specific Work Philosophy") | INVESTIGATE — likely RC1/RC2/RC3 incompletely fixed; do not declare A14a resolved until all three indicators present |
+
+**Principle**: Stop-gates are FATAL, not advisory. Skipping them turns a clean migration into a multi-day debugging session.
+
+---
+
+## §8 Acceptance Criteria
+
+| # | Criterion | How Verified |
+|---|---|---|
+| F1 | `FileSpaceManager` exists in RPU at agreed path with documented public API | `python -c "from rich_python_utils.common_objects.file_space import FileSpaceManager, ResolvedContent, FieldBackend, FileBackend"` succeeds |
+| F2 | `ResolvedContent` has `uri`, `kind`, `path`, `field`, `mime` fields | unit test T20 |
+| F3 | `FieldBackend` Protocol is `@runtime_checkable`; `FileBackend` implements it | `isinstance(FileBackend(), FieldBackend) == True` |
+| F4 | `master_version` axis end-to-end: YAML/SLOT_DEFAULTS → inferencer attrib → load_variables kwarg → FileSpaceManager `resolve()` | unit + integration tests |
+| F5 | All 32 new FileSpaceManager tests pass (T1-T32) | `pytest test/rich_python_utils/common_objects/test_file_space_manager.py` |
+| F6 | Zero regressions in pre-existing RPU tests | `pytest test/rich_python_utils/` (full suite) |
+| F7 | 8 file migrations applied (7 distinct + 1 sibling copy for `role_setup_report` in `implementation/`); old `aggregation.jinja2` paths removed from active tree (only `_archive/` retains) | `find … -name "aggregation.jinja2"` outside `_archive/` returns 0 results AND `find … -name "role_setup_report.jinja2"` outside `_archive/` returns 0 results |
+| F8 | `ROLE_SYNTHESIS_INSTRUCTIONS` constant removed from `create_role/executor.py` | `grep "ROLE_SYNTHESIS_INSTRUCTIONS" OpenStartup/src/openteam/server/resources/tools/create_role/executor.py` returns 0 |
+| F9 | Custom `agg_prompt_builder` removed from both `create_role` and `role_setup` executors | grep returns 0 results in both files |
+| F10 | A14a smoke E2E passes: aggregator's `InferenceInput/*.txt` contains `(See file: ...)` + `aggregating` keyword + ≥200 lines | manual audit per §6.6 |
+| F11 | `.config.yaml` cascade test (T27) confirms LOCAL-only semantics | unit test |
+| F12 | Prefix equivalence test (T25/T26) confirms `_variables` ↔ `.variables` both work | unit test |
+| F13 | `explain()` returns useful diagnostic output for failed resolves | unit test T22; manual sanity check |
+| F14 | Backend chain test (T29/T30) confirms files-first + chain fallback | unit test |
+| F15 | `template_master_version` correctly propagated through SLOT_DEFAULTS to YAML-instantiated aggregator | AF SLOT_DEFAULTS test |
+| **F16** | **Constraint C verified**: `TestVersionAnywhereBeatsUnversionedLocally` passes — a version-specific match in a parent space wins over an unversioned default in the most-specific child space | unit test in §6.2 |
+| **F17** | **Content-check **: aggregator's rendered `task_instructions` contains canonical section names from `plan/main/_variables/task_instructions/aggregation/create_role.jinja2` (e.g., "Domain Operational Artifacts" OR "AI-Specific Work Philosophy") AND does NOT contain stale-constant section names ("Growth Path", "Guardrails & Autonomy") | manual audit per §6.6 + grep |
+| **F18** | **`enable_templated_feed` audit clean **: every `TemplateManager(...)` constructor call in OpenStartup + AgentFoundation Python code passes `enable_templated_feed=True` (or has an explicit documented reason not to) | `grep -rn "TemplateManager(" src/` per repo + manual review |
+| **F19** | ** `FieldBackend.read(parser=None) → Any` correct for `FileBackend`**: `FileBackend.read(rc)` returns `str` (raw file content); `FileBackend.read(rc, parser=int)` returns `int` (after `int(raw)`); `FileBackend.read(rc, parser=lambda s: s.strip())` returns stripped str | Unit test `test_filebackend_parser_none_returns_str`, `test_filebackend_parser_callable_returns_parsed`, `test_resolvedcontent_read_text_strict` |
+| **F20** | ** Backward compatibility — no callsite changes needed**: all existing callers using `.read()` with no args continue to receive `str` from `FileBackend`; no unexpected `Any` type leaking forces None-checks or isinstance guards | Unit test `test_filebackend_read_default_parser_is_str`; grep all `.read()` callers — none use `parser=` (since it wasn't yet available) |
+| **F21** | **Subdir-fallback test (T31/T32) — migration regression gate**: `load_variables({"task_instructions": "aggregation"})` returns same content BEFORE and AFTER the 7-file migration (Constraint H). No existing caller using flat-version syntax breaks. | unit test + §6.7 audit |
+| **F22** | ❌ **RETRACTED in v3.8** — Architecturally misguided. `template_master_version` is a **per-slot** attribute set via `SLOT_DEFAULTS` (`AGGREGATOR_PREAMBLE_DEFAULTS` / `STRUCTURED_AGGREGATION_DEFAULTS` in `template_defaults.py`), NOT a hierarchy-wide attribute like `template_extra_feed`/`modes`. If propagated via `_propagate_to_children()`, breakdown/worker inferencers would silently inherit the aggregator's `master_version="aggregation"` and load wrong template variants. The correct propagation mechanism is SLOT_DEFAULTS at Hydra instantiation time, which is already implemented and working. **Verification**: zero YAML topologies set `_template_master_version` at parent cascade level; all aggregator wiring is done via SLOT_DEFAULTS or explicit per-instance assignment in executors. | N/A — retracted |
+
+---
+
+## §9 Risks & Mitigations
+
+| # | Risk | Severity | Mitigation |
+|---|---|---|---|
+| R1 | TemplateManager + FileBasedVariableManager have subtle behavior differences not caught in audit; refactor introduces silent regression | HIGH | P5 mandates full pre-existing test suite passes before P6 begins; if ANY test fails, halt and reconcile before continuing |
+| R2 | File migrations break consumers that reference `aggregation.jinja2` directly by path | MEDIUM | grep both repos for literal `"aggregation.jinja2"` before P8; update any direct references |
+| R3 | A14a fix doesn't actually resolve in production (e.g., `template_master_version` not reaching aggregator at runtime) | HIGH | P12 smoke is gate; if fails, do NOT consider plan complete; investigate via `explain()` |
+| R4 | `_archive/` files accidentally moved | LOW | P8 grep includes `! -path "*/_archive/*"` filter |
+| R5 | `cross_space_root` config migration breaks (FileBasedVariableManager.config.cross_space_root → `roots=[…]`) | MEDIUM | Add explicit unit test in P4 covering this migration; verify via `test_cross_root_variable_lookup.py` (existing) |
+| R6 | `FieldBackend` Protocol shape locks us out of future patterns (e.g., async backends) | LOW | Current Protocol is sync; if async needed later, add `AsyncFieldBackend` Protocol alongside (additive, non-breaking) |
+| R7 | `.config.yaml` LOCAL-only contradicts user expectations (some folks expect cascade) | LOW | §3.7 explicitly documents the rationale; deviation requires NEW plan |
+| R8 | Sidecar `.variables.yaml` files exist in some repos and silently break under the MVP | LOW | MVP does NOT load sidecars (no YamlFieldBackend); existing files are inert until the field backend lands |
+| R9 | `master_version` + `version` combo creates exponential test surface | LOW | Tests T14-T17 cover the 2×2 matrix (master ∈ {set, unset} × version ∈ {set, unset}) |
+| R10 | Two-step rollout (RPU first, then AF/OS) creates window where AF/OS don't have `master_version` plumbed but RPU expects it | LOW | `master_version` is OPTIONAL kwarg (default None); RPU is fully backward-compat |
+| **R11** | Other Python-built `TemplateManager(...)` callers in OS/AF lack `enable_templated_feed=True`, so wrapper variables silently fail with `KeyError` or render as empty string | HIGH | F18 audit gate in §8; `grep -rn "TemplateManager(" src/` per repo before P12; explicit constructor change for each call site OR document why a particular call site doesn't need it |
+| **R12** | Stale per-tool constants (like `ROLE_SYNTHESIS_INSTRUCTIONS`) hide regressions: even after canonical templates are correct, the executor injects its own old copy | MEDIUM | Audit ALL executor.py files for hardcoded prompt constants (`grep -rn "INSTRUCTIONS = \|PROMPT = " src/openteam/server/resources/tools/`); flag any > 50 lines for review; delete stale ones |
+| **R13** | Migration of `aggregation.jinja2` is irreversible-ish (git tracks it, but downstream consumers may reference old paths) | LOW | grep both repos for literal `"aggregation.jinja2"` string before P8 (R2 also covers this); add a one-line shim leaving an `_archive/aggregation.jinja2.MOVED` file with a comment pointing to new location |
+| **R14** | `read() → Any` API silently breaks downstream type expectations if a future backend returns non-str where a caller assumed str | LOW (file-only in → always str) | `ResolvedContent.read_text()` strict helper exists for fail-loud callers; F20 audit confirms no existing callsite breaks; documented in §3.2 docstring that FileBackend always returns str |
+| **R15** | File migration (§5) breaks existing callers that use `load_variables({"task_instructions": "aggregation"})` without `master_version`. Without Constraint H subdir fallback in `FileSpaceManager.resolve()`, post-migration lookups fail (the flat `task_instructions/aggregation.jinja2` no longer exists; the new `task_instructions/aggregation/default.jinja2` is only findable when `master_version="aggregation"` is set). | HIGH (every existing caller without master_version breaks) | **MITIGATED**: §3.0 Constraint H + §3.4 Pass-1 subdir fallback + T31/T32 tests. Mirrors existing `_find_variable_file()` Phase 1.c semantics — proven safe pattern. F21 acceptance gates merge on test passage. |
+
+---
+
+## §10 Open Questions
+
+| # | Question | Status | Note |
+|---|---|---|---|
+| OQ1 | Should `master_version` accept multi-level paths like `"v1/aggregation"` for nested masters? | DEFERRED to a future iteration | current scope is single-level; pattern would be `master_version="v1.aggregation"` (dotted) if needed later |
+| OQ2 | Should `.config.yaml` aliases support master_version? | NO | LOCAL-only semantic doesn't extend to master cascades; aliases stay flat |
+| OQ3 | Should `explain()` log via Python `logging` module too, or only return? | RETURN-ONLY | Caller decides whether to log; keeps function pure |
+| OQ4 | Should `FieldBackend.resolve()` accept `master_version` kwarg explicitly or via `**kwargs`? | EXPLICIT | Add `master_version: Optional[str] = None` to Protocol signature; clearer contract |
+| OQ5 | Should `roots` accept `dict` shapes (e.g., named roots) for clearer diagnostics? | NO | List-of-paths is sufficient; named-root pattern is future if there's demand |
+| OQ6 | Should we deprecate `template_version` in favor of `template_master_version`? | NO | They're orthogonal axes; both stay (per §2.4) |
+| OQ7 | Should `FileBackend` cache file-existence checks? | NO | Filesystem is fast enough; caching introduces stale-file bugs. Revisit if profiling shows hot spot |
+| **OQ8** | Should `YamlFieldBackend` (future+) treat absent top-level key vs `null` differently? | DEFERRED to a future iteration | Document policy when implementing: probable answer = "absent key → cascade continues; explicit `null` → return `None` and stop cascade (caller intent: 'I explicitly cleared this field')" |
+| **OQ9** | Should `parser` exceptions wrap the original `IOError` / `ParseError` or propagate? | LOCKED: propagate | Don't bury exceptions; `try: vm.get(name, read=parser) except Exception` is the caller's choice. Backends only convert IOError → IOError, ParseError → backend-specific ParseError. Parser errors propagate verbatim. |
+
+---
+
+## §11 Provenance / Change History
+
+> This section is the ONLY place where prior-version annotations live. Sections §0–§10 describe the current spec only; they are deliberately free of `(v3.X)` inline tags. To trace the origin of a specific decision or acceptance criterion, consult §11.1 below.
+
+### §11.1 Decision Index — Where Each Concept Was Introduced
+
+| Concept / Decision | Introduced In | Final Spec Lives In |
+|---|---|---|
+| `FileSpaceManager` module abstraction + Public API | v2.1 (Plan B) | §3.2 |
+| `master_version` axis | v2.1 (Plan B) | §3.1, §3.4 |
+| `FieldBackend` Protocol (defined, file-only impl) | v2.1 (Plan B) | §3.2 |
+| `ResolvedContent` URI shape | v2.1 (Plan B) | §3.2 |
+| `_variables` ↔ `.variables` prefix equivalence | v2.1 (Plan B) | §3.6 |
+| `.config.yaml` local-only policy | v2.1 (Plan B) | §3.7 |
+| Locked Decisions #1–#10 | v3.0 INTEGRATED | §3.9 |
+| §5 7-file Migration Table (concrete) | v3.0 (from Plan A) | §5 |
+| §6.6 A14a smoke verification commands | v3.0 (from Plan A) | §6.6 |
+| §7 Phased dependency order (P1–P12) | v3.0 INTEGRATED | §7 |
+| Acceptance criteria F1–F15 | v3.0 INTEGRATED | §8 |
+| Triple root cause for A14a (RC1/RC2/RC3) | v3.1 (Plan A v2 critique) | §3.8 |
+| §3.4 cascade pseudo-code 2-pass shape | v3.1 (Plan A v2 critique) | §3.4 |
+| §7.1 Stop-Gates G1–G6 between phases | v3.1 (Plan A v2 critique) | §7.1 |
+| Locked Decision #11 ("Version specificity beats proximity") | v3.1 | §3.9 |
+| Locked Decision #12 (YAML sidecar storage stays in policy layer) | v3.1 | §3.9 |
+| Locked Decision #13 (sidecar field-key convention) | v3.1 | §3.9 |
+| Acceptance criteria F16–F18 | v3.1 | §8 |
+| Risks R11–R13 (audit gaps) | v3.1 | §9 |
+| Locked Decision #14 (`read(parser=None) → Any`) | v3.2 | §3.9 |
+| Acceptance criteria F19–F20 (parser/type) | v3.2 | §8 |
+| Risk R14 (type-safety regression vector) | v3.2 | §9 |
+| Open Questions OQ8–OQ9 (yaml-null policy, parser-exception) | v3.2 | §10 |
+| §11.1 Decision Index itself + tag stripping from §0–§10 | v3.3 | §11.1 |
+| §3.0 Constraints Checklist (A–H, gating per-phase) | v3.4 | §3.0 |
+| Constraint H (subdir fallback in `resolve()` Pass 1 when `master_version=None`) | v3.4 | §3.4 |
+| Locked Decision #15 (Constraint H formalization) | v3.4 | §3.9 |
+| Acceptance F21 (subdir-fallback regression gate) | v3.4 | §8 |
+| Tests T31/T32 (subdir-fallback coverage) | v3.4 | §6.1 |
+| Risk R15 (migration-breakage without subdir fallback) | v3.4 | §9 |
+| §6.7 Test Audit cross-reference (21 tests mapped to Constraints) | v3.4 | §6.7 |
+| §6.7 expanded to granular 4-action-class audit (415 tests, per-file counts) | v3.5 | §6.7 |
+| Class 5 cosmetic comment updates (exact line numbers: test_task_real_cli.py:479,498,631,653,656,665; test_slot_defaults_real_orchestrators.py:819-820) | v3.5 | §6.7 Class 5 |
+| §0 count corrections (15 decisions / 15 risks / 16 acceptance / 415+ tests) | v3.6 | §0 |
+| FieldBackend.resolve() explicit `master_version: Optional[str]=None` (per OQ4) | v3.6 | §3.2 |
+| `_find_version_only_across_roots` clarification (does NOT take master_version) | v3.6 | §4.2 |
+| F-criteria sequence repair: F21 → end; F22 added for `_propagate_to_children()` | v3.6 | §8 |
+| `role_setup_report.jinja2` filename correction + row 7b for implementation/ copy | v3.6 | §5.2, §5.3 |
+| role_setup executor: dual-aggregator template_version explicit | v3.6 | §5.4 |
+| §12 "Pick Plan A" headline → v3.6 recommendation + historical note | v3.6 | §12 |
+| F5 test count 30 → 32 (matches T1–T32) | v3.6 | §8 |
+| Acceptance count "16" → "22" in §0 line 8 (matches F1–F22) | v3.7 | §0 |
+| F22 RETRACTED — architecturally misguided per-slot vs hierarchy distinction | v3.8 | §8 |
+| Acceptance count "22" → "21" effective (F22 retracted; F1–F21 active) | v3.8 | §0, §8 |
+| Architectural clarification: `template_master_version` propagates via SLOT_DEFAULTS only | v3.8 | §8 F22 row |
+| File count "7" → "8" across §0 line 8/line 20, §1 line 45, §5.3 header, F7 acceptance | v3.7 | §0, §1, §5.3, §8 |
+| §5.2 stale `role_setup.jinja2` → `role_setup_report.jinja2` in semantic-shift paragraph | v3.7 | §5.2 |
+| §4.2 `hit.path` → `hit.read_text()` (ResolvedContent API, original returns str) | v3.7 | §4.2 |
+| §12 stale "Plan A vs Plan B" bullets → integrated-rationale list | v3.7 | §12 |
+
+
+
+| Version | Date | Author Notes | Changes |
+|---|---|---|---|
+| v1.0 | 2026-05-23 06:02 | Initial plan: `master_version` axis + `FileSpaceResolver` extraction + 7-file migration + create_role executor fix | First draft |
+| v2.0 | 2026-05-23 06:05 | Expanded scope: `FileSpaceManager` as full abstraction with multi-backend support | Added §3 architecture, §4 phase plan; deferred A14a fix details |
+| v2.1 | 2026-05-23 07:07 | Locked in 10 design decisions: `.config.yaml` LOCAL-only, prefix equivalence, URI-shape `ResolvedContent`, `FieldBackend` Protocol defined but only `FileBackend` implemented | Added §3.6-§3.10, expanded §3.2 API, renumbered §3.7-§3.11 |
+| **v3.0** | **2026-05-23 07:16** | **INTEGRATED Plan A (concrete migrations + executor fixes + 30 per-file tests) with Plan B v2.1 (FieldBackend Protocol + URI scheme + locked decisions). Re-introduced explicit §5 7-file migration table + §6.6 A14a smoke verification + §7 phased dependency order. Tightened §3.4 cascade pseudo-code per Plan A's reference impl. Added F7-F15 acceptance criteria from Plan A.** | **INTEGRATED PLAN** |
+| **v3.1** | **2026-05-23 08:55** | **Re-integrated against Plan A v2 (`understand-this-context-stateless-kahan.md` rewrite). Added: (1) triple root cause for A14a (§3.8: RC1=master_version propagation, RC2=`enable_templated_feed=True` gap, RC3=stale `ROLE_SYNTHESIS_INSTRUCTIONS` constant); (2) 3 new locked decisions (#11 Constraint C "version specificity beats proximity", #12 sidecar storage stays in policy layer, #13 forward-compat sidecar field-key convention); (3) §7.1 stop-gates G1-G6 (FATAL between-phase checks); (4) F16/F17/F18 acceptance criteria (Constraint C lock-in, content section-name audit, `enable_templated_feed` audit); (5) R11/R12/R13 risks (TM caller audit, executor stale-constant audit, migration shim). v3.0 is superseded.** | **INTEGRATED v3.1** |
+| **v3.8** | **2026-05-23 14:48** | **F22 RETRACTION** (post-implementation feedback validated). After P1-P10 implementation complete: implementing agent correctly identified that F22 (`template_master_version` propagation via `_propagate_to_children()`) was architecturally misguided. `template_master_version` is per-slot (set via `SLOT_DEFAULTS` like `AGGREGATOR_PREAMBLE_DEFAULTS`/`STRUCTURED_AGGREGATION_DEFAULTS`), NOT hierarchy-wide. If propagated, breakdown/worker children would inherit the aggregator's `master_version="aggregation"` and load wrong template variants. F22 is RETRACTED. Active acceptance criteria reduced to F1–F21 (21 total). Separately: `switch_role()` was missing `template_master_version` parameter — implementing agent fixed it (signature + change-dict updated, matching `_ROLE_RELEVANT_ATTRS` declaration). All 320 RPU tests + 34 AF template_defaults tests still pass. **Lesson**: plan must distinguish per-slot attributes (set via SLOT_DEFAULTS at instantiation) from per-hierarchy attributes (propagated at runtime via `_propagate_to_children()`). Conflating the two creates plausible-looking but architecturally wrong propagation requirements. |
+| **v3.7** | **2026-05-23 10:47** | **SECOND CRITICAL-THINKING PATCH** (auditor feedback validated; all 5/5 valid). Fixes residual inconsistencies from v3.6: (1) §0 line 8 acceptance count "16"→"22" (matches F1–F22 contiguous after F21 renumber + F22 add); (2) §0 line 8 + line 20 + §1 line 45 + §5.3 header + F7 file count "7"→"8" (7 distinct + 1 implementation/ sibling copy for `role_setup_report` — both must migrate per v3.6 row 7b); (3) §5.2 "Semantic shift" paragraph still said `role_setup.jinja2`; corrected to `role_setup_report.jinja2` matching v3.6's row 7/7b correction; (4) §4.2 pseudo-code `return hit.path if hit else None` was WRONG (`find_in_folder` returns `Optional[ResolvedContent]`, NOT `Path` — Path has no `.path` attribute; original `_find_version_only_across_roots` returns file CONTENT string); fixed to `return hit.read_text() if hit else None` matching `ResolvedContent.read_text()` (Decision #14); (5) §12 still had stale "Plan A is CONCRETE / Plan B is more architecturally ambitious" framing from pre-v3.0 "Pick Plan A" era; replaced with integrated-rationale list describing the result, not the competing alternatives. v3.7 is purely additive corrections to v3.6 — no design changes, no logic changes, no breaking changes. | **CONSOLIDATED** |
+| **v3.6** | **2026-05-23 10:38** | **CRITICAL-THINKING PATCH** (auditor feedback validated). Fixed 8 valid issues + rejected 1 invalid (Item 9 "21 invariants" was a stale provenance reference, not active claim): (1) §0 stale counts corrected (10→15 decisions, 14→15 risks, 20→16 criteria, 21→415 tests); (2) `FieldBackend.resolve()` signature now has explicit `master_version: Optional[str]=None` matching OQ4; (3) §4.2 clarified `_find_version_only_across_roots` does NOT take master_version (called from `__call__` passing `self.template_version`); threading happens at `__call__`/`load_variables` layers via `self.template_master_version`; (4) F21 renumbered to end of sequence (was between F14/F15); F22 added for `_propagate_to_children()` template_master_version propagation; (5) §12 stale "Pick Plan A" headline replaced with v3.6 recommendation + historical note; (6) role_setup executor specifies explicit `template_master_version="aggregation"` + `template_version="role_setup_report"` for BOTH inner and outer aggregators with their respective `template_root_space`; (7) F22 documents the `_propagate_to_children()` propagation contract; (8) **CRITICAL**: §5.2/§5.3 corrected `role_setup.jinja2` → `role_setup_report.jinja2` AND row 7b added for `implementation/main/...` copy (BOTH files VERIFIED to exist, BOTH must migrate); (9) F5 test count 30 → 32 (matches T1–T32). | **CONSOLIDATED** |
+| **v3.5** | **2026-05-23 10:10** | **RE-INTEGRATED Plan A v3 fully (415-test granular audit).** §6.7 expanded from 21-file high-level table to comprehensive 4-action-class audit with per-file test counts: Class 1 SAFE-no-changes (236+ tests across 10 files), Class 2 SAFE-internal-methods-delegated (59 tests across 3 files), Class 3 SAFE-backward-compatible (43+ tests across 2 files), Class 4 SAFE+ADD-assertions (77 tests across 2 files), Class 5 cosmetic-comment-updates (exact line numbers). Header updated to reflect 415-test scope. ZERO logic changes from v3.4 — only test-audit granularity refined for implementer precision. Verdict at end of §6.7: ZERO logically-correct tests broken IF Constraint H is implemented; 2 break without it. |
+| **v3.4** | **2026-05-23 10:00** | **RE-INTEGRATED with Plan A v3 (153-line reference doc).** Plan A v3 was rewritten to defer to Plan B as canonical AND contributes 3 unique pieces: (1) compact §3.0 Constraints Checklist (A–H) used as a per-phase acceptance gate; (2) **CRITICAL Constraint H** — `resolve()` Pass 1 subdirectory-fallback when `master_version=None`, mirroring `FileBasedVariableManager._find_variable_file()` Phase 1.c (file_based.py:757-762); without it, every existing `load_variables({"task_instructions": "aggregation"})` callsite breaks after migration (Risk R15); (3) §6.7 Test Audit cross-reference table mapping 21 existing tests to the Constraints that protect them. Plan B v3.3 ONLY had the kept-as-is fallback in `_find_variable_file`, NOT in the new `FileSpaceManager.resolve()` — meaning the new resolver path used by TemplateManager callers would have BROKEN through migration. v3.4 closes this gap: pseudo-code in §3.4 updated; Decision #15 added; F21 acceptance criterion added; T31/T32 unit tests added; R15 risk documented with mitigation; §6.7 Test Audit ensures zero behavioral regression. NO breaking changes — purely additive correctness hardening. Header bumped to v3.4 (re-integrated). | **CORRECTNESS HARDENING — adds backward-compat gate for file migration** |
+| **v3.3** | **2026-05-23 09:50** | **Consolidated all prior-version annotations into §11.1 Decision Index. Stripped inline `(v3.X)` tags from §0–§10 so the spec describes only the current state. Header simplified to "Plan version: v3.3 (consolidated)". Provenance narrative preserved verbatim. No semantic changes to any decision, criterion, or risk — purely editorial.** | **EDITORIAL CONSOLIDATION** |
+| **v3.2** | **2026-05-23 09:36** | **Refined `FieldBackend.read()` signature for structured returns. NEW: `read(resolved, parser: Optional[Callable]=None) → Any`. When `parser=None`, backends return their natural raw decoded object (str for FileBackend; list/dict/scalars/None for YAML/JSON; bytes for binary). When `parser` is provided, raw goes through it (no auto-yaml-decoding). Added: (1) Locked Decision #14 documenting the API + 4 concrete examples; (2) `ResolvedContent.read_text()` strict str-enforcer convenience; (3) F19/F20 acceptance criteria (parser=None returns str, no v3.0 callsite breaks); (4) OQ8/OQ9 (deferred yaml-null policy + locked parser-exception-propagation); (5) R14 (silent type expectation risk, mitigated by read_text()). Updated §3.2 Protocol signature.** | **Forward-compat hardened for v3.1+ structured backends; v3.0 callsite-compatible** |
+
+---
+
+## §12 If You Could Pick ONE Plan: Honest Verdict
+
+**Pick this integrated plan (v3.6).** It is strictly a superset: it includes ALL of Plan A v3's contributions (constraints checklist, correctness callouts, subdir-fallback Constraint H, 415-test action-class audit) PLUS Plan B's forward-compat architecture (FieldBackend Protocol, URI ResolvedContent, locked decisions, phased dependency order, A14a coordinated fix). Plan A v3 itself is now a reference/sanity-check doc, not a standalone executable plan (it lacks the Protocol, URI, locked decisions, and phasing this plan defines).
+
+**Historical note** (preserved for traceability): earlier versions of this section recommended "Pick Plan A" — that was when Plan B v2.1 had not yet absorbed Plan A's concrete migrations. After v3.0 RE-INTEGRATION the recommendation flipped; the integrated plan IS Plan A's superset.
+
+**Reasoning (why this integrated plan, not either source alone)**:
+- **Concrete + machine-followable**: every file move (§5.3 8-row table), every executor change (§5.4), every test (§6 with T1–T32 + 415-test audit) is listed by name and line number
+- **Fixes A14a as part of MVP scope**: §3.8's triple root cause (RC1 master_version propagation, RC2 enable_templated_feed gating, RC3 stale ROLE_SYNTHESIS_INSTRUCTIONS constant) addressed in one coordinated phase
+- **Sidecar mechanism is staged**: file-backend ships in v3.6; YAML/JSON field-backends are forward-compat Protocol extensions (Decision #14 locks read(parser=None) → Any signature so they're non-breaking)
+- **Forward-compat architecture locked**: FieldBackend Protocol + URI ResolvedContent + 15 locked decisions ensure no second-refactor in 3 months
+- **Subdir-fallback Constraint H**: Decision #15 + F21 + T31/T32 guarantee zero breakage of existing `load_variables({"task_instructions": "aggregation"})` callsites during migration (§3.4 Pass 1 explicit fallback)
+- **Test preservation verified**: §6.7's 5-action-class audit confirms all 415+ existing tests stay green under the migration (Constraint H is the gate)
+

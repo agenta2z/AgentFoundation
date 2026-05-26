@@ -337,10 +337,43 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: E402
-    DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-    DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
     _resolve_visible_indices,
 )
+
+# Inline Jinja fixtures for tests that need to exercise the aggregator-prompt
+# and followup-prompt code paths. The renderer just needs any non-empty Jinja
+# string with the right placeholders to produce a non-empty prompt feed for
+# the aggregator / followup mocks.
+_TEST_AGGREGATOR_PROMPT = """\
+Original task:
+{{ input }}
+
+Each team's final output:
+{% for idx, plan in worker_plans.items() %}
+=== Flow {{ idx }} ===
+{{ plan if plan else '(no output)' }}
+
+{% endfor %}\
+Produce a final integrated synthesis.
+"""
+
+_TEST_FOLLOWUP_PROMPT = """\
+Original task:
+{{ input }}
+
+Your previous output:
+{{ your_prev }}
+
+{% if visible_plans %}
+Other teams' latest outputs:
+{% for idx, plan in visible_plans.items() %}
+--- Flow {{ idx }} ---
+{{ plan if plan else '(no output yet)' }}
+
+{% endfor %}
+{% endif %}\
+Continue iterating; integrate the best ideas from any other teams' outputs.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +659,7 @@ class TestTemplateMachinery(unittest.TestCase):
                 }
             ],
             visible_flows="self",
-            multiflow_followup_prompt=DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
+            multiflow_followup_prompt=_TEST_FOLLOWUP_PROMPT,
             disable_aggregator=True,
             checkpoint_dir=self.tmpdir,
         )
@@ -659,7 +692,7 @@ class TestTemplateMachinery(unittest.TestCase):
                     "initial_inferencer": _make_sequential_inferencer(["init"]),
                     "followup_inferencer": _Cap(),
                     "dynamic_input_builder": my_builder,   # takes precedence
-                    "followup_prompt": DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE,
+                    "followup_prompt": _TEST_FOLLOWUP_PROMPT,
                     "end_condition": lambda s, r: s.get("dynamic_step_count", 0) >= 2,
                     "max_dynamic_steps": 5,
                 }
@@ -762,7 +795,7 @@ class TestAggregatorIntegration(unittest.TestCase):
                 },
             ],
             aggregator_inferencer=_AggCap(),
-            aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             checkpoint_dir=self.tmpdir,
         )
         mfi.infer("the_master_task")
@@ -843,7 +876,7 @@ class TestAggregatorIntegration(unittest.TestCase):
                 },
             ],
             aggregator_inferencer=agg,
-            aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             judgment_parser=parse_judgment,
             checkpoint_dir=self.tmpdir,
         )
@@ -996,7 +1029,7 @@ class TestRound7DispatchState(unittest.TestCase):
                 },
             ],
             aggregator_inferencer=_AggCap(agg_output),
-            aggregator_prompt=DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
+            aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             checkpoint_dir=self.tmpdir,
             **mfi_kwargs,
         ), flow0_init, flow1_init

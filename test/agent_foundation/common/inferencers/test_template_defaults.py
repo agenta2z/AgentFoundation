@@ -27,7 +27,7 @@ from agent_foundation.common.inferencers.template_constants import (
     VARIANT_AGGREGATION,
 )
 from agent_foundation.common.inferencers.template_defaults import (
-    AGGREGATOR_PREAMBLE_DEFAULTS,
+    AGGREGATION_DEFAULTS,
     BREAKDOWN_TEMPLATE_DEFAULTS,
     ConditionalTemplateDefaults,
     FOLLOWUP_AGGREGATION_DEFAULTS,
@@ -35,7 +35,6 @@ from agent_foundation.common.inferencers.template_defaults import (
     InferencerTemplateDefaults,
     InferencerTemplateVersionDefaults,
     REVIEW_TEMPLATE_DEFAULTS,
-    STRUCTURED_AGGREGATION_DEFAULTS,
     _aggregation_applicable,
     _resolve_attrib_default,
 )
@@ -333,22 +332,11 @@ class TestModuleConstants:
         assert BREAKDOWN_TEMPLATE_DEFAULTS.template_key is None
         assert BREAKDOWN_TEMPLATE_DEFAULTS.template_variables == {}
 
-    def test_aggregator_preamble_constant_shape(self):
-        # The universal aggregator minimum used by BTA's aggregator slot.
-        # Refactor 13 form: template_version + variable_names with None values.
-        assert AGGREGATOR_PREAMBLE_DEFAULTS.template_root_space is None
-        assert AGGREGATOR_PREAMBLE_DEFAULTS.template_version == VARIANT_AGGREGATION
-        assert AGGREGATOR_PREAMBLE_DEFAULTS.template_variables == {
-            VAR_TASK_PREAMBLE: None,
-        }
-
-    def test_structured_aggregation_constant_shape(self):
-        # Full triplet for slots that depend on structured-output addenda
-        # (winner_pick, iteration_judgment) — used by MFDual's aggregator
-        # and per-flow followup. Refactor 13 form.
-        assert STRUCTURED_AGGREGATION_DEFAULTS.template_root_space is None
-        assert STRUCTURED_AGGREGATION_DEFAULTS.template_version == VARIANT_AGGREGATION
-        assert STRUCTURED_AGGREGATION_DEFAULTS.template_variables == {
+    def test_aggregation_constant_shape(self):
+        assert AGGREGATION_DEFAULTS.template_root_space is None
+        assert AGGREGATION_DEFAULTS.template_version == VARIANT_AGGREGATION
+        assert AGGREGATION_DEFAULTS.template_master_version == VARIANT_AGGREGATION
+        assert AGGREGATION_DEFAULTS.template_variables == {
             VAR_TASK_PREAMBLE: None,
             VAR_TASK_INSTRUCTIONS: None,
             VAR_TASK_RESPONSE_FORMAT: None,
@@ -360,11 +348,9 @@ class TestModuleConstants:
 
     def test_followup_aggregation_is_conditional(self):
         assert isinstance(FOLLOWUP_AGGREGATION_DEFAULTS, ConditionalTemplateDefaults)
-        # Same triplet content as STRUCTURED_AGGREGATION_DEFAULTS — the
-        # followup needs the full structured framing for iteration_judgment.
         assert (
             FOLLOWUP_AGGREGATION_DEFAULTS.template_variables
-            == STRUCTURED_AGGREGATION_DEFAULTS.template_variables
+            == AGGREGATION_DEFAULTS.template_variables
         )
 
 

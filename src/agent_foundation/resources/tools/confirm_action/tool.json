@@ -1,0 +1,10 @@
+{
+  "name": "confirm_action",
+  "description": "Request user confirmation before proceeding. In yolo mode, returns true immediately. SOP-scoped.",
+  "tool_type": "Conversation",
+  "category": "workflow",
+  "parameters": [
+    {"name": "prompt", "type": "string", "required": true, "description": "Confirmation prompt to show the user"},
+    {"name": "--default", "type": "flag", "description": "Default to confirmed"}
+  ]
+}

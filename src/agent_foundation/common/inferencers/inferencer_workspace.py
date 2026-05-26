@@ -27,6 +27,15 @@ from typing import List, Optional, Union
 
 from attr import attrib, attrs
 
+from agent_foundation.common.workspace.layout import (
+    ARTIFACTS_DIR,
+    CHECKPOINTS_DIR,
+    CHILDREN_DIR,
+    FINAL_DELIVERABLES_DIR,
+    LOGS_DIR,
+    OUTPUTS_DIR,
+)
+
 DEFAULT_OUTPUT_FILENAME = "output.md"
 
 
@@ -56,27 +65,27 @@ class InferencerWorkspace:
     @property
     def outputs_dir(self) -> str:
         """Final output directory."""
-        return os.path.join(self.root, "outputs")
+        return os.path.join(self.root, OUTPUTS_DIR)
 
     @property
     def artifacts_dir(self) -> str:
         """Intermediate files, step-completion markers."""
-        return os.path.join(self.root, "artifacts")
+        return os.path.join(self.root, ARTIFACTS_DIR)
 
     @property
     def checkpoints_dir(self) -> str:
         """Workflow checkpoint JSON files."""
-        return os.path.join(self.root, "checkpoints")
+        return os.path.join(self.root, CHECKPOINTS_DIR)
 
     @property
     def logs_dir(self) -> str:
         """Per-round prompt/response logs."""
-        return os.path.join(self.root, "logs")
+        return os.path.join(self.root, LOGS_DIR)
 
     @property
     def children_dir(self) -> str:
         """Child inferencer workspace roots."""
-        return os.path.join(self.root, "children")
+        return os.path.join(self.root, CHILDREN_DIR)
 
     @property
     def deliverables_dir(self) -> "Optional[str]":
@@ -90,9 +99,9 @@ class InferencerWorkspace:
         name = (
             self.use_final_deliverables_folder
             if isinstance(self.use_final_deliverables_folder, str)
-            else "final_deliverables"
+            else FINAL_DELIVERABLES_DIR
         )
-        return os.path.join(self.root, "outputs", name)
+        return os.path.join(self.root, OUTPUTS_DIR, name)
 
     def deliverable_path(self, relative: str) -> "Optional[str]":
         """Resolve a path relative to deliverables_dir, or None if not configured."""
@@ -177,7 +186,7 @@ class InferencerWorkspace:
         src_root = source_workspace.deliverables_dir
 
         for root_dir, _dirs, files in os.walk(src_root):
-            _dirs[:] = [d for d in _dirs if d != "final_deliverables"]  # v4.8: prevent nesting
+            _dirs[:] = [d for d in _dirs if d != FINAL_DELIVERABLES_DIR]  # v4.8: prevent nesting
             for f in files:
                 src_path = os.path.join(root_dir, f)
                 rel_path = os.path.relpath(src_path, src_root)
@@ -292,7 +301,7 @@ class InferencerWorkspace:
         """
         self._validate_child_name(child_name)
         return os.path.join(
-            self.children_dir, child_name, "outputs", output_relative
+            self.children_dir, child_name, OUTPUTS_DIR, output_relative
         )
 
     # -- Artifact scanning --

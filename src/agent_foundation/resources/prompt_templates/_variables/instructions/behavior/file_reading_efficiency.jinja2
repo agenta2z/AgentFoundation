@@ -1,0 +1,3 @@
+{%- if has_local_access is defined and has_local_access -%}
+Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly. Read only the relevant line range — not the entire file — and incrementally read more as needed.
+{%- endif -%}

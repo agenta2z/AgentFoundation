@@ -1,0 +1,6 @@
+{%- if has_local_access is defined and has_local_access -%}
+## NOTES (on writing large files):
+- If a file is too large for a single write, split it into smaller sections/chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
+- Try file writing tools first (e.g., `create_file`, `write_file`, etc.). If file-writing tools fail due to size, fall back to writing incremental sections/chunks using bash tools/commands. You may even consider "python -c" command or creating temporary python scripts for incremental writing if justified (e.g., python avoids ARG_MAX limit for raw bash, and handles edge cases better for unicode, special characters, code blocks mixed with quoting, regex, etc., that are fragile in bash string literals).
+- Do NOT use bash heredocs (`<< EOF`) — they fail with large content.
+{%- endif -%}

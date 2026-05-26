@@ -36,6 +36,7 @@ import attr
 from .template_constants import (
     FIELD_TEMPLATE_EXTRA_FEED,
     FIELD_TEMPLATE_KEY,
+    FIELD_TEMPLATE_MASTER_VERSION,
     FIELD_TEMPLATE_ROOT_SPACE,
     FIELD_TEMPLATE_VARIABLES,
     FIELD_TEMPLATE_VERSION,
@@ -72,6 +73,7 @@ class InferencerTemplateDefaults:
         template_variables: Optional[dict] = None,
         template_extra_feed: Optional[dict] = None,
         template_version: Optional[str] = None,
+        template_master_version: Optional[str] = None,
     ):
         self.template_root_space = template_root_space
         self.template_key = template_key
@@ -82,6 +84,7 @@ class InferencerTemplateDefaults:
             dict(template_extra_feed) if template_extra_feed else {}
         )
         self.template_version = template_version
+        self.template_master_version = template_master_version
 
     def apply_to(
         self, node: dict, parent_node: Optional[dict] = None
@@ -108,6 +111,11 @@ class InferencerTemplateDefaults:
             and FIELD_TEMPLATE_VERSION not in node
         ):
             node[FIELD_TEMPLATE_VERSION] = self.template_version
+        if (
+            self.template_master_version is not None
+            and FIELD_TEMPLATE_MASTER_VERSION not in node
+        ):
+            node[FIELD_TEMPLATE_MASTER_VERSION] = self.template_master_version
         if self.template_variables:
             self._merge_dict(node, FIELD_TEMPLATE_VARIABLES, self.template_variables)
         if self.template_extra_feed:
@@ -129,19 +137,19 @@ class InferencerTemplateVersionDefaults(InferencerTemplateDefaults):
 
     The constructor sugars ``variable_names=["a", "b"]`` into
     ``template_variables={"a": None, "b": None}`` so that ``_build_template_feed``
-    sees empty values and falls back to ``template_version``. This lets the
-    migration constants stay terse::
+    sees empty values and falls back to the default version. This lets the
+    constants stay terse::
 
-        AGGREGATOR_PREAMBLE_DEFAULTS = InferencerTemplateVersionDefaults(
-            template_version="aggregation",
-            variable_names=["task_preamble"],
+        AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
+            template_master_version="aggregation",
+            variable_names=["task_preamble", "task_instructions", "task_response_format"],
         )
 
     is equivalent in effect to::
 
         InferencerTemplateDefaults(
-            template_version="aggregation",
-            template_variables={"task_preamble": None},
+            template_master_version="aggregation",
+            template_variables={"task_preamble": None, "task_instructions": None, "task_response_format": None},
         )
 
     All apply_to merge semantics are inherited unchanged from the parent.
@@ -151,6 +159,7 @@ class InferencerTemplateVersionDefaults(InferencerTemplateDefaults):
         self,
         *,
         template_version: Optional[str] = None,
+        template_master_version: Optional[str] = None,
         variable_names: Optional[list] = None,
         template_root_space: Optional[str] = None,
         template_key: Optional[str] = None,
@@ -171,6 +180,7 @@ class InferencerTemplateVersionDefaults(InferencerTemplateDefaults):
             template_variables=merged_variables or None,
             template_extra_feed=template_extra_feed,
             template_version=template_version,
+            template_master_version=template_master_version,
         )
 
 
@@ -252,39 +262,25 @@ BREAKDOWN_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
 ``task_breakdown`` template space."""
 
 
-AGGREGATOR_PREAMBLE_DEFAULTS = InferencerTemplateVersionDefaults(
+AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
     template_version=VARIANT_AGGREGATION,
-    variable_names=[VAR_TASK_PREAMBLE],
-)
-"""Universal aggregator minimum — just the ``aggregation`` task_preamble
-variant, which renders the wrapper that consumes ``{{ upstream_artifacts }}``
-and ``{{ aggregation_guidance }}``.
-
-Used by BTA's ``aggregator_inferencer``. Deliberately NOT the full triplet:
-some aggregators (e.g. exec BTA in plan-then-implement) want generic
-synthesis instructions sourced from runtime ``aggregation_guidance`` only,
-and would conflict with a hardcoded ``task_instructions: aggregation``.
-Use :data:`STRUCTURED_AGGREGATION_DEFAULTS` for slots that need the full
-structured-aggregation framing (with addenda rendering)."""
-
-
-STRUCTURED_AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
-    template_version=VARIANT_AGGREGATION,
+    template_master_version=VARIANT_AGGREGATION,
     variable_names=[
         VAR_TASK_PREAMBLE,
         VAR_TASK_INSTRUCTIONS,
         VAR_TASK_RESPONSE_FORMAT,
     ],
 )
-"""Full structured-aggregation framing — preamble + generic instructions +
-response_format that renders structured-output addenda (e.g.,
-``include_winner_pick``, ``include_iteration_judgment``) when the
-corresponding flag is set in ``template_extra_feed``.
+"""Aggregation framing — preamble + instructions + response_format.
 
-Used by MFDual's ``multi_flow_aggregator_inferencer`` and
-:data:`FOLLOWUP_AGGREGATION_DEFAULTS` (per-flow followup). Callers that
-want only the universal aggregator preamble use
-:data:`AGGREGATOR_PREAMBLE_DEFAULTS` instead."""
+``master_version="aggregation"`` routes variable lookups into the
+``aggregation/`` subdirectory (e.g., ``task_preamble/aggregation/default.jinja2``).
+Per-variable overrides in YAML (e.g., ``task_instructions: skill_tool_creation``)
+select a specific variant within that subdirectory.
+
+Used by BTA's ``aggregator_inferencer``, MFDual's
+``multi_flow_aggregator_inferencer``, and :data:`FOLLOWUP_AGGREGATION_DEFAULTS`
+(per-flow followup)."""
 
 
 REVIEW_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
@@ -339,8 +335,9 @@ def _aggregation_applicable(parent: dict) -> bool:
 
 FOLLOWUP_AGGREGATION_DEFAULTS = ConditionalTemplateDefaults(
     condition=_aggregation_applicable,
-    template_variables=STRUCTURED_AGGREGATION_DEFAULTS.template_variables,
-    template_version=STRUCTURED_AGGREGATION_DEFAULTS.template_version,
+    template_variables=AGGREGATION_DEFAULTS.template_variables,
+    template_version=AGGREGATION_DEFAULTS.template_version,
+    template_master_version=AGGREGATION_DEFAULTS.template_master_version,
 )
 """For per-flow MultiFlow/MFDual ``followup_inferencer`` when (a) peers
 are visible (``visible_flows != "self"``) AND (b) injection wiring is
@@ -355,8 +352,7 @@ __all__ = [
     "InferencerTemplateVersionDefaults",
     "ConditionalTemplateDefaults",
     "BREAKDOWN_TEMPLATE_DEFAULTS",
-    "AGGREGATOR_PREAMBLE_DEFAULTS",
-    "STRUCTURED_AGGREGATION_DEFAULTS",
+    "AGGREGATION_DEFAULTS",
     "REVIEW_TEMPLATE_DEFAULTS",
     "FOLLOWUP_TEMPLATE_DEFAULTS",
     "FOLLOWUP_AGGREGATION_DEFAULTS",

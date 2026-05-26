@@ -75,47 +75,6 @@ def _looks_like_lwi_state(d: Dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Default templates (raw Jinja2 — used when no shared TemplateManager is set)
-# ---------------------------------------------------------------------------
-
-DEFAULT_MULTIFLOW_FOLLOWUP_TEMPLATE = """\
-Original task:
-{{ input }}
-
-Your previous output:
-{{ your_prev }}
-
-{% if visible_plans %}
-Other teams' latest outputs:
-{% for idx, plan in visible_plans.items() %}
---- Flow {{ idx }} ---
-{{ plan if plan else '(no output yet)' }}
-
-{% endfor %}
-{% endif %}\
-Continue iterating; integrate the best ideas from any other teams' outputs.
-"""
-
-DEFAULT_AGGREGATOR_PROMPT_TEMPLATE = """\
-Original task:
-{{ input }}
-
-Each team's final output:
-{% for idx, plan in worker_plans.items() %}
-=== Flow {{ idx }} ===
-{{ plan if plan else '(no output)' }}
-
-{% endfor %}\
-{% if all_judgments_summary %}
-Per-iteration judgments collected during the multi-flow phase:
-{{ all_judgments_summary }}
-
-{% endif %}\
-Produce a final integrated synthesis drawing on the best of every team's work.
-"""
-
-
-# ---------------------------------------------------------------------------
 # Followup-input formatting (per-step iteration)
 # ---------------------------------------------------------------------------
 #
@@ -419,6 +378,34 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         if self.worker_factory is None:
             self.worker_factory = self._build_worker_factory()
 
+        # Surgical 3-way aggregator-source guard: when the aggregator is
+        # enabled, at least ONE of these must be configured, otherwise the
+        # aggregation step has no instructions to give the model:
+        #   (A) ``aggregator_prompt`` (str)         — legacy Jinja string.
+        #   (B) ``aggregator_prompt_builder`` (Callable) — user-supplied
+        #                                              prompt-feed builder.
+        #   (C) ``aggregator_inferencer`` (Inferencer) — the leaf renders
+        #         its own template via SLOT_DEFAULTS (modern Path B; this
+        #         is what ``breakdown-multiflow-plan.yaml`` and friends use).
+        # Raising here converts a previously-silent misconfiguration (the
+        # aggregator step would run with an empty / unset prompt and emit
+        # garbage) into an actionable error at construction time.
+        if not self.disable_aggregator:
+            has_prompt_str     = self.aggregator_prompt is not None
+            has_prompt_builder = self.aggregator_prompt_builder is not None
+            has_inferencer     = self.aggregator_inferencer is not None
+            if not (has_prompt_str or has_prompt_builder or has_inferencer):
+                raise ValueError(
+                    "MultiFlowInferencer aggregator is enabled but no prompt "
+                    "source is configured. Provide ONE of: "
+                    "(1) aggregator_prompt (str) — legacy Jinja template; "
+                    "(2) aggregator_prompt_builder (Callable) — user-supplied "
+                    "builder; "
+                    "(3) aggregator_inferencer (InferencerBase) — leaf with "
+                    "its own SLOT_DEFAULTS-resolved template (recommended). "
+                    "Otherwise set disable_aggregator=True to skip aggregation."
+                )
+
         # Install default aggregator prompt builder when the user supplied a
         # template but no custom builder. BTA's own builder (if any) wins.
         if (
@@ -695,10 +682,15 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 "all_judgments_summary": all_judgments_summary,
                 # NOTE: worker_output_paths kept in builder signature for
                 # BTA call-compatibility but not fed into the template
-                # because DEFAULT_AGGREGATOR_PROMPT_TEMPLATE doesn't use it.
+                # because the legacy default template didn't consume it.
+                # User-supplied ``aggregator_prompt`` strings that DO want
+                # output paths can use ``aggregator_prompt_builder`` instead.
             }
 
-            template = outer.aggregator_prompt or DEFAULT_AGGREGATOR_PROMPT_TEMPLATE
+            # ``_make_default_aggregator_prompt_builder`` is gated on
+            # ``aggregator_prompt is not None`` (see ``__attrs_post_init__``),
+            # so this attribute is always a non-None string here.
+            template = outer.aggregator_prompt
             rendered = outer._render_template(template, feed)
 
             # Upstream artifact injection: when enabled, push the rendered

@@ -1,0 +1,1151 @@
+# UI Components Formalization Plan
+
+**Goal:** Formalize and consolidate reusable UI widgets/components into
+`AgentFoundation/src/agent_foundation/ui` so that downstream applications
+(OpenStartup, RankEvolve, future agent UIs) consume a single, well-defined
+component library instead of forking and diverging.
+
+**Author:** Drafted via deep cross-codebase investigation, 2026-05-23.
+**Status:** PROPOSED — awaiting sign-off before execution.
+
+---
+
+## 0. TL;DR
+
+1. **Three codebases** all carry copies of essentially the same "agent
+   interaction widget set" (TextInput / SingleChoice / MultipleChoice /
+   Confirmation / etc.) plus a small set of pure-UI primitives
+   (LoadingIndicator, MarkdownRenderer, PersonChip, StatusBadge, …).
+2. **AgentFoundation already has** a widget protocol (Python
+   `widget_protocol.py` + a React `webui/react/src/components/widgets/`
+   registry) — it is the **natural home** for the canonical components.
+3. **OpenStartup** and **RankEvolve** today **fork-and-diverge** from
+   AgentFoundation's UI; OpenStartup even documents this in
+   `shared/index.js` ("Adapted from AgentFoundation/.../components/common/").
+4. We propose a **5-phase formalization**:
+   Phase 1 — Inventory & freeze (no behavioral change).
+   Phase 2 — Promote pure primitives into AgentFoundation `ui/widgets/common/`.
+   Phase 3 — Canonicalize the **widget protocol** components in
+   `ui/widgets/inputs/` (TextInput, SingleChoice, MultipleChoice,
+   Confirmation, Dropdown, Toggle, ToolArgumentForm, MultiInput,
+   Default) and register them via a single `WidgetRegistry` source of truth.
+   Phase 4 — Publish a consumable package (`@agent-foundation/ui-react`
+   workspace + Python entry-point loader) and migrate OpenStartup &
+   RankEvolve to consume it.
+   Phase 5 — Set up contribution rules, lint guards, and a visual snapshot
+   test harness so divergence cannot silently reappear.
+
+The plan deliberately **keeps domain-specific widgets** (ProjectSummary,
+SprintProgress, TaskAssignment, WorkloadChart, ProposalSelection, Hub,
+Pipeline*) in their respective apps. Only the **generic, agent-protocol-
+shaped** components move.
+
+---
+
+## 1. Investigation Findings
+
+### 1.1 Codebases & Roles
+
+| Codebase | Path | Role |
+|----------|------|------|
+| AgentFoundation | `CoreProjects/AgentFoundation/src/agent_foundation/ui/` | The **framework**. Owns Python `interactive_base`, `input_modes`, `widget_protocol`, and the canonical React `webui/`. |
+| OpenStartup (OpenTEAM) | `CoreProjects/OpenStartup/src/openteam/ui/` | A **product UI** built on top of MUI 7 + React 19. Imports from local copies that were "Adapted from" AgentFoundation. |
+| RankEvolve | `CoreProjects/atlassian-packages/rankevolve/src/webui/` | An **independent application** of the framework. Lives in a separate package; today is the *de facto* upstream from which AgentFoundation's `webui/` was forked. |
+
+### 1.2 Key files that already exist in AgentFoundation
+
+**Python protocol layer** (authoritative):
+
+- `ui/widget_protocol.py` — `WidgetMessage`, `WidgetResponse`, `WidgetField`,
+  `WIDGET_TEXT_INPUT`, `WIDGET_SINGLE_CHOICE`, `WIDGET_MULTIPLE_CHOICE`,
+  `WIDGET_DROPDOWN`, `WIDGET_TOGGLE`, `WIDGET_TOOL_ARGUMENT_FORM`.
+- `ui/input_modes.py` — `InputMode` StrEnum (`FREE_TEXT`,
+  `PRESS_TO_CONTINUE`, `EXACT_STRING`, `SINGLE_CHOICE`, `MULTIPLE_CHOICE`),
+  `InputModeConfig`, `ChoiceOption`, plus convenience constructors
+  (`press_to_continue`, `exact_string`, `single_choice`,
+  `multiple_choices`).
+- `ui/interactive_base.py`, `ui/rich_interactive_base.py`,
+  `ui/terminal_interactive.py`, `ui/queue_interactive.py`,
+  `ui/email_interactive.py`, `ui/simulated_interactive.py` —
+  back-end implementations of the interactive protocol.
+- `ui/dash_interactive/` — Python-only Dash app (separate UI surface;
+  out of scope for this plan but referenced).
+
+**React layer (already present, but currently a fork of RankEvolve)**:
+
+- `ui/webui/react/src/components/widgets/` — WidgetRegistry +
+  TextInput / SingleChoice / MultipleChoice / Confirmation / Dropdown /
+  Toggle / ToolArgumentForm / MultiInput / Default / ToolConfigPanel.
+- `ui/webui/react/src/components/common/` — ClickToEditMarkdown,
+  EmptyState, LoadingIndicator, MarkdownRenderer, PersonChip,
+  PlanModeSelector, ProgressBar, QuickLinkButton, SectionCard,
+  StatusBadge, WelcomeScreen.
+- `ui/webui/react/src/components/agent/` — AgentChatPanel,
+  AgentStatusBar, AgentStreamDrawer, AgentStreamSection,
+  CommandAutocomplete, SessionSidebar, StreamingMessage, TaskCard,
+  TaskPanel.
+- `ui/webui/react/src/components/chat|layout|progress|queries|messages|actions/`
+- `ui/webui/react/src/hooks/` — useAgentChat, useAgentWebSocket,
+  useChat, useContextMenu, useFileViewer, useInputFields, useProgress,
+  useProgressHeader, useSectionVisibility, useSessionApi,
+  useSessionManager, useWorkspace.
+- `ui/webui/react/src/theme/` — createAppTheme, cssVariableBridge,
+  ThemeProvider, themeRegistry, ThemeSwitcher (+ tests).
+- `ui/webui/react/src/contexts/SessionContext.js`.
+- `ui/webui/src/...` — an **older, partial duplicate** of the above
+  (legacy). To be removed in Phase 1 cleanup.
+
+### 1.3 The Divergence Problem (proven by `diff -rq`)
+
+`AgentFoundation/.../webui/react/src/components/` differs from
+`rankevolve/.../webui/react/src/components/` in essentially **every**
+file that exists in both:
+
+- `agent/AgentChatPanel.js` differs
+- `agent/AgentStatusBar.js` differs
+- `agent/AgentStreamDrawer.js` differs
+- `agent/AgentStreamSection.js` differs
+- `agent/CommandAutocomplete.js` differs
+- `agent/SessionSidebar.js` differs
+- `agent/StreamingMessage.js` differs
+- `agent/TaskCard.js` differs
+- `agent/TaskPanel.js` differs
+- `common/ClickToEditMarkdown.js` differs
+- `common/MarkdownRenderer.js` differs
+- `common/PlanModeSelector.js` differs
+- `common/index.js` differs
+- `layout/AppHeader.js`, `layout/FileViewer.js` differ
+- `progress/*.js` differs across the board
+- `queries/AddDropdown.js`, `queries/AddQueriesDropdown.js`,
+  `queries/QueryCard.js` differ
+- `widgets/ConfirmationWidget.js`, `widgets/MultiInputWidget.js`,
+  `widgets/SingleChoiceWidget.js`, `widgets/TextInputWidget.js`,
+  `widgets/ToolConfigPanel.js`, `widgets/WidgetRegistry.js` differ
+- RankEvolve **only**: `agent/MultiViewTaskPanel.js`,
+  `agent/PipelineStatusBar.js`, `agent/ViewTabBar.js`,
+  `common/SplitActionButton.js`, `widgets/GroupedWidget.js`,
+  `widgets/ProposalSelectionWidget.js`, `components/hub/*`,
+  `components/views/*`.
+- AgentFoundation **only**: `common/EmptyState.js`,
+  `common/PersonChip.js`, `common/ProgressBar.js`,
+  `common/QuickLinkButton.js`, `common/SectionCard.js`,
+  `common/StatusBadge.js`.
+
+**Conclusion:** RankEvolve and AgentFoundation have **already** drifted.
+OpenStartup independently reimplemented many of the same primitives
+(`shared/EmptyState.js`, `shared/LoadingIndicator.js`,
+`shared/PersonChip.js`, `shared/ProgressBar.js`,
+`shared/QuickLinkButton.js`, `shared/SectionCard.js`,
+`shared/StatusBadge.js`, `shared/PendingReasonPopover.js`) and built its
+own widget set (`components/chat-widgets/`) with the *same* shape but
+*different* code. This is the exact failure mode the formalization must
+prevent going forward.
+
+### 1.4 OpenStartup Inventory (`openteam/ui/src/`)
+
+Built on **MUI 7** + React 19 + react-markdown + react-syntax-highlighter.
+Uses a custom `theme.custom` namespace (`categorical`, `surfaces`).
+
+**a) Pure UI primitives — `shared/`** — direct candidates for upstream
+(file headers explicitly say "Adapted from AgentFoundation"):
+
+| File | Status | Notes |
+|------|--------|-------|
+| `EmptyState.js` | DUPLICATES AF | AF already has `common/EmptyState.js` |
+| `LoadingIndicator.js` | DUPLICATES AF | AF already has `common/LoadingIndicator.js` |
+| `PendingReasonPopover.js` | **NEW** | Generic resolution popover; not in AF. Candidate for promotion. |
+| `PersonChip.js` | DUPLICATES AF | AF already has `common/PersonChip.js` |
+| `ProgressBar.js` | DUPLICATES AF | AF already has `common/ProgressBar.js` |
+| `QuickLinkButton.js` | DUPLICATES AF | AF already has `common/QuickLinkButton.js` |
+| `SectionCard.js` | DUPLICATES AF | AF already has `common/SectionCard.js` |
+| `StatusBadge.js` | DUPLICATES AF | AF already has `common/StatusBadge.js` |
+
+**b) Chat widgets — `components/chat-widgets/`** — split:
+
+Generic (move to / reconcile with AF widgets):
+- `WidgetRegistry.js` — overlaps AF's; AF version is more complete.
+- `ChatWidgetRenderer.js` — generic registry dispatcher.
+- `ConversationToolWidget.js` — generic `input_mode`-protocol dispatcher.
+- `ConfirmationWidget.js`, `SingleChoiceWidget.js`,
+  `MultipleChoiceWidget.js`, `TextInputWidget.js`,
+  `ApprovalWidget.js`, `ChoiceWidget.js` — all schema-driven; all
+  match the AF protocol.
+
+Domain-specific (keep in OpenStartup):
+- `ProjectSummaryWidget.js`, `SprintProgressWidget.js`,
+  `TaskAssignmentWidget.js`, `TaskListWidget.js`,
+  `WorkloadChartWidget.js`.
+
+**c) Chat components — `components/chat/`** — split:
+
+Generic candidates: `MarkdownRenderer.js` (overlaps AF + RE),
+`StreamingMessage.js` (overlaps AF + RE), `Breadcrumb.js`,
+`ThinkingFold.js`, `PromptViewerDrawer.js`, `NodeDetailPanel.js`,
+`GraphFlowView.js`, `CommandAutocomplete.js` (overlaps AF + RE),
+`BackendSelector.js`, `ChatInput.js` (overlaps AF + RE),
+`AgentMessageBubble.js`.
+
+OpenTEAM-specific: `SessionContextBar.js`, `TaskCard.js` (OpenTEAM
+flavour), `TaskPanel.js` (OpenTEAM flavour).
+
+**d) Layout — `components/layout/`** — `ConnectionStatusBar.js`
+(generic), `FileViewer.js` (overlaps AF + RE), `FolderTree.js`
+(generic candidate), `SettingsDrawer.js` (app-specific scaffold),
+`Sidebar.js` (OpenTEAM session/task sidebar — keep in app).
+
+**e) Hooks — `hooks/`** — `useApiData.js`, `useServerStatus.js`
+(generic candidates). Others (`useFileViewer`, `useGraphState`,
+`useManagerChat`, `usePromptViewer`, `useServerBackends`,
+`useTaskTopologies`) are domain-specific.
+
+**f) Theme — `theme/`** — `createAppTheme.js`, `cssVariableBridge.js`,
+`ThemeProvider.js`, `themeRegistry.js`, `ThemeSwitcher.js`, plus three
+theme definitions (`atlassian`, `dark`, `pinterest`). The
+**implementation appears to be the same shape** as AF's theme system
+but is currently independently maintained — strong consolidation
+candidate.
+
+**g) Domain components** (keep in app): `components/employees/*`,
+`components/projects/*`, `components/tasks/*`, `components/teams/*`,
+`components/views/*`.
+
+### 1.5 RankEvolve Inventory (`rankevolve/src/webui/react/src/`)
+
+Same MUI-based stack. Currently is the **de facto upstream** of the AF
+`webui/` fork. Contains everything AF has, plus RE-specific extras:
+
+- `components/hub/*` (HowCombosWork, ScriptEditorDrawer,
+  SetupWizardModal, SubmissionActionButton, SubmissionFooterBar,
+  SubmitExperimentConfirm, UploadExistingRunnerModal) — **RE domain**.
+- `components/views/*` (AnalysisView, JobMonitorView,
+  MultiChoiceComboView, QueueProgressView, RunQueueList, …) — **RE
+  domain**.
+- `widgets/GroupedWidget.js` — Plan v3 compound widget — **generic**
+  pattern, suitable for promotion.
+- `widgets/ProposalSelectionWidget.js` — **RE domain** (proposals).
+- `agent/MultiViewTaskPanel.js`, `agent/PipelineStatusBar.js`,
+  `agent/ViewTabBar.js` — Plan v3 multi-view experience —
+  **RE-shaped** but the *pattern* (multi-task panel, pipeline status,
+  view tab bar) is generic.
+- `common/SplitActionButton.js` — generic primitive — promotion candidate.
+- `hooks/` adds: `useArchiveCount`, `useAggregationSettings`,
+  `useAutopilot`, `useComboOverrides`, `useHypothesisImplementations`,
+  `useProposalOverrides`, `useSubmissionTemplates`,
+  `useViewWorkspace`, `_autopilotChipFinders` — **RE domain**.
+- `contexts/SessionContext.js` — extends AF's; has RE actions baked in.
+
+### 1.6 AgentFoundation Existing Architecture (recap)
+
+- Python `widget_protocol.py` and `input_modes.py` are the **contract**.
+  Any UI in the ecosystem must speak this dict shape.
+- React `webui/react/src/components/widgets/WidgetRegistry.js`
+  currently handles: `text_input`, `free_text`, `single_choice`,
+  `multiple_choice`, `multiple_choices`, `dropdown`, `toggle`,
+  `confirmation`, `tool_argument_form`, `multi_input`, `default`.
+  This matches the Python constants 1:1.
+- React `webui/react/src/components/common/` is the **only place**
+  today that holds `EmptyState`, `PersonChip`, `ProgressBar`,
+  `QuickLinkButton`, `SectionCard`, `StatusBadge` — these are
+  duplicated downstream as `shared/*` in OpenStartup.
+- `webui/src/` (older variant) is **dead code** and should be removed.
+- `webui/` is structured as a **bundled application** today (it has its
+  own `run_server.sh`, `backend/`, `package.json`, etc.), not as a
+  consumable library. This is the biggest architectural gap.
+
+---
+
+## 2. Target Architecture
+
+### 2.1 Directory layout (proposed)
+
+```
+AgentFoundation/src/agent_foundation/ui/
+├── __init__.py
+├── interactive_base.py          # (unchanged)
+├── rich_interactive_base.py     # (unchanged)
+├── terminal_interactive.py      # (unchanged)
+├── queue_interactive.py         # (unchanged)
+├── email_interactive.py         # (unchanged)
+├── simulated_interactive.py     # (unchanged)
+├── input_modes.py               # (unchanged — contract)
+├── widget_protocol.py           # (unchanged — contract)
+├── interactive_checkpoint.py    # (unchanged)
+├── graph_interactive_adapter.py # (unchanged)
+├── graph_reporter_factory.py    # (unchanged)
+├── stdio_graph_reporter.py      # (unchanged)
+├── dash_interactive/            # (unchanged; Python-only Dash UI)
+│
+├── widgets/                     # NEW — the canonical React UI library
+│   ├── README.md                # contract docs (mirrors widget_protocol.py)
+│   ├── package.json             # publishable: "@agent-foundation/ui-react"
+│   ├── src/
+│   │   ├── index.js             # public barrel
+│   │   ├── protocol/
+│   │   │   ├── WidgetRegistry.js     # single source of truth
+│   │   │   ├── ChatWidgetRenderer.js # dispatch a data widget array
+│   │   │   ├── ConversationToolWidget.js  # input_mode-protocol router
+│   │   │   └── widgetTypes.js        # mirrors Python constants
+│   │   ├── inputs/              # one file per AF widget type
+│   │   │   ├── TextInputWidget.js
+│   │   │   ├── SingleChoiceWidget.js
+│   │   │   ├── MultipleChoiceWidget.js
+│   │   │   ├── DropdownWidget.js
+│   │   │   ├── ToggleWidget.js
+│   │   │   ├── ConfirmationWidget.js
+│   │   │   ├── ToolArgumentFormWidget.js
+│   │   │   ├── MultiInputWidget.js
+│   │   │   ├── GroupedWidget.js     # from RankEvolve
+│   │   │   ├── ApprovalWidget.js    # from OpenStartup (generic)
+│   │   │   ├── ChoiceWidget.js      # from OpenStartup (generic)
+│   │   │   └── DefaultWidget.js
+│   │   ├── common/              # pure UI primitives (no domain coupling)
+│   │   │   ├── EmptyState.js
+│   │   │   ├── LoadingIndicator.js
+│   │   │   ├── MarkdownRenderer.js
+│   │   │   ├── ClickToEditMarkdown.js
+│   │   │   ├── PersonChip.js
+│   │   │   ├── ProgressBar.js
+│   │   │   ├── QuickLinkButton.js
+│   │   │   ├── SectionCard.js
+│   │   │   ├── StatusBadge.js
+│   │   │   ├── SplitActionButton.js     # from RankEvolve
+│   │   │   ├── PendingReasonPopover.js  # from OpenStartup
+│   │   │   ├── Breadcrumb.js            # from OpenStartup
+│   │   │   └── WelcomeScreen.js
+│   │   ├── chat/                # agent chat primitives
+│   │   │   ├── ChatInput.js
+│   │   │   ├── ChatMessage.js
+│   │   │   ├── StreamingMessage.js
+│   │   │   ├── ThinkingFold.js          # from OpenStartup
+│   │   │   ├── CommandAutocomplete.js
+│   │   │   ├── PromptViewerDrawer.js    # from OpenStartup
+│   │   │   └── AgentMessageBubble.js
+│   │   ├── layout/              # generic chrome
+│   │   │   ├── AppHeader.js
+│   │   │   ├── FileViewer.js
+│   │   │   ├── ConnectionStatusBar.js   # from OpenStartup
+│   │   │   └── FolderTree.js            # from OpenStartup
+│   │   ├── progress/            # generic progress UI
+│   │   │   ├── ProgressSection.js
+│   │   │   ├── CompletedSection.js
+│   │   │   ├── TaskProgressBar.js
+│   │   │   └── TaskProgressPanel.js
+│   │   ├── graph/               # agent-reasoning visualisation
+│   │   │   ├── GraphFlowView.js         # from OpenStartup
+│   │   │   └── NodeDetailPanel.js       # from OpenStartup
+│   │   ├── theme/               # theming
+│   │   │   ├── createAppTheme.js
+│   │   │   ├── cssVariableBridge.js
+│   │   │   ├── ThemeProvider.js
+│   │   │   ├── themeRegistry.js
+│   │   │   ├── ThemeSwitcher.js
+│   │   │   └── themes/
+│   │   │       ├── dark.js
+│   │   │       ├── atlassian.js   # promoted from OpenStartup
+│   │   │       └── pinterest.js   # promoted from OpenStartup
+│   │   └── hooks/               # generic React hooks
+│   │       ├── useApiData.js            # from OpenStartup
+│   │       ├── useServerStatus.js       # from OpenStartup
+│   │       ├── useFileViewer.js
+│   │       ├── useContextMenu.js
+│   │       ├── useInputFields.js
+│   │       ├── useSectionVisibility.js
+│   │       ├── useProgressHeader.js
+│   │       ├── useAgentWebSocket.js     # generic transport hook
+│   │       └── useAgentChat.js          # uses WidgetRegistry
+│   ├── tests/                   # unit + snapshot tests
+│   └── stories/                 # Storybook for living docs
+│
+└── webui/                       # demo / reference app (NOT the library)
+    ├── react/                   # consumes ../widgets via local link
+    └── backend/                 # Flask backend used by the demo
+```
+
+### 2.2 Contracts
+
+The library exposes **three stable contracts** that downstream apps
+program against. Versioning is semver, with the Python `widget_protocol`
+constants being the source of truth.
+
+**Contract 1 — Widget data shape (transport).**
+Mirrors `widget_protocol.WidgetMessage.to_dict()`:
+
+```ts
+type WidgetMessage = {
+  widget_id: string;
+  widget_type:
+    | 'text_input' | 'free_text'
+    | 'single_choice' | 'multiple_choice' | 'multiple_choices'
+    | 'dropdown' | 'toggle' | 'confirmation'
+    | 'tool_argument_form' | 'multi_input' | 'grouped'
+    | 'approval' | 'choice' | 'press_to_continue' | 'default';
+  title?: string;
+  description?: string;
+  input_mode?: InputModeConfigDict;
+  fields?: WidgetFieldDict[];
+  metadata?: Record<string, any>;
+};
+
+type WidgetResponse = {
+  widget_id: string;
+  values: Record<string, any>;
+  action: 'submit' | 'cancel' | 'skip';
+};
+```
+
+**Contract 2 — React component prop shape.**
+Every input widget MUST accept exactly:
+
+```ts
+type WidgetProps = {
+  widget: WidgetMessage;            // immutable; never mutated by widget
+  onSubmit: (r: WidgetResponse) => void;
+  onCancel?: () => void;
+  // Optional cross-cutting concerns:
+  onView?: (path: string) => void;       // open file viewer
+  onViewFolder?: (path: string) => void; // open folder tree
+  disabled?: boolean;
+};
+```
+
+This is intentionally narrower than the current RE/AF/OS variants
+(which leak `config`, `data`, and `pendingInput` shapes). The unified
+prop is `widget` only.
+
+**Contract 3 — Registry / extension.**
+The registry is *open*: apps may register additional widget types, but
+the canonical types are owned by AF.
+
+```js
+// in app code
+import { registerWidget, getWidget } from '@agent-foundation/ui-react';
+import { SprintProgressWidget } from './widgets/SprintProgressWidget';
+
+registerWidget('openteam.sprint_progress', SprintProgressWidget);
+```
+
+### 2.3 Consumption Model
+
+We pick the **monorepo workspace** model so that:
+- AgentFoundation owns the source; downstream apps depend on it via
+  a workspace link (`yarn workspaces` / `pnpm workspace`) or a
+  published `@agent-foundation/ui-react` npm package.
+- The Python `widget_protocol` constants are mirrored into
+  `widgets/src/protocol/widgetTypes.js` by a small codegen step
+  (`scripts/sync-widget-types.py`) run in CI to prevent drift.
+
+For RankEvolve (which lives in a separate Atlassian package), the
+library is consumed via the **published npm package** rather than a
+workspace link. The package is published from AgentFoundation CI.
+
+---
+
+## 3. Component Classification Matrix
+
+Legend:
+- **PROMOTE** — move to `@agent-foundation/ui-react`, delete duplicates downstream.
+- **CANONICALIZE** — already in AF; reconcile divergence with RE/OS into one true version.
+- **LIFT-AND-GENERALIZE** — exists in RE/OS in a domain-specific form; extract the generic shape.
+- **KEEP-IN-APP** — domain-specific, stays in the consuming app.
+- **DELETE** — duplicate or dead code.
+
+### 3.1 Input widgets (chat-widgets / widgets)
+
+| Component | OpenStartup | RankEvolve | AgentFoundation | Decision | Notes |
+|-----------|-------------|------------|-----------------|----------|-------|
+| TextInputWidget | `chat-widgets/TextInputWidget.js` | `widgets/TextInputWidget.js` (differs) | `widgets/TextInputWidget.js` | **CANONICALIZE** | Reconcile to one impl. AF version is base; pull "view file" affordance from OS. |
+| SingleChoiceWidget | `chat-widgets/SingleChoiceWidget.js` | `widgets/SingleChoiceWidget.js` (differs) | `widgets/SingleChoiceWidget.js` | **CANONICALIZE** | OS has nice rich-vs-simple split; merge it in. |
+| MultipleChoiceWidget | `chat-widgets/MultipleChoiceWidget.js` | `widgets/MultipleChoiceWidget.js` | `widgets/MultipleChoiceWidget.js` | **CANONICALIZE** | Already aligned; preserve `show_select_all` / `select_all_text` from `input_modes.py`. |
+| ConfirmationWidget | `chat-widgets/ConfirmationWidget.js` | `widgets/ConfirmationWidget.js` (differs) | `widgets/ConfirmationWidget.js` | **CANONICALIZE** | Keep `metadata.view` / `metadata.view_type` callbacks; pull OS's optional "additional instructions" textarea. |
+| DropdownWidget | (not present) | (not present) | `widgets/DropdownWidget.js` | **PROMOTE** | Already in AF; promote unchanged. |
+| ToggleWidget | (not present) | (not present) | `widgets/ToggleWidget.js` | **PROMOTE** | Already in AF; promote unchanged. |
+| ToolArgumentFormWidget | (not present) | (not present) | `widgets/ToolArgumentFormWidget.js` | **PROMOTE** | Already in AF; promote unchanged. |
+| MultiInputWidget | (CompoundWidget inline in ConversationToolWidget) | `widgets/MultiInputWidget.js` | `widgets/MultiInputWidget.js` (differs) | **CANONICALIZE** | Unify the two MultiInput impls; absorb the OS CompoundWidget into it. |
+| GroupedWidget | (not present) | `widgets/GroupedWidget.js` | (not present) | **LIFT-AND-GENERALIZE** | Plan v3 compound pattern; remove RE-specific "group resolve" semantics, keep generic stack. |
+| ApprovalWidget | `chat-widgets/ApprovalWidget.js` | (not present) | (not present) | **PROMOTE** | Generic approve/reject; add `'approval'` to `widget_protocol.py` constants. |
+| ChoiceWidget | `chat-widgets/ChoiceWidget.js` | (not present) | (not present) | **PROMOTE** | Card-style single-pick UI; rename `'card_choice'` to distinguish from radio `'single_choice'`. |
+| DefaultWidget | (not present) | (not present) | `widgets/DefaultWidget.js` | **PROMOTE** | Fallback for unknown types. |
+| ChatWidgetRenderer | `chat-widgets/ChatWidgetRenderer.js` | (inline in ChatMessage) | (none — uses registry directly) | **CANONICALIZE** | Promote OS's explicit renderer; thin wrapper over `getWidget(type)`. |
+| ConversationToolWidget | `chat-widgets/ConversationToolWidget.js` | (different code paths) | (none) | **PROMOTE** | Generic `input_mode`-protocol dispatcher; the right place to centralize `input_mode.mode` → widget mapping. |
+| WidgetRegistry | `chat-widgets/WidgetRegistry.js` (subset) | `widgets/WidgetRegistry.js` (differs) | `widgets/WidgetRegistry.js` (canonical-leaning) | **CANONICALIZE** | AF version is the closest to ideal; merge in OS's `'press_to_continue'` alias. |
+| ToolConfigPanel | (not present) | `widgets/ToolConfigPanel.js` (differs) | `widgets/ToolConfigPanel.js` | **CANONICALIZE** | Generic; reconcile divergence. |
+| ProposalSelectionWidget | (not present) | `widgets/ProposalSelectionWidget.js` | (not present) | **KEEP-IN-APP** | RE-specific proposals/phases/metrics. |
+| ProjectSummaryWidget | `chat-widgets/ProjectSummaryWidget.js` | — | — | **KEEP-IN-APP** | OpenTEAM project domain. |
+| SprintProgressWidget | `chat-widgets/SprintProgressWidget.js` | — | — | **KEEP-IN-APP** | OpenTEAM sprint domain. |
+| TaskAssignmentWidget | `chat-widgets/TaskAssignmentWidget.js` | — | — | **KEEP-IN-APP** | OpenTEAM task assignment. |
+| TaskListWidget | `chat-widgets/TaskListWidget.js` | — | — | **KEEP-IN-APP** | OpenTEAM task list. |
+| WorkloadChartWidget | `chat-widgets/WorkloadChartWidget.js` | — | — | **KEEP-IN-APP** | OpenTEAM workload chart. |
+
+### 3.2 Pure UI primitives (common / shared)
+
+| Component | OpenStartup | RankEvolve | AgentFoundation | Decision | Notes |
+|-----------|-------------|------------|-----------------|----------|-------|
+| EmptyState | `shared/EmptyState.js` | (not present) | `common/EmptyState.js` | **CANONICALIZE** | Delete OS copy; import from AF. |
+| LoadingIndicator | `shared/LoadingIndicator.js` | `common/LoadingIndicator.js` | `common/LoadingIndicator.js` | **CANONICALIZE** | Three copies → one. |
+| PersonChip | `shared/PersonChip.js` | (not present) | `common/PersonChip.js` | **CANONICALIZE** | Delete OS copy; import from AF. |
+| ProgressBar | `shared/ProgressBar.js` | (not present) | `common/ProgressBar.js` | **CANONICALIZE** | Delete OS copy; import from AF. |
+| QuickLinkButton | `shared/QuickLinkButton.js` | (not present) | `common/QuickLinkButton.js` | **CANONICALIZE** | Delete OS copy; import from AF. |
+| SectionCard | `shared/SectionCard.js` | (not present) | `common/SectionCard.js` | **CANONICALIZE** | Delete OS copy; import from AF. |
+| StatusBadge | `shared/StatusBadge.js` | (not present) | `common/StatusBadge.js` | **CANONICALIZE** | Delete OS copy; import from AF. Extract status palette as a prop. |
+| MarkdownRenderer | `chat/MarkdownRenderer.js` | `common/MarkdownRenderer.js` (differs) | `common/MarkdownRenderer.js` (differs) | **CANONICALIZE** | Three copies → one. Standardize on `react-markdown` + `remark-gfm` + syntax highlighter. |
+| ClickToEditMarkdown | (not present) | `common/ClickToEditMarkdown.js` (differs) | `common/ClickToEditMarkdown.js` | **CANONICALIZE** | Reconcile RE vs AF; remove RE-specific session-dispatch coupling. |
+| PlanModeSelector | (not present) | `common/PlanModeSelector.js` (differs) | `common/PlanModeSelector.js` | **CANONICALIZE** | Mode names become a prop. |
+| SplitActionButton | (not present) | `common/SplitActionButton.js` | (not present) | **PROMOTE** | Generic compound button. |
+| WelcomeScreen | (not present) | `common/WelcomeScreen.js` | `common/WelcomeScreen.js` | **CANONICALIZE** | Promote AF version. |
+| PendingReasonPopover | `shared/PendingReasonPopover.js` | (not present) | (not present) | **LIFT-AND-GENERALIZE** | Remove OpenTEAM-specific resolution logic; expose `resolutions[]` + `onResolve(reason, value)` as props. |
+| Breadcrumb | `chat/Breadcrumb.js` | (not present) | (not present) | **PROMOTE** | Already generic. |
+| BackendSelector | `chat/BackendSelector.js` | (different in AgentStatusBar) | (different in AgentStatusBar) | **LIFT-AND-GENERALIZE** | Extract a `<ModelSelector value options onChange />`. |
+| FileViewer | `layout/FileViewer.js` | `layout/FileViewer.js` (differs) | `layout/FileViewer.js` (differs) | **CANONICALIZE** | Three copies → one. |
+| FolderTree | `layout/FolderTree.js` | (not present; workspace tree inline) | (not present) | **PROMOTE** | Generic file-tree primitive. |
+| ConnectionStatusBar | `layout/ConnectionStatusBar.js` | (different; in AgentStatusBar) | (different; in AgentStatusBar) | **LIFT-AND-GENERALIZE** | Standalone connection status pill. |
+| AppHeader | (none) | `layout/AppHeader.js` (differs) | `layout/AppHeader.js` (differs) | **CANONICALIZE** | Reconcile RE vs AF; strip RE-specific menu items. |
+| SettingsDrawer | `layout/SettingsDrawer.js` | (none) | (none) | **KEEP-IN-APP** | OpenTEAM-specific settings. |
+| Sidebar | `layout/Sidebar.js` | (different — SessionSidebar) | (different — SessionSidebar) | **KEEP-IN-APP** | OpenTEAM session/task semantics; SessionSidebar in AF stays separate. |
+
+### 3.3 Chat / streaming / agent components
+
+| Component | OpenStartup | RankEvolve | AgentFoundation | Decision | Notes |
+|-----------|-------------|------------|-----------------|----------|-------|
+| ChatInput | `chat/ChatInput.js` | `chat/ChatInput.js` | `chat/ChatInput.js` | **CANONICALIZE** | Three copies → one. Make command list a prop. |
+| ChatMessage | (in AgentMessageBubble) | `chat/ChatMessage.js` | `chat/ChatMessage.js` | **CANONICALIZE** | Reconcile AF vs RE. |
+| StreamingMessage | `chat/StreamingMessage.js` | `agent/StreamingMessage.js` | `agent/StreamingMessage.js` | **CANONICALIZE** | Three copies → one. |
+| ThinkingFold | `chat/ThinkingFold.js` | (not present; in AgentStreamSection) | (not present) | **PROMOTE** | Generalize the OpenTEAM-specific parsing into a `parser` prop. |
+| AgentMessageBubble | `chat/AgentMessageBubble.js` | (in ChatMessage) | (in ChatMessage) | **PROMOTE** | Useful generic pattern. |
+| CommandAutocomplete | `chat/CommandAutocomplete.js` | `agent/CommandAutocomplete.js` (differs) | `agent/CommandAutocomplete.js` (differs) | **CANONICALIZE** | Commands list becomes a prop. |
+| PromptViewerDrawer | `chat/PromptViewerDrawer.js` | (similar in AgentStreamDrawer) | (similar in AgentStreamDrawer) | **PROMOTE** | Generic. |
+| AgentStatusBar | (none) | `agent/AgentStatusBar.js` (differs) | `agent/AgentStatusBar.js` (differs) | **LIFT-AND-GENERALIZE** | Split into `<ConnectionStatus>`, `<ModelSelector>`, `<TargetPathChip>` primitives; keep the composed `AgentStatusBar` as an app component. |
+| AgentChatPanel | (none) | `agent/AgentChatPanel.js` (differs) | `agent/AgentChatPanel.js` (differs) | **KEEP-IN-APP** | Too coupled to session/workspace state in each app. |
+| AgentStreamDrawer | (none) | `agent/AgentStreamDrawer.js` (differs) | `agent/AgentStreamDrawer.js` (differs) | **LIFT-AND-GENERALIZE** | Extract `<StreamDrawer>` primitive; app supplies content. |
+| AgentStreamSection | (none) | `agent/AgentStreamSection.js` (differs) | `agent/AgentStreamSection.js` (differs) | **LIFT-AND-GENERALIZE** | Extract `<CollapsibleStreamSection>` primitive. |
+| TaskCard | `chat/TaskCard.js`; `tasks/TaskCard.js` | `agent/TaskCard.js` (differs) | `agent/TaskCard.js` (differs) | **KEEP-IN-APP** | Each app has its own task domain. (But extract a generic `<MiniCard>` primitive in `common/`.) |
+| TaskPanel | `chat/TaskPanel.js` | `agent/TaskPanel.js` (differs) | `agent/TaskPanel.js` (differs) | **KEEP-IN-APP** | Same reason. |
+| SessionSidebar | (Sidebar in OS) | `agent/SessionSidebar.js` (differs) | `agent/SessionSidebar.js` (differs) | **KEEP-IN-APP** | Session is app-shaped. |
+| GraphFlowView | `chat/GraphFlowView.js` | (none) | (none) | **PROMOTE** | Useful agent-reasoning visualisation. |
+| NodeDetailPanel | `chat/NodeDetailPanel.js` | (none) | (none) | **PROMOTE** | Useful agent-reasoning detail. |
+| SessionContextBar | `chat/SessionContextBar.js` | (none) | (none) | **KEEP-IN-APP** | OpenTEAM session/project/sprint coupling. |
+| MultiViewTaskPanel | (none) | `agent/MultiViewTaskPanel.js` | (none) | **KEEP-IN-APP** | RE Plan v3 multi-view; pattern documented for future generalization. |
+| PipelineStatusBar | (none) | `agent/PipelineStatusBar.js` | (none) | **KEEP-IN-APP** | RE pipeline domain. |
+| ViewTabBar | (none) | `agent/ViewTabBar.js` | (none) | **PROMOTE** | Tab bar is generic. |
+
+### 3.4 Progress / queries / messages
+
+| Component | OpenStartup | RankEvolve | AgentFoundation | Decision |
+|-----------|-------------|------------|-----------------|----------|
+| ProgressSection | (none) | `progress/ProgressSection.js` (differs) | `progress/ProgressSection.js` (differs) | **CANONICALIZE** |
+| CompletedSection | (none) | `progress/CompletedSection.js` (differs) | `progress/CompletedSection.js` (differs) | **CANONICALIZE** |
+| TaskProgressBar | (none) | `progress/TaskProgressBar.js` (differs) | `progress/TaskProgressBar.js` (differs) | **CANONICALIZE** |
+| TaskProgressPanel | (none) | `progress/TaskProgressPanel.js` (differs) | `progress/TaskProgressPanel.js` (differs) | **CANONICALIZE** |
+| PreMessage | (none) | `messages/PreMessage.js` | `messages/PreMessage.js` | **CANONICALIZE** |
+| QueryCard | (none) | `queries/QueryCard.js` (differs) | `queries/QueryCard.js` (differs) | **CANONICALIZE** |
+| EditableList / EditableQueryList | (none) | `queries/EditableList.js` | `queries/EditableQueryList.js` | **CANONICALIZE** (rename to `EditableList`) |
+| AddDropdown / AddQueriesDropdown | (none) | `queries/AddDropdown.js` (generic) + `AddQueriesDropdown.js` (specialized) | `queries/AddQueriesDropdown.js` only | **CANONICALIZE** (promote `AddDropdown`; treat `AddQueriesDropdown` as a thin wrapper kept in app). |
+| SuggestedActions | (none) | `actions/SuggestedActions.js` (differs) | `actions/SuggestedActions.js` (differs) | **CANONICALIZE** |
+
+### 3.5 Hooks
+
+| Hook | OpenStartup | RankEvolve | AgentFoundation | Decision |
+|------|-------------|------------|-----------------|----------|
+| useApiData | `hooks/useApiData.js` | (none) | (none) | **PROMOTE** |
+| useServerStatus | `hooks/useServerStatus.js` | (none) | (none) | **PROMOTE** |
+| useFileViewer | `hooks/useFileViewer.js` | `hooks/useFileViewer.js` | `hooks/useFileViewer.js` | **CANONICALIZE** |
+| useContextMenu | (none) | `hooks/useContextMenu.js` | `hooks/useContextMenu.js` | **CANONICALIZE** |
+| useInputFields | (none) | `hooks/useInputFields.js` | `hooks/useInputFields.js` | **CANONICALIZE** |
+| useSectionVisibility | (none) | `hooks/useSectionVisibility.js` | `hooks/useSectionVisibility.js` | **CANONICALIZE** |
+| useProgressHeader | (none) | `hooks/useProgressHeader.js` | `hooks/useProgressHeader.js` | **CANONICALIZE** |
+| useChat | (none) | `hooks/useChat.js` | `hooks/useChat.js` | **CANONICALIZE** |
+| useAgentChat | (none) | `hooks/useAgentChat.js` | `hooks/useAgentChat.js` | **CANONICALIZE** (RE has more; pull non-RE features). |
+| useAgentWebSocket | (none) | `hooks/useAgentWebSocket.js` | `hooks/useAgentWebSocket.js` | **CANONICALIZE** |
+| useProgress | (none) | `hooks/useProgress.js` | (none) | **LIFT-AND-GENERALIZE** (extract progress-tracking primitives from RE schema). |
+| useWorkspace | (none) | `hooks/useWorkspace.js` | (none) | **LIFT-AND-GENERALIZE** (decouple from `/api/workspace/...` shape). |
+| useSessionApi | (none) | `hooks/useSessionApi.js` | (none) | **KEEP-IN-APP** |
+| useSessionManager | (none) | `hooks/useSessionManager.js` | (none) | **KEEP-IN-APP** |
+| useGraphState | `hooks/useGraphState.js` | (none) | (none) | **KEEP-IN-APP** |
+| useManagerChat | `hooks/useManagerChat.js` | (none) | (none) | **KEEP-IN-APP** |
+| usePromptViewer | `hooks/usePromptViewer.js` | (none) | (none) | **KEEP-IN-APP** |
+| useServerBackends | `hooks/useServerBackends.js` | (none) | (none) | **KEEP-IN-APP** |
+| useTaskTopologies | `hooks/useTaskTopologies.js` | (none) | (none) | **KEEP-IN-APP** |
+| useAutopilot, useArchiveCount, useComboOverrides, useProposalOverrides, useSubmissionTemplates, useViewWorkspace, useHypothesisImplementations, useAggregationSettings | (none) | RE hooks | (none) | **KEEP-IN-APP** (RE domain). |
+
+### 3.6 Theme
+
+| File | OpenStartup | RankEvolve | AgentFoundation | Decision |
+|------|-------------|------------|-----------------|----------|
+| createAppTheme | `theme/createAppTheme.js` | (uses MUI `createTheme` directly) | `theme/createAppTheme.js` | **CANONICALIZE** |
+| cssVariableBridge | `theme/cssVariableBridge.js` | (none) | `theme/cssVariableBridge.js` | **CANONICALIZE** |
+| ThemeProvider | `theme/ThemeProvider.js` | (none) | `theme/ThemeProvider.js` | **CANONICALIZE** |
+| themeRegistry | `theme/themeRegistry.js` | (none) | `theme/themeRegistry.js` | **CANONICALIZE** |
+| ThemeSwitcher | `theme/ThemeSwitcher.js` | (none) | `theme/ThemeSwitcher.js` | **CANONICALIZE** |
+| themes/dark, atlassian, pinterest | `theme/themes/*.js` | (none) | (none in `themes/`) | **PROMOTE** all three into AF. RE adopts whichever matches its product. |
+
+### 3.7 Python side
+
+| File | Decision |
+|------|----------|
+| `widget_protocol.py` | **CANONICAL** (add new constants for newly-promoted widget types: `WIDGET_APPROVAL`, `WIDGET_CHOICE`, `WIDGET_GROUPED`, `WIDGET_DEFAULT`, `WIDGET_MULTI_INPUT`). |
+| `input_modes.py` | **CANONICAL** — keep as is. |
+| `interactive_base.py` and concrete subclasses | **UNCHANGED**. |
+| `dash_interactive/` | **UNCHANGED** (Python-only UI; can later adopt the same widget catalog terminology). |
+
+---
+
+## 4. Phased Migration Plan
+
+The plan is **five phases**, each independently shippable and reversible.
+Total estimated effort: ~3–4 weeks of focused work (1 engineer) for
+Phases 1–3; Phase 4 depends on RankEvolve coordination; Phase 5 is
+ongoing process work.
+
+### Phase 1 — Inventory & Freeze (target: 2 days)
+
+**Goal:** Establish the baseline; no behavior changes.
+
+**Steps:**
+
+1.1 Land this plan document at
+`AgentFoundation/_docs/_plan/ui_components_formalization/PLAN.md`.
+
+1.2 Create three companion artifacts in the same directory:
+- `INVENTORY.md` — full file-by-file inventory (auto-generated by
+  `scripts/audit_ui.py`, optional).
+- `DECISIONS.md` — rolling log of decisions taken during execution.
+- `MIGRATION_CHECKLIST.md` — checkboxes per file for ops tracking.
+
+1.3 Add a **freeze tag** to each codebase:
+`git tag ui-formalization-baseline-2026-05-23` in each repo. This
+gives a rollback point.
+
+1.4 Add a **CODEOWNERS rule** in AgentFoundation for
+`src/agent_foundation/ui/widget_protocol.py` and
+`src/agent_foundation/ui/input_modes.py` so changes get reviewed.
+
+1.5 Delete the legacy `webui/src/` tree in AgentFoundation (dead
+duplicate of `webui/react/src/`). This is the only **code change**
+in Phase 1; verify with `git grep` that nothing imports from it.
+
+1.6 Update `webui/react/src/components/widgets/index.js` to also
+re-export `MultiInputWidget` (currently missing from barrel).
+
+**Exit criteria:** Plan checked in; legacy `webui/src/` removed; CI
+green; baseline tags in place.
+
+### Phase 2 — Promote Pure Primitives (target: 1 week)
+
+**Goal:** Create the publishable library *skeleton* with everything
+that has **zero divergence risk** today (the pure UI primitives).
+
+**Steps:**
+
+2.1 Create the new `widgets/` workspace alongside `webui/`:
+
+```
+ui/widgets/
+├── package.json          # name: "@agent-foundation/ui-react"
+│                         # peerDeps: react>=18, @mui/material>=5
+├── tsconfig.json         # optional — JSDoc-only is fine initially
+├── src/
+│   ├── index.js          # public barrel
+│   ├── protocol/
+│   ├── inputs/
+│   ├── common/
+│   ├── chat/
+│   ├── layout/
+│   ├── progress/
+│   ├── graph/
+│   ├── theme/
+│   └── hooks/
+├── tests/
+└── stories/              # Storybook configuration
+```
+
+2.2 Move the following files from
+`webui/react/src/components/common/` → `widgets/src/common/`
+unchanged, then re-export from the old path so existing
+imports keep working:
+- `EmptyState.js`, `LoadingIndicator.js`, `MarkdownRenderer.js`,
+  `ClickToEditMarkdown.js`, `PersonChip.js`, `ProgressBar.js`,
+  `QuickLinkButton.js`, `SectionCard.js`, `StatusBadge.js`,
+  `PlanModeSelector.js`, `WelcomeScreen.js`.
+
+2.3 Move the theme module from `webui/react/src/theme/` →
+`widgets/src/theme/`. Add the three theme JS files from
+OpenStartup (`dark.js`, `atlassian.js`, `pinterest.js`) into
+`widgets/src/theme/themes/`.
+
+2.4 Move the following hooks from `webui/react/src/hooks/` →
+`widgets/src/hooks/`: `useFileViewer`, `useContextMenu`,
+`useInputFields`, `useSectionVisibility`, `useProgressHeader`,
+`useChat`, `useAgentWebSocket`.
+
+2.5 Add OpenStartup's `useApiData` and `useServerStatus` to
+`widgets/src/hooks/`.
+
+2.6 Write a `widgets/src/index.js` barrel that re-exports
+everything in a stable public surface; document it in
+`widgets/README.md`.
+
+2.7 Wire `webui/react/package.json` to depend on
+`@agent-foundation/ui-react` via `link:./widgets`. Replace the
+internal `components/common/*` files with re-exports from the
+library so `import X from 'components/common/X'` still works.
+
+2.8 Snapshot-test every promoted component (Vitest + RTL).
+
+**Exit criteria:** `widgets/` package builds; `webui/react/` still
+runs unchanged; snapshot tests pass; no public API regressions.
+
+### Phase 3 — Canonicalize the Widget Protocol (target: 1 week)
+
+**Goal:** Single source of truth for the widget set described in
+`widget_protocol.py`.
+
+**Steps:**
+
+3.1 Add new widget-type constants to `widget_protocol.py`:
+`WIDGET_APPROVAL = "approval"`, `WIDGET_CHOICE = "card_choice"`,
+`WIDGET_GROUPED = "grouped"`, `WIDGET_DEFAULT = "default"`,
+`WIDGET_MULTI_INPUT = "multi_input"`. Add a top-level
+`WIDGET_TYPES` tuple for iteration.
+
+3.2 Write `scripts/sync_widget_types.py` that reads the constants
+from `widget_protocol.py` and re-writes
+`widgets/src/protocol/widgetTypes.js`. Wire it into a pre-commit
+hook **and** a CI check.
+
+3.3 For each canonical widget, choose the source of truth and merge:
+
+| Widget | Source of truth | Merge from |
+|--------|-----------------|------------|
+| `TextInputWidget` | AF | OS: `view` / `view_type` callback, optional `note_variable` |
+| `SingleChoiceWidget` | AF | OS: rich-vs-simple selector split |
+| `MultipleChoiceWidget` | AF | OS: `show_select_all` / `select_all_text` (already in AF) |
+| `ConfirmationWidget` | AF | OS: "additional instructions" textarea; preserve `metadata.view`/`metadata.view_type` |
+| `DropdownWidget` | AF | (no change) |
+| `ToggleWidget` | AF | (no change) |
+| `ToolArgumentFormWidget` | AF | (no change) |
+| `MultiInputWidget` | AF + RE merge | absorb OS's CompoundWidget semantics |
+| `GroupedWidget` | RE | strip RE-specific group-resolve callbacks |
+| `ApprovalWidget` | OS | unchanged |
+| `ChoiceWidget` (card) | OS | rename type → `'card_choice'` |
+| `DefaultWidget` | AF | (no change) |
+
+3.4 Migrate widgets into `widgets/src/inputs/` and update the
+`WidgetRegistry.js` (in `widgets/src/protocol/`).
+
+3.5 Add `ChatWidgetRenderer.js` (from OS, refactored) and
+`ConversationToolWidget.js` (from OS, refactored) into
+`widgets/src/protocol/`. Make `ConversationToolWidget` purely
+data-driven — input_mode protocol logic only, **no** OpenTEAM
+parsing.
+
+3.6 Unify all widgets to the **Contract 2** prop shape
+(`{ widget, onSubmit, onCancel?, onView?, onViewFolder?, disabled? }`).
+Provide compatibility adapters in `webui/react/src/components/widgets/`
+that translate the old `{ config, data, pendingInput }` props to the
+new shape, with deprecation warnings, so we don't have to migrate
+all callers at once.
+
+3.7 Add property tests:
+- Round-trip: `WidgetMessage.to_dict() ↔ from_dict()` in Python.
+- Snapshot tests for each widget against canned `WidgetMessage`s.
+- A "registry completeness" test: every constant in
+  `widget_protocol.py` must have a registered React component.
+
+**Exit criteria:** `widget_protocol.py` has all canonical types;
+`widgets/src/inputs/` has one impl per type; registry test green;
+snapshot tests pass; `webui/react/` and `webui/backend/` still run
+against the demo backend.
+
+### Phase 4 — Migrate Consumers (target: 1–2 weeks, dependent)
+
+**Goal:** Switch OpenStartup and RankEvolve to consume the library;
+delete duplicates.
+
+**Steps for OpenStartup:**
+
+4a.1 Add `@agent-foundation/ui-react` as a dependency in
+`openteam/ui/package.json` (workspace link if monorepo-able;
+otherwise the published tarball).
+
+4a.2 Replace `openteam/ui/src/shared/index.js` with a thin
+re-export from the library:
+```js
+export {
+  EmptyState, LoadingIndicator, PersonChip, ProgressBar,
+  QuickLinkButton, SectionCard, StatusBadge,
+} from '@agent-foundation/ui-react';
+export { default as PendingReasonPopover } from './PendingReasonPopover';
+```
+4a.3 Delete the duplicated files in `openteam/ui/src/shared/`
+(keep `PendingReasonPopover` locally for now, then promote it in
+4a.7 once API is stable).
+
+4a.4 Replace `openteam/ui/src/components/chat-widgets/TextInputWidget`,
+`SingleChoiceWidget`, `MultipleChoiceWidget`, `ConfirmationWidget`,
+`ApprovalWidget`, `ChoiceWidget`, `ChatWidgetRenderer`,
+`ConversationToolWidget`, `WidgetRegistry` with re-exports from
+the library. Keep app-specific widgets (`ProjectSummaryWidget`,
+`SprintProgressWidget`, `TaskAssignmentWidget`, `TaskListWidget`,
+`WorkloadChartWidget`) in place but **register them via the
+library's `registerWidget()`** API.
+
+4a.5 Replace `openteam/ui/src/theme/` with re-exports from
+`@agent-foundation/ui-react/theme` (theme definitions remain in
+the library; OpenStartup can still add an OpenTEAM-flavoured theme
+locally if needed).
+
+4a.6 Replace `chat/MarkdownRenderer.js`, `chat/StreamingMessage.js`,
+`chat/Breadcrumb.js`, `chat/CommandAutocomplete.js`,
+`chat/PromptViewerDrawer.js`, `chat/ThinkingFold.js`,
+`chat/AgentMessageBubble.js` with library imports. Keep
+`SessionContextBar`, `TaskCard`, `TaskPanel` local (they reference
+OpenTEAM domain).
+
+4a.7 Promote `PendingReasonPopover` and `FolderTree` into the
+library after one release of "settling" time, once the OpenStartup
+team is happy with the props surface.
+
+4a.8 Snapshot diff: run the OpenStartup demo and capture screenshots
+of every view; compare pixel-by-pixel to the pre-migration baseline.
+Any unintended visual diff blocks the merge.
+
+**Steps for RankEvolve:**
+
+4b.1 Add `@agent-foundation/ui-react` as a published-npm dependency
+(RE cannot use a workspace link cleanly because it lives in a
+separate package tree).
+
+4b.2 Replace `rankevolve/.../widgets/{TextInput, SingleChoice,
+MultipleChoice, Confirmation, Dropdown, Toggle, ToolArgumentForm,
+MultiInput, Default, WidgetRegistry}.js` with re-exports from the
+library. Keep `ProposalSelectionWidget` and `GroupedWidget` local
+until Phase 3.7 promotes the generic GroupedWidget; then re-export.
+
+4b.3 Replace `rankevolve/.../common/{ClickToEditMarkdown,
+LoadingIndicator, MarkdownRenderer, PlanModeSelector,
+WelcomeScreen, SplitActionButton}.js` with library re-exports.
+
+4b.4 Replace `rankevolve/.../{chat, progress, queries, messages,
+actions, layout}/*` shared files with library re-exports where the
+classification matrix marks them CANONICALIZE.
+
+4b.5 Hooks: replace `useChat`, `useAgentChat`, `useAgentWebSocket`,
+`useContextMenu`, `useFileViewer`, `useInputFields`,
+`useProgressHeader`, `useSectionVisibility` with library imports.
+
+4b.6 Snapshot diff against pre-migration baseline.
+
+**Steps for AgentFoundation/webui (the demo app):**
+
+4c.1 Refactor `webui/react/src/components/widgets/`,
+`components/common/`, etc. to be **only** re-exports / extension
+points from `widgets/src/...`. Anything that doesn't fit the
+library stays as app code in `webui/`.
+
+4c.2 Update `webui/react/package.json` so the demo app depends on
+the workspace `widgets/` package.
+
+4c.3 Verify the demo Flask backend (`webui/backend/main.py`) still
+serves the demo end-to-end.
+
+**Exit criteria:** All three apps build and run; no duplicate file
+remains in any consumer for the components marked CANONICALIZE or
+PROMOTE; snapshot/screenshot diffs are zero or explicitly approved.
+
+### Phase 5 — Governance & Anti-Drift (ongoing)
+
+**Goal:** Lock in the structure so divergence cannot silently return.
+
+**Steps:**
+
+5.1 Add **CI guardrails** in AgentFoundation:
+- `scripts/check_no_duplicate_widgets.py` walks the workspace and
+  fails the build if any file in `widgets/src/{inputs,common}/`
+  has a same-named twin anywhere under
+  `webui/react/src/components/` that is not a one-line re-export.
+- `scripts/sync_widget_types.py --check` runs as a CI step and
+  fails if `widgetTypes.js` is stale.
+- Storybook visual snapshot test as a CI step.
+
+5.2 Add the same `check_no_duplicate_widgets.py` script to
+OpenStartup's and RankEvolve's CI (path-aware).
+
+5.3 Establish a **contribution guide** at
+`widgets/CONTRIBUTING.md`:
+- Every new widget MUST be added via the registry pattern.
+- Every new widget MUST conform to Contract 2 prop shape.
+- Every new widget MUST have a Storybook story and a snapshot test.
+- Domain widgets stay in apps and register themselves via
+  `registerWidget('namespace.type', Component)`.
+
+5.4 Versioning: tag releases of
+`@agent-foundation/ui-react` semver; document breaking-change
+policy. The first stable release is `0.1.0` (pre-1.0 to signal we
+will iterate).
+
+5.5 Quarterly **drift audit**: run `diff -rq` between the
+library and each consumer's local UI tree; investigate any
+unexpected matches.
+
+5.6 Migrate `dash_interactive/` Python widgets to also reference
+the same `widget_protocol.WIDGET_TYPES` (consistency across UI
+surfaces — optional, deferred to a separate plan).
+
+**Exit criteria:** All CI guardrails green; CONTRIBUTING.md
+published; first npm release cut.
+
+---
+
+## 5. Risks, Constraints & Mitigations
+
+### 5.1 Risks
+
+| # | Risk | Likelihood | Impact | Mitigation |
+|---|------|------------|--------|------------|
+| R1 | Visual regressions in OpenStartup after migration (e.g., MUI 7 vs MUI 5 mismatch). OpenStartup pins `@mui/material ^7.3.9`; RankEvolve uses earlier MUI; AF's library will set the floor. | MEDIUM | MEDIUM | Set MUI as a **peerDependency** (`>=5 <8`) in the library; gate apps on Storybook snapshot diff. |
+| R2 | Hidden coupling: a "generic" component actually depends on an app-shaped object (e.g., `StatusBadge` mapping `'in-progress'` → color where each app has different statuses). | HIGH | MEDIUM | Audit during Phase 3.3; expose palettes & status maps as props. Provide `defaultStatusPalette` in library but require apps to pass their own. |
+| R3 | RankEvolve is in a separate package tree (`atlassian-packages/rankevolve`) and may have a slower release cadence than AgentFoundation, leading to stale dependency versions. | HIGH | MEDIUM | Publish stable releases; pin RE to a specific semver; allow RE to lag while AF iterates. |
+| R4 | Python/JS widget-type drift returns (the original sin). | MEDIUM | HIGH | The `scripts/sync_widget_types.py` codegen + CI check from Phase 5.1 is the primary defense. Make the test fail loudly. |
+| R5 | The `WidgetMessage` shape unification breaks existing call sites that pass `{ config, data, pendingInput }` to widgets. | HIGH | MEDIUM | Phase 3.6 compatibility adapters; deprecation warnings; remove adapters in `0.2.0`. |
+| R6 | "Big-bang" migrations cause merge conflicts in active development. | MEDIUM | MEDIUM | Each step in Phase 4 is a small PR per directory; can stop after any step and still have a working system. |
+| R7 | OpenStartup's `theme.custom.surfaces` and `theme.custom.categorical` namespaces are referenced by inline `sx={{ ... }}` blocks throughout the codebase; moving themes to AF mid-flight could break these references. | MEDIUM | LOW | Keep namespace identical; theme objects continue to expose `theme.custom`. Verify by greping for `theme.custom.` after move. |
+| R8 | Streaming and WebSocket hooks (`useAgentChat`, `useAgentWebSocket`) carry RankEvolve-specific message schema; canonicalizing them risks breaking RE message handling. | MEDIUM | HIGH | In Phase 3, introduce a `messageAdapter` prop on the hooks; library ships a default adapter that matches `widget_protocol`; RE keeps its custom adapter. |
+| R9 | OpenStartup uses React 19; RE / AF webui use React 18. | LOW | MEDIUM | Set library peerDep to `react>=18`; verify React 19 compatibility in CI. |
+| R10 | Library publishing infrastructure does not yet exist in AgentFoundation. | HIGH | MEDIUM | Phase 2 includes setting up `package.json`; Phase 5 includes publishing pipeline. Until npm publishing is available, use tarball / `link:` consumption. |
+| R11 | The `ChatWidgetRenderer` and `ConversationToolWidget` in OpenStartup contain OpenTEAM-specific parsing (e.g., ACLI noise stripping, `<Response>` tag handling) that bleeds into the generic dispatcher. | HIGH | MEDIUM | Phase 3.5 explicitly extracts the parsing into a `parser` prop; default is identity. |
+| R12 | AF's `webui/react/src/components/` is currently a fork of an older RE state. Several "AF" canonicalizations may actually regress vs. newer RE versions. | HIGH | LOW | When in doubt, prefer RE's version (since it is the most actively-maintained). Document each choice in `DECISIONS.md`. |
+
+### 5.2 Constraints
+
+- **C1 — No behavior changes in Phase 1.** Plan & cleanup only.
+- **C2 — Every phase must leave each app shippable.** No "all or nothing" merges.
+- **C3 — Python `widget_protocol.py` is the contract.** Any new widget type MUST be added there first.
+- **C4 — MUI is the de facto UI kit.** No introduction of new design systems (Chakra, AntD, etc.) without a separate RFC.
+- **C5 — Avoid TypeScript-only sources for now.** The three codebases are all JS+JSDoc; library should match to keep import friction zero. TS adoption is a separate plan.
+- **C6 — No hidden global state.** Library components must be pure (props in, callbacks out). Session/Workspace contexts stay in apps.
+
+### 5.3 Out of Scope (explicitly)
+
+- Replacing MUI with a different design system.
+- Migrating OpenStartup to React 18 or RE to React 19.
+- Redesigning `widget_protocol.py` (additive changes only).
+- The `dash_interactive/` Python UI (cross-references the same constants in 5.6; no React changes there).
+- Domain widgets (`ProjectSummaryWidget`, `ProposalSelectionWidget`, etc.).
+- The Python `interactive_base.py` hierarchy.
+- Backend route consolidation between `webui/backend/`, `openteam/server/`, and `rankevolve/.../backend/`.
+
+---
+
+## 6. Open Questions (need answers before Phase 2)
+
+1. **Q1 — Workspace tooling.** Should the AgentFoundation repo adopt
+   `pnpm workspaces` / `yarn berry workspaces` / `npm workspaces` for
+   hosting `widgets/` alongside `webui/`? Recommendation: `pnpm` for
+   speed and strict-deps; alternative: keep using `npm` as today and
+   use `file:./widgets`.
+2. **Q2 — Publishing target.** Internal Atlassian Artifactory, public
+   npm, or a private GitHub Packages registry? Affects RankEvolve
+   consumption story.
+3. **Q3 — TypeScript adoption.** Stay JS+JSDoc for the library (lowest
+   migration friction) or move to TS (better contracts, more work)?
+   Recommendation: ship JS+JSDoc in 0.1.0; revisit TS at 0.2.0.
+4. **Q4 — MUI version floor.** Pin `^5` for max compatibility, or
+   bump to `^7` to match OpenStartup? Recommendation: peerDep
+   `>=5 <8` and test on both.
+5. **Q5 — Storybook hosting.** Where do we host the Storybook for
+   visual docs/snapshot testing? Recommendation: GitHub Pages from
+   AgentFoundation repo.
+6. **Q6 — Dependency on RankEvolve releases.** RE is an Atlassian
+   package; can we coordinate a release window for Phase 4b, or do
+   we expect a 1–2 sprint lag?
+7. **Q7 — Does AgentFoundation already have an npm publishing
+   pipeline?** If not, Phase 5 must set one up.
+8. **Q8 — Naming.** `@agent-foundation/ui-react` vs
+   `@agent-foundation/ui` vs `@atlassian/agent-foundation-ui`?
+9. **Q9 — License header.** AF widgets carry a Meta copyright
+   header (likely vestigial from a template); should we standardize
+   on a single header?
+10. **Q10 — How aggressively do we deprecate** the existing
+    `webui/react/src/components/widgets/` paths once `widgets/`
+    becomes the library? 1 release? 2? Tied to Phase 3.6
+    compatibility adapter lifetime.
+
+---
+
+## 7. Deliverables & Acceptance Criteria
+
+### 7.1 Documentation deliverables
+
+- [ ] `_docs/_plan/ui_components_formalization/PLAN.md` (this file)
+- [ ] `_docs/_plan/ui_components_formalization/INVENTORY.md`
+- [ ] `_docs/_plan/ui_components_formalization/DECISIONS.md`
+- [ ] `_docs/_plan/ui_components_formalization/MIGRATION_CHECKLIST.md`
+- [ ] `widgets/README.md`
+- [ ] `widgets/CONTRIBUTING.md`
+
+### 7.2 Code deliverables
+
+- [ ] `widgets/` package skeleton with `package.json`, `src/`,
+      `tests/`, `stories/`.
+- [ ] All PROMOTE / CANONICALIZE components migrated.
+- [ ] `widget_protocol.py` extended with new constants and a
+      `WIDGET_TYPES` tuple.
+- [ ] `scripts/sync_widget_types.py` (Py → JS codegen).
+- [ ] `scripts/check_no_duplicate_widgets.py` (drift detector).
+- [ ] OpenStartup `shared/` reduced to thin re-exports + 1–2
+      app-specific files.
+- [ ] RankEvolve `webui/react/src/components/widgets/` reduced to
+      RE-specific widgets + re-exports.
+- [ ] AgentFoundation `webui/react/src/components/widgets/` reduced
+      to re-exports only.
+- [ ] Snapshot/Storybook tests for every promoted component.
+
+### 7.3 Acceptance criteria (overall)
+
+1. Each of the three apps builds and runs visually unchanged.
+2. `grep -rE "from '.*chat-widgets/(TextInput|SingleChoice|MultipleChoice|Confirmation|Approval|Choice)Widget'"` in OpenStartup returns **zero matches** (other than the re-export shim).
+3. `grep -rE "from '.*shared/(EmptyState|LoadingIndicator|PersonChip|ProgressBar|QuickLinkButton|SectionCard|StatusBadge)'"` in OpenStartup returns **zero matches** (other than the re-export shim).
+4. `diff -rq widgets/src/inputs/ <consumer>/widgets/` shows that no widget file exists in any consumer that isn't a one-line re-export.
+5. `python scripts/check_widget_protocol_consistency.py` passes (Python ↔ JS type table identical).
+6. CI is green in all three repos.
+
+---
+
+## 8. Appendices
+
+### Appendix A — Full file-by-file extraction map
+
+For Phase 2 / 3 execution, the canonical extraction list is:
+
+**Pure primitives (PROMOTE, 0 risk):**
+- `webui/react/src/components/common/EmptyState.js`
+- `webui/react/src/components/common/LoadingIndicator.js`
+- `webui/react/src/components/common/MarkdownRenderer.js`
+- `webui/react/src/components/common/ClickToEditMarkdown.js`
+- `webui/react/src/components/common/PersonChip.js`
+- `webui/react/src/components/common/ProgressBar.js`
+- `webui/react/src/components/common/QuickLinkButton.js`
+- `webui/react/src/components/common/SectionCard.js`
+- `webui/react/src/components/common/StatusBadge.js`
+- `webui/react/src/components/common/PlanModeSelector.js`
+- `webui/react/src/components/common/WelcomeScreen.js`
+- (new) `widgets/src/common/SplitActionButton.js` (from RE)
+- (new) `widgets/src/common/Breadcrumb.js` (from OS)
+- (new) `widgets/src/common/PendingReasonPopover.js` (from OS, generalized)
+
+**Theme (PROMOTE):**
+- `webui/react/src/theme/createAppTheme.js`
+- `webui/react/src/theme/cssVariableBridge.js`
+- `webui/react/src/theme/ThemeProvider.js`
+- `webui/react/src/theme/themeRegistry.js`
+- `webui/react/src/theme/ThemeSwitcher.js`
+- (new) `widgets/src/theme/themes/dark.js` (from OS)
+- (new) `widgets/src/theme/themes/atlassian.js` (from OS)
+- (new) `widgets/src/theme/themes/pinterest.js` (from OS)
+
+**Input widgets (CANONICALIZE / PROMOTE):**
+- `webui/react/src/components/widgets/WidgetRegistry.js`
+- `webui/react/src/components/widgets/TextInputWidget.js`
+- `webui/react/src/components/widgets/SingleChoiceWidget.js`
+- `webui/react/src/components/widgets/MultipleChoiceWidget.js`
+- `webui/react/src/components/widgets/ConfirmationWidget.js`
+- `webui/react/src/components/widgets/DropdownWidget.js`
+- `webui/react/src/components/widgets/ToggleWidget.js`
+- `webui/react/src/components/widgets/ToolArgumentFormWidget.js`
+- `webui/react/src/components/widgets/MultiInputWidget.js`
+- `webui/react/src/components/widgets/DefaultWidget.js`
+- (new) `widgets/src/inputs/GroupedWidget.js` (from RE)
+- (new) `widgets/src/inputs/ApprovalWidget.js` (from OS)
+- (new) `widgets/src/inputs/ChoiceWidget.js` (from OS, type `card_choice`)
+- (new) `widgets/src/protocol/ChatWidgetRenderer.js` (from OS, refactored)
+- (new) `widgets/src/protocol/ConversationToolWidget.js` (from OS, refactored)
+
+**Chat / streaming (CANONICALIZE / PROMOTE):**
+- `webui/react/src/components/chat/ChatInput.js`
+- `webui/react/src/components/chat/ChatMessage.js`
+- `webui/react/src/components/agent/StreamingMessage.js`
+- `webui/react/src/components/agent/CommandAutocomplete.js`
+- (new) `widgets/src/chat/ThinkingFold.js` (from OS)
+- (new) `widgets/src/chat/PromptViewerDrawer.js` (from OS)
+- (new) `widgets/src/chat/AgentMessageBubble.js` (from OS)
+
+**Layout (CANONICALIZE / PROMOTE):**
+- `webui/react/src/components/layout/FileViewer.js`
+- `webui/react/src/components/layout/AppHeader.js`
+- (new) `widgets/src/layout/ConnectionStatusBar.js` (from OS, generalized)
+- (new) `widgets/src/layout/FolderTree.js` (from OS)
+
+**Progress / queries / messages / actions (CANONICALIZE):**
+- All files in `webui/react/src/components/{progress,queries,messages,actions}/`
+
+**Hooks (CANONICALIZE / PROMOTE):**
+- `webui/react/src/hooks/useFileViewer.js`
+- `webui/react/src/hooks/useContextMenu.js`
+- `webui/react/src/hooks/useInputFields.js`
+- `webui/react/src/hooks/useSectionVisibility.js`
+- `webui/react/src/hooks/useProgressHeader.js`
+- `webui/react/src/hooks/useChat.js`
+- `webui/react/src/hooks/useAgentChat.js`
+- `webui/react/src/hooks/useAgentWebSocket.js`
+- (new) `widgets/src/hooks/useApiData.js` (from OS)
+- (new) `widgets/src/hooks/useServerStatus.js` (from OS)
+
+### Appendix B — Glossary
+
+- **AF** — AgentFoundation.
+- **OS** — OpenStartup / OpenTEAM.
+- **RE** — RankEvolve.
+- **Widget protocol** — The Python `WidgetMessage` / `WidgetResponse`
+  contract defined in `agent_foundation/ui/widget_protocol.py`.
+- **Input mode** — The narrower `InputModeConfig` defined in
+  `agent_foundation/ui/input_modes.py`, embedded inside a widget
+  message.
+- **Canonical widget** — A widget type listed in `widget_protocol.py`
+  constants; the library must ship a React implementation for each.
+- **Registry** — `WidgetRegistry` map from `widget_type` string →
+  React component; both built-in (library-owned) and extensible
+  (app-owned via `registerWidget()`).
+- **Domain widget** — A widget specific to an app's domain
+  (`ProjectSummaryWidget`, `ProposalSelectionWidget`, etc.); not
+  promoted to the library but registered into the same registry at
+  runtime.
+
+### Appendix C — References (read during plan creation)
+
+- `AgentFoundation/src/agent_foundation/ui/widget_protocol.py`
+- `AgentFoundation/src/agent_foundation/ui/input_modes.py`
+- `AgentFoundation/src/agent_foundation/ui/webui/react/src/components/widgets/WidgetRegistry.js`
+- `AgentFoundation/src/agent_foundation/ui/webui/react/src/components/widgets/index.js`
+- `OpenStartup/src/openteam/ui/src/components/chat-widgets/WidgetRegistry.js`
+- `OpenStartup/src/openteam/ui/src/shared/index.js`
+- `OpenStartup/src/openteam/ui/package.json`
+- `OpenStartup/src/openteam/ui/src/App.js`
+- `OpenStartup/src/openteam/ui/src/theme.js`
+- `rankevolve/src/webui/react/src/components/widgets/*`
+- `rankevolve/src/webui/react/src/components/common/*`
+- `rankevolve/src/webui/react/src/components/agent/*`
+
+### Appendix D — Decision-making rubric for "Promote vs Keep"
+
+A component is a **promotion candidate** if and only if it:
+
+1. Takes only **structural** props (string, number, array, callback),
+   not domain objects (`task`, `employee`, `proposal`).
+2. Has **no imports** from app-specific modules
+   (`shared/`, `contexts/SessionContext`, `hooks/useSessionApi`).
+3. Renders identically across the three codebases (modulo cosmetic
+   theming).
+4. Has, or can have, a self-contained Storybook story.
+5. Maps to a stable concept in the agent-interaction domain (input,
+   choice, confirmation, progress, message, panel, tab).
+
+If any of (1)–(5) is **false**, default to **KEEP-IN-APP**, but
+extract the underlying primitive (e.g., extract `<Card>` from
+`<TaskCard>`).
+
+---
+
+*End of plan.*
+
+
+
+

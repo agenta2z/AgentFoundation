@@ -5,10 +5,8 @@
 
 You want to help carefully and thoroughly decomposing a large or complex task into focused, independent subtasks.
 
-**Original User Request:**
 <OriginalUserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ context.user_request_with_task_preamble }}
 </OriginalUserRequest>
 
 ---
@@ -78,7 +76,7 @@ Before producing your final decomposition, verify it against the four criteria a
 
 In addition to deciding what each subtask covers, you MUST also decide what should be the aggregation task. For example, if it is simply integrating final output artifacts from the workers, or there needs additional work to synthesize the results (e.g. validating workers's deliverables holistically, build on top of all workers' deliverables, etc.).
 
-<Response>
+<ResponseSchema>
 {% if output_path %}
 Your detailed investigation and reasoning is already in the output file above. Below is the structured JSON decomposition with a short `reasoning` summary.
 {% else %}
@@ -110,7 +108,9 @@ Your detailed investigation and reasoning is already in the output file above. B
   "aggregation_guidance": "<the aggregation task — what the aggregator should do with the worker outputs, specific to this decomposition. MUST be present and non-empty.>"
 }
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 

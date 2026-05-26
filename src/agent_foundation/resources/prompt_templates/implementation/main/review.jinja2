@@ -3,10 +3,8 @@
 
 You are tasked with carefully and thoroughly reviewing an implementation made by another agent for the following user request:
 
-**Original User Request:**
 <OriginalUserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ user_request_with_task_preamble }}
 </OriginalUserRequest>
 
 **Implementation Under Review:**
@@ -86,7 +84,7 @@ You approve the implementation only if there are only one or two trivial COSMETI
 
 If the implementation has no meaningful issues, return an empty `issues` array and set `approve: true`.
 
-<Response>
+<ResponseSchema>
 [Your natural language analysis of the implementation]
 ```json
 {
@@ -105,7 +103,9 @@ If the implementation has no meaningful issues, return an empty `issues` array a
   "approve": <true if no CRITICAL/MAJOR issues>
 }
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 
@@ -113,9 +113,12 @@ If the implementation has no meaningful issues, return an empty `issues` array a
 - Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. Read the actual code changes, not just the report.
 - However, stay focused on the implementation and the files it claims to modify. DO NOT explore the entire codebase.
 - Every issue must cite concrete evidence (such as file paths, line numbers, actual behavior) with careful reasoning — DO NOT raise issues based on speculation.
+- {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback_for_review }}
 - Verify if there is any missing implementation or broken code, and flag them.
 - Verify if all required tests and benchmarks have been executed — flag if no actual tests or benchmarks were run, or results appear mocked or fabricated.
 - If files referenced in the implementation report (tests, benchmarks, code changes) are not found in the expected directory, conclude they were never created. Do NOT search the entire repository for them.
+
+{{ notes.local_search_efficiency }}
 
 Now start your review.

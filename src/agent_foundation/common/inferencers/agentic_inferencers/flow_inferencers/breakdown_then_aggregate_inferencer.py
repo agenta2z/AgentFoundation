@@ -19,7 +19,7 @@ from agent_foundation.common.inferencers.inferencer_base import (
 )
 from agent_foundation.common.inferencers.template_defaults import (
     BREAKDOWN_TEMPLATE_DEFAULTS,
-    STRUCTURED_AGGREGATION_DEFAULTS,
+    AGGREGATION_DEFAULTS,
 )
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
     ResultPassDownMode,
@@ -231,15 +231,22 @@ def make_conflict_aware_prompt_builder(
             for i, r in enumerate(worker_results)
         )
 
+        # Inject upstream_artifacts EARLY — before any return path — so the
+        # aggregation preamble template always has worker content available.
+        if bta is not None and getattr(bta, "aggregator_inferencer", None) is not None:
+            agg_inf = bta.aggregator_inferencer
+            if hasattr(agg_inf, "template_extra_feed"):
+                agg_inf.template_extra_feed["upstream_artifacts"] = default_text
+
         if conflict_resolution_mode == "last_writer_wins":
-            return default_text
+            return original_query or ""
 
         if not worker_output_paths or not any(worker_output_paths):
-            return default_text
+            return original_query or ""
 
         first_path = next((p for p in worker_output_paths if p), None)
         if first_path is None:
-            return default_text
+            return original_query or ""
 
         cur = os.path.abspath(first_path)
         while cur and os.path.basename(cur) != "children":
@@ -249,7 +256,7 @@ def make_conflict_aware_prompt_builder(
                 break
             cur = parent
         if cur is None:
-            return default_text
+            return original_query or ""
 
         children_dir = cur
         ws_root = os.path.dirname(children_dir)
@@ -263,8 +270,7 @@ def make_conflict_aware_prompt_builder(
 
         conflicts_grouped = group_conflicts_by_parent(conflicts, depth=2)
 
-        # Option 2: inject structured data into aggregator's template_extra_feed
-        if bta is not None and hasattr(bta, "aggregator_inferencer") and bta.aggregator_inferencer is not None:
+        if bta is not None and getattr(bta, "aggregator_inferencer", None) is not None:
             agg_inf = bta.aggregator_inferencer
             if hasattr(agg_inf, "template_extra_feed"):
                 agg_inf.template_extra_feed.update({
@@ -278,7 +284,7 @@ def make_conflict_aware_prompt_builder(
                     "worker_summaries": worker_summaries,
                 })
 
-        return default_text
+        return original_query or ""
 
     return _builder
 
@@ -354,7 +360,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # aggregation files (plan/.../task_instructions/aggregation.jinja2,
         # implementation/.../task_instructions/aggregation.jinja2) provide
         # the role-correct content for each.
-        "aggregator_inferencer": STRUCTURED_AGGREGATION_DEFAULTS,
+        "aggregator_inferencer": AGGREGATION_DEFAULTS,
     }
 
     # The aggregation stage gets a canonical runtime workspace via the WorkGraph
@@ -570,12 +576,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         if self._workspace is not None:
             self._workspace.ensure_dirs()
 
-        # Auto-default output_path for the pipeline report.
-        # This is the fallback filename used when the aggregator produces no
-        # file outputs (written to outputs/). The default name makes it clear
-        # this is the pipeline's aggregation report, not a final deliverable.
+        # Auto-default output_path: derive from aggregator's output_path
+        # (since the BTA's canonical output IS the aggregator's output,
+        # symlinked via _symlink_child_output). Falls back to generic name
+        # when no aggregator or no output_path is set on it.
         if not self.output_path:
-            self.output_path = "aggregation_report.md"
+            agg_out = getattr(self.aggregator_inferencer, "output_path", None) if self.aggregator_inferencer else None
+            self.output_path = agg_out or "aggregation_report.md"
 
         if (
             self.breakdown_inferencer is not None
@@ -630,6 +637,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self,
         worker_results,
         worker_output_paths=None,
+        worker_deliverable_dirs=None,
     ) -> str:
         """Format worker_results as ``### Result N\\n<output>`` lines, joined
         by blank lines.
@@ -643,12 +651,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         When the aggregator has local file access AND a worker output path is
         available, the result is referenced by path rather than inlined
         (avoids OS ARG_MAX limits when piping large outputs to subprocess).
+
+        When ``worker_deliverable_dirs`` is provided and a worker has a
+        non-empty deliverables folder, both the folder path and the report
+        file are referenced — giving the aggregator a directory to explore
+        AND a summary to read.
         """
         agg_has_local = (
             self.aggregator_inferencer is not None
             and getattr(self.aggregator_inferencer, "has_local_access", False)
         )
         paths = list(worker_output_paths or [])
+        fd_dirs = list(worker_deliverable_dirs or [])
         self.log_info(
             {
                 "bta_name": getattr(self, "name", None),
@@ -656,6 +670,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 "agg_has_local": agg_has_local,
                 "agg_type": type(self.aggregator_inferencer).__name__ if self.aggregator_inferencer else None,
                 "paths": [str(p) if p else None for p in paths],
+                "deliverable_dirs": [str(d) if d else None for d in fd_dirs],
                 "num_results": len(worker_results) if worker_results else 0,
             },
             log_type="AggFormatDecision",
@@ -663,7 +678,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         parts = []
         for idx, res in enumerate(worker_results):
             path = paths[idx] if idx < len(paths) else None
-            if agg_has_local and path:
+            fd_dir = fd_dirs[idx] if idx < len(fd_dirs) else None
+            if agg_has_local and fd_dir:
+                lines = [f"### Result {idx + 1}"]
+                lines.append(f"(See deliverables: `{fd_dir}`)")
+                if path:
+                    lines.append(f"(See file: `{path}`)")
+                parts.append("\n".join(lines))
+            elif agg_has_local and path:
                 parts.append(f"### Result {idx + 1}\n(See file: `{path}`)")
             else:
                 path_ref = f"\n(Full output at: `{path}`)" if path else ""
@@ -674,6 +696,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self,
         worker_results,
         worker_output_paths=None,
+        worker_deliverable_dirs=None,
     ) -> None:
         """Push formatted upstream artifacts (and breakdown-captured
         aggregation_guidance, if any) into the aggregator inferencer's
@@ -705,7 +728,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             target.template_extra_feed = {}
 
         upstream_text = self._format_worker_results_text(
-            worker_results, worker_output_paths
+            worker_results, worker_output_paths,
+            worker_deliverable_dirs=worker_deliverable_dirs,
         )
         target.template_extra_feed["upstream_artifacts"] = upstream_text
         # NOTE: Per-worker output paths are embedded inline within
@@ -746,6 +770,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         self._last_aggregation_guidance = None
 
         response_text = extract_delimited(str(raw_output))
+        if response_text is None:
+            response_text = str(raw_output)
 
         # Try to extract JSON from ```json ... ``` code fence
         json_match = re.search(
@@ -1708,6 +1734,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     resolve_canonical_output_path,
                 )
                 _bta_ws = _bta_self._workspace
+                _captured_deliverable_dirs = []
                 if _bta_ws is not None and worker_results:
                     _captured_paths = []
                     _diag_workers = []
@@ -1715,8 +1742,28 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         child_ws = _bta_ws.child(_bta_self._worker_child_name(idx))
                         _w = _worker_instances[idx]
                         _w_filename = _w.output_path
-                        p = resolve_canonical_output_path(child_ws, filename=_w_filename)
+                        p = resolve_canonical_output_path(
+                            child_ws, filename=_w_filename,
+                            deliverables_fallback="none",
+                        )
                         _captured_paths.append(p)
+                        # Capture deliverables folder for two-reference format.
+                        _fd = getattr(child_ws, "deliverables_dir", None)
+                        if _fd and os.path.isdir(_fd) and os.listdir(_fd):
+                            _captured_deliverable_dirs.append(os.path.abspath(_fd))
+                        else:
+                            _out_dir = getattr(child_ws, "outputs_dir", None)
+                            if _out_dir and os.path.isdir(_out_dir):
+                                from agent_foundation.common.workspace.layout import FINAL_DELIVERABLES_DIR
+                                _out_entries = [e for e in os.listdir(_out_dir)
+                                                if e != FINAL_DELIVERABLES_DIR]
+                                if len(_out_entries) > 1:
+                                    _captured_deliverable_dirs.append(
+                                        os.path.abspath(_out_dir))
+                                else:
+                                    _captured_deliverable_dirs.append(None)
+                            else:
+                                _captured_deliverable_dirs.append(None)
                         _winfo = {
                             "idx": idx,
                             "child_name": _bta_self._worker_child_name(idx),
@@ -1724,7 +1771,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             "worker_output_path": _w_filename,
                             "resolved": str(p) if p else None,
                         }
-                        if p is None:
+                        if p is None and _w_filename is not None and child_ws.root is not None:
                             _out = os.path.join(child_ws.root, "outputs", _w_filename)
                             _winfo["diag_outputs_exists"] = os.path.exists(_out)
                             _winfo["diag_outputs_islink"] = os.path.islink(_out)
@@ -1740,6 +1787,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             "bta_type": type(_bta_self).__name__,
                             "bta_id": getattr(_bta_self, "id", None),
                             "paths": [str(p) if p else None for p in _captured_paths],
+                            "deliverable_dirs": [str(d) if d else None for d in _captured_deliverable_dirs],
                             "workers": _diag_workers,
                         },
                         log_type="AggInputPaths",
@@ -1775,6 +1823,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 if _bta_self.inject_upstream_artifacts_to_aggregator:
                     _bta_self._inject_aggregator_extra_feed(
                         worker_results, _captured_paths,
+                        worker_deliverable_dirs=_captured_deliverable_dirs,
                     )
                     return original_query or ""
 

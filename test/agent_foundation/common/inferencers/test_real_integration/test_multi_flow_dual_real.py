@@ -29,10 +29,6 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
     MultiFlowDualInferencer,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
-    DEFAULT_AGGREGATOR_PROMPT_TEMPLATE,
-)
-
 # Reuse the conftest's CLI-availability skip markers.
 from .conftest import (  # noqa: E402
     DEFAULT_TIMEOUT,

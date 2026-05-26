@@ -1,1 +1,3 @@
+{%- if has_local_access is defined and has_local_access -%}
 If file-reading tools fail with path errors (e.g., "Paths must be within root"), fall back to command-line tools (`cat`, `grep`, `sed`, `ls`).
+{%- endif -%}

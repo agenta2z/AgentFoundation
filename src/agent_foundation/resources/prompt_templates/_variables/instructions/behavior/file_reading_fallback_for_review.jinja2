@@ -1,1 +1,3 @@
+{%- if has_local_access is defined and has_local_access -%}
 {{ file_reading_fallback }} If BOTH fail for a referenced path, raise a MAJOR `verification_gap` issue — do NOT silently skip it.
+{%- endif -%}

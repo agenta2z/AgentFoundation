@@ -970,6 +970,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             cleaned = extract_delimited(analysis_text)
         except Exception:
             cleaned = analysis_text
+        if cleaned is None:
+            cleaned = analysis_text
 
         json_match = re.search(r"```json\s*\n?(.*?)\n?\s*```", cleaned, re.DOTALL)
         if json_match:

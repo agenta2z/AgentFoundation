@@ -253,7 +253,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         # deduplicates by resolved absolute path.
         path_strs = [ap.path for ap in self.effective_allowed_paths if ap and ap.path]
 
-        if not path_strs:
+        if not path_strs and not self.efficiency_level:
             return self.config_override if base else None
 
         if not isinstance(base, dict):
@@ -285,6 +285,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             merged.append(p)
 
         tool_perms["allowedExternalPaths"] = merged
+
+        # Merge efficiency_level into agent config if set
+        if self.efficiency_level:
+            base.setdefault("agent", {})["efficiencyLevel"] = self.efficiency_level
 
         return json.dumps(base)
 

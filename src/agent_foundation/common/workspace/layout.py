@@ -14,6 +14,10 @@ from typing import Any
 RUNTIME_DIR = "_runtime"
 CACHE_DIR: str = os.path.join(RUNTIME_DIR, "inferencer_cache")
 OUTPUTS_DIR = "outputs"
+ARTIFACTS_DIR = "artifacts"
+CHECKPOINTS_DIR = "checkpoints"
+CHILDREN_DIR = "children"
+FINAL_DELIVERABLES_DIR = "final_deliverables"
 RESULTS_DIR = "results"
 LOGS_DIR = "logs"
 ANALYSIS_DIR = "analysis"

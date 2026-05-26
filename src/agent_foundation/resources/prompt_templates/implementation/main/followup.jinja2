@@ -3,10 +3,8 @@
 
 You previously executed/implemented the following user request and received feedback from a reviewing agent.
 
-**Original User Request:**
 <OriginalUserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ context.user_request_with_task_preamble }}
 </OriginalUserRequest>
 
 **Prior Implementation:**
@@ -60,7 +58,6 @@ Check the reviewer's `estimated_fix_impact` for each issue. If full regeneration
 
 - Write your **improved implementation report** to: `{{ output_path }}`. This is a report, not the implementation improvement itself.
 - The report should thoroughly index the implementation improvement: files created/modified, key code changes, testing status, with concise descriptions. Also report any potential concerns.
-- If the implementation report is too large for a single write, split it into smaller chunks and write them incrementally (append). Do NOT alter the content — only split the write operations.
 - If re-running benchmarks, save results to a JSON file alongside `{{ output_path }}` under `benchmarks/round{{ round_index }}/`.
 - If re-running tests with output artifacts, save them alongside `{{ output_path }}` under `tests/round{{ round_index }}/`.
 
@@ -68,7 +65,7 @@ Meanwhile, wrap a structured response in `<Response>` tags.
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your official response. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
 
-<Response>
+<ResponseSchema>
 [Concise summary of what changed and why]
 
 ```json
@@ -84,7 +81,9 @@ Meanwhile, wrap a structured response in `<Response>` tags.
 }
 
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 
@@ -96,10 +95,13 @@ Meanwhile, wrap a structured response in `<Response>` tags.
 - {{ instructions.behavior.file_reading_fallback_for_followup }}
 - YOU MUST run real tests or benchmarking after making changes. Do not claim or mock test or benchmark results without actually executing them.
 - Prefer applying incremental targeted code edits over full code file rewrites when full code regeneration is not necessary.
-- Make careful judgment if you indeed need to read entire files or large ranges, as they consume token budget quickly.
-  * When verifying reviewer claims with reference code lines (e.g., lines 134-146), read only the specific lines around those referenced, and incrementally read more as needed.
+- {{ instructions.behavior.file_reading_efficiency }}
 - After writing your improved implementation report to the output path, you can briefly check the file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * The implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+{{ notes.local_search_efficiency }}
+
+{{ notes.large_file_writing }}
 
 Now start your work counter-reviewing the ReviewerFeedback and refining your implementation as needed.

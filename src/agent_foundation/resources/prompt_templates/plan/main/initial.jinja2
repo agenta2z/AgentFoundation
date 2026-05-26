@@ -5,13 +5,12 @@
 
 You are tasked with creating artifacts (e.g., plan, document, design, etc.) based on the following user request:
 
-**Original User Request:**
 <UserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ context.user_request_with_task_preamble }}
 </UserRequest>
 
 ---
+
 {% if task_instructions %}
 ## Your Task
 {{ task_instructions }}
@@ -33,7 +32,6 @@ However,
 
 - Write your **complete artifact** following any user-requested format to: `{{ output_path }}`
 - The artifact should be human readable and structured with details, that another human or agent could follow or act on later.
-- When writing a large artifact, YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
 
 ## Response Format
 
@@ -41,12 +39,14 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
 
-<Response>
+<ResponseSchema>
 [Your concise natural language summary of what you have investigated and produced. Do NOT repeat the full artifact here — it is already in the file above.]
 {% if task_response_format %}
 {{ task_response_format }}
 {% endif %}
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 
@@ -56,6 +56,7 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * If the task involves user-visible experience (e.g. CLI, UI, streaming output), trace the end-to-end user experience and verify the planned changes will not break or regress the user experience.
   * However, YOU MUST also prevent unnecessary exploration — focus on the materials that are actually relevant.
   * Balance exploration vs. efficiency. Prioritize thoroughness over speed if the task scope genuinely requires deeper investigation, but avoid aimless exploration.
+- {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback }}
 {%- if enable_deep_mode %}
 - {{ instructions.modes.deep_mode }}
@@ -65,5 +66,9 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
 {%- endif %}
 - You can briefly verify the output artifacts to ensure they are complete and no corruption (e.g. reading the ending lines), but DO NOT call any tools (e.g. validate_changes).
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+{{ notes.local_search_efficiency }}
+
+{{ notes.large_file_writing }}
 
 Now start your work.

@@ -3,10 +3,8 @@
 
 You previously generated artifacts (e.g., plan, document, design, etc.) for the following user request and received feedback from a reviewing agent.
 
-**Original User Request:**
 <OriginalUserRequest>
-{{ task_preamble }}
-{{ input }}
+{{ context.user_request_with_task_preamble }}
 </OriginalUserRequest>
 
 **Prior Version Artifact:**
@@ -61,12 +59,11 @@ Check the reviewer's `estimated_fix_impact` for each issue. When fixes are mostl
 
 Write your **improved artifact** in markdown format to: `{{ output_path }}`
 - The artifact should be human readable and structured with details, that another human or agent could follow or act on later.
-- When writing a large artifact, YOU MUST split it into smaller chunks and write them incrementally (append) to avoid single-write failure when possible. Do NOT alter the content — only split the write operations.
 
 Wrap a structured response in `<Response>` tags:
 - **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be passed to downstream, which may cause failures.
 
-<Response>
+<ResponseSchema>
 [Concise summary of what changed and why]
 
 ```json
@@ -82,13 +79,16 @@ Wrap a structured response in `<Response>` tags:
 }
 
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 
 ## NOTES (on agent behavior):
 - Deep Investigation Requirement: You MUST conduct a careful, deep, and accurate investigation of each feedback item with critical thinking. Validate claims by checking actual sources — do not assume.
 - Every accept/reject must cite concrete evidence with careful reasoning — DO NOT speculate or assume.
+- {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback_for_followup }}
 - Prefer copying the prior version artifact and making incremental targeted edits over full regeneration when full regeneration is not necessary. If fixes are mostly localized—small edits within 1–2 sections, or limited cross-section changes, YOU MUST copy the prior version artifact and apply targeted edits. The coping-prior-version-then-edit approach avoids regeneration of unchanged contents to save time, an prevents content drifting or regression.
 {%- if enable_elegant_mode %}
@@ -96,5 +96,9 @@ Wrap a structured response in `<Response>` tags:
 {%- endif %}
 - You can briefly check the refined artifact file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
+
+{{ notes.local_search_efficiency }}
+
+{{ notes.large_file_writing }}
 
 Now start your work counter-reviewing the ReviewerFeedback and refining your artifact as needed.

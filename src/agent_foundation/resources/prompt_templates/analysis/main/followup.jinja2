@@ -64,7 +64,7 @@ Wrap a structured response in `<Response>` tags:
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary.
 
-<Response>
+<ResponseSchema>
 [Concise summary of what changed and why]
 
 ```json
@@ -79,7 +79,9 @@ Wrap a structured response in `<Response>` tags:
   "summary": "<brief tally: N accepted, M rejected, with one-line reasoning>"
 }
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 Now start your work counter-reviewing the ReviewerFeedback and refining your analysis as needed.
 

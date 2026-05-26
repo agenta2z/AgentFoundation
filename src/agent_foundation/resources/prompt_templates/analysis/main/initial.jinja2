@@ -59,7 +59,7 @@ In addition to above output, YOU MUST generate a **concise decision summary** (N
 
 **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your decision. If you omit them, the system defaults to `should_continue: false` and may silently skip needed iterations.
 
-<Response>
+<ResponseSchema>
 [Your concise natural language summary of key analysis findings and whether another iteration is warranted. Do NOT repeat the full analysis here — it is already in the file above.]
 ```json
 {
@@ -68,7 +68,9 @@ In addition to above output, YOU MUST generate a **concise decision summary** (N
   "next_iteration_request": "if should_continue=true: what the next iteration should focus on | if false: empty string"
 }
 ```
-</Response>
+</ResponseSchema>
+
+(Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
 ---
 

@@ -332,5 +332,51 @@ class TestFollowupTemplateDefaultsConstant(unittest.TestCase):
         self.assertEqual(node["template_key"], "explicit")
 
 
+class TestWorkspaceFeedVariables(unittest.TestCase):
+    """workspace_root and workspace_outputs are injected into feed when
+    _workspace is set and inferencer has local file access."""
+
+    def _make_leaf(self, has_local_access=True, workspace=None):
+        leaf = _StubLeaf(
+            template_manager=_RecordingTemplateManager(),
+            template_root_space="implementation",
+            template_key="initial",
+        )
+        if has_local_access:
+            leaf.has_local_access = True
+        if workspace is not None:
+            leaf._workspace = workspace
+        return leaf
+
+    def _make_workspace(self, root="/tmp/test_ws"):
+        ws = MagicMock()
+        ws.root = root
+        return ws
+
+    def test_workspace_vars_present_when_workspace_set(self):
+        leaf = self._make_leaf(workspace=self._make_workspace("/tmp/test_ws"))
+        feed = leaf._build_template_feed("input")
+        self.assertEqual(feed["workspace_root"], "/tmp/test_ws")
+        self.assertEqual(feed["workspace_outputs"], "/tmp/test_ws/outputs")
+
+    def test_workspace_vars_absent_when_no_workspace(self):
+        leaf = self._make_leaf(workspace=None)
+        feed = leaf._build_template_feed("input")
+        self.assertNotIn("workspace_root", feed)
+        self.assertNotIn("workspace_outputs", feed)
+
+    def test_workspace_vars_absent_when_no_local_access(self):
+        leaf = self._make_leaf(has_local_access=False, workspace=self._make_workspace())
+        feed = leaf._build_template_feed("input")
+        self.assertNotIn("workspace_root", feed)
+        self.assertNotIn("workspace_outputs", feed)
+
+    def test_workspace_outputs_is_always_outputs_subdir(self):
+        leaf = self._make_leaf(workspace=self._make_workspace("/data/runs/run_001"))
+        feed = leaf._build_template_feed("input")
+        self.assertTrue(feed["workspace_outputs"].endswith("/outputs"))
+        self.assertEqual(feed["workspace_outputs"], "/data/runs/run_001/outputs")
+
+
 if __name__ == "__main__":
     unittest.main()

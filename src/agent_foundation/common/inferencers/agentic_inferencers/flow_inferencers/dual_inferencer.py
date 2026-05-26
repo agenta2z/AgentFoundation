@@ -25,6 +25,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     ConsensusIterationRecord,
     DualInferencerResponse,
+    InferencerExecutionError,
     InferencerResponse,
     ReflectionStyles,
     ResponseSelectors,
@@ -1069,6 +1070,16 @@ class DualInferencer(LinearWorkflowInferencer):
             parts_subfolder=_sf,
         )
         base_output_str = self.response_parser(_raw_base)
+        if base_output_str is None:
+            raise InferencerExecutionError(
+                tool=f"<{self.phase or 'DualInferencer'}.propose>",
+                error=(
+                    "response_parser returned None — model emitted no clean "
+                    "<Response> block (likely truncated by max_tokens, deliberately "
+                    "skipped after a tool call, or prompt-template echo). "
+                    f"raw_size_bytes={len(_raw_base)}"
+                ),
+            )
         base_output_str = self._maybe_replace_with_file_reference(
             base_output_str,
             round_index=0,
@@ -1247,6 +1258,16 @@ class DualInferencer(LinearWorkflowInferencer):
         )
 
         review_output_str = self.response_parser(_raw_review)
+        if review_output_str is None:
+            raise InferencerExecutionError(
+                tool=f"<{self.phase or 'DualInferencer'}.review>",
+                error=(
+                    "response_parser returned None — model emitted no clean "
+                    "<Response> block (likely truncated by max_tokens, deliberately "
+                    "skipped after a tool call, or prompt-template echo). "
+                    f"raw_size_bytes={len(_raw_review)}"
+                ),
+            )
         parsed_review = self.review_parser(review_output_str)
         self.log_info(
             review_output_str,
@@ -1419,6 +1440,16 @@ class DualInferencer(LinearWorkflowInferencer):
         )
 
         fix_output_str = self.response_parser(_raw_fix)
+        if fix_output_str is None:
+            raise InferencerExecutionError(
+                tool=f"<{self.phase or 'DualInferencer'}.fix>",
+                error=(
+                    "response_parser returned None — model emitted no clean "
+                    "<Response> block (likely truncated by max_tokens, deliberately "
+                    "skipped after a tool call, or prompt-template echo). "
+                    f"raw_size_bytes={len(_raw_fix)}"
+                ),
+            )
         self.log_info(
             fix_output_str,
             "FollowupResponse",
@@ -1794,13 +1825,34 @@ class DualInferencer(LinearWorkflowInferencer):
     # region Default Parsers
 
     @staticmethod
-    def _default_response_parser(raw: str) -> str:
-        """Extract response content from delimiter tags."""
+    def _default_response_parser(raw: str) -> Optional[str]:
+        """Extract response content from delimiter tags, with prompt-echo defense.
+
+        Three return modes:
+        1. No matches at all     -> raw unchanged (legacy passthrough).
+        2. >=1 clean matches     -> most-recent clean match's content.
+        3. All matches are echoes -> None (hard-failure signal).
+
+        See forensics_round_template_echo_bug for the original corruption
+        that motivated this defense.
+        """
+        from agent_foundation.common.response_parsers.delimiter_parser import (
+            _PROMPT_ECHO_MARKERS,
+        )
+
+        any_matches = False
         for tag in ("Response", "ImprovedProposal"):
-            match = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", raw)
-            if match:
-                return match.group(1).strip()
-        return raw
+            matches = list(re.finditer(rf"<{tag}>([\s\S]*?)</{tag}>", raw))
+            if matches:
+                any_matches = True
+            for match in reversed(matches):
+                content = match.group(1).strip()
+                if all(m in content for m in _PROMPT_ECHO_MARKERS):
+                    continue
+                return content
+        if not any_matches:
+            return raw
+        return None
 
     @staticmethod
     def _default_parse_review(raw: str) -> dict:
