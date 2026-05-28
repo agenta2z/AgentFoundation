@@ -18,20 +18,16 @@ class TerminalInferencerBase(InferencerBase):
     Abstract base class for executing terminal commands as inference.
 
     One of three orthogonal axes (terminal-exec, streaming, templating).
-    Provides subprocess execution machinery: target_path, effective_cwd,
-    pre/post-exec scripts, env_vars, timeout, output capture.
+    Provides subprocess execution machinery: pre/post-exec scripts,
+    env_vars, timeout, output capture. The ``target_path`` field and
+    ``effective_cwd`` property live on ``InferencerBase`` (promoted so
+    SDK-family inferencers can use the same 3-path model).
 
     Subclasses should implement:
         - construct_command(): Build the CLI command from inference input
         - parse_output(): Parse the command output into desired format
 
     Attributes:
-        target_path (Optional[str]): The directory the CLI agent operates on
-            (e.g., the repo it edits). Distinct from workspace.root (artifact
-            storage). Defaults to None — DO NOT default to os.getcwd(); this
-            is load-bearing for effective_cwd's workspace.root fallback.
-        effective_cwd (property): Subprocess cwd, derived at call time:
-            target_path > workspace.root > os.getcwd().
         timeout (Optional[int]): Command execution timeout in seconds.
             None = no timeout. Default: None.
         output_file (str): Optional file path to save output.
@@ -42,13 +38,17 @@ class TerminalInferencerBase(InferencerBase):
         fail_on_pre_script_error (bool): If True, abort if pre-script fails.
         fail_on_post_script_error (bool): If True, fail if post-script fails.
 
-    See also: ``InferencerBase.additional_allowed_paths`` /
-    ``InferencerBase.effective_allowed_paths`` — base-level slot for extra
-    paths the subprocess should be permitted to access (translated into
-    the backend's native flag by subclasses like ``RovoDevCliInferencer``).
+    See also:
+        ``InferencerBase.target_path`` / ``InferencerBase.effective_cwd``
+        — canonical agent-operating-directory slot, used here as the
+        subprocess cwd (via ``_resolve_subprocess_cwd``).
+        ``InferencerBase.additional_allowed_paths`` /
+        ``InferencerBase.effective_allowed_paths`` — base-level slot for
+        extra paths the subprocess should be permitted to access
+        (translated into the backend's native flag by subclasses like
+        ``RovoDevCliInferencer``).
     """
 
-    target_path: Optional[str] = attrib(default=None)
     timeout: Optional[int] = attrib(default=None)
     output_file: Optional[str] = attrib(default=None)
     capture_stderr: bool = attrib(default=True)
@@ -63,20 +63,6 @@ class TerminalInferencerBase(InferencerBase):
     # Streaming output state (promoted from implicit instance attributes)
     _last_streaming_output: str = attrib(default="", init=False, repr=False)
     _last_streaming_return_code: int = attrib(default=0, init=False, repr=False)
-
-    @property
-    def effective_cwd(self) -> str:
-        """The subprocess cwd, derived at call time.
-
-        Priority: target_path > workspace.root > os.getcwd().
-        Replaces the old ``working_dir`` stored field.
-        """
-        if self.target_path is not None:
-            return self.target_path
-        ws = self._workspace
-        if ws is not None and hasattr(ws, "root"):
-            return str(ws.root)
-        return os.getcwd()
 
     def __attrs_post_init__(self):
         """target_path stays None if the leaf didn't set it — this is

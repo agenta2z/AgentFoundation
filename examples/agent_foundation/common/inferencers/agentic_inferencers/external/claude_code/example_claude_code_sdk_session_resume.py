@@ -91,7 +91,7 @@ async def main_async(args):
     print("-" * 40)
 
     async with ClaudeCodeSdkInferencer(
-        root_folder=args.root_folder, allowed_tools=[], auto_resume=True
+        target_path=args.target_path, allowed_tools=[], auto_resume=True
     ) as inf_a:
         response_a1 = await send_and_print(
             inf_a,
@@ -120,7 +120,7 @@ async def main_async(args):
     print("-" * 40)
 
     async with ClaudeCodeSdkInferencer(
-        root_folder=args.root_folder, allowed_tools=[], auto_resume=True
+        target_path=args.target_path, allowed_tools=[], auto_resume=True
     ) as inf_b:
         response_b1 = await send_and_print(
             inf_b,
@@ -149,7 +149,7 @@ async def main_async(args):
     print("-" * 40)
 
     async with ClaudeCodeSdkInferencer(
-        root_folder=args.root_folder, allowed_tools=[]
+        target_path=args.target_path, allowed_tools=[]
     ) as inf_c:
         response_c = await send_and_print(
             inf_c,

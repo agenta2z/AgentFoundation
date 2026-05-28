@@ -51,7 +51,7 @@ def _run_real_inference(model_id: str) -> tuple[bool, str, str | None]:
     Returns ``(success, output, session_id)``.
     """
     inferencer = DevmateCliInferencer(
-        repo_path=_REPO_PATH,
+        target_path=_REPO_PATH,
         model_id=model_id,
         max_tokens=_MAX_TOKENS,
         no_create_commit=True,
@@ -123,7 +123,7 @@ class DefaultModelRealInferenceTest(unittest.TestCase):
 
     def test_default_model_runs_end_to_end(self) -> None:
         inferencer = DevmateCliInferencer(
-            repo_path=_REPO_PATH,
+            target_path=_REPO_PATH,
             max_tokens=_MAX_TOKENS,
             no_create_commit=True,
         )

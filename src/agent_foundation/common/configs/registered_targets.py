@@ -31,6 +31,11 @@ register_alias(
     "inferencer",
 )
 register_alias(
+    "ClaudeCodeSDK",
+    f"{_P}.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer.ClaudeCodeSdkInferencer",
+    "inferencer",
+)
+register_alias(
     "Conversational",
     f"{_P}.common.inferencers.agentic_inferencers.conversational"
     ".conversational_inferencer.ConversationalInferencer",
@@ -68,6 +73,16 @@ register_alias(
 register_alias(
     "RovoChat",
     f"{_P}.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer.RovoChatInferencer",
+    "inferencer",
+)
+register_alias(
+    "Metamate",
+    f"{_P}.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer.MetamateSDKInferencer",
+    "inferencer",
+)
+register_alias(
+    "Devmate",
+    f"{_P}.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer.DevmateCliInferencer",
     "inferencer",
 )
 

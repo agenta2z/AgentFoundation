@@ -1,0 +1,13 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "contract_smoke",
+    srcs = ["contract_smoke.py"],
+    base_module = "",
+    main_function = "contract_smoke.main",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

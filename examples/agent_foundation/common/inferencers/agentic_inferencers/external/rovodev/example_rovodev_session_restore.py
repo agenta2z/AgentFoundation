@@ -49,14 +49,14 @@ if os.path.isdir(_rich_utils_src) and _rich_utils_src not in sys.path:
     sys.path.insert(0, _rich_utils_src)
 
 
-def create_inferencer(working_dir: str, output_file: str):
+def create_inferencer(target_path: str, output_file: str):
     """Create a RovoDevCliInferencer instance."""
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev import (
         RovoDevCliInferencer,
     )
 
     return RovoDevCliInferencer(
-        target_path=working_dir,
+        target_path=target_path,
         output_file=output_file,
         idle_timeout_seconds=600,
         tool_use_idle_timeout_seconds=600,
@@ -91,18 +91,18 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.working_dir:
-        working_dir = args.working_dir
+    if args.target_path:
+        target_path = args.target_path
     else:
         # Create a temp git repo (required for session workspace matching)
-        working_dir = tempfile.mkdtemp(prefix="rovodev_session_")
+        target_path = tempfile.mkdtemp(prefix="rovodev_session_")
         subprocess.run(
-            ["git", "init", "-q"], cwd=working_dir, check=True,
+            ["git", "init", "-q"], cwd=target_path, check=True,
             capture_output=True,
         )
         subprocess.run(
             ["git", "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=working_dir, check=True, capture_output=True,
+            cwd=target_path, check=True, capture_output=True,
         )
 
     # Verify acli is installed
@@ -112,11 +112,11 @@ def main():
         print("  acli not found. Install with: brew install atlassian-cli")
         sys.exit(1)
 
-    out_file = os.path.join(working_dir, "rovodev_output.txt")
+    out_file = os.path.join(target_path, "rovodev_output.txt")
 
     print()
     print("Rovo Dev Session Save & Restore Demo")
-    print(f"   Working dir: {working_dir}")
+    print(f"   Working dir: {target_path}")
     print()
 
     try:
@@ -130,7 +130,7 @@ def main():
         print()
 
         # --- Session A ---
-        inferencer_a = create_inferencer(working_dir, out_file)
+        inferencer_a = create_inferencer(target_path, out_file)
         print("  Creating Session A...")
         result_a = inferencer_a.new_session(
             "My favorite color is BLUE. "
@@ -146,7 +146,7 @@ def main():
             sys.exit(1)
 
         # --- Session B ---
-        inferencer_b = create_inferencer(working_dir, out_file)
+        inferencer_b = create_inferencer(target_path, out_file)
         print("  Creating Session B...")
         result_b = inferencer_b.new_session(
             "My favorite color is GREEN. "
@@ -183,7 +183,7 @@ def main():
 
         # --- Resume Session A ---
         print("  Resuming Session A...")
-        inferencer_resume_a = create_inferencer(working_dir, out_file)
+        inferencer_resume_a = create_inferencer(target_path, out_file)
         inferencer_resume_a.active_session_id = session_a_id
         response_a = send_and_print(
             inferencer_resume_a, recall_prompt, label="Session A recall"
@@ -191,7 +191,7 @@ def main():
 
         # --- Resume Session B ---
         print("  Resuming Session B...")
-        inferencer_resume_b = create_inferencer(working_dir, out_file)
+        inferencer_resume_b = create_inferencer(target_path, out_file)
         inferencer_resume_b.active_session_id = session_b_id
         response_b = send_and_print(
             inferencer_resume_b, recall_prompt, label="Session B recall"

@@ -99,7 +99,7 @@ async def test_async_single_call(query: str):
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -152,7 +152,7 @@ async def test_async_multiple_calls():
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -210,7 +210,7 @@ async def test_sdk_response_format():
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -272,7 +272,7 @@ async def test_async_streaming():
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -339,7 +339,7 @@ async def test_session_continuation():
     try:
         # Create inferencer with auto_resume=True (default)
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -414,7 +414,7 @@ def test_sync_single_call(query: str):
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -468,7 +468,7 @@ def test_sync_multiple_calls():
     try:
         # Use same config as working DevmateAgent!
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -522,7 +522,7 @@ def test_sync_streaming(query: str):
 
     try:
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,
@@ -587,7 +587,7 @@ async def test_async_streaming_realtime(query: str):
 
     try:
         inferencer = DevmateSDKInferencer(
-            root_folder="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             config_file_path="config.dual_agent.md",
             usecase="dual_agent_coding",
             total_timeout_seconds=120,

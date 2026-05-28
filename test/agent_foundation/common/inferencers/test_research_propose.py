@@ -173,7 +173,7 @@ INFERENCER_CHOICES = [
 def main(
     workflow_target_path: str,
     docs_path: str | None,
-    root_folder: str | None,
+    target_path: str | None,
     base_inferencer: str,
     query: str | None,
     max_breakdown: str,
@@ -193,21 +193,21 @@ def main(
     )
 
     # Resolve root folder
-    if root_folder is None:
+    if target_path is None:
         target_path = Path(workflow_target_path)
         if target_path.is_file():
-            root_folder = str(target_path.parent)
+            target_path = str(target_path.parent)
         elif target_path.is_dir():
-            root_folder = str(target_path)
+            target_path = str(target_path)
         else:
-            root_folder = os.getcwd()
+            target_path = os.getcwd()
 
     # Use default query if none provided
     request_text = query or _build_default_query(workflow_target_path, docs_path)
 
     # Build session context (mirrors how the server passes context)
     session_context: dict[str, str] = {
-        "target_path": root_folder,
+        "target_path": target_path,
         "workflow_target_path": workflow_target_path,
     }
     if docs_path:
@@ -219,7 +219,7 @@ def main(
     click.echo(f"Target:           {workflow_target_path}")
     if docs_path:
         click.echo(f"Docs path:        {docs_path}")
-    click.echo(f"Root folder:      {root_folder}")
+    click.echo(f"Root folder:      {target_path}")
     click.echo(f"Base inferencer:  {base_inferencer}")
     if research_inferencer:
         click.echo(f"Research inferencer: {research_inferencer}")
@@ -238,7 +238,7 @@ def main(
     from agent_foundation.server.research_propose_bridge import ResearchProposeBridge
 
     bridge = ResearchProposeBridge(
-        root_folder=Path(root_folder),
+        target_path=Path(target_path),
         model=model,
         research_only=research_only,
         breakdown_only=breakdown_only,

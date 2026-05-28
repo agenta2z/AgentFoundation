@@ -184,7 +184,7 @@ def main():
     print()
     print("🤖 Kiro CLI Inferencer Demo")
     print(f"   Model:       {inferencer.model_name}")
-    print(f"   Working dir: {inferencer.working_dir}")
+    print(f"   Working dir: {inferencer.effective_cwd}")
     print()
 
     # Demo 1: Sync

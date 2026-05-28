@@ -119,10 +119,6 @@ class ToolAsInferencer(StreamingInferencerBase):
     """Appended after ``command``; supports ``${KEY}`` substitution from
     ``inference_input`` (when it is a ``dict``)."""
 
-    cwd: Optional[str] = attrib(default=None)
-    """Working directory; defaults to ``self._workspace.root`` if a
-    workspace is set."""
-
     env: Optional[dict[str, str]] = attrib(default=None)
     """Process environment overrides. ``None`` inherits the parent's env;
     a dict is merged ON TOP of ``os.environ`` (so callers don't have to
@@ -200,10 +196,17 @@ class ToolAsInferencer(StreamingInferencerBase):
         return list(self.command) + rendered
 
     def _resolve_cwd(self) -> Optional[str]:
-        """Pick a working directory: explicit ``cwd`` wins; else the
-        workspace root (if set); else ``None`` (subprocess inherits)."""
-        if self.cwd:
-            return self.cwd
+        """Pick a working directory.
+
+        Delegates to ``InferencerBase.effective_cwd`` (priority:
+        ``target_path`` > ``workspace.root`` > ``os.getcwd()``). Returns
+        ``None`` only when no target_path is set AND no workspace is
+        available — letting the subprocess inherit the parent's cwd in
+        that case (preserves the historic "no cwd → inherit" contract for
+        ToolAs callers that never set either).
+        """
+        if self.target_path is not None:
+            return self.target_path
         ws = self._workspace
         if ws is not None and getattr(ws, "root", None) is not None:
             return str(ws.root)

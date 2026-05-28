@@ -126,7 +126,7 @@ INFERENCER_CHOICES = ["claude_code", "claude_code_cli", "devmate_sdk", "devmate_
 
 def create_inferencer(
     inferencer_type: str,
-    root_folder: str,
+    target_path: str,
     model: str | None,
     system_prompt: str,
     timeout: int,
@@ -148,7 +148,7 @@ def create_inferencer(
         )
 
         return ClaudeCodeSdkInferencer(
-            target_path=root_folder,
+            target_path=target_path,
             model_id=model or "",
             system_prompt=system_prompt,
             idle_timeout_seconds=timeout,
@@ -164,7 +164,7 @@ def create_inferencer(
         )
 
         kwargs: dict = dict(
-            target_path=root_folder,
+            target_path=target_path,
             allowed_tools=["Read", "Write", "Bash", "Glob", "Grep"],
             idle_timeout_seconds=timeout,
             tool_use_idle_timeout_seconds=tool_use_timeout,
@@ -188,7 +188,7 @@ def create_inferencer(
         )
 
         kwargs: dict = dict(
-            target_path=root_folder,
+            target_path=target_path,
             total_timeout_seconds=timeout,
             idle_timeout_seconds=timeout,
             tool_use_idle_timeout_seconds=tool_use_timeout,
@@ -208,7 +208,7 @@ def create_inferencer(
         )
 
         kwargs = dict(
-            target_path=root_folder,
+            target_path=target_path,
             idle_timeout_seconds=timeout,
             tool_use_idle_timeout_seconds=tool_use_timeout,
         )
@@ -533,7 +533,7 @@ def main(
     impl_base_inferencer: str,
     impl_review_inferencer: str,
     require_approval: bool,
-    root_folder: str | None,
+    target_path: str | None,
     model: str | None,
     max_iterations: int,
     max_attempts: int,
@@ -580,8 +580,8 @@ def main(
         setup_workspace(workspace_path, request_text, enable_analysis=enable_analysis)
 
     # 4. Resolve root folder
-    if root_folder is None:
-        root_folder = os.getcwd()
+    if target_path is None:
+        target_path = os.getcwd()
 
     # 5. Set up structured logging
     logs_dir = workspace_path / "logs"
@@ -626,7 +626,7 @@ def main(
     )
     plan_base_inf = create_inferencer(
         plan_base_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -638,7 +638,7 @@ def main(
     )
     plan_review_inf = create_inferencer(
         plan_review_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -656,7 +656,7 @@ def main(
     )
     impl_base_inf = create_inferencer(
         impl_base_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -668,7 +668,7 @@ def main(
     )
     impl_review_inf = create_inferencer(
         impl_review_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -685,7 +685,7 @@ def main(
         logger.info("Building analyzer inferencer: %s", analyzer_inferencer)
         analyzer_inf = create_inferencer(
             analyzer_inferencer,
-            root_folder,
+            target_path,
             model,
             system_prompt,
             timeout,

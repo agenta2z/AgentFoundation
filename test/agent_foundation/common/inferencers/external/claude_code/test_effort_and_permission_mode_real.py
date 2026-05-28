@@ -217,7 +217,7 @@ class SdkRealPermissionModeTest(unittest.TestCase):
             prompt = _make_plan_prompt(target)
 
             inf = ClaudeCodeSdkInferencer(
-                root_folder=str(tmpdir),
+                target_path=str(tmpdir),
                 permission_mode="plan",
                 effort="low",
             )
@@ -252,7 +252,7 @@ class SdkRealEffortTest(unittest.TestCase):
     def _smoke_one_effort(self, level):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             inf = ClaudeCodeSdkInferencer(
-                root_folder=tmp,
+                target_path=tmp,
                 effort=level,
                 permission_mode="bypassPermissions",
             )
@@ -457,7 +457,7 @@ class InferencerDefaultPermissionModeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             tmpdir = Path(tmp)
             target = tmpdir / f"sdk_default_{uuid.uuid4().hex[:8]}.txt"
-            inf = ClaudeCodeSdkInferencer(root_folder=str(tmpdir), effort="low")
+            inf = ClaudeCodeSdkInferencer(target_path=str(tmpdir), effort="low")
             self.assertIsNone(
                 inf.permission_mode,
                 "SDK inferencer default should be None",

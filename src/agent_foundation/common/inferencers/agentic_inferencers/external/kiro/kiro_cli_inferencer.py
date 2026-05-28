@@ -69,6 +69,22 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
         large_input_mode: How to pass prompt to subprocess (default: STDIN).
     """
 
+    # KiroCli runs the ``kiro-cli`` agent as a subprocess with file-edit /
+    # write tools, so it HAS local file access. Override ``InferencerBase``'s
+    # False default (inferencer_base.py:117) so that:
+    #   - ``TemplatedInferencerBase._build_template_feed`` exposes
+    #     ``output_path`` / ``workspace_root`` / ``workspace_outputs`` to
+    #     the rendered prompt (without these the agent has no explicit
+    #     absolute target and picks its own filename).
+    #   - ``{% if has_local_access %}`` blocks in shared templates render —
+    #     correct, Kiro IS local.
+    #   - BTA's ``_format_worker_results_text`` emits ``(See file: <path>)``
+    #     references for worker outputs instead of inlining multi-KB bodies
+    #     (ARG_MAX safety).
+    # Mirrors ``DevmateCliInferencer.has_local_access=True`` and
+    # ``ClaudeCodeCliInferencer.has_local_access=True``.
+    has_local_access: bool = attrib(default=True)
+
     # Kiro CLI-specific attributes
     agent_name: Optional[str] = attrib(default=None)
     model_name: str = attrib(default="auto")

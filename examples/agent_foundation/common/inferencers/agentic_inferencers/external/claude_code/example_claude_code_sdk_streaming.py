@@ -55,7 +55,7 @@ def _prepare_env():
 
 # -- Demo 1: Async single call (ainfer) --------------------------------------
 
-async def demo_async_single(query: str, root_folder: str) -> None:
+async def demo_async_single(query: str, target_path: str) -> None:
     """Async context manager + ainfer: full response at once."""
     print("=" * 70)
     print("MODE 1: Async Single Call (ainfer)")
@@ -69,7 +69,7 @@ async def demo_async_single(query: str, root_folder: str) -> None:
 
     start = time.time()
 
-    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
         result = await inf.ainfer(query)
 
     elapsed = time.time() - start
@@ -85,7 +85,7 @@ async def demo_async_single(query: str, root_folder: str) -> None:
 
 # -- Demo 2: Async streaming (ainfer_streaming) -------------------------------
 
-async def demo_async_streaming(query: str, root_folder: str) -> None:
+async def demo_async_streaming(query: str, target_path: str) -> None:
     """Async streaming: prints text chunk-by-chunk as Claude generates."""
     print("=" * 70)
     print("MODE 2: Async Streaming (ainfer_streaming)")
@@ -105,7 +105,7 @@ async def demo_async_streaming(query: str, root_folder: str) -> None:
     print("Response (streaming):")
     print("-" * 60)
 
-    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
         async for chunk in inf.ainfer_streaming(query):
             if first_chunk_time is None:
                 first_chunk_time = time.time()
@@ -127,7 +127,7 @@ async def demo_async_streaming(query: str, root_folder: str) -> None:
 
 # -- Demo 3: SDKInferencerResponse -------------------------------------------
 
-async def demo_sdk_response(query: str, root_folder: str) -> None:
+async def demo_sdk_response(query: str, target_path: str) -> None:
     """SDKInferencerResponse: structured result with metadata."""
     print("=" * 70)
     print("MODE 3: SDKInferencerResponse (return_sdk_response=True)")
@@ -141,7 +141,7 @@ async def demo_sdk_response(query: str, root_folder: str) -> None:
 
     start = time.time()
 
-    async with ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
         response = await inf.ainfer(query, return_sdk_response=True)
 
     elapsed = time.time() - start
@@ -161,7 +161,7 @@ async def demo_sdk_response(query: str, root_folder: str) -> None:
 
 # -- Demo 4: Sync bridge (_infer) --------------------------------------------
 
-def demo_sync_single(query: str, root_folder: str) -> None:
+def demo_sync_single(query: str, target_path: str) -> None:
     """Sync _infer bridge: for non-async code (pays reconnect cost per call)."""
     print("=" * 70)
     print("MODE 4: Sync Single Call (via _infer bridge)")
@@ -173,7 +173,7 @@ def demo_sync_single(query: str, root_folder: str) -> None:
         ClaudeCodeSdkInferencer,
     )
 
-    inferencer = ClaudeCodeSdkInferencer(root_folder=root_folder, allowed_tools=[])
+    inferencer = ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[])
 
     start = time.time()
     result = inferencer(query)
@@ -221,23 +221,23 @@ def main():
 
     print()
     print("Claude Code SDK Inferencer Demo")
-    print(f"   Root folder: {args.root_folder}")
+    print(f"   Root folder: {args.target_path}")
     print()
 
     # Demo 1: Async single call
-    asyncio.run(demo_async_single(args.query, args.root_folder))
+    asyncio.run(demo_async_single(args.query, args.target_path))
 
     # Demo 2: Async streaming
     if args.examples >= 2:
-        asyncio.run(demo_async_streaming(args.query, args.root_folder))
+        asyncio.run(demo_async_streaming(args.query, args.target_path))
 
     # Demo 3: SDKInferencerResponse
     if args.examples >= 3:
-        asyncio.run(demo_sdk_response(args.query, args.root_folder))
+        asyncio.run(demo_sdk_response(args.query, args.target_path))
 
     # Demo 4: Sync bridge
     if args.examples >= 4:
-        demo_sync_single(args.query, args.root_folder)
+        demo_sync_single(args.query, args.target_path)
 
     print("All demos complete!")
 

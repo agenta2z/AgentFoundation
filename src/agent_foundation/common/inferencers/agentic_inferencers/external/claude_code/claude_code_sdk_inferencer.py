@@ -22,19 +22,54 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types 
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@attrs
-class ClaudeCodeSdkInferencer(StreamingInferencerBase):
+@attrs(slots=False)
+class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     """Claude Code SDK as an async-native streaming inferencer with session continuation.
+
+    .. note:: **Multiple Inheritance Rationale**
+
+       Inherits from BOTH ``StreamingInferencerBase`` (NDJSON-style streaming +
+       session management) AND ``TemplatedInferencerBase`` (Jinja2 prompt
+       rendering via ``template_key`` / ``template_root_space`` /
+       ``template_variables``). Mirrors ``RovoChatInferencer`` and
+       ``MetamateSDKInferencer`` (post-2026-05-26 fix).
+
+       MRO: ``ClaudeCodeSdkInferencer → StreamingInferencerBase →
+       TemplatedInferencerBase → InferencerBase``.
+
+       Templates are rendered automatically by the framework's
+       ``__ainfer_single_impl`` chain via ``self._render_prompt()``, which
+       resolves via MRO to ``TemplatedInferencerBase._render_prompt()``. No
+       explicit rendering call is needed in this class.
+
+       ``slots=False`` matches ``TemplatedInferencerBase`` to avoid attrs
+       layout conflicts under MI.
+
+       Pre-2026-05-27 this class extended only ``StreamingInferencerBase``;
+       YAML ``template_variables`` / ``template_root_space`` keys on a
+       ``_target_: ClaudeCodeSDK`` leaf were silently dropped by
+       ``_filter_attrs_keys`` (rich_python_utils logs a WARNING). Adding
+       ``TemplatedInferencerBase`` here makes ClaudeCodeSdk a drop-in
+       replacement for ClaudeCodeCli in templated BTA topologies.
 
     Inherits from StreamingInferencerBase which provides:
     - ``ainfer_streaming()`` with idle timeout and optional caching
     - ``infer_streaming()`` sync bridge via thread + queue
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - ``active_session_id`` property
+
+    Inherits from TemplatedInferencerBase which provides:
+    - ``_render_prompt()`` for Jinja2 template rendering
+    - ``template_manager``, ``template_key``, ``template_root_space``,
+      ``template_variables``, ``template_extra_feed``, ``template_version``,
+      ``template_master_version``, ``modes`` attrs fields
 
     This class implements ``_ainfer_streaming()`` (the abstract primitive) and
     overrides ``_ainfer()`` to support ``SDKInferencerResponse``.
@@ -46,16 +81,16 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
 
     Usage Patterns:
         # Sync (simple, but pays connect cost each call):
-        inferencer = ClaudeCodeSdkInferencer(root_folder="/path/to/repo")
+        inferencer = ClaudeCodeSdkInferencer(target_path="/path/to/repo")
         result = inferencer("Write a hello world program")
 
         # Multi-turn with auto-resume (recommended):
-        inferencer = ClaudeCodeSdkInferencer(root_folder="/repo", auto_resume=True)
+        inferencer = ClaudeCodeSdkInferencer(target_path="/repo", auto_resume=True)
         r1 = inferencer.new_session("My number is 42")
         r2 = inferencer.infer("What is my number?")  # Auto-resumes!
 
         # Async with context manager (persistent connection):
-        async with ClaudeCodeSdkInferencer(root_folder="/repo") as inf:
+        async with ClaudeCodeSdkInferencer(target_path="/repo") as inf:
             r1 = await inf.anew_session("My number is 42")
             r2 = await inf.ainfer("What is my number?")  # Auto-resumes!
 
@@ -68,7 +103,10 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
             print(chunk, end="", flush=True)
 
     Attributes:
-        root_folder: Working directory for Claude Code agent.
+        target_path: Working directory for Claude Code agent (inherited
+            from ``InferencerBase``). Used as the subprocess cwd via
+            ``effective_cwd`` (which falls back to ``workspace.root`` and
+            then ``os.getcwd()`` when ``target_path`` is None).
         system_prompt: System prompt to configure agent behavior.
         idle_timeout_seconds: Per-chunk idle timeout in seconds (inherited,
             overridden to 1800). If no new text chunk arrives within this
@@ -101,10 +139,20 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
             SDK's typed Literal is narrower than the CLI's accepted set.
     """
 
+    # ClaudeCodeSdk launches the ``claude`` CLI as a subprocess with
+    # Read / Write / Bash tools — it HAS local file access. Override
+    # ``InferencerBase``'s False default (inferencer_base.py:117) so the
+    # template feed exposes ``output_path`` / ``workspace_root`` /
+    # ``workspace_outputs`` and BTA aggregators reference worker
+    # artifacts by path instead of inlining. Mirrors
+    # ``ClaudeCodeCliInferencer.has_local_access=True`` (claude_code_cli_inferencer.py:87),
+    # ``RovoDevCliInferencer.has_local_access=True`` (rovodev_cli_inferencer.py:111),
+    # and ``DevmateCliInferencer.has_local_access=True`` (devmate_cli_inferencer.py:183).
+    has_local_access: bool = attrib(default=True)
+
     # ClaudeCode-specific attributes
     # idle_timeout_seconds overridden to 1800 (was timeout_seconds=1800 in old code)
     idle_timeout_seconds: int = attrib(default=1800)
-    root_folder: Optional[str] = attrib(default=None)
     system_prompt: str = attrib(default="")
     allowed_tools: List[str] = attrib(factory=lambda: ["Read", "Write", "Bash"])
     include_partial_messages: bool = attrib(default=True)
@@ -366,7 +414,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase):
 
         options = ClaudeAgentOptions(
             model=self.model_id or None,
-            cwd=str(self.root_folder) if self.root_folder else None,
+            cwd=str(self.effective_cwd),
             system_prompt=self.system_prompt,
             include_partial_messages=self.include_partial_messages,
             allowed_tools=self.allowed_tools,

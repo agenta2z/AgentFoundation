@@ -135,6 +135,21 @@ _CONTINUATION_PHRASES: List[str] = [
     "are you most interested in",
     "i can tailor",
     "more actionable",
+    # Deep-Research / "think longer" gatekeeper stubs. When a deep-research
+    # template is sent to ``engine_start_v2`` (which has no ``force_async``
+    # plumbing), the Metamate server replies with a button-stub like
+    # "If you click Deep Research, ...". These phrases let
+    # ``auto_continue`` send the canonical "please proceed" reply and
+    # squeeze a real synthesis out of the same conversation instead of
+    # giving up after the first turn.
+    "deep research button",
+    "click deep research",
+    "click the deep research",
+    "think longer for a better",
+    "if you proceed without deep research",
+    "if you click",
+    "if you want me to run it",
+    "if you proceed",
 ]
 
 

@@ -16,8 +16,8 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     MaxIterationsExhaustedError,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
+    _detect_fbsource_root_for,
     generate_config_with_allowed_commands,
-    get_source_repo_root,
     resolve_model_tag,
     SessionMode,
     sync_config_to_target,
@@ -114,12 +114,12 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     Usage Patterns:
         # Single-turn usage:
-        inferencer = DevmateCliInferencer(repo_path="/path/to/repo")
+        inferencer = DevmateCliInferencer(target_path="/path/to/repo")
         result = inferencer.infer("Help me understand this code")
         print(result["output"])
 
         # Multi-turn with auto-resume (recommended):
-        inferencer = DevmateCliInferencer(repo_path="/repo", auto_resume=True)
+        inferencer = DevmateCliInferencer(target_path="/repo", auto_resume=True)
         r1 = inferencer.new_session("My number is 42")
         r2 = inferencer.infer("What is my number?")  # Auto-resumes!
         r3 = inferencer.infer("New topic", new_session=True)  # Force new
@@ -137,8 +137,10 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             print(line, end="")
 
     Attributes:
-        repo_path (str): Path to the repository for DevMate context.
-            Defaults to ~/fbsource if not specified.
+        target_path (str): Path to the repository the DevMate agent operates
+            on. Inherited from ``InferencerBase``. Defaults to ~/fbsource if
+            not explicitly specified (Devmate-specific default preserved
+            from the historical ``repo_path`` attrib).
         model_name (str): Model to use for inference (e.g., 'claude-sonnet-4.5').
             Defaults to 'claude-sonnet-4.5'.
         max_tokens (int): Maximum tokens for response. Defaults to 32768.
@@ -164,9 +166,25 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         active_session_id (str): Currently active session ID.
     """
 
+    # Devmate runs as a CLI subprocess with file-edit / write tools, so it
+    # HAS local file access. Override ``InferencerBase``'s False default
+    # (inferencer_base.py:117) so that:
+    #   - ``TemplatedInferencerBase._build_template_feed`` exposes
+    #     ``output_path``, ``workspace_root``, and ``workspace_outputs`` to
+    #     the rendered prompt — without these, the agent has no explicit
+    #     absolute target and picks its own filename (observed: Devmate
+    #     wrote ``/data/users/zgchen/fbsource/role_responsibility_document_mle.md``
+    #     instead of the workspace's ``role_document.md``).
+    #   - ``{% if has_local_access %}`` blocks in shared templates render —
+    #     correct, Devmate IS local.
+    #   - BTA's ``_format_worker_results_text`` emits ``(See file: <path>)``
+    #     references for worker outputs instead of inlining multi-KB
+    #     bodies (ARG_MAX safety).
+    # Mirrors ``RovoDevCliInferencer.has_local_access=True`` (rovodev_cli_inferencer.py:111)
+    # and ``ClaudeCodeCliInferencer.has_local_access=True`` (claude_code_cli_inferencer.py:87).
+    has_local_access: bool = attrib(default=True)
+
     # Existing attributes
-    repo_path: Optional[str] = attrib(default=None)
-    source_path: Optional[str] = attrib(default=None)
     # ``model_name`` is the Devmate-native model identifier (dot-separated,
     # e.g. ``claude-opus-4.7-1m``) that gets passed verbatim to the
     # ``devmate run`` CLI as a template variable. Prefer setting the
@@ -245,7 +263,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     _output_file: Optional[str] = attrib(default=None, init=False, repr=False)
 
     def __attrs_post_init__(self):
-        """Translate model_id, set paths, generate/sync shell config, configure cd."""
+        """Translate model_id, then super() runs source_path auto-detect, then apply Devmate ~/fbsource default + sync config."""
         # Translate inherited ``model_id`` (from InferencerBase) into the
         # Devmate-native ``model_name`` (dot-form, ``-1m`` suffix).
         # Mirrors rovodev's ``_translate_model_id_to_config_override`` pattern.
@@ -256,19 +274,19 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # (or caller-set value) is used unchanged.
         self._translate_model_id_to_model_name()
 
-        # Default repo_path to ~/fbsource if not specified. Accept ``target_path``
-        # as an alias (the base class also defines ``target_path``); whichever is
-        # populated first wins, and the other mirrors it.
-        if self.repo_path is None and self.target_path is not None:
-            self.repo_path = self.target_path
-        if self.repo_path is None:
-            self.repo_path = os.path.expanduser("~/fbsource")
-        if self.target_path is None:
-            self.target_path = self.repo_path
+        # super() runs IB's __attrs_post_init__, which auto-detects
+        # ``source_path`` via ``_detect_source_root()`` (we override below
+        # to return the fbsource root — Devmate's custom configs at
+        # ``tools/devmate/configs/...`` live above the project root).
+        super().__attrs_post_init__()
 
-        # Auto-detect source_path (where this inferencer code + custom configs live).
-        if self.source_path is None:
-            self.source_path = get_source_repo_root()
+        # Preserve Devmate's historical default of operating on ~/fbsource
+        # when no target is explicitly passed. Was on repo_path pre-removal
+        # (mirrored to target_path in the post-init mirror block); now
+        # lives directly on target_path (the canonical name inherited from
+        # InferencerBase).
+        if self.target_path is None:
+            self.target_path = os.path.expanduser("~/fbsource")
 
         # If both shell controls are set, generate an extended config that
         # restricts execute_command to the allowed commands. If only
@@ -290,17 +308,25 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # Sync the (possibly updated) config to the target repo if they differ.
         sync_config_to_target(self.config_name, self.source_path, self.target_path)
 
-        # Set up pre-execution script to cd to repo directory
-        # This is required because devmate needs to be run from within the repo
-        cd_script = f'cd "{self.repo_path}" || exit 1'
+        # NOTE: no shell ``cd $target_path`` needed in pre_exec_scripts —
+        # the framework launches the subprocess with cwd=effective_cwd
+        # (via ``_resolve_subprocess_cwd``), and TerminalSessionInferencer-
+        # Base's ``_run_pre_exec_scripts_in_subprocess_shell()`` returns
+        # True so pre_exec_scripts are joined with ``&&`` into the SAME
+        # shell that already starts in effective_cwd. A pre-exec ``cd``
+        # would be a no-op.
 
-        if self.pre_exec_scripts is None:
-            self.pre_exec_scripts = [cd_script]
-        elif cd_script not in self.pre_exec_scripts:
-            # Insert cd command at the beginning if not already present
-            self.pre_exec_scripts.insert(0, cd_script)
+    @classmethod
+    def _detect_source_root(cls) -> "Optional[str]":
+        """Devmate-specific source-root detection: the fbsource monorepo root.
 
-        super().__attrs_post_init__()
+        See ``DevmateSDKInferencer._detect_source_root`` for rationale —
+        Devmate's custom configs live at ``fbsource/fbcode/tools/devmate/
+        configs/...`` (above the AgentFoundation project root), so the
+        ``.hg/`` walk gives the correct ``source_path`` for
+        ``sync_config_to_target`` to reach them.
+        """
+        return _detect_fbsource_root_for(cls) or super()._detect_source_root()
 
     def _translate_model_id_to_model_name(self) -> None:
         """Translate ``self.model_id`` → ``self.model_name`` via ``resolve_model_tag``.
@@ -886,11 +912,54 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs
     ) -> Dict[str, Any]:
-        """Async inference with session-mode policies and fault-tolerance."""
-        # Session-mode policy application (shared with sync path).
+        """Async inference with session-mode policies and fault-tolerance.
+
+        Routes through ``_ainfer_single`` (matching ``RovoDevCliInferencer``,
+        ``ClaudeCodeCliInferencer``, ``KiroCliInferencer``) so we inherit
+        the full framework chain:
+
+        - ``_propagate_to_children`` (no-op for leaves)
+        - ``input_preprocessor``
+        - ``_render_prompt`` (Jinja2 templating — load-bearing for BTA-
+          aggregator usage where the prompt is a multi-KB synthesis
+          directive plus ``upstream_artifacts`` from peer workers)
+        - ``_atry_resume_from_cache`` (partial-stream recovery)
+        - ``default_inference_args`` / ``state_graphs`` merging
+        - ``timeout`` / ``fallback_mode`` / ``retry_prompt_mode``
+        - ``pre_retry`` hooks for session cleanup
+        - ``async_execute_with_retry`` around ``self._ainfer``
+        - ``_finalize_output`` (output_path → workspace deliverable promotion)
+        - ``response_post_processor`` (e.g. ``extract_delimited``)
+
+        Pre-2026-05-26 this method called ``self._ainfer(...)`` directly,
+        bypassing the entire chain — most visibly dropping the templated
+        prompt (e.g. the create_role aggregator's 28 KB synthesis directive
+        was silently degraded to the bare 34-byte BTA user request), which
+        in turn caused Devmate's freeform agent to misread the request as
+        a coding task and write ``.llms/agents/<name>.md`` files to
+        fbsource with an auto-commit instead of producing the workspace's
+        ``role_document.md``. The bypass had no design rationale — the
+        original author wrote ``ainfer`` to add session-policy and
+        fault-tolerance, and built atop the existing one-layer-shallower
+        ``_ainfer`` call without noticing the framework features being lost.
+        Verified across siblings: RovoDevCli (rovodev_cli_inferencer.py:757),
+        ClaudeCodeCli (claude_code_cli_inferencer.py:656),
+        KiroCli (kiro_cli_inferencer.py:270) all route through
+        ``_ainfer_single``; only DevmateCli was the outlier.
+
+        Fault-tolerance runs AFTER ``_ainfer_single`` returns. This is
+        compatible with the framework's retry chain: ``async_execute_with_retry``
+        retries on EXCEPTIONS, but Devmate's ``_ainfer`` does not raise on
+        ``success=False`` — the promotion-to-exception happens here, after
+        retries have exhausted. ``session_mode``'s
+        ``_consecutive_error_count`` and the framework's ``max_retry`` (default 1)
+        are independent counters and do not conflict.
+        """
         self._apply_session_policy(kwargs)
 
-        result = await self._ainfer(inference_input, inference_config, **kwargs)
+        result = await self._ainfer_single(
+            inference_input, inference_config, **kwargs
+        )
 
         # ``_ainfer`` may return either a plain dict (legacy path) or a
         # ``TerminalInferencerResponse`` (current path). Accept both so the
@@ -921,8 +990,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
             if _looks_like_max_iterations(error_text):
                 self.active_session_id = None
-                import re as _re
-                _m = _re.search(r"Max iterations of (\d+) reached", error_text)
+                _m = re.search(r"Max iterations of (\d+) reached", error_text)
                 raise MaxIterationsExhaustedError(
                     tool="devmate",
                     return_code=_field(result, "return_code"),

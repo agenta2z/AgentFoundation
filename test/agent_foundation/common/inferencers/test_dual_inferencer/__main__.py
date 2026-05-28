@@ -77,7 +77,7 @@ INFERENCER_CHOICES = ["claude_code", "devmate_sdk", "devmate_cli"]
 
 def create_inferencer(
     inferencer_type: str,
-    root_folder: str,
+    target_path: str,
     model: str | None,
     system_prompt: str,
     timeout: int,
@@ -95,7 +95,7 @@ def create_inferencer(
         )
 
         return ClaudeCodeSdkInferencer(
-            root_folder=root_folder,
+            target_path=target_path,
             model_id=model or "",
             system_prompt=system_prompt,
             idle_timeout_seconds=timeout,
@@ -110,7 +110,7 @@ def create_inferencer(
         )
 
         kwargs: dict = dict(
-            root_folder=root_folder,
+            target_path=target_path,
             total_timeout_seconds=timeout,
             idle_timeout_seconds=timeout,
         )
@@ -128,7 +128,7 @@ def create_inferencer(
             DevmateCliInferencer,
         )
 
-        kwargs = dict(repo_path=root_folder)
+        kwargs = dict(target_path=target_path)
         if model is not None:
             kwargs["model_name"] = model
         if inferencer_logger is not None:
@@ -357,7 +357,7 @@ def main(
     base_inferencer: str,
     review_inferencer: str,
     fixer_inferencer: str | None,
-    root_folder: str | None,
+    target_path: str | None,
     model: str | None,
     max_iterations: int,
     max_attempts: int,
@@ -392,8 +392,8 @@ def main(
     setup_workspace(workspace_path, request_text)
 
     # 4. Resolve root folder
-    if root_folder is None:
-        root_folder = os.getcwd()
+    if target_path is None:
+        target_path = os.getcwd()
 
     # 5. Set up JsonLogger for structured prompt/response logging
     logs_dir = workspace_path / "logs"
@@ -429,7 +429,7 @@ def main(
 
     base_inf = create_inferencer(
         base_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -439,7 +439,7 @@ def main(
     )
     review_inf = create_inferencer(
         review_inferencer,
-        root_folder,
+        target_path,
         model,
         system_prompt,
         timeout,
@@ -451,7 +451,7 @@ def main(
     if fixer_inferencer is not None:
         fixer_inf = create_inferencer(
             fixer_inferencer,
-            root_folder,
+            target_path,
             model,
             system_prompt,
             timeout,
@@ -468,7 +468,7 @@ def main(
     )
 
     # 8. Output path template (uses Jinja2 syntax for round_index)
-    # Must be absolute so Claude Code (with arbitrary root_folder) can find it
+    # Must be absolute so Claude Code (with arbitrary target_path) can find it
     output_dir = workspace_path.resolve() / "outputs"
     output_path = (
         str(output_dir) + "/round{{ round_index }}_" + template_version + ".md"

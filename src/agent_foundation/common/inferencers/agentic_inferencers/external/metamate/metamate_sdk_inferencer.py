@@ -42,23 +42,59 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types 
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
 from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-@attrs
-class MetamateSDKInferencer(StreamingInferencerBase):
+@attrs(slots=False)
+class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     """MetaMate SDK as an async-native streaming inferencer with auto-continuation.
 
     Uses ``MetamateGraphQLClient.engine_start_v2()`` to start a conversation
     and polls ``get_conversation_for_stream()`` to yield text deltas.
+
+    .. note:: **Multiple Inheritance Rationale**
+
+       Inherits from BOTH ``StreamingInferencerBase`` (poll/stream + session
+       management) AND ``TemplatedInferencerBase`` (Jinja2 prompt rendering
+       via ``template_key`` / ``template_root_space`` / ``template_variables``).
+       Mirrors ``RovoChatInferencer`` — the API-grounded research/knowledge
+       agent that this class is the Meta-internal counterpart of.
+
+       MRO: ``MetamateSDKInferencer → StreamingInferencerBase →
+       TemplatedInferencerBase → InferencerBase``.
+
+       Templates are rendered automatically by the framework's
+       ``__ainfer_single_impl`` chain via ``self._render_prompt()``, which
+       resolves via MRO to ``TemplatedInferencerBase._render_prompt()``.
+       No explicit rendering call is needed in this class. The ``_ainfer``
+       override below sees the already-rendered prompt.
+
+       ``slots=False`` matches ``TemplatedInferencerBase`` to avoid attrs
+       layout conflicts under MI.
+
+       Pre-2026-05-26 this class extended only ``StreamingInferencerBase``;
+       YAML ``template_variables`` / ``template_root_space`` keys on a
+       ``_target_: Metamate`` leaf were silently dropped by
+       ``_filter_attrs_keys``, producing non-templated prompts. Adding
+       ``TemplatedInferencerBase`` here makes Metamate a drop-in replacement
+       for RovoChat in templated BTA topologies (e.g. create_role).
 
     Inherits from StreamingInferencerBase which provides:
     - ``ainfer_streaming()`` with idle timeout and optional caching
     - ``infer_streaming()`` sync bridge via thread + queue
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - ``active_session_id`` property
+
+    Inherits from TemplatedInferencerBase which provides:
+    - ``_render_prompt()`` for Jinja2 template rendering
+    - ``template_manager``, ``template_key``, ``template_root_space``,
+      ``template_variables``, ``template_extra_feed``, ``template_version``,
+      ``template_master_version``, ``modes`` attrs fields
 
     This class implements ``_ainfer_streaming()`` (the abstract primitive) and
     overrides ``_ainfer()`` to support session kwargs and ``SDKInferencerResponse``.

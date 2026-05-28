@@ -24,7 +24,14 @@ python_library(
         "fbsource//third-party/pypi/flask:flask",
         "fbsource//third-party/pypi/httpx:httpx",
         "fbsource//third-party/pypi/jinja2:jinja2",
-        "fbsource//third-party/pypi/lancedb:lancedb",
+        # NOTE: `lancedb` removed (2026-05-26). Optional knowledge-store backend
+        # (used only by ``agent_foundation/knowledge/retrieval/stores/pieces/
+        # lancedb_store.py``, which lazily ``import lancedb`` inside
+        # ``__attrs_post_init__``). The fbsource third-party package is absent
+        # on some checkouts (``fbsource//third-party/pypi/lancedb:`` doesn't
+        # exist), which blocks every consumer's Buck build even when nothing
+        # actually constructs a ``LanceDBKnowledgePieceStore``. Re-add only
+        # after the third-party landing.
         "fbsource//third-party/pypi/plotly:plotly",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pydantic-core:pydantic-core",

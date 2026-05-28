@@ -35,13 +35,13 @@ def test_claude_code_sdk_inferencer_initialization():
         )
 
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             system_prompt="Test prompt",
             allowed_tools=["Read"],
             idle_timeout_seconds=60,
         )
         print(f"  ✓ Initialization successful")
-        print(f"    - root_folder: {inferencer.root_folder}")
+        print(f"    - target_path: {inferencer.target_path}")
         print(f"    - system_prompt: {inferencer.system_prompt}")
         print(f"    - allowed_tools: {inferencer.allowed_tools}")
         return True

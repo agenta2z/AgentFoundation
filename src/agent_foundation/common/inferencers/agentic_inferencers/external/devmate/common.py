@@ -96,15 +96,34 @@ class SessionMode(Enum):
 _logger = logging.getLogger(__name__)
 
 
-def get_source_repo_root() -> str:
-    """Auto-detect the fbsource root where this inferencer code lives.
+def _detect_fbsource_root_for(cls) -> "str | None":
+    """Detect the Sapling/Mercurial repo root containing ``cls``'s source file.
 
-    Walks up from this file to the fbsource root. This file is at:
-        <fbsource>/fbcode/agent_foundation/common/
-                   inferencers/agentic_inferencers/external/devmate/common.py
-    So fbsource root is 8 parents up.
+    Walks up from ``cls``'s source file looking for an ``.hg/`` marker.
+    Used by Devmate inferencers to set ``source_path`` to the fbsource
+    root (Devmate's custom configs at
+    ``fbsource/fbcode/tools/devmate/configs/...`` live ABOVE
+    AgentFoundation's project root, so the standard src-layout detector
+    returns the wrong dir).
+
+    Returns ``None`` when no ``.hg/`` marker is found (test stubs,
+    pip-installed packages, non-Sapling environments). Callers chain
+    with ``super()._detect_source_root()`` for the fallback.
     """
-    return str(Path(__file__).resolve().parents[8])
+    import inspect
+
+    try:
+        source_file = inspect.getfile(cls)
+    except (TypeError, OSError):
+        return None
+    current = os.path.dirname(os.path.abspath(source_file))
+    while True:
+        if os.path.exists(os.path.join(current, ".hg")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
 
 
 def sync_config_to_target(

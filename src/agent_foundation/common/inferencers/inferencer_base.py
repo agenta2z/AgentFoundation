@@ -185,11 +185,25 @@ class InferencerBase(Debuggable, Resumable, ABC):
     workspace: Optional[Any] = attrib(default=None)
 
     # === Source path (auto-detected) ===
-    # Where this inferencer's own source code lives (project root).
+    # Where this inferencer's own source resources are addressable (project
+    # root for a standard src-layout, fbsource root for inferencers whose
+    # custom configs / templates live above the project — e.g. Devmate's
+    # configs in tools/devmate/configs/...). Subclasses override the
+    # _detect_source_root classmethod to customize.
     # Auto-detected via _detect_source_root() in __attrs_post_init__
     # if not explicitly set. Returns None for test stubs, pip-installed
     # packages, or non-src-layout projects — this is intentional.
     source_path: Optional[str] = attrib(default=None)
+
+    # === Target path (operating directory for the agent) ===
+    # The directory the agent operates on (e.g., the repo it edits, the cwd
+    # of its subprocess, the root_folder it passes to an SDK client).
+    # Distinct from workspace.root (artifact storage) and source_path
+    # (where the inferencer's own source resources live).
+    # Stays None if the agent doesn't need it (API / cloud / orchestrator
+    # inferencers); subclasses that DO use it either consume it directly
+    # or derive a subprocess cwd via the effective_cwd property below.
+    target_path: Optional[str] = attrib(default=None)
 
     # === Deliverable Boundary Semantics (v1.7) ===
     # Whether this inferencer is a Deliverable Boundary. When True, the
@@ -272,6 +286,22 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # stale cached paths from surviving across consensus iterations or
     # workspace swaps.
     _DERIVED_FROM_WORKSPACE: tuple = ()
+
+    @property
+    def effective_cwd(self) -> str:
+        """The derived operating directory for the agent.
+
+        Priority: ``target_path`` > ``workspace.root`` > ``os.getcwd()``.
+        Subclasses that spawn subprocesses or hand a cwd to an SDK client
+        should read this property rather than ``target_path`` directly, so
+        orchestrator-spawned children get the workspace-root fallback.
+        """
+        if self.target_path is not None:
+            return self.target_path
+        ws = self._workspace
+        if ws is not None and hasattr(ws, "root"):
+            return str(ws.root)
+        return os.getcwd()
 
     @property
     def effective_allowed_paths(self) -> List[AllowedPath]:

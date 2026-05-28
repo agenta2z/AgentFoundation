@@ -108,7 +108,7 @@ def make_retry_callback(inference_args: dict, inferencer_name: str):
 
 def create_inferencer(
     inferencer_type: str,
-    root_folder: str,
+    target_path: str,
     model: str,
     max_retry: int,
     initial_idle_timeout: int,
@@ -120,7 +120,7 @@ def create_inferencer(
 
     Args:
         inferencer_type: One of ``INFERENCER_CHOICES``.
-        root_folder: Working directory for the agent.
+        target_path: Working directory for the agent.
         model: Model name/id.
         max_retry: Maximum retry attempts.
         initial_idle_timeout: Initial idle timeout in seconds.
@@ -137,7 +137,7 @@ def create_inferencer(
         )
 
         return DevmateSDKInferencer(
-            target_path=root_folder,
+            target_path=target_path,
             model_name=model,
             max_retry=max_retry,
             min_retry_wait=5,
@@ -155,7 +155,7 @@ def create_inferencer(
         )
 
         return ClaudeCodeSdkInferencer(
-            target_path=root_folder,
+            target_path=target_path,
             model_id=model or "",
             system_prompt="",
             max_retry=max_retry,
@@ -175,7 +175,7 @@ def create_inferencer(
         )
 
         return ClaudeCodeCliInferencer(
-            target_path=root_folder,
+            target_path=target_path,
             model_name=model or "sonnet",
             max_retry=max_retry,
             min_retry_wait=5,
@@ -193,7 +193,7 @@ def create_inferencer(
         )
 
         return DevmateCliInferencer(
-            target_path=root_folder,
+            target_path=target_path,
             model_name=model,
             max_retry=max_retry,
             min_retry_wait=5,
@@ -566,7 +566,7 @@ def main(
     inferencer_type: str,
     request: str,
     request_file: Optional[str],
-    root_folder: Optional[str],
+    target_path: Optional[str],
     model: str,
     initial_idle_timeout: int,
     total_timeout: int,
@@ -614,8 +614,8 @@ def main(
     paths = setup_workspace(workspace_path)
 
     # 4. Resolve root folder
-    if root_folder is None:
-        root_folder = os.getcwd()
+    if target_path is None:
+        target_path = os.getcwd()
 
     # 5. Set up JsonLogger for structured logging
     from rich_python_utils.common_objects.debuggable import LoggerConfig
@@ -649,7 +649,7 @@ def main(
 
     inferencer = create_inferencer(
         inferencer_type=inferencer_type,
-        root_folder=root_folder,
+        target_path=target_path,
         model=model,
         max_retry=max_retry,
         initial_idle_timeout=initial_idle_timeout,
@@ -671,7 +671,7 @@ def main(
     config = {
         "inferencer_type": inferencer_type,
         "request": request_text[:500],
-        "root_folder": root_folder,
+        "target_path": target_path,
         "model": model,
         "initial_idle_timeout": initial_idle_timeout,
         "total_timeout": total_timeout,

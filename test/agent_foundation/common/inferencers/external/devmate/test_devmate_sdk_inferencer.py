@@ -26,7 +26,7 @@ class DevmateSDKInferencerInitTest(unittest.TestCase):
         """
         inferencer = DevmateSDKInferencer()
 
-        self.assertIsNone(inferencer.root_folder)
+        self.assertIsNone(inferencer.target_path)
         self.assertEqual(inferencer.config_file_path, "freeform")
         self.assertEqual(inferencer.usecase, "dual_agent_coding")
         self.assertEqual(inferencer.model_name, "claude-opus-4.7-1m")
@@ -41,7 +41,7 @@ class DevmateSDKInferencerInitTest(unittest.TestCase):
         """Test inferencer with custom parameters."""
         custom_vars = {"key": "value"}
         inferencer = DevmateSDKInferencer(
-            root_folder="/path/to/repo",
+            target_path="/path/to/repo",
             config_file_path="custom_config.yaml",
             usecase="custom_usecase",
             model_name="claude-3-opus",
@@ -49,7 +49,7 @@ class DevmateSDKInferencerInitTest(unittest.TestCase):
             config_vars=custom_vars,
         )
 
-        self.assertEqual(inferencer.root_folder, "/path/to/repo")
+        self.assertEqual(inferencer.target_path, "/path/to/repo")
         self.assertEqual(inferencer.config_file_path, "custom_config.yaml")
         self.assertEqual(inferencer.usecase, "custom_usecase")
         self.assertEqual(inferencer.model_name, "claude-3-opus")
@@ -83,15 +83,15 @@ class DevmateSDKInferencerRepoRootTest(unittest.TestCase):
     """Test repo_root handling."""
 
     def test_repo_root_passed_as_path(self):
-        """[v3 FIX #3] root_folder str is converted to Path for SDK."""
-        inferencer = DevmateSDKInferencer(root_folder="/path/to/repo")
+        """[v3 FIX #3] target_path str is converted to Path for SDK."""
+        inferencer = DevmateSDKInferencer(target_path="/path/to/repo")
 
         # The conversion happens in _ainfer, but we can verify the attribute
-        self.assertEqual(inferencer.root_folder, "/path/to/repo")
+        self.assertEqual(inferencer.target_path, "/path/to/repo")
 
         # We'd need to mock the SDK to fully test the conversion
         # Here we just verify the Path conversion logic
-        result_path = Path(inferencer.root_folder)
+        result_path = Path(inferencer.target_path)
         self.assertIsInstance(result_path, Path)
         self.assertEqual(str(result_path), "/path/to/repo")
 

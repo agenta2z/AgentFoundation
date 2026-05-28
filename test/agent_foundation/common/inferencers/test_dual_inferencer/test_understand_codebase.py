@@ -115,7 +115,7 @@ INFERENCER_CHOICES = ["claude_code", "claude_code_cli", "devmate_sdk", "devmate_
 )
 def main(
     workflow_target_path: str,
-    root_folder: str | None,
+    target_path: str | None,
     base_inferencer: str,
     review_inferencer: str,
     workspace: str | None,
@@ -135,18 +135,18 @@ def main(
     )
 
     # Resolve root folder
-    if root_folder is None:
+    if target_path is None:
         target_path = Path(workflow_target_path)
         if target_path.is_file():
-            root_folder = str(target_path.parent)
+            target_path = str(target_path.parent)
         elif target_path.is_dir():
-            root_folder = str(target_path)
+            target_path = str(target_path)
         else:
-            root_folder = os.getcwd()
+            target_path = os.getcwd()
 
     # Build session_context (mirrors how the server passes workflow_target_path)
     session_context = {
-        "target_path": root_folder,
+        "target_path": target_path,
         "workflow_target_path": workflow_target_path,
     }
 
@@ -162,7 +162,7 @@ def main(
     click.echo("Understand Codebase Integration Test")
     click.echo("=" * 60)
     click.echo(f"Target:            {workflow_target_path}")
-    click.echo(f"Root folder:       {root_folder}")
+    click.echo(f"Root folder:       {target_path}")
     click.echo(f"Base inferencer:   {base_inferencer}")
     click.echo(f"Review inferencer: {review_inferencer}")
     click.echo(f"Planning:          {enable_planning}")
@@ -178,7 +178,7 @@ def main(
     from agent_foundation.server.task_types import TaskMode
 
     bridge_kwargs = dict(
-        root_folder=Path(root_folder),
+        target_path=Path(target_path),
         claude_model=model,
         session_context=session_context,
         base_inferencer_type=base_inferencer,

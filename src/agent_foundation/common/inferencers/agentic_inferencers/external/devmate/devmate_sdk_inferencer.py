@@ -13,8 +13,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
+    _detect_fbsource_root_for,
     generate_config_with_allowed_commands,
-    get_source_repo_root,
     resolve_model_tag,
     sync_config_to_target,
 )
@@ -52,11 +52,11 @@ class DevmateSDKInferencer(StreamingInferencerBase):
 
     Usage Patterns:
         # Single query:
-        inferencer = DevmateSDKInferencer(root_folder="/path/to/repo")
+        inferencer = DevmateSDKInferencer(target_path="/path/to/repo")
         result = inferencer("Write a hello world program")
 
         # Multi-turn with auto-resume (recommended):
-        inferencer = DevmateSDKInferencer(root_folder="/repo", auto_resume=True)
+        inferencer = DevmateSDKInferencer(target_path="/repo", auto_resume=True)
         r1 = inferencer.new_session("My number is 42")
         r2 = inferencer.infer("What is my number?")  # Auto-resumes!
 
@@ -69,7 +69,11 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             print(chunk, end="", flush=True)
 
     Attributes:
-        root_folder: Working directory for Devmate agent.
+        target_path: Working directory for Devmate agent (inherited from
+            ``InferencerBase``). Read at call time via ``effective_cwd``
+            so orchestrator-spawned children pick up ``workspace.root``
+            when target_path is None. Plumbed to the SDK client as
+            ``repo_root``.
         config_file_path: Path to config file or "freeform" for freeform mode.
         usecase: Usecase identifier for the SDK.
         model_name: Model to use (default: claude-sonnet-4-5).
@@ -79,13 +83,19 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         auto_resume: If True, automatically resume previous session (default True).
     """
 
+    # DevmateSDK launches the Devmate SDK subprocess with file-edit / write
+    # tools, so it HAS local file access. Override ``InferencerBase``'s
+    # False default (inferencer_base.py:117) so the template feed exposes
+    # ``output_path`` / ``workspace_root`` / ``workspace_outputs`` and BTA
+    # aggregators reference worker artifacts by path. Mirrors
+    # ``DevmateCliInferencer.has_local_access=True``.
+    has_local_access: bool = attrib(default=True)
+
     # DevmateSDK-specific attributes
     # total_timeout_seconds overridden to 1800 (preserves current total timeout behavior)
     total_timeout_seconds: int = attrib(default=1800)
     # idle_timeout_seconds overridden to 2400 — Devmate sessions can be slower than Claude Code
     idle_timeout_seconds: int = attrib(default=2400)
-    root_folder: Optional[str] = attrib(default=None)
-    source_path: Optional[str] = attrib(default=None)
     config_file_path: str = attrib(default="freeform")
     usecase: str = attrib(default="dual_agent_coding")
     # ``model_name`` is the Devmate-native model identifier (dot-form,
@@ -106,7 +116,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
     _last_token_count: int = attrib(default=0, init=False, repr=False)
 
     def __attrs_post_init__(self):
-        """Translate model_id, auto-detect source_path, wire shell-allowlist config."""
+        """Translate model_id, then super() runs source_path auto-detect, then wire shell-allowlist config."""
         # Translate inherited ``model_id`` (from InferencerBase) into the
         # Devmate-native ``model_name``. See ``DevmateCliInferencer``'s
         # ``_translate_model_id_to_model_name`` for full precedence rules
@@ -114,11 +124,20 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         # consistent across CLI/SDK and YAML-cascade compatible.
         self._translate_model_id_to_model_name()
 
-        # Auto-detect source_path (where this inferencer code + custom configs live).
-        if self.source_path is None:
-            self.source_path = get_source_repo_root()
+        # super() runs IB's __attrs_post_init__, which auto-detects
+        # ``source_path`` via ``_detect_source_root()`` (we override below
+        # to walk up for ``.hg/`` instead of IB's ``/src`` layout default,
+        # so the result is the fbsource root — where Devmate's custom
+        # configs at tools/devmate/configs/... live).
+        super().__attrs_post_init__()
 
-        target_path = self.root_folder or self.source_path
+        # Local var (not a name-shadow of inherited target_path field).
+        # The ``or self.source_path`` fallback is legitimate for the
+        # config-sync use case: sync_config_to_target early-returns when
+        # source == target, so falling back to source_path makes
+        # standalone DevmateSDKInferencer() invocations a no-op for
+        # config-sync (no fictitious target dir conjured).
+        config_sync_target = self.target_path or self.source_path
 
         # If both shell controls are set, generate an extended config that
         # restricts execute_command to the allowed commands. If only
@@ -132,15 +151,29 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             )
         elif self.allowed_shell_commands and self.enable_shell:
             # Sync base config first (before we mutate self.config_file_path).
-            sync_config_to_target(self.config_file_path, self.source_path, target_path)
+            sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
             self.config_file_path = generate_config_with_allowed_commands(
                 self.config_file_path, self.allowed_shell_commands, self.source_path
             )
 
         # Sync the (possibly updated) config to the target repo if they differ.
-        sync_config_to_target(self.config_file_path, self.source_path, target_path)
+        sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
 
-        super().__attrs_post_init__()
+    @classmethod
+    def _detect_source_root(cls) -> "Optional[str]":
+        """Devmate-specific source-root detection: the fbsource monorepo root.
+
+        Devmate's ``sync_config_to_target`` reaches custom configs at paths
+        like ``fbsource/fbcode/tools/devmate/configs/...`` which live ABOVE
+        the AgentFoundation project root. IB's default detector walks up
+        for a ``/src`` directory marker and returns the AgentFoundation
+        project root — too narrow.
+
+        Walks up for the ``.hg/`` marker (Sapling/Mercurial repo root)
+        and falls back to IB's ``/src``-layout detector if no ``.hg/`` is
+        found (test stubs, pip-installed packages, non-Sapling envs).
+        """
+        return _detect_fbsource_root_for(cls) or super()._detect_source_root()
 
     def _translate_model_id_to_model_name(self) -> None:
         """Translate ``self.model_id`` → ``self.model_name`` via ``resolve_model_tag``.
@@ -195,7 +228,15 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         if self.model_name:
             config_vars["model_name"] = self.model_name
 
-        repo_root_path = Path(self.root_folder) if self.root_folder else None
+        # Use effective_cwd (target_path > workspace.root > os.getcwd())
+        # so the SDK client always gets a concrete repo_root. Previously
+        # standalone DevmateSDKInferencer() handed None to the SDK and
+        # relied on its internal find_root(Path.cwd()) Sapling walk — that
+        # path is preserved (Path(os.getcwd()) is what the SDK would have
+        # walked from). For BTA-spawned workers with per-worker workspaces,
+        # this now gets ``workspace.root`` automatically (parity with TIB
+        # family).
+        repo_root_path = Path(self.effective_cwd)
 
         client = DevmateSDKClient(
             config_file_path=self.config_file_path,

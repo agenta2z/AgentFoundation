@@ -64,7 +64,7 @@ def create_inferencer(args):
     )
 
     return DevmateCliInferencer(
-        repo_path=args.repo_path,
+        target_path=args.target_path,
         model_name=args.model,
         max_tokens=args.max_tokens,
         no_create_commit=True,

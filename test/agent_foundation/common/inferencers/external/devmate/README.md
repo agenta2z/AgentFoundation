@@ -123,7 +123,7 @@ async def on_error(error):
 
 1. **Path wrapper (v3 FIX #3):** SDK expects `Path | None`, not `str`
    ```python
-   repo_root_path = Path(self.root_folder) if self.root_folder else None
+   repo_root_path = Path(self.effective_cwd)
    ```
 
 2. **Local session_id (v3 FIX #9):** Uses closure-local variable for concurrent safety
@@ -207,7 +207,7 @@ Check:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `root_folder` | `None` | Working directory for Devmate agent |
+| `target_path` | `None` | Working directory for Devmate agent (inherited from `InferencerBase`; consumed via `effective_cwd`) |
 | `config_file_path` | `"freeform"` | Path to config or "freeform" mode |
 | `usecase` | `"sdk_inferencer"` | Usecase identifier |
 | `model_name` | `"claude-sonnet-4-5"` | Model to use |

@@ -35,7 +35,7 @@ async def test_cross_session_sdk():
     )
 
     inferencer = DevmateSDKInferencer(
-        root_folder="/data/users/zgchen/fbsource",
+        target_path="/data/users/zgchen/fbsource",
         config_file_path="config.dual_agent.md",
         usecase="dual_agent_coding",
         total_timeout_seconds=120,
@@ -118,7 +118,7 @@ async def test_cross_session_cli():
     )
 
     inferencer = DevmateCliInferencer(
-        repo_path="/data/users/zgchen/fbsource",
+        target_path="/data/users/zgchen/fbsource",
         model_name="claude-sonnet-4.5",
         no_create_commit=True,
         auto_resume=False,  # Disable auto-resume to manually control sessions
@@ -210,7 +210,7 @@ async def test_cross_session_claude():
     )
 
     inferencer = ClaudeCodeSdkInferencer(
-        root_folder="/tmp",
+        target_path="/tmp",
         allowed_tools=[],
         idle_timeout_seconds=120,
         auto_resume=False,  # Disable auto-resume to manually control sessions

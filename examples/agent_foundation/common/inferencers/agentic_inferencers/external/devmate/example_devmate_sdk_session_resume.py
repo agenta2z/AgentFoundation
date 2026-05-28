@@ -46,7 +46,7 @@ if os.path.isdir(_rich_utils_src) and _rich_utils_src not in sys.path:
     sys.path.insert(0, _rich_utils_src)
 
 
-def make_inferencer(root_folder: str, model: str, auto_resume: bool = False):
+def make_inferencer(target_path: str, model: str, auto_resume: bool = False):
     """Create a DevmateSDKInferencer.
 
     Defaults to ``auto_resume=False`` so the example below can demonstrate
@@ -60,7 +60,7 @@ def make_inferencer(root_folder: str, model: str, auto_resume: bool = False):
     )
 
     return DevmateSDKInferencer(
-        root_folder=root_folder,
+        target_path=target_path,
         model_name=model,
         auto_resume=auto_resume,
     )
@@ -112,7 +112,7 @@ async def main_async(args):
     print("STEP 1: Create Session A -- tell secret 'banana'")
     print("-" * 40)
 
-    inf_a = make_inferencer(args.root_folder, args.model)
+    inf_a = make_inferencer(args.target_path, args.model)
     response_a1 = await send_and_print(
         inf_a,
         'I am going to tell you a secret word. The secret word is "banana". '
@@ -145,7 +145,7 @@ async def main_async(args):
     print("STEP 3: Create Session B -- tell secret 'dragon'")
     print("-" * 40)
 
-    inf_b = make_inferencer(args.root_folder, args.model)
+    inf_b = make_inferencer(args.target_path, args.model)
     response_b1 = await send_and_print(
         inf_b,
         'I am going to tell you a secret word. The secret word is "dragon". '
@@ -177,7 +177,7 @@ async def main_async(args):
     print("STEP 5: New Session C -- should NOT know any secret")
     print("-" * 40)
 
-    inf_c = make_inferencer(args.root_folder, args.model)
+    inf_c = make_inferencer(args.target_path, args.model)
     response_c = await send_and_print(
         inf_c,
         "What is the secret word? Reply with just the word if you know it, "

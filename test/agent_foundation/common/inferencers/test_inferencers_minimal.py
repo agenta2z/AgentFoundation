@@ -111,19 +111,19 @@ def test_initialization():
         )
 
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             system_prompt="Test",
             allowed_tools=["Read"],
             idle_timeout_seconds=60,
         )
 
-        assert inferencer.root_folder == "/tmp"
+        assert inferencer.target_path == "/tmp"
         assert inferencer.system_prompt == "Test"
         assert inferencer.allowed_tools == ["Read"]
         assert inferencer.idle_timeout_seconds == 60
 
         print("✓ ClaudeCodeSdkInferencer initialization works")
-        print(f"  - root_folder: {inferencer.root_folder}")
+        print(f"  - target_path: {inferencer.target_path}")
         print(f"  - allowed_tools: {inferencer.allowed_tools}")
     except Exception as e:
         print(f"✗ ClaudeCodeSdkInferencer init failed: {e}")
@@ -136,19 +136,19 @@ def test_initialization():
         )
 
         inferencer = DevmateSDKInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             usecase="test_usecase",
             config_vars={"key": "value"},
             total_timeout_seconds=120,
         )
 
-        assert inferencer.root_folder == "/tmp"
+        assert inferencer.target_path == "/tmp"
         assert inferencer.usecase == "test_usecase"
         assert inferencer.config_vars == {"key": "value"}
         assert inferencer.total_timeout_seconds == 120
 
         print("✓ DevmateSDKInferencer initialization works")
-        print(f"  - root_folder: {inferencer.root_folder}")
+        print(f"  - target_path: {inferencer.target_path}")
         print(f"  - usecase: {inferencer.usecase}")
     except Exception as e:
         print(f"✗ DevmateSDKInferencer init failed: {e}")
@@ -327,7 +327,7 @@ def test_real_sdk_call_claude():
 
         if sdk_available:
             inferencer = ClaudeCodeSdkInferencer(
-                root_folder="/tmp",
+                target_path="/tmp",
                 allowed_tools=[],
                 idle_timeout_seconds=60,
             )
@@ -371,7 +371,7 @@ def test_real_sdk_call_devmate():
 
         if sdk_available:
             inferencer = DevmateSDKInferencer(
-                root_folder="/tmp",
+                target_path="/tmp",
                 total_timeout_seconds=60,
             )
 

@@ -39,7 +39,7 @@ class DevmateCliInferencerInitTest(unittest.TestCase):
     def test_custom_initialization(self):
         """Test inferencer with custom parameters."""
         inferencer = DevmateCliInferencer(
-            repo_path="/path/to/repo",
+            target_path="/path/to/repo",
             model_name="claude-3-opus",
             max_tokens=16384,
             no_create_commit=False,
@@ -52,7 +52,7 @@ class DevmateCliInferencerInitTest(unittest.TestCase):
             extra_cli_args=["--verbose"],
         )
 
-        self.assertEqual(inferencer.repo_path, "/path/to/repo")
+        self.assertEqual(inferencer.target_path, "/path/to/repo")
         self.assertEqual(inferencer.model_name, "claude-3-opus")
         self.assertEqual(inferencer.max_tokens, 16384)
         self.assertFalse(inferencer.no_create_commit)
@@ -64,11 +64,11 @@ class DevmateCliInferencerInitTest(unittest.TestCase):
         self.assertEqual(inferencer.privacy_type, "PUBLIC")
         self.assertEqual(inferencer.extra_cli_args, ["--verbose"])
 
-    def test_default_repo_path(self):
-        """Test that repo_path defaults to ~/fbsource."""
+    def test_default_target_path(self):
+        """Test that target_path defaults to ~/fbsource."""
         inferencer = DevmateCliInferencer()
         expected_path = os.path.expanduser("~/fbsource")
-        self.assertEqual(inferencer.repo_path, expected_path)
+        self.assertEqual(inferencer.target_path, expected_path)
 
 
 class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
@@ -77,7 +77,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_basic(self):
         """Test basic command construction."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             no_create_commit=True,
         )
 
@@ -93,7 +93,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_headless(self):
         """Test that --headless flag is added when headless=True."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             headless=True,
             no_create_commit=False,
         )
@@ -106,7 +106,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_dump_output(self):
         """Test that temp file is created and flag added when dump_output=True."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             dump_output=True,
             no_create_commit=False,
         )
@@ -125,7 +125,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_session_resume(self):
         """Test command construction with session resume."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             no_create_commit=False,
         )
 
@@ -145,7 +145,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_shell_escaping(self):
         """Test that special characters are properly escaped."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             no_create_commit=False,
         )
 
@@ -168,7 +168,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_timeout_percent(self):
         """Test that timeout percentage is added."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             timeout_percent=75,
             no_create_commit=False,
         )
@@ -180,7 +180,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_timeout_percent_zero(self):
         """Test that timeout_percent=0 is handled correctly (0 is valid)."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             timeout_percent=0,
             no_create_commit=False,
         )
@@ -192,7 +192,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_privacy_type(self):
         """Test that privacy type is added."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             privacy_type="PRIVATE",
             no_create_commit=False,
         )
@@ -204,7 +204,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_extra_cli_args(self):
         """Test that extra CLI args are appended."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             extra_cli_args=["--verbose", "--debug"],
             no_create_commit=False,
         )
@@ -217,7 +217,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_with_context_files(self):
         """Test that context files are added."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             context_files=["/path/to/file1.py", "/path/to/file2.py"],
             no_create_commit=False,
         )
@@ -230,7 +230,7 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     def test_construct_command_custom_config_name(self):
         """Test that custom config name is used."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             config_name="my_custom_config",
             no_create_commit=False,
         )
@@ -246,7 +246,7 @@ class DevmateCliInferencerParseOutputTest(unittest.TestCase):
 
     def test_parse_output_from_stdout(self):
         """Test parsing output from stdout."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         stdout = """Starting Devmate server...
 ================
@@ -270,7 +270,7 @@ Finished session abc123-def456
     def test_parse_output_from_dump_file(self):
         """Test parsing output from dump file when dump_output=True."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             dump_output=True,
         )
 
@@ -301,7 +301,7 @@ Finished session abc123-def456
     def test_parse_output_fallback_on_dump_error(self):
         """Test that parsing falls back to stdout when dump file has errors."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             dump_output=True,
         )
 
@@ -329,7 +329,7 @@ Finished session abc123-def456
 
     def test_parse_output_with_error(self):
         """Test parsing output when command fails."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         result = inferencer.parse_output("", "Error message", 1)
 
@@ -343,7 +343,7 @@ class DevmateCliInferencerCleanupTest(unittest.TestCase):
 
     def test_cleanup_output_file(self):
         """Test that temp file is properly cleaned up."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         # Create a temp file
         fd, temp_file = tempfile.mkstemp(suffix=".json")
@@ -359,7 +359,7 @@ class DevmateCliInferencerCleanupTest(unittest.TestCase):
 
     def test_cleanup_output_file_nonexistent(self):
         """Test cleanup when file doesn't exist (should not raise)."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
         inferencer._output_file = "/nonexistent/path/file.json"
 
         # Should not raise
@@ -373,7 +373,7 @@ class DevmateCliInferencerStreamingTest(unittest.TestCase):
     def test_streaming_disables_dump_output(self):
         """Test that dump_output is disabled during streaming."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             dump_output=True,
         )
 
@@ -391,7 +391,7 @@ class DevmateCliInferencerStreamingTest(unittest.TestCase):
     def test_streaming_restores_dump_output_on_error(self):
         """Test that dump_output is restored even if streaming raises."""
         inferencer = DevmateCliInferencer(
-            repo_path="/test/repo",
+            target_path="/test/repo",
             dump_output=True,
         )
 
@@ -415,7 +415,7 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
         ``infer`` resolves ``resume=True`` internally based on the presence
         of ``session_id`` (see ``_infer``'s session resolution).
         """
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
         inferencer.active_session_id = "active-session-123"
 
         with patch.object(inferencer, "infer") as mock_infer:
@@ -430,7 +430,7 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
 
     def test_resume_session_without_session_raises(self):
         """Test that resume_session raises when no session available."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
         inferencer.active_session_id = None
 
         with self.assertRaises(ValueError) as context:
@@ -445,7 +445,7 @@ class DevmateCliInferencerSessionTest(unittest.TestCase):
         ``infer`` with the ``new_session=True`` flag (which the inferencer
         uses internally to force a fresh session).
         """
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
         inferencer.active_session_id = "old-session-123"
 
         with patch.object(inferencer, "infer") as mock_infer:
@@ -462,7 +462,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_extract_session_id(self):
         """Test session ID extraction from output."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         output = "Session ID: abc123-def456-789"
         session_id = inferencer._extract_session_id(output)
@@ -471,7 +471,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_extract_session_id_not_found(self):
         """Test session ID extraction when not present."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         output = "No session info here"
         session_id = inferencer._extract_session_id(output)
@@ -480,7 +480,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_extract_trajectory_url(self):
         """Test trajectory URL extraction."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         output = "Trajectory: https://www.internalfb.com/intern/devai/devmate/inspector/abc123"
         url = inferencer._extract_trajectory_url(output)
@@ -492,7 +492,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_is_session_info_line(self):
         """Test session info line detection."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         self.assertTrue(inferencer._is_session_info_line("Starting Devmate server..."))
         self.assertTrue(inferencer._is_session_info_line("Session ID: abc123"))
@@ -504,7 +504,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_get_response_text_success(self):
         """Test get_response_text on successful result."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         result = {"success": True, "output": "The response text"}
         text = inferencer.get_response_text(result)
@@ -513,7 +513,7 @@ class DevmateCliInferencerHelperMethodsTest(unittest.TestCase):
 
     def test_get_response_text_failure(self):
         """Test get_response_text on failed result."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         result = {"success": False, "error": "Something went wrong"}
         text = inferencer.get_response_text(result)
@@ -526,7 +526,7 @@ class DevmateCliInferencerDumpDataExtractionTest(unittest.TestCase):
 
     def test_extract_output_from_dump_with_final_response(self):
         """Test extracting output when final_response is present."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         dump_data = {"final_response": "This is the final response", "other": "data"}
         output = inferencer._extract_output_from_dump(dump_data)
@@ -535,7 +535,7 @@ class DevmateCliInferencerDumpDataExtractionTest(unittest.TestCase):
 
     def test_extract_output_from_dump_without_final_response(self):
         """Test extracting output when final_response is not present."""
-        inferencer = DevmateCliInferencer(repo_path="/test/repo")
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
 
         dump_data = {"some_key": "some_value", "other": 123}
         output = inferencer._extract_output_from_dump(dump_data)

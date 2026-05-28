@@ -45,21 +45,21 @@ if os.path.isdir(_rich_utils_src) and _rich_utils_src not in sys.path:
     sys.path.insert(0, _rich_utils_src)
 
 
-def make_inferencer(root_folder: str, model: str):
+def make_inferencer(target_path: str, model: str):
     """Create a fresh DevmateSDKInferencer (each call uses its own client)."""
     from agent_foundation.common.inferencers.agentic_inferencers.external.devmate import (
         DevmateSDKInferencer,
     )
 
     return DevmateSDKInferencer(
-        root_folder=root_folder,
+        target_path=target_path,
         model_name=model,
     )
 
 
 # -- Demo 1: Async single call (ainfer) --------------------------------------
 
-async def demo_async_single(query: str, root_folder: str, model: str) -> None:
+async def demo_async_single(query: str, target_path: str, model: str) -> None:
     """ainfer: returns the full response text at once."""
     print("=" * 70)
     print("MODE 1: Async Single Call (ainfer)")
@@ -67,7 +67,7 @@ async def demo_async_single(query: str, root_folder: str, model: str) -> None:
     print(f"Query: {query}")
     print()
 
-    inf = make_inferencer(root_folder, model)
+    inf = make_inferencer(target_path, model)
 
     start = time.time()
     result = await inf.ainfer(query)
@@ -86,7 +86,7 @@ async def demo_async_single(query: str, root_folder: str, model: str) -> None:
 
 # -- Demo 2: Async streaming (ainfer_streaming) -------------------------------
 
-async def demo_async_streaming(query: str, root_folder: str, model: str) -> None:
+async def demo_async_streaming(query: str, target_path: str, model: str) -> None:
     """Async streaming: yields text deltas as the Devmate SDK emits events."""
     print("=" * 70)
     print("MODE 2: Async Streaming (ainfer_streaming)")
@@ -94,7 +94,7 @@ async def demo_async_streaming(query: str, root_folder: str, model: str) -> None
     print(f"Query: {query}")
     print()
 
-    inf = make_inferencer(root_folder, model)
+    inf = make_inferencer(target_path, model)
 
     start = time.time()
     first_chunk_time = None
@@ -127,7 +127,7 @@ async def demo_async_streaming(query: str, root_folder: str, model: str) -> None
 
 # -- Demo 3: SDKInferencerResponse -------------------------------------------
 
-async def demo_sdk_response(query: str, root_folder: str, model: str) -> None:
+async def demo_sdk_response(query: str, target_path: str, model: str) -> None:
     """SDKInferencerResponse: structured result with session_id and tokens."""
     print("=" * 70)
     print("MODE 3: SDKInferencerResponse (return_sdk_response=True)")
@@ -135,7 +135,7 @@ async def demo_sdk_response(query: str, root_folder: str, model: str) -> None:
     print(f"Query: {query}")
     print()
 
-    inf = make_inferencer(root_folder, model)
+    inf = make_inferencer(target_path, model)
 
     start = time.time()
     response = await inf.ainfer(query, return_sdk_response=True)
@@ -160,7 +160,7 @@ async def demo_sdk_response(query: str, root_folder: str, model: str) -> None:
 
 # -- Demo 4: Sync bridge (_infer) --------------------------------------------
 
-def demo_sync_single(query: str, root_folder: str, model: str) -> None:
+def demo_sync_single(query: str, target_path: str, model: str) -> None:
     """Sync _infer bridge: for non-async code (creates a fresh event loop)."""
     print("=" * 70)
     print("MODE 4: Sync Single Call (via _infer bridge)")
@@ -168,7 +168,7 @@ def demo_sync_single(query: str, root_folder: str, model: str) -> None:
     print(f"Query: {query}")
     print()
 
-    inf = make_inferencer(root_folder, model)
+    inf = make_inferencer(target_path, model)
 
     start = time.time()
     result = inf(query)
@@ -219,24 +219,24 @@ def main():
 
     print()
     print("Devmate SDK Inferencer Demo")
-    print(f"   Root folder: {args.root_folder}")
+    print(f"   Root folder: {args.target_path}")
     print(f"   Model:       {args.model}")
     print()
 
     # Demo 1: Async single call
-    asyncio.run(demo_async_single(args.query, args.root_folder, args.model))
+    asyncio.run(demo_async_single(args.query, args.target_path, args.model))
 
     # Demo 2: Async streaming
     if args.examples >= 2:
-        asyncio.run(demo_async_streaming(args.query, args.root_folder, args.model))
+        asyncio.run(demo_async_streaming(args.query, args.target_path, args.model))
 
     # Demo 3: SDKInferencerResponse
     if args.examples >= 3:
-        asyncio.run(demo_sdk_response(args.query, args.root_folder, args.model))
+        asyncio.run(demo_sdk_response(args.query, args.target_path, args.model))
 
     # Demo 4: Sync bridge
     if args.examples >= 4:
-        demo_sync_single(args.query, args.root_folder, args.model)
+        demo_sync_single(args.query, args.target_path, args.model)
 
     print("All demos complete!")
 

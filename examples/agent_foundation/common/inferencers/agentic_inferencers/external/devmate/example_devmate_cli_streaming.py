@@ -45,7 +45,7 @@ def create_inferencer(args):
     )
 
     return DevmateCliInferencer(
-        repo_path=args.repo_path,
+        target_path=args.target_path,
         model_name=args.model,
         max_tokens=args.max_tokens,
         no_create_commit=True,
@@ -220,7 +220,7 @@ def main():
     print()
     print("🤖 Devmate CLI Inferencer Demo")
     print(f"   Model:        {inferencer.model_name}")
-    print(f"   Repo path:    {inferencer.repo_path}")
+    print(f"   Repo path:    {inferencer.target_path}")
     print(f"   Config name:  {inferencer.config_name}")
     print(f"   Max tokens:   {inferencer.max_tokens}")
     print()

@@ -5,7 +5,7 @@ via HTTP REST API + Server-Sent Events (SSE) for streaming inference.
 
 Usage::
 
-    async with RovoDevServeInferencer(working_dir="/path/to/repo") as inf:
+    async with RovoDevServeInferencer(target_path="/path/to/repo") as inf:
         # Streaming
         async for chunk in inf.ainfer_streaming("Explain this codebase"):
             print(chunk, end="")
@@ -53,7 +53,10 @@ class RovoDevServeInferencer(StreamingInferencerBase):
 
     Attributes:
         acli_path: Path to acli binary (auto-detected if None).
-        working_dir: Workspace directory for the agent.
+        target_path: Workspace directory for the agent (inherited from
+            ``InferencerBase``). Read at call time via ``effective_cwd``
+            so orchestrator-spawned children pick up ``workspace.root``
+            when target_path is None.
         config_file: Path to rovodev config file.
         site_url: Atlassian site URL for billing.
         port: Serve port (auto-selected if None).
@@ -64,9 +67,15 @@ startup_timeout: Max seconds to wait for server startup.
         agent_mode: Agent mode ("ask", "plan", or "default").
     """
 
+    # RovoDevServe spawns ``acli rovodev serve`` which exposes file-edit /
+    # write tools, so it HAS local file access. Override ``InferencerBase``'s
+    # False default (inferencer_base.py:117) so the template feed and
+    # ``{% if has_local_access %}`` gates render correctly. Mirrors
+    # ``RovoDevCliInferencer.has_local_access=True``.
+    has_local_access: bool = attrib(default=True)
+
     # ---- Configuration attributes ----
     acli_path: Optional[str] = attrib(default=None)
-    working_dir: Optional[str] = attrib(default=None)
     config_file: Optional[str] = attrib(default=None)
     site_url: Optional[str] = attrib(default=None)
     port: Optional[int] = attrib(default=None)
@@ -89,8 +98,6 @@ startup_timeout: Max seconds to wait for server startup.
         if self.acli_path is None:
             import shutil
             self.acli_path = shutil.which(ACLI_BINARY)
-        if self.working_dir is None:
-            self.working_dir = os.getcwd()
         super().__attrs_post_init__()
 
     # =========================================================================
@@ -136,7 +143,7 @@ startup_timeout: Max seconds to wait for server startup.
 
         self._server_process = await asyncio.create_subprocess_exec(
             *cmd,
-            cwd=self.working_dir,
+            cwd=self.effective_cwd,
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

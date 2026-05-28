@@ -51,7 +51,7 @@ def test_sync_single_call(query: str):
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],  # No tools for simple question
             idle_timeout_seconds=120,
         )
@@ -101,7 +101,7 @@ def test_sync_multiple_calls():
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         )
@@ -153,7 +153,7 @@ async def test_async_single_call(query: str):
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         )
@@ -204,7 +204,7 @@ async def test_async_context_manager():
         print("\nUsing async context manager (single connection, multiple queries)...")
 
         async with ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         ) as inferencer:
@@ -262,7 +262,7 @@ async def test_sdk_response_format():
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         )
@@ -321,7 +321,7 @@ def test_sync_streaming(query: str):
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         )
@@ -384,7 +384,7 @@ async def test_async_streaming(query: str):
 
     try:
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
         )
@@ -448,7 +448,7 @@ async def test_session_continuation():
     try:
         # Create inferencer with auto_resume=True (default)
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/tmp",
+            target_path="/tmp",
             allowed_tools=[],
             idle_timeout_seconds=120,
             auto_resume=True,

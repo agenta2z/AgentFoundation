@@ -51,7 +51,7 @@ def test_sync_single_call(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
         )
@@ -105,7 +105,7 @@ def test_sync_with_headless(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             headless=True,
             no_create_commit=True,
@@ -153,7 +153,7 @@ def test_sync_with_dump_output(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             dump_output=True,
             no_create_commit=True,
@@ -204,7 +204,7 @@ def test_streaming_call(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
         )
@@ -270,7 +270,7 @@ def test_session_continuation():
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
         )
@@ -336,7 +336,7 @@ async def test_async_single_call(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
         )
@@ -389,7 +389,7 @@ async def test_async_streaming(query: str):
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
         )
@@ -450,7 +450,7 @@ async def test_async_session_continuation():
 
     try:
         inferencer = DevmateCliInferencer(
-            repo_path="/data/users/zgchen/fbsource",
+            target_path="/data/users/zgchen/fbsource",
             model_name="claude-sonnet-4.5",
             no_create_commit=True,
             auto_resume=True,

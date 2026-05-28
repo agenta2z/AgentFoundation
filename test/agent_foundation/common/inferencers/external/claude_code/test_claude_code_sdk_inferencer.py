@@ -19,7 +19,7 @@ class ClaudeCodeSdkInferencerInitTest(unittest.TestCase):
         """Test inferencer can be created with default values."""
         inferencer = ClaudeCodeSdkInferencer()
 
-        self.assertIsNone(inferencer.root_folder)
+        self.assertIsNone(inferencer.target_path)
         self.assertEqual(inferencer.system_prompt, "")
         self.assertEqual(inferencer.idle_timeout_seconds, 1800)
         self.assertEqual(inferencer.allowed_tools, ["Read", "Write", "Bash"])
@@ -28,14 +28,14 @@ class ClaudeCodeSdkInferencerInitTest(unittest.TestCase):
     def test_custom_initialization(self):
         """Test inferencer with custom parameters."""
         inferencer = ClaudeCodeSdkInferencer(
-            root_folder="/path/to/repo",
+            target_path="/path/to/repo",
             system_prompt="Custom prompt",
             idle_timeout_seconds=900,
             allowed_tools=["Read"],
             model_id="claude-3",
         )
 
-        self.assertEqual(inferencer.root_folder, "/path/to/repo")
+        self.assertEqual(inferencer.target_path, "/path/to/repo")
         self.assertEqual(inferencer.system_prompt, "Custom prompt")
         self.assertEqual(inferencer.idle_timeout_seconds, 900)
         self.assertEqual(inferencer.allowed_tools, ["Read"])

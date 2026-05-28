@@ -40,14 +40,14 @@ if os.path.isdir(_rich_utils_src) and _rich_utils_src not in sys.path:
     sys.path.insert(0, _rich_utils_src)
 
 
-def create_inferencer(working_dir: str, output_file: str | None = None):
+def create_inferencer(target_path: str, output_file: str | None = None):
     """Create a RovoDevCliInferencer instance."""
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev import (
         RovoDevCliInferencer,
     )
 
     return RovoDevCliInferencer(
-        target_path=working_dir,
+        target_path=target_path,
         output_file=output_file,
         idle_timeout_seconds=600,
         tool_use_idle_timeout_seconds=600,
@@ -59,17 +59,17 @@ def create_inferencer(working_dir: str, output_file: str | None = None):
 # =========================================================================
 
 
-def demo_sync(working_dir: str, query: str) -> None:
+def demo_sync(target_path: str, query: str) -> None:
     """Non-streaming one-shot inference."""
     print("=" * 70)
     print("📦 Demo: Sync One-Shot Inference")
     print("=" * 70)
     print()
 
-    out_file = os.path.join(working_dir, "rovodev_output.txt")
-    inferencer = create_inferencer(working_dir, output_file=out_file)
+    out_file = os.path.join(target_path, "rovodev_output.txt")
+    inferencer = create_inferencer(target_path, output_file=out_file)
 
-    print(f"  Working dir: {working_dir}")
+    print(f"  Working dir: {target_path}")
     print(f"  acli path:   {inferencer.acli_path}")
     print()
     print(f"  You: {query}")
@@ -90,16 +90,16 @@ def demo_sync(working_dir: str, query: str) -> None:
 # =========================================================================
 
 
-def demo_streaming(working_dir: str, query: str) -> None:
+def demo_streaming(target_path: str, query: str) -> None:
     """Streaming inference — prints tokens as they arrive."""
     print("=" * 70)
     print("🌊 Demo: Streaming Inference")
     print("=" * 70)
     print()
 
-    inferencer = create_inferencer(working_dir)
+    inferencer = create_inferencer(target_path)
 
-    print(f"  Working dir: {working_dir}")
+    print(f"  Working dir: {target_path}")
     print()
     print(f"  You: {query}")
     print(f"  Rovo Dev: ", end="", flush=True)
@@ -126,15 +126,15 @@ def demo_streaming(working_dir: str, query: str) -> None:
 # =========================================================================
 
 
-def demo_multi_turn_streaming(working_dir: str) -> None:
+def demo_multi_turn_streaming(target_path: str) -> None:
     """Multi-turn conversation with streaming output."""
     print("=" * 70)
     print("🔄 Demo: Multi-Turn Streaming Conversation")
     print("=" * 70)
     print()
 
-    out_file = os.path.join(working_dir, "rovodev_output.txt")
-    inferencer = create_inferencer(working_dir, output_file=out_file)
+    out_file = os.path.join(target_path, "rovodev_output.txt")
+    inferencer = create_inferencer(target_path, output_file=out_file)
 
     turns = [
         "My favorite programming language is Rust. Just acknowledge this.",
@@ -193,7 +193,7 @@ def main():
     )
     args = parser.parse_args()
 
-    working_dir = args.working_dir or tempfile.mkdtemp(prefix="rovodev_demo_")
+    target_path = args.target_path or tempfile.mkdtemp(prefix="rovodev_demo_")
 
     # Verify acli is installed
     import shutil
@@ -204,18 +204,18 @@ def main():
 
     print()
     print("🤖 Rovo Dev CLI Inferencer Demo")
-    print(f"   Working dir: {working_dir}")
+    print(f"   Working dir: {target_path}")
     print()
 
     try:
         if args.mode in ("sync", "all"):
-            demo_sync(working_dir, args.query)
+            demo_sync(target_path, args.query)
 
         if args.mode in ("streaming", "all"):
-            demo_streaming(working_dir, args.query)
+            demo_streaming(target_path, args.query)
 
         if args.mode in ("multi-turn", "all"):
-            demo_multi_turn_streaming(working_dir)
+            demo_multi_turn_streaming(target_path)
 
         print("🎉 Demo complete!")
 
