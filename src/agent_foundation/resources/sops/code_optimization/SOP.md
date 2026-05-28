@@ -25,7 +25,7 @@ Once confirmed, perform in-depth static analysis of the target codebase at `{{ w
 ### Phase 1b -- Codebase Documentation Review
 [__depends on__ Phase 1]
 
-[__requires confirmation__] After the codebase investigation completes, present the results to the user for review. Use a `confirmation tool` with the `view` parameter pointing to the generated documentation. Summarize key architectural findings (top hotspots, biggest files, ownership map, refactor candidates) and invite the user to review the full documentation via the "View Documentation" button. Only proceed to the next Phase after the user confirms they are satisfied.
+[__requires confirmation__] After the codebase investigation completes, present the results to the user for review. Use a `confirmation` conversation tool with the `view` parameter pointing to the generated documentation. Summarize key architectural findings (top hotspots, biggest files, ownership map, refactor candidates) and invite the user to review the full documentation via the "View Documentation" button. Only proceed to the next Phase after the user confirms they are satisfied.
 
 ## Phase 2 -- System & Signals Investigation
 [__depends on__ Phase 1b]

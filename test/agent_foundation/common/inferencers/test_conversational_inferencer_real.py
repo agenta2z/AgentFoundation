@@ -4,7 +4,7 @@
 
 Uses real MetagenApiInferencer (real LLM calls) with:
 - Mock tool executor (simulates tool execution without side effects)
-- Real JinjaPromptRenderer (real template rendering)
+- Real TemplateManagerPromptRenderer (real template rendering)
 - Real prior_context and dynamic_context
 
 Usage:
@@ -46,14 +46,24 @@ def _make_conversational_inferencer(**kwargs):
 
 
 def _make_prompt_renderer():
-    from agent_foundation.common.inferencers.agentic_inferencers.conversational.prompt_rendering import (
-        JinjaPromptRenderer,
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.template_manager_renderer import (
+        TemplateManagerPromptRenderer,
+    )
+    from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
+        TemplateManager,
     )
 
     template_dir = (
         Path(__file__).resolve().parents[4] / "src" / "resources" / "prompt_templates"
     )
-    return JinjaPromptRenderer(str(template_dir))
+    return TemplateManagerPromptRenderer(
+        template_manager=TemplateManager(
+            templates=str(template_dir),
+            active_template_root_space="conversation",
+            active_template_type="main",
+        ),
+        template_key="initial",
+    )
 
 
 def _make_tool_registry():

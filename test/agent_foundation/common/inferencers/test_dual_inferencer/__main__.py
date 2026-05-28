@@ -487,7 +487,6 @@ def main(
             consensus_threshold=Severity[consensus_threshold],
             enable_counter_feedback=enable_counter_feedback,
         ),
-        prompt_formatter=prompt_tm,
         initial_prompt="initial",
         review_prompt="review",
         followup_prompt="followup",

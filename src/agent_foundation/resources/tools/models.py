@@ -103,6 +103,8 @@ class ToolDefinition:
     aliases: list[str] = field(default_factory=list)
     is_bridge: bool = False
     asynchronous: bool = False  # Fire-and-forget: tool runs in background, turn completes immediately
+    concurrency: str = "blocking"  # "blocking" | "async_background" | "async_awaitable"
+    yolo_default: dict[str, Any] | None = None  # Per-tool yolo auto-advance config
     parameters: list[ParameterDef] = field(default_factory=list)
     subcommands: list[SubcommandDef] = field(default_factory=list)
     returns: str = ""
@@ -164,6 +166,8 @@ class ToolDefinition:
             aliases=data.get("aliases", []),
             is_bridge=data.get("is_bridge", False),
             asynchronous=data.get("asynchronous", False),
+            concurrency=data.get("concurrency", "async_background" if data.get("asynchronous") else "blocking"),
+            yolo_default=data.get("yolo_default"),
             parameters=[
                 ParameterDef.from_dict(p) for p in data.get("parameters", [])
             ],

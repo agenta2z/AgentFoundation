@@ -23,3 +23,5 @@ class WorkflowDefinition:
     available_tools: list[str] = field(default_factory=list)
     requires_tools: list[str] = field(default_factory=list)
     available_modes: list[str] = field(default_factory=lambda: ["default", "yolo"])
+    keywords: list[str] = field(default_factory=list)
+    example_requests: list[str] = field(default_factory=list)

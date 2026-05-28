@@ -80,7 +80,7 @@ For each issue found, assign an `issue_id` in the format `<round_index>-<issue_i
 - **COSMETIC**: Trivial style/naming suggestions only
 
 You then judge the `overall_severity` of the implementation, and then judge if you `approve` the implementation.
-You approve the implementation only if there are only one or two trivial COSMETIC issues.
+You approve the implementation only if {{ approval_guidance }}
 
 If the implementation has no meaningful issues, return an empty `issues` array and set `approve: true`.
 
@@ -100,7 +100,7 @@ If the implementation has no meaningful issues, return an empty `issues` array a
   ],
   "reasoning": "<overall assessment and reasoning for your verdict>",
   "overall_severity": "<CRITICAL|MAJOR|MINOR|COSMETIC|NONE>",
-  "approve": <true if no CRITICAL/MAJOR issues>
+  "approve": <{{ approve_hint }}>
 }
 ```
 </ResponseSchema>

@@ -61,7 +61,7 @@ class WorkflowRegistry:
         raw_markdown = md_file.read_text(encoding="utf-8")
         sop = SOPManager.parse_markdown(raw_markdown)
 
-        workflow_id = md_file.stem
+        workflow_id = md_file.parent.name if md_file.stem == "SOP" else md_file.stem
         name = workflow_id.replace("_", " ").replace("-", " ").title()
         description = ""
 
@@ -91,17 +91,18 @@ class WorkflowRegistry:
     @staticmethod
     def _default_search_paths() -> list[Path]:
         paths = []
-        af_resources = (
+
+        # Primary: new resources/sops/ layout (PR-1 migration)
+        af_sops = (
             Path(__file__).resolve().parent.parent.parent
             / "resources"
-            / "prompt_templates"
-            / "conversation"
-            / "main"
-            / "_variables"
-            / "workflow_sop"
+            / "sops"
         )
-        if af_resources.is_dir():
-            paths.append(af_resources)
+        if af_sops.is_dir():
+            for child in sorted(af_sops.iterdir()):
+                sop_md = child / "SOP.md"
+                if child.is_dir() and sop_md.is_file():
+                    paths.append(child)
 
         user_dir = Path.home() / ".agent_foundation" / "workflows"
         if user_dir.is_dir():

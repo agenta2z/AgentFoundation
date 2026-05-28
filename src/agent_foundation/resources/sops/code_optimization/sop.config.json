@@ -1,0 +1,12 @@
+{
+  "name": "code_optimization",
+  "display_name": "Code Optimization",
+  "version": "1.0.0",
+  "description": "Investigate a codebase end-to-end — static analysis, system signals, operational telemetry — then synthesize ranked refactor/fix/observability proposals and implement selected items. Use when the user wants to optimize, refactor, improve performance, or reduce tech debt in a codebase.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["set_workflow_target_path", "understand_codebase", "investigate_system", "research_propose", "task"],
+  "labels": ["optimization", "refactoring", "code-quality"],
+  "linear_only": false,
+  "max_goto_iterations": 5,
+  "max_total_nodes": 100
+}

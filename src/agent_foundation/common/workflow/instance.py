@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -25,8 +25,8 @@ class WorkflowInstance:
     status: Literal["active", "suspended", "completed", "aborted"] = "active"
     yolo_mode: bool = False
     workspace: Path = field(default_factory=lambda: Path("."))
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    last_active_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_active_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     graph: Optional[WorkGraph] = field(default=None, repr=False)
     tracker: Optional[StateGraphTracker] = field(default=None, repr=False)

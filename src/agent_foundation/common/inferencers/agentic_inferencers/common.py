@@ -273,6 +273,45 @@ class ConsensusConfig:
                 f"severity_levels={self.severity_levels!r}"
             )
 
+    def acceptable_severities(self) -> tuple:
+        """Severity levels at or below threshold, e.g. ``('NONE', 'COSMETIC')``."""
+        idx = self.severity_levels.index(self.consensus_threshold)
+        return self.severity_levels[: idx + 1]
+
+    def blocking_severities(self) -> tuple:
+        """Severity levels above threshold, e.g. ``('MINOR', 'MAJOR', 'CRITICAL')``."""
+        idx = self.severity_levels.index(self.consensus_threshold)
+        return self.severity_levels[idx + 1 :]
+
+    def approve_hint(self) -> str:
+        """Short hint for JSON schema ``"approve"`` field.
+
+        Picks whichever list (acceptable vs blocking) is shorter::
+
+            COSMETIC → 'true if only observing NONE/COSMETIC issues'
+            MINOR    → 'true if no MAJOR/CRITICAL issues'
+            MAJOR    → 'true if no CRITICAL issues'
+        """
+        acceptable = self.acceptable_severities()
+        blocking = self.blocking_severities()
+        if not blocking:
+            return "true (all severity levels are acceptable)"
+        if len(acceptable) <= len(blocking):
+            return f"true if only observing {'/'.join(acceptable)} issues"
+        return f"true if no {'/'.join(blocking)} issues"
+
+    def approval_guidance(self) -> str:
+        """Prose guidance for when to set ``approve: true``."""
+        acceptable = self.acceptable_severities()
+        blocking = self.blocking_severities()
+        if not blocking:
+            return "there are no severity restrictions — all levels are acceptable."
+        return (
+            f"all issues are at most {self.consensus_threshold} severity "
+            f"(i.e., {' or '.join(acceptable)}). "
+            f"Any issue rated {', '.join(blocking)} means you must NOT approve."
+        )
+
 
 @attrs
 class ConsensusIterationRecord:

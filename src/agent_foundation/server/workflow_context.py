@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,47 +12,6 @@ from typing import Any
 from agent_foundation.common.workflow_constants import _WORKFLOW_DESC_PHASE_RE  # noqa: E402
 
 logger: logging.Logger = logging.getLogger(__name__)
-
-# Strategy -> _variables/ filename mapping.
-# Currently only "default" exists. Strategy-specific descriptions
-# will be handled as a separate concept downstream.
-STRATEGY_FILE_MAP: dict[str, str] = {
-    "default": "default",
-}
-
-
-def load_workflow_description(strategy: str, templates_dir: str = "") -> str:
-    """Load a versioned workflow description from _variables/ files.
-
-    Follows the same pattern as PTI's _load_analysis_request_template().
-    If the file doesn't exist, returns an empty string (template renders empty).
-    """
-    filename = STRATEGY_FILE_MAP.get(strategy, "default")
-    rel_parts = ("conversation", "main", "_variables", "workflow_description", f"{filename}.jinja2")
-
-    # Try importlib.resources first (works with Buck link-trees)
-    if not templates_dir:
-        try:
-            from importlib import resources
-
-            # TODO: migrate prompt_templates resource package
-            pkg = resources.files("rankevolve.src.resources.prompt_templates")
-            resource = pkg.joinpath(*rel_parts)
-            return resource.read_text(encoding="utf-8")
-        except Exception:
-            pass
-
-    # Fallback: filesystem path
-    if not templates_dir:
-        templates_dir = str(
-            os.path.join(os.path.dirname(__file__), "..", "resources", "prompt_templates")
-        )
-    var_path = os.path.join(templates_dir, *rel_parts)
-    if os.path.isfile(var_path):
-        with open(var_path) as f:
-            return f.read()
-    logger.warning("Workflow description file not found: %s", var_path)
-    return ""
 
 
 @dataclass
@@ -84,14 +42,8 @@ class WorkflowPhaseRecord:
 
 @dataclass
 class WorkflowContext:
-    """Session-level workflow state — tracked across turns, persisted, injected into prompts.
+    """Session-level workflow state — tracked across turns, persisted, injected into prompts."""
 
-    Supports two modes for session_context values:
-    - Full string: Dynamic values computed at access time (workflow_status via to_status_text())
-    - Versioned variable: workflow_description loaded from _variables/ at strategy selection time
-    """
-
-    # Strategy selection (determines which workflow_description version to load)
     strategy: str = "default"
     workflow_description: str = ""
 
@@ -137,15 +89,9 @@ class WorkflowContext:
     # Optional StateGraphTracker for SOP-driven state management
     state_tracker: Any = None  # StateGraphTracker | None
 
-    def __post_init__(self) -> None:
-        """Load default workflow description if not already set."""
-        if not self.workflow_description:
-            self.workflow_description = load_workflow_description(self.strategy)
-
-    def set_strategy(self, strategy: str, templates_dir: str = "") -> None:
-        """Set evolution strategy and load the corresponding workflow description."""
+    def set_strategy(self, strategy: str) -> None:
+        """Set the active strategy."""
         self.strategy = strategy
-        self.workflow_description = load_workflow_description(strategy, templates_dir)
 
     @property
     def phase_names(self) -> dict[str, str]:

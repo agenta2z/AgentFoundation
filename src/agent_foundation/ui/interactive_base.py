@@ -1,12 +1,20 @@
 from abc import ABC, abstractmethod
 import asyncio
+from contextvars import ContextVar
 from enum import StrEnum
-from typing import Tuple, Any, Union, Dict, Iterable, List
+from typing import Tuple, Any, Union, Dict, Iterable, List, Optional, TYPE_CHECKING
 
 from attr import attrs, attrib
 
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_utils import iter_
+
+if TYPE_CHECKING:
+    from agent_foundation.ui.interaction_serializer import InteractionSerializer
+
+_CURRENT_INTERACTION_CALLER: ContextVar[str] = ContextVar(
+    "interaction_caller", default=""
+)
 
 LOG_TYPE_USER_INPUT = 'UserInput'
 LOG_TYPE_SYSTEM_RESPONSE = 'SystemResponse'
@@ -59,6 +67,17 @@ class InteractiveBase(Debuggable):
     user_name: str = attrib(default="User")
     log_input_content: bool = attrib(default=True, kw_only=True)
     log_response_content: bool = attrib(default=True, kw_only=True)
+    _serializer: Optional["InteractionSerializer"] = attrib(default=None, init=False, repr=False)
+
+    def enable_serialization(self, serializer: "InteractionSerializer") -> None:
+        """Activate per-caller serialization. Idempotent with same serializer."""
+        if self._serializer is not None and self._serializer is not serializer:
+            raise ValueError("Interactive already has a different serializer attached")
+        self._serializer = serializer
+
+    def disable_serialization(self) -> None:
+        """Detach serializer. Reverts to direct single-caller behavior."""
+        self._serializer = None
 
 
     def get_user_input_string(self, user_input: Any) -> str:
@@ -196,7 +215,10 @@ class InteractiveBase(Debuggable):
         self.reset_input(flag)
 
     async def aget_input(self) -> Any:
-        """Async wrapper around get_input(); subclasses with native async override."""
+        """Async wrapper. With serializer: waits for the response delivered to
+        THIS caller's request. Without serializer: direct behavior."""
+        if self._serializer is not None:
+            return await self._serializer.await_response_for_caller()
         return await asyncio.to_thread(self.get_input)
 
     async def asend_response(
@@ -205,5 +227,19 @@ class InteractiveBase(Debuggable):
         flag: InteractionFlags = InteractionFlags.TurnCompleted,
         **kwargs,
     ) -> None:
-        """Async wrapper around send_response(); subclasses with native async override."""
+        """Async wrapper. With serializer: enqueues + returns. Without: direct."""
+        if self._serializer is not None:
+            await self._serializer.enqueue_send(
+                interactive=self, response=response, flag=flag, kwargs=kwargs,
+            )
+            return
+        await asyncio.to_thread(self.send_response, response, flag, **kwargs)
+
+    async def _direct_send(
+        self,
+        response: Union[Any, List, Tuple],
+        flag: InteractionFlags = InteractionFlags.TurnCompleted,
+        **kwargs,
+    ) -> None:
+        """Send without serializer check — used by InteractionSerializer."""
         await asyncio.to_thread(self.send_response, response, flag, **kwargs)

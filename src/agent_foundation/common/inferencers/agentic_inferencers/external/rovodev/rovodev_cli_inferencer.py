@@ -528,12 +528,15 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     def _get_clean_output_for_cache(self) -> Optional[str]:
         """Read clean output from --output-file while it still exists.
 
-        Called from the base class _ainfer_streaming() finally block — at this
-        point the RovoDevCliInferencer.ainfer_streaming() finally hasn't run yet,
-        so _current_output_file contextvar is still set and the file still exists.
+        Called from the base class ``ainfer_streaming()`` finally block —
+        at this point the subclass finally hasn't run yet, so the
+        ``--output-file`` still exists on disk.
 
-        This is intentionally separate from get_final_output() which reads
-        _last_clean_output (set in ainfer_streaming() finally, AFTER this runs).
+        Single read, dual use: the returned content overwrites the stream
+        cache (base class), and is also stored in ``_last_clean_output``
+        for the response object (used by ``_ainfer()`` and
+        ``get_final_output()``).  The subclass finally only needs to
+        handle file cleanup — no second read required.
         """
         if not self.enable_legacy:
             return None
@@ -544,6 +547,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 try:
                     content = p.read_text(encoding="utf-8").strip()
                     if content:
+                        self._last_clean_output = content
                         logger.debug(
                             "[%s] _get_clean_output_for_cache: read %d chars from %s",
                             self.__class__.__name__, len(content), p,
@@ -677,24 +681,22 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             async for chunk in super().ainfer_streaming(inference_input, inference_config, **kwargs):
                 yield chunk
         finally:
-            # Read clean output BEFORE deleting the temp file.
-            # get_final_output() will be called after this generator is exhausted,
-            # by which point the file is gone — so we pre-load it here.
+            # _last_clean_output is already set by _get_clean_output_for_cache()
+            # (called from the base class finally, which runs before this one).
+            # We only need to handle cleanup and a defensive fallback for when
+            # the cache path was disabled (no cache_file → base finally skipped
+            # the _get_clean_output_for_cache call).
             if auto_output_file:
-                logger.info("[%s] ainfer_streaming reading clean output from: %s", self.__class__.__name__, auto_output_file)
-                try:
-                    p = Path(auto_output_file)
-                    if p.exists():
-                        content = p.read_text(encoding="utf-8").strip()
-                        self._last_clean_output = content if content else None
-                        logger.info("[%s] _last_clean_output: %d chars", self.__class__.__name__, len(content) if content else 0)
-                    else:
+                if not getattr(self, "_last_clean_output", None):
+                    try:
+                        p = Path(auto_output_file)
+                        if p.exists():
+                            content = p.read_text(encoding="utf-8").strip()
+                            self._last_clean_output = content if content else None
+                        else:
+                            self._last_clean_output = None
+                    except OSError:
                         self._last_clean_output = None
-                        logger.warning("[%s] --output-file not found: %s", self.__class__.__name__, auto_output_file)
-                except OSError as e:
-                    self._last_clean_output = None
-                    logger.warning("[%s] Failed to read --output-file: %s", self.__class__.__name__, e)
-                # Delete temp file and clear contextvar
                 try:
                     Path(auto_output_file).unlink(missing_ok=True)
                 except OSError:
@@ -702,6 +704,28 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 _current_output_file.set(None)
             else:
                 self._last_clean_output = None
+
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Override to return TerminalInferencerResponse with clean output.
+
+        The base ``_ainfer()`` returns noisy TUI stdout as a plain string.
+        When ``_last_clean_output`` is available (populated by
+        ``ainfer_streaming``'s finally block from the ``--output-file``),
+        we wrap the result in a ``TerminalInferencerResponse`` so that
+        the logged ``InferenceResponse`` at the base-class level has the
+        correct clean ``output`` field — matching the stream cache content.
+        """
+        raw = await super()._ainfer(inference_input, inference_config, **kwargs)
+        clean = getattr(self, "_last_clean_output", None)
+        if clean:
+            return TerminalInferencerResponse(
+                output=clean,
+                raw_output=str(raw),
+                success=True,
+            )
+        return raw
 
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
@@ -745,28 +769,20 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        # Route through _ainfer_single for retry/preprocessing/timeout.
-        # _ainfer_single → _ainfer → ainfer_streaming accumulates noisy TUI stdout
-        # and returns "".join(content_parts) — a plain string of terminal noise.
-        # Meanwhile ainfer_streaming()'s finally block reads the clean --output-file
-        # content and stores it in self._last_clean_output (via ainfer_streaming's
-        # own finally), and overwrites the stream cache with it.
-        # We capture the raw noisy string here for raw_output, then wrap everything
-        # into a TerminalInferencerResponse so that str(result) returns the clean
-        # output-file content (with <Response> tags etc.) rather than noisy TUI stdout.
-        raw_noisy = await self._ainfer_single(
+        # _ainfer_single → _ainfer → ainfer_streaming. Our _ainfer override
+        # returns a TerminalInferencerResponse (clean output + raw noisy)
+        # when _last_clean_output is available, so the base-class logging at
+        # InferencerBase.__ainfer_single_impl logs the correct clean output.
+        result = await self._ainfer_single(
             inference_input, inference_config, **kwargs
         )
-
-        # Build a TerminalInferencerResponse: output = clean --output-file content
-        # (captured in _last_clean_output by ainfer_streaming's finally block),
-        # raw_output = the accumulated noisy TUI stdout.
-        clean_output = self.get_final_output() or ""
-        result = TerminalInferencerResponse(
-            output=clean_output,
-            raw_output=str(raw_noisy),
-            success=True,
-        )
+        if not isinstance(result, TerminalInferencerResponse):
+            clean_output = self.get_final_output() or ""
+            result = TerminalInferencerResponse(
+                output=clean_output,
+                raw_output=str(result),
+                success=True,
+            )
 
         # Extract the real session ID from the sessions directory.
         # After a successful run, the most recently modified session in

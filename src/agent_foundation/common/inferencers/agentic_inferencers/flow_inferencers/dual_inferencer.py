@@ -139,13 +139,11 @@ class DualInferencer(LinearWorkflowInferencer):
         review_inferencer: Reviewer/reflector inferencer.
         fixer_inferencer: Fixer inferencer (defaults to base_inferencer).
         consensus_config: Loop configuration (max iterations, threshold, etc.).
-        prompt_formatter: Shared TemplateManager for all prompts. When set,
-            initial_prompt/review_prompt/followup_prompt are used as template_key
-            names. When None, those strings are treated as raw Jinja2 templates.
-        initial_prompt: Template key (when prompt_formatter is set) or raw Jinja2
-            template string for the initial prompt. None means passthrough.
-        review_prompt: Template key or raw template for review prompts.
-        followup_prompt: Template key or raw template for followup/fix prompts.
+        initial_prompt: Raw Jinja2 template string for the initial prompt.
+            None means passthrough. In the modern (Phase 2) path, leaves
+            self-render via their own template_manager + template_key.
+        review_prompt: Raw Jinja2 template for review prompts (fallback only).
+        followup_prompt: Raw Jinja2 template for followup/fix prompts (fallback only).
         review_parser: Callable to parse raw review output into structured dict.
         followup_response_parser: Callable to parse counter-feedback from fixer output.
         response_parser: Callable to extract/clean raw output from any sub-inferencer.
@@ -194,7 +192,6 @@ class DualInferencer(LinearWorkflowInferencer):
     enable_round_audit: bool = attrib(default=True)
     """Emits per-round audit: outputs/round_log.jsonl + children/round_NN/ nav links."""
 
-    prompt_formatter: Callable = attrib(default=None)
     initial_prompt: Optional[str] = attrib(default=None)
     # ------------------------------------------------------------------
     # Prompt template resolution semantics (review_prompt / followup_prompt)
@@ -267,10 +264,6 @@ class DualInferencer(LinearWorkflowInferencer):
     # are all inherited from LinearWorkflowInferencer with init=False.
     # checkpoint_mode is also inherited from LWI (default="jsonfy").
 
-    @property
-    def supports_prompt_rendering(self) -> bool:
-        return self.prompt_formatter is not None
-
     def __attrs_post_init__(self):
         # --- Domain-specific init BEFORE calling super() ---
         # (LWI's __attrs_post_init__ calls Workflow.__attrs_post_init__
@@ -294,94 +287,12 @@ class DualInferencer(LinearWorkflowInferencer):
         self._review_role_disabled = False
         self._followup_role_disabled = False
 
-        # Build prompt rendering infrastructure
-        if isinstance(self.prompt_formatter, TemplateManager):
-            # Shared TemplateManager — initial/review/followup are template_key names.
-            # Implicit-default resolution happens lazily at render time.
-            self._prompt_tms = None
-        elif self.prompt_formatter is not None:
-            # Custom formatter provided — wrap each EXPLICITLY configured raw
-            # template string. None values fall back to the legacy in-Python
-            # defaults (with a one-time logger warning) since there's no
-            # template-discovery mechanism here. This preserves backward
-            # compatibility for callers that construct DualInferencer with a
-            # custom formatter but no explicit prompts; production callers
-            # using a shared TemplateManager get the implicit-key-discovery
-            # path instead.
-            from agent_foundation.common.inferencers.constants import (
-                DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
-                DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
-            )
-            custom_formatter = self.prompt_formatter
-            self._prompt_tms = {}
-            role_to_default = {
-                "initial": None,
-                "review": DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
-                "followup": DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
-            }
-            for role, prompt_str in [
-                ("initial", self.initial_prompt),
-                ("review", self.review_prompt),
-                ("followup", self.followup_prompt),
-            ]:
-                effective = prompt_str
-                if effective is None and role_to_default.get(role) is not None:
-                    effective = role_to_default[role]
-                    logger.warning(
-                        "DualInferencer.%s_prompt is None — falling back to "
-                        "in-Python DEFAULT_DUAL_%s_PROMPT_TEMPLATE because no "
-                        "TemplateManager is configured. For production use, "
-                        "pass a TemplateManager as prompt_formatter so "
-                        "implicit template_key resolution can locate "
-                        "<root>/main/%s.jinja2 instead.",
-                        role,
-                        role.upper(),
-                        role,
-                    )
-                if effective is not None:
-                    self._prompt_tms[role] = TemplateManager(
-                        templates=effective,
-                        template_formatter=custom_formatter,
-                        enable_templated_feed=True,
-                    )
-        else:
-            # No formatter at all — render raw Jinja2 templates directly using
-            # the explicitly configured strings. None values fall back to the
-            # legacy in-Python defaults with a one-time warning. Same
-            # backward-compatibility rationale as the custom-formatter path
-            # above.
-            from agent_foundation.common.inferencers.constants import (
-                DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
-                DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
-            )
-            self._prompt_tms = {}
-            role_to_default = {
-                "initial": None,
-                "review": DEFAULT_DUAL_REVIEW_PROMPT_TEMPLATE,
-                "followup": DEFAULT_DUAL_FOLLOWUP_PROMPT_TEMPLATE,
-            }
-            # Materialize defaults onto the public attribute so the explicit
-            # path in _render_role_prompt sees them as "set". This keeps the
-            # render contract simple (always renders a non-None template
-            # string when in raw-Jinja mode).
-            for role in ("review", "followup"):
-                current = getattr(self, f"{role}_prompt")
-                if current is None:
-                    default = role_to_default.get(role)
-                    if default is not None:
-                        setattr(self, f"{role}_prompt", default)
-                        # Mark as explicit so _render_role_prompt doesn't
-                        # treat it as "implicit + missing → disable".
-                        setattr(self, f"_{role}_explicit", True)
-                        logger.warning(
-                            "DualInferencer.%s_prompt is None — using "
-                            "in-Python DEFAULT_DUAL_%s_PROMPT_TEMPLATE. "
-                            "For production use, pass a TemplateManager "
-                            "as prompt_formatter to enable implicit "
-                            "template-key discovery.",
-                            role,
-                            role.upper(),
-                        )
+        # Prompt rendering: leaf-owned (Phase 2). Review/followup leaves
+        # self-render via their own template_manager + template_key (set by
+        # SLOT_DEFAULTS). The orchestrator assembles the feed dict and passes
+        # it via extra_feed=; no orchestrator-level prompt construction needed.
+        # _render_role_prompt is kept as a fallback for raw Jinja2 strings
+        # (review_prompt / followup_prompt explicitly set).
 
         # Default parsers
         if self.review_parser is None:
@@ -1157,6 +1068,7 @@ class DualInferencer(LinearWorkflowInferencer):
                 state["counter_feedback_str"],
                 iteration=iteration,
                 attempt=attempt_num,
+                inference_config=inference_config,
             )
             review_leaf_can_render = self._leaf_can_self_render(
                 self.review_inferencer
@@ -1499,101 +1411,37 @@ class DualInferencer(LinearWorkflowInferencer):
         return getattr(self, f"_{role}_role_disabled", False)
 
     def _render_role_prompt(self, role: str, feed: dict, inference_config: dict) -> str:
-        """Render a prompt template by role name.
+        """Render a prompt for a role using an explicit Jinja2 string.
 
-        Resolution rules (see class docstring on ``review_prompt`` /
-        ``followup_prompt`` for full design rationale):
-
-          1. ``<role>_prompt`` is explicitly set (non-None):
-             Use the configured value. If the TemplateManager cannot resolve
-             it, raise ValueError (loud failure for explicit misconfig).
-          2. ``<role>_prompt`` is None (default) AND we have a shared
-             TemplateManager:
-             Try the implicit key (``"review"`` / ``"followup"``) against
-             the manager. If found, use it. If NOT found, mark the role as
-             disabled and raise a sentinel ``_RoleDisabledError`` that the
-             step caller treats as "skip this step".
-          3. ``<role>_prompt`` is None AND no template-discovery mechanism
-             is available (custom formatter / no formatter): the role is
-             pre-marked as disabled in ``__attrs_post_init__``; this method
-             should not be reached.
+        This is the fallback path — only reached when the leaf inferencer
+        cannot self-render (no template_manager or template_key). In the
+        modern (Phase 2) architecture, leaves self-render and this method
+        is not called.
 
         Raises:
-            ValueError: if an EXPLICITLY configured prompt cannot be resolved.
-            _RoleDisabledError: if the implicit default cannot be found —
-                the calling step should catch this and skip the step.
+            _RoleDisabledError: if no prompt string is configured for this role.
         """
         post_process = partial(unescape_xml, unescape_for_html=True)
         prompt_value = getattr(self, f"{role}_prompt", None)
-        explicit = getattr(self, f"_{role}_explicit", False)
 
-        # Pre-disabled (no resolution mechanism available + no explicit value).
         if self._is_role_disabled(role):
             raise _RoleDisabledError(role)
 
-        # Implicit default — try the role-name as the template key.
-        resolved_key = prompt_value if prompt_value is not None else role
+        if prompt_value is None:
+            raise _RoleDisabledError(role)
 
-        if self._prompt_tms is None:
-            # Shared TemplateManager mode — prompt_formatter is a TemplateManager.
-            # Probe existence first via get_raw_template; this lets us
-            # distinguish "found and resolved" from "not found" before
-            # actually rendering.
-            try:
-                raw = self.prompt_formatter.get_raw_template(template_key=resolved_key)
-            except Exception:
-                raw = None
-            if raw is None or raw == "":
-                if explicit:
-                    raise ValueError(
-                        f"DualInferencer.{role}_prompt is set to "
-                        f"{resolved_key!r}, but the configured TemplateManager "
-                        f"could not resolve it. Either:\n"
-                        f"  - Provide a template at the configured root_space "
-                        f"matching key {resolved_key!r}, or\n"
-                        f"  - Remove the ``{role}_prompt`` setting to fall "
-                        f"back to the implicit ``{role}`` key (and skip the "
-                        f"role if that's also missing)."
-                    )
-                # Implicit and not found → silently disable.
-                setattr(self, f"_{role}_role_disabled", True)
-                raise _RoleDisabledError(role)
-            return self.prompt_formatter(
-                template_key=resolved_key,
-                feed=feed,
-                post_process=post_process,
-                **inference_config,
-            )
-        elif self._prompt_tms:
-            # Per-role TemplateManager wrappers (custom formatter was provided).
-            # These were built only for explicitly-configured roles in
-            # __attrs_post_init__; if we got here without a wrapper, the role
-            # is disabled.
-            wrapper = self._prompt_tms.get(role)
-            if wrapper is None:
-                raise _RoleDisabledError(role)
-            return wrapper(feed=feed, post_process=post_process, **inference_config)
-        else:
-            # No formatter — render raw Jinja2 template directly. The
-            # __attrs_post_init__ materializes legacy defaults onto
-            # ``review_prompt``/``followup_prompt`` for this branch, so
-            # ``prompt_value`` is non-None here unless someone constructed
-            # the inferencer in an exotic way.
-            if prompt_value is None:
-                raise _RoleDisabledError(role)
-            from jinja2 import Template
-
-            rendered = Template(prompt_value).render(**feed)
-            return post_process(rendered)
+        from jinja2 import Template
+        rendered = Template(prompt_value).render(**feed)
+        return post_process(rendered)
 
     # ─────────────────────────────────────────────────────────────────
     # Phase 2 (leaf-owned template rendering): leaf-side rendering helpers.
     # ─────────────────────────────────────────────────────────────────
     # Architectural direction: orchestrators own workflow & feed-dict
-    # assembly; leaves own template selection & rendering. The legacy path
-    # (_render_role_prompt) renders at the orchestrator level using
-    # prompt_formatter; the modern path passes a feed dict to the leaf via
-    # extra_feed= and lets the leaf's own _build_template_feed merge it.
+    # assembly; leaves own template selection & rendering. The fallback path
+    # (_render_role_prompt) renders raw Jinja2 strings at the orchestrator
+    # level; the modern path passes a feed dict to the leaf via extra_feed=
+    # and lets the leaf's own _build_template_feed merge it.
     #
     # Detection: a leaf "can self-render" iff:
     #   1. It is a TemplatedInferencerBase subclass (or duck-types it via
@@ -1691,6 +1539,7 @@ class DualInferencer(LinearWorkflowInferencer):
         counter_feedback: Optional[str],
         iteration: int = 1,
         attempt: int = 1,
+        inference_config: Optional[dict] = None,
     ) -> dict:
         """Build the review feed dict (Phase 2: pure feed assembly).
 
@@ -1703,6 +1552,9 @@ class DualInferencer(LinearWorkflowInferencer):
         Splits feed assembly from rendering so the same dict can be used
         for both paths during the migration period (Phase 2-5).
         """
+        config = (inference_config or {}).get(
+            "consensus_config", self.consensus_config
+        )
         prior_output_path = self._resolve_prior_proposer_output_path() or ""
         feed = {
             self.placeholder_input: inference_input,
@@ -1713,6 +1565,10 @@ class DualInferencer(LinearWorkflowInferencer):
             # Outer-template slots (always set; safe with empty-string sentinel).
             "main_response": proposal,
             "prior_output_path": prior_output_path,
+            # Consensus threshold guidance for review templates.
+            "consensus_threshold": str(config.consensus_threshold),
+            "approve_hint": config.approve_hint(),
+            "approval_guidance": config.approval_guidance(),
         }
         if counter_feedback is not None:
             feed[self.placeholder_counter_feedback] = counter_feedback
@@ -1739,6 +1595,7 @@ class DualInferencer(LinearWorkflowInferencer):
         feed = self._build_review_feed(
             inference_input, proposal, counter_feedback,
             iteration=iteration, attempt=attempt,
+            inference_config=inference_config,
         )
         return self._render_role_prompt("review", feed, inference_config)
 
@@ -1796,6 +1653,10 @@ class DualInferencer(LinearWorkflowInferencer):
             "main_response": proposal,
             "prior_output_path": prior_output_path,
             "reviewer_response": review_output if review_output is not None else "",
+            # Consensus threshold guidance for followup templates.
+            "consensus_threshold": str(config.consensus_threshold),
+            "approve_hint": config.approve_hint(),
+            "approval_guidance": config.approval_guidance(),
         }
         return feed
 

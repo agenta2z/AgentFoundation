@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -63,8 +63,8 @@ class WorkflowManager:
             definition_id=definition_id,
             yolo_mode=yolo_mode,
             workspace=self.session_workspace / "workflows" / definition_id / instance_id,
-            created_at=datetime.utcnow(),
-            last_active_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            last_active_at=datetime.now(UTC),
         )
         instance.workspace.mkdir(parents=True, exist_ok=True)
 
@@ -90,7 +90,7 @@ class WorkflowManager:
         """Suspend the focused (or specified) instance."""
         instance = self._resolve_instance(instance_id)
         instance.status = "suspended"
-        instance.last_active_at = datetime.utcnow()
+        instance.last_active_at = datetime.now(UTC)
         if instance._graph_task and not instance._graph_task.done():
             instance._graph_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -130,7 +130,7 @@ class WorkflowManager:
         instance.graph = graph
         instance.tracker = tracker
         instance.status = "active"
-        instance.last_active_at = datetime.utcnow()
+        instance.last_active_at = datetime.now(UTC)
         instance._graph_task = asyncio.create_task(graph.arun())
         self.focused_instance_id = instance_id
         logger.info("Workflow instance %s resumed", instance_id)
@@ -144,17 +144,28 @@ class WorkflowManager:
         return list(self.active_instances.values())
 
     def render_prompt_sections(self) -> dict[str, str]:
-        """Render the three prompt sections for workflow-aware prompts."""
+        """Render prompt sections for SOP-aware prompts."""
         sections: dict[str, str] = {}
 
-        available = self.registry.list_all()
-        if available:
-            lines = []
-            for wf in available:
-                desc = wf.description[:120] if wf.description else ""
-                lines.append(f"- **{wf.name}** (`{wf.workflow_id}`): {desc}")
-            sections["available_workflows"] = "\n".join(lines)
+        # Available SOPs (from SOPRegistry if available, else legacy WorkflowRegistry)
+        try:
+            from agent_foundation.resources.sops.registry import format_all_sops, load_all_sops
+            sops = load_all_sops(extra_dirs=getattr(self, "_extra_sop_dirs", None))
+            if sops:
+                sections["available_sops"] = format_all_sops(sops)
+        except ImportError:
+            pass
 
+        if "available_sops" not in sections:
+            available = self.registry.list_all()
+            if available:
+                lines = []
+                for wf in available:
+                    desc = wf.description[:120] if wf.description else ""
+                    lines.append(f"- **{wf.name}** (`{wf.workflow_id}`): {desc}")
+                sections["available_workflows"] = "\n".join(lines)
+
+        # Active SOPs / instances
         instances = self.list_instances()
         if instances:
             lines = []
@@ -166,15 +177,13 @@ class WorkflowManager:
                     f"- `{inst.instance_id}` [{inst.definition_id}] "
                     f"status={inst.status}{phase}"
                 )
-            sections["ongoing_workflows"] = "\n".join(lines)
+            sections["active_sops"] = "\n".join(lines)
 
+        # Focused instance context
         focused = self.get_focused_instance()
         if focused:
             definition = self.registry.get(focused.definition_id)
-            mode = "yolo" if focused.yolo_mode else "default"
-            sections["workflow_description"] = SOPManager.render_for_mode(
-                definition.raw_markdown, mode=mode
-            )
+            sections["workflow_description"] = definition.raw_markdown
             if focused.tracker:
                 sections["workflow_nextstep_guidance"] = SOPManager.render_guidance(
                     focused.tracker, definition.sop

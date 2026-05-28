@@ -1,0 +1,12 @@
+{
+  "name": "model_optimization",
+  "display_name": "Model Optimization",
+  "version": "1.0.0",
+  "description": "Optimize ML models through structured research-propose-experiment-analyze cycles. Investigates the target codebase, generates architecture proposals via deep research, implements and validates changes experimentally, then iterates. Use when the user wants to improve model quality, reduce training cost, or explore novel architectures.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["set_workflow_target_path", "set_strategy", "understand_codebase", "research_propose", "task"],
+  "labels": ["ml", "optimization", "model-training"],
+  "linear_only": false,
+  "max_goto_iterations": 10,
+  "max_total_nodes": 200
+}

@@ -126,6 +126,25 @@ class ConversationalInferencer(InferencerBase):
     _last_template_feed: dict[str, Any] = attrib(factory=dict, init=False)
     _last_template_config: dict[str, Any] = attrib(factory=dict, init=False)
 
+    def __attrs_post_init__(self) -> None:
+        if self.prompt_renderer is None:
+            from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
+                TemplateManager,
+            )
+            from agent_foundation.common.inferencers.agentic_inferencers.conversational.template_manager_renderer import (
+                TemplateManagerPromptRenderer,
+            )
+            from agent_foundation.resources import PROMPT_TEMPLATES_ROOT
+
+            self.prompt_renderer = TemplateManagerPromptRenderer(
+                template_manager=TemplateManager(
+                    templates=str(PROMPT_TEMPLATES_ROOT),
+                    active_template_root_space="conversation",
+                    active_template_type="main",
+                ),
+                template_key="initial",
+            )
+
     @property
     def supports_prompt_rendering(self) -> bool:
         return self.prompt_renderer is not None
@@ -286,13 +305,26 @@ class ConversationalInferencer(InferencerBase):
                     len(conv_response.text),
                 )
 
-            if conv_response.has_conversation_tool and effective_interactive:
-                collected = await self._handle_conversation_tools(
-                    conv_response.conversation_tools,
-                    conv_response.text,
-                    interactive_override=effective_interactive,
-                    action_tools=conv_response.action_tools,
-                )
+            if conv_response.has_conversation_tool:
+                if self.yolo_mode:
+                    collected = self._synthesize_yolo_collected(
+                        conv_response.conversation_tools,
+                    )
+                    synthetic_summary = str(collected)
+                    self._messages.append({
+                        "role": "user",
+                        "content": f"[Synthetic auto-advance] {synthetic_summary}",
+                        "synthetic": True,
+                    })
+                elif effective_interactive:
+                    collected = await self._handle_conversation_tools(
+                        conv_response.conversation_tools,
+                        conv_response.text,
+                        interactive_override=effective_interactive,
+                        action_tools=conv_response.action_tools,
+                    )
+                else:
+                    collected = None
                 if collected is None:
                     return AgenticResult(
                         text=conv_response.text,
@@ -571,9 +603,6 @@ class ConversationalInferencer(InferencerBase):
 
     def _render_prompt(self, current_message: str) -> str:
         """Build template variables and render via prompt_renderer."""
-        if not self.prompt_renderer:
-            return self._render_fallback_prompt(current_message)
-
         # Format tools — separate action tools from conversation tools
         formatter = ToolMarkdownFormatter()
         tools_list = list(self.tool_registry.values())
@@ -742,33 +771,6 @@ class ConversationalInferencer(InferencerBase):
             self.prompt_renderer, "template_config", {}
         ) or {}
         return self.prompt_renderer.render(feed)
-
-    def _render_fallback_prompt(self, current_message: str) -> str:
-        """Fallback prompt when prompt_renderer is None."""
-        formatter = ToolMarkdownFormatter()
-        tools_list = [t for t in self.tool_registry.values() if getattr(t, 'agent_enabled', True)]
-        available_tools = formatter.format_all(tools_list)
-        parts = [
-            "You are an AI assistant with tool-use capabilities.",
-            "",
-            "## Available Tools",
-            available_tools,
-            "",
-            'To invoke a tool: <tool_call>{"name": "...", "arguments": {...}}</tool_call>',
-            "",
-        ]
-        if self._messages:
-            parts.append("## Conversation")
-            for msg in self._messages:
-                if (
-                    msg == self._messages[-1]
-                    and msg.get("role") == "user"
-                    and msg.get("content") == current_message
-                ):
-                    continue
-                parts.append(f"<{msg['role']}>{msg['content']}</{msg['role']}>")
-        parts.append(f"\n<user>{current_message}</user>")
-        return "\n".join(parts)
 
     # =========================================================================
     # Tool Execution
@@ -966,6 +968,90 @@ class ConversationalInferencer(InferencerBase):
             _MAX_CONVERSATION_ITERATIONS,
         )
         return response.text
+
+    def _synthesize_yolo_collected(
+        self, tools: list,
+    ) -> dict[str, str] | str | None:
+        """Synthesize responses for conversation tools in yolo mode.
+
+        Uses per-tool yolo_default from tool.json, with per-SOP overrides
+        from sop.config.json yolo_overrides. Falls back to "Follow your
+        best judgment." for unconfigured tools.
+        """
+        if not tools:
+            return None
+
+        if len(tools) == 1:
+            return self._synthesize_single_yolo(tools[0])
+
+        collected: dict[str, str] = {}
+        for tool in tools:
+            var_name = getattr(tool, "output_variable", None) or tool.tool_type
+            collected[var_name] = self._synthesize_single_yolo(tool)
+        return collected
+
+    def _synthesize_single_yolo(self, tool) -> str:
+        """Synthesize a single conversation tool response for yolo mode."""
+        # Resolve yolo spec: per-SOP override → tool.json default → builtin
+        spec = self._resolve_yolo_spec(tool)
+        mode = spec.get("mode", "fixed")
+
+        if mode == "fixed":
+            return spec.get("value", "Follow your best judgment.")
+        elif mode == "select_all":
+            choices = getattr(tool, "choices", []) or []
+            if isinstance(choices, list) and choices:
+                values = []
+                for c in choices:
+                    if isinstance(c, dict):
+                        values.append(c.get("value", c.get("label", "")))
+                    else:
+                        values.append(str(c))
+                return ", ".join(values)
+            return "Follow your best judgment."
+        elif mode == "first_choice":
+            choices = getattr(tool, "choices", []) or []
+            if isinstance(choices, list) and choices:
+                c = choices[0]
+                if isinstance(c, dict):
+                    return c.get("value", c.get("label", ""))
+                return str(c)
+            return "Follow your best judgment."
+        elif mode == "confirm":
+            return "yes"
+        elif mode == "decline":
+            return "no"
+        elif mode == "none":
+            return "Follow your best judgment."
+        else:
+            return spec.get("value", "Follow your best judgment.")
+
+    def _resolve_yolo_spec(self, tool) -> dict:
+        """Resolution order: per-SOP override → tool.json default → builtin."""
+        tool_type = getattr(tool, "tool_type", "")
+
+        # Check per-SOP yolo_overrides
+        sop_instance_id = self.prior_context.get("sop_instance_id")
+        if sop_instance_id and hasattr(self, "workflow_manager") and self.workflow_manager:
+            try:
+                instance = self.workflow_manager.active_instances.get(sop_instance_id)
+                if instance:
+                    definition = self.workflow_manager.registry.get(instance.definition_id)
+                    if hasattr(definition, "frontmatter"):
+                        overrides = definition.frontmatter.get("yolo_overrides", {})
+                        if tool_type in overrides:
+                            return overrides[tool_type]
+            except Exception:
+                pass
+
+        # Check tool.json yolo_default
+        tool_name = getattr(tool, "tool_type", "") or getattr(tool, "name", "")
+        tool_def = self.tool_registry.get(tool_name)
+        if tool_def and getattr(tool_def, "yolo_default", None):
+            return tool_def.yolo_default
+
+        # Builtin fallback
+        return {"mode": "fixed", "value": "Follow your best judgment."}
 
     async def _handle_conversation_tool(
         self,

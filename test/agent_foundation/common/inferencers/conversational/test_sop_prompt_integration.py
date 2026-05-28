@@ -11,8 +11,11 @@ import os
 import tempfile
 import unittest
 
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.prompt_rendering import (
-    JinjaPromptRenderer,
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.template_manager_renderer import (
+    TemplateManagerPromptRenderer,
+)
+from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
+    TemplateManager,
 )
 from rich_python_utils.common_objects.workflow.stategraph import (
     StateGraphTracker,
@@ -82,24 +85,26 @@ class TestSOPPromptIntegration(unittest.TestCase):
         with open(os.path.join(template_dir, ".initial.variables.yaml"), "w") as f:
             f.write(MOCK_VARIABLES)
 
-        self.renderer = JinjaPromptRenderer(
-            template_dir=self.tmpdir,
-            template_path="conversation/main/initial.jinja2",
+        self.renderer = TemplateManagerPromptRenderer(
+            template_manager=TemplateManager(
+                templates=self.tmpdir,
+                active_template_root_space="conversation",
+                active_template_type="main",
+            ),
+            template_key="initial",
         )
 
-        # Load the SOP
-        sop_path = self.renderer.find_sop_file()
-        self.assertIsNotNone(sop_path, "SOP file should be found")
+        # Load the SOP from the known variables directory
+        sop_path = os.path.join(variables_dir, "sop.md")
         self.sop = SOPManager.load(sop_path)
 
     def _render_with_state(self, tracker, user_message="what next?"):
         """Render the template with state from the tracker."""
-        template_vars = self.renderer.template_variables
         nextstep_guidance = SOPManager.render_guidance(
             tracker, self.sop, context={"target_path": tracker.state_outputs.get("target_path", "not set")},
         )
         feed = {
-            **template_vars,
+            "employee": {"name": "TestBot", "role": "a test AI agent"},
             "workflow_nextstep_guidance": nextstep_guidance,
             "target_path": tracker.state_outputs.get("target_path", "not set"),
         }

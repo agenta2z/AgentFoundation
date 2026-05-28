@@ -141,49 +141,6 @@ class TestDualInferencerCrashFix(unittest.TestCase):
         self.assertEqual(result, "Hello world")
 
 
-class TestDualInferencerSupportsPromptRendering(unittest.TestCase):
-    """DualInferencer.supports_prompt_rendering reflects prompt_formatter state."""
-
-    def test_false_without_formatter(self):
-        dual = DualInferencer(
-            base_inferencer=_make_mock_inferencer(),
-            review_inferencer=_make_mock_inferencer(),
-            prompt_formatter=None,
-        )
-        self.assertFalse(dual.supports_prompt_rendering)
-
-    def test_true_with_callable_formatter(self):
-        dual = DualInferencer(
-            base_inferencer=_make_mock_inferencer(),
-            review_inferencer=_make_mock_inferencer(),
-            prompt_formatter=lambda t, **kw: t,
-        )
-        self.assertTrue(dual.supports_prompt_rendering)
-
-    def test_true_with_template_manager(self):
-        from rich_python_utils.string_utils.formatting.template_manager import (
-            TemplateManager,
-        )
-
-        tm = TemplateManager(
-            default_template="{{input}}",
-            templates={
-                "initial_prompt": "init: {{inference_input}}",
-                "review_prompt": "review: {{proposal}}",
-                "followup_prompt": "fix: {{proposal}}",
-            },
-        )
-        dual = DualInferencer(
-            base_inferencer=_make_mock_inferencer(),
-            review_inferencer=_make_mock_inferencer(),
-            prompt_formatter=tm,
-            initial_prompt="initial_prompt",
-            review_prompt="review_prompt",
-            followup_prompt="followup_prompt",
-        )
-        self.assertTrue(dual.supports_prompt_rendering)
-
-
 # ---------------------------------------------------------------------------
 # ReflectiveInferencer: supports_prompt_rendering
 # ---------------------------------------------------------------------------

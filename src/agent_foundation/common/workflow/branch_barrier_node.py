@@ -56,7 +56,7 @@ class BranchBarrierNode(WorkGraphNode):
     def __attrs_post_init__(self) -> None:
         self.value = self._barrier_aggregate
         self.name = f"sop_branch_barrier_{self.phase_id}"
-        self.enable_result_save = StepResultSaveOptions.SaveAndResume
+        self.enable_result_save = StepResultSaveOptions.Always
 
     async def _barrier_aggregate(self, *leaf_results, **_) -> Any:
         """Aggregate all branch leaf outputs into one phase completion."""

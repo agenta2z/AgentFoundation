@@ -3,14 +3,25 @@
 {{ employee.mindset }}
 {% endif %}
 
-{# Available workflows (shown like tools/skills — always rendered when present) #}
-{% if available_workflows is defined and available_workflows %}
+{# Available SOPs (shown like tools/skills — always rendered when present) #}
+{% if available_sops is defined and available_sops %}
+## Available SOPs
+
+You can invoke an SOP via `/sop <name>` (interactive) or `/sop <name> --yolo` (autonomous).
+
+{{ available_sops }}
+{% endif %}
+{% if available_workflows is defined and available_workflows and not available_sops %}
 ## Available Workflows
 {{ available_workflows }}
 {% endif %}
 
-{# Ongoing/suspended workflow instances #}
-{% if ongoing_workflows is defined and ongoing_workflows %}
+{# Active SOPs / Ongoing workflow instances #}
+{% if active_sops is defined and active_sops %}
+## Active SOPs
+{{ active_sops }}
+{% endif %}
+{% if ongoing_workflows is defined and ongoing_workflows and not active_sops %}
 ## Ongoing Workflows
 {{ ongoing_workflows }}
 {% endif %}
