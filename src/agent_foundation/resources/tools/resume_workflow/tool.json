@@ -1,9 +1,0 @@
-{
-  "name": "resume_workflow",
-  "description": "Resume a suspended workflow instance.",
-  "tool_type": "Action",
-  "category": "workflow",
-  "parameters": [
-    {"name": "instance_id", "type": "string", "required": true, "positional": true, "description": "Instance ID to resume"}
-  ]
-}

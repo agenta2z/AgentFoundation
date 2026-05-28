@@ -336,11 +336,8 @@ class TestModuleConstants:
         assert AGGREGATION_DEFAULTS.template_root_space is None
         assert AGGREGATION_DEFAULTS.template_version == VARIANT_AGGREGATION
         assert AGGREGATION_DEFAULTS.template_master_version == VARIANT_AGGREGATION
-        assert AGGREGATION_DEFAULTS.template_variables == {
-            VAR_TASK_PREAMBLE: None,
-            VAR_TASK_INSTRUCTIONS: None,
-            VAR_TASK_RESPONSE_FORMAT: None,
-        }
+        assert AGGREGATION_DEFAULTS.template_variables == {}
+        assert AGGREGATION_DEFAULTS.modes == {"deep_mode": False}
 
     def test_review_constant_shape(self):
         assert REVIEW_TEMPLATE_DEFAULTS.template_key == KEY_REVIEW
@@ -377,6 +374,10 @@ class TestReviewFollowupDefaults:
     def test_review_default_template_key_is_review(self):
         """REVIEW_TEMPLATE_DEFAULTS has template_key='review'."""
         assert REVIEW_TEMPLATE_DEFAULTS.template_key == KEY_REVIEW
+
+    def test_review_default_disables_elegant_mode(self):
+        """Review inferencers have elegant_mode=False (reviews assess, not create)."""
+        assert REVIEW_TEMPLATE_DEFAULTS.modes == {"elegant_mode": False}
 
     def test_followup_default_template_key_is_followup(self):
         """FOLLOWUP_TEMPLATE_DEFAULTS has template_key='followup'."""

@@ -110,7 +110,7 @@ If the implementation has no meaningful issues, return an empty `issues` array a
 ---
 
 ## NOTES (on agent behavior):
-- Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. Read the actual code changes, not just the report.
+- Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. Read the actual code changes, not just the report.{%- if enable_deep_mode %} {{ instructions.modes.deep_mode }}{%- endif %}
 - However, stay focused on the implementation and the files it claims to modify. DO NOT explore the entire codebase.
 - Every issue must cite concrete evidence (such as file paths, line numbers, actual behavior) with careful reasoning — DO NOT raise issues based on speculation.
 - {{ instructions.behavior.file_reading_efficiency }}

@@ -74,6 +74,7 @@ class InferencerTemplateDefaults:
         template_extra_feed: Optional[dict] = None,
         template_version: Optional[str] = None,
         template_master_version: Optional[str] = None,
+        modes: Optional[dict] = None,
     ):
         self.template_root_space = template_root_space
         self.template_key = template_key
@@ -85,6 +86,7 @@ class InferencerTemplateDefaults:
         )
         self.template_version = template_version
         self.template_master_version = template_master_version
+        self.modes = dict(modes) if modes else {}
 
     def apply_to(
         self, node: dict, parent_node: Optional[dict] = None
@@ -120,6 +122,8 @@ class InferencerTemplateDefaults:
             self._merge_dict(node, FIELD_TEMPLATE_VARIABLES, self.template_variables)
         if self.template_extra_feed:
             self._merge_dict(node, FIELD_TEMPLATE_EXTRA_FEED, self.template_extra_feed)
+        if self.modes:
+            self._merge_dict(node, "modes", self.modes)
 
     @staticmethod
     def _merge_dict(node: dict, field: str, defaults: dict) -> None:
@@ -165,6 +169,7 @@ class InferencerTemplateVersionDefaults(InferencerTemplateDefaults):
         template_key: Optional[str] = None,
         template_variables: Optional[dict] = None,
         template_extra_feed: Optional[dict] = None,
+        modes: Optional[dict] = None,
     ):
         # Sugar variable_names -> template_variables with None values.
         # Per-key explicit values in template_variables (if also supplied)
@@ -181,6 +186,7 @@ class InferencerTemplateVersionDefaults(InferencerTemplateDefaults):
             template_extra_feed=template_extra_feed,
             template_version=template_version,
             template_master_version=template_master_version,
+            modes=modes,
         )
 
 
@@ -265,11 +271,7 @@ BREAKDOWN_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
 AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(
     template_version=VARIANT_AGGREGATION,
     template_master_version=VARIANT_AGGREGATION,
-    variable_names=[
-        VAR_TASK_PREAMBLE,
-        VAR_TASK_INSTRUCTIONS,
-        VAR_TASK_RESPONSE_FORMAT,
-    ],
+    modes={"deep_mode": False},
 )
 """Aggregation framing — preamble + instructions + response_format.
 
@@ -285,6 +287,7 @@ Used by BTA's ``aggregator_inferencer``, MFDual's
 
 REVIEW_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
     template_key=KEY_REVIEW,
+    modes={"elegant_mode": False},
 )
 """For any review slot: render the canonical ``review`` template variant.
 

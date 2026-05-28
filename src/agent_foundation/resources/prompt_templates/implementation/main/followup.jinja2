@@ -100,6 +100,13 @@ Meanwhile, wrap a structured response in `<Response>` tags.
   * The implementation report is a markdown document, not code — validation is unnecessary and will waste time on unrelated errors.
   * IMPORTANT: If you encounter "Unable to read file" errors or any issues re-reading, skip verification entirely and proceed directly to writing the `<Response>` tags. The system depends on these tags to proceed.
 
+{%- if enable_deep_mode %}
+- {{ instructions.modes.deep_mode }}
+{%- endif %}
+{%- if enable_elegant_mode %}
+- {{ instructions.modes.elegant_mode }}
+{%- endif %}
+
 {{ notes.local_search_efficiency }}
 
 {{ notes.large_file_writing }}

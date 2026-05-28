@@ -1,9 +1,0 @@
-{
-  "name": "complete_phase",
-  "description": "Signal that the current SOP phase is complete with artifacts. SOP-scoped: only available inside a running workflow phase.",
-  "tool_type": "Action",
-  "category": "workflow",
-  "parameters": [
-    {"name": "artifacts", "type": "string", "description": "JSON key-value artifacts produced by this phase"}
-  ]
-}

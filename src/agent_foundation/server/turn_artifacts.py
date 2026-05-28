@@ -1,8 +1,4 @@
-"""Shared turn artifact writer — single source of truth for turn folder format.
-
-Both SessionStore.save_turn_data (OpenStartup) and SOPSession.save_turn_data
-delegate to this to avoid format drift.
-"""
+"""Shared turn artifact writer — single source of truth for turn folder format."""
 
 from __future__ import annotations
 

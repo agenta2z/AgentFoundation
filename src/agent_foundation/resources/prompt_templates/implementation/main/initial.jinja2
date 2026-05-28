@@ -54,6 +54,13 @@ In addition to above output, YOU MUST generate a **concise summary** (NOT the fu
   * For new testing/benchmarking scripts, ensure they have an option to specify the output directory.
   * Your careful decision to choose right file format for the output artifacts (e.g. CSV for tabular metrics data, JSON for structured details, etc.).
 
+{%- if enable_deep_mode %}
+- {{ instructions.modes.deep_mode }}
+{%- endif %}
+{%- if enable_elegant_mode %}
+- {{ instructions.modes.elegant_mode }}
+{%- endif %}
+
 {{ notes.local_search_efficiency }}
 
 {{ notes.large_file_writing }}

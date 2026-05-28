@@ -24,6 +24,14 @@ If the task preamble specifies a research methodology, source guidance, or outpu
 3. **Synthesize**: Identify patterns, gaps, and opportunities across sources. Note where sources agree, disagree, or leave open questions.
 4. **Structure**: Organize findings into a clear, actionable report.
 
+## NOTES (on agent behavior):
+{%- if enable_deep_mode %}
+- {{ instructions.modes.deep_mode }}
+{%- endif %}
+{%- if enable_elegant_mode %}
+- {{ instructions.modes.elegant_mode }}
+{%- endif %}
+
 {% if output_path %}
 Write the full report to: `{{ output_path }}`
 

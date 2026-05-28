@@ -1,5 +1,5 @@
-"""First-class workflow framework — two-layer architecture.
+"""Workflow framework — Model A architecture.
 
-Layer 1: StateGraph (static blueprint) — defines phases, dependencies, gotos, gates.
-Layer 2: WorkGraph (runtime executor) — SOPWorkGraphNode bridges the layers.
+SOP state lives in ConversationalInferencer.prior_context. The CI's agentic
+loop drives execution; SOP guidance rotates in the prompt as phases complete.
 """

@@ -60,6 +60,9 @@ from agent_foundation.ui.interactive_base import (
     InteractionFlags,
     InteractiveBase,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.commands import (
+    command,
+)
 from agent_foundation.resources.tools.formatters.markdown import ToolMarkdownFormatter
 from agent_foundation.resources.tools.models import ToolDefinition
 from rich_python_utils.string_utils.formatting.template_manager.sop_manager import SOPManager
@@ -145,6 +148,13 @@ class ConversationalInferencer(InferencerBase):
                 template_key="initial",
             )
 
+        from agent_foundation.common.inferencers.agentic_inferencers.conversational.commands import (
+            CommandRegistry,
+        )
+        self._commands = CommandRegistry(self)
+        self._paused = False
+        self.sop_state = None  # SOPState | None — set by /sop executor
+
     @property
     def supports_prompt_rendering(self) -> bool:
         return self.prompt_renderer is not None
@@ -175,6 +185,24 @@ class ConversationalInferencer(InferencerBase):
         InteractiveBase. Consider introducing a StreamingCallback protocol
         to decouple them in a future iteration.
         """
+        # Command dispatch: slash-commands bypass the LLM entirely
+        if content and self._commands.is_command(content):
+            from agent_foundation.common.inferencers.agentic_inferencers.conversational.commands import (
+                UnknownCommand,
+            )
+            try:
+                response = await self._commands.dispatch(content)
+            except UnknownCommand:
+                pass  # fall through to agentic loop
+            else:
+                self.add_message("user", content)
+                self.add_message("assistant", response)
+                return AgenticResult(
+                    text=response,
+                    completed_actions=[],
+                    iterations_used=0,
+                )
+
         loop_actions: list[CompletedAction] = []
         # Resolve interactive: prefer per-call arg, fallback to self.interactive
         effective_interactive = interactive or self.interactive
@@ -186,7 +214,33 @@ class ConversationalInferencer(InferencerBase):
         last_raw_response = ""
         last_boundary_turn: int | None = None  # track last sent turn_boundary
 
-        for iteration in range(self.max_iterations):
+        # Consume any pending resume state from a prior _restore_pause_state
+        _resume = getattr(self, "_pending_resume_state", None)
+        start_iteration = 0
+        if _resume is not None:
+            start_iteration = _resume.get("iteration", 0)
+            self._pending_resume_state = None
+
+        # SOP needs more iterations than the default 5
+        effective_max = self.max_iterations
+        if self.sop_state and self.sop_state.sop:
+            n_phases = len(self.sop_state.sop.phases)
+            effective_max = max(effective_max, n_phases * 3)
+
+        for iteration in range(start_iteration, effective_max):
+            # Cooperative pause check at iteration boundary
+            if self._paused:
+                from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
+                    PausedResult,
+                )
+                return PausedResult(
+                    pause_state=self._serialize_pause_state(
+                        turn_number=turn_number, iteration=iteration,
+                    ),
+                    text=last_raw_response or "",
+                    completed_actions=loop_actions,
+                    iterations_used=iteration + 1,
+                )
             # Signal turn boundary ONLY when the server turn number has
             # changed (i.e., _on_new_turn created a new turn directory).
             # This keeps frontend turn numbers in sync with server turn
@@ -316,6 +370,13 @@ class ConversationalInferencer(InferencerBase):
                         "content": f"[Synthetic auto-advance] {synthetic_summary}",
                         "synthetic": True,
                     })
+                    # Set confirmation gate for phase completion detection
+                    for tool in conv_response.conversation_tools:
+                        if getattr(tool, "tool_type", "") == "confirmation":
+                            if self.sop_state:
+                                self.sop_state.confirmation_gate_passed = True
+                            break
+                    self._check_phase_completion()
                 elif effective_interactive:
                     collected = await self._handle_conversation_tools(
                         conv_response.conversation_tools,
@@ -349,6 +410,7 @@ class ConversationalInferencer(InferencerBase):
                     user_input = f"{_WIDGET_RESPONSE_PREFIX}\n{collected}"
                 self.add_message("user", user_input)
                 content = user_input
+                self._check_phase_completion()
 
                 # Notify server of new turn boundary so it can start
                 # a new turn directory and send stream_start/stream_end
@@ -558,6 +620,10 @@ class ConversationalInferencer(InferencerBase):
         self.prior_context = dict(ctx)
 
     def update_prior_context(self, **kwargs: Any) -> None:
+        if "sop_state" in kwargs:
+            self.sop_state = kwargs.pop("sop_state")
+            if self.sop_state and self.sop_state.yolo_mode:
+                self.yolo_mode = True
         self.prior_context.update(kwargs)
 
     def set_messages(self, messages: list) -> None:
@@ -596,6 +662,183 @@ class ConversationalInferencer(InferencerBase):
 
     # Alias for LWI's reset_sessions_per_iteration which calls reset_session()
     reset_session = reset_for_flow_invocation
+
+    # =========================================================================
+    # Pause / Resume
+    # =========================================================================
+
+    def _serialize_pause_state(
+        self, *, turn_number: int = 0, iteration: int = 0,
+    ) -> dict:
+        """Capture CI state for pause."""
+        return {
+            "messages": list(self._messages),
+            "prior_context": dict(self.prior_context),
+            "sop_state": self.sop_state.to_dict() if self.sop_state else None,
+            "dynamic_context": (
+                self._dynamic_context.to_dict()
+                if hasattr(self, "_dynamic_context") else None
+            ),
+            "turn_number": turn_number,
+            "iteration": iteration,
+        }
+
+    def _restore_pause_state(self, state: dict) -> None:
+        """Restore CI state from a serialized pause snapshot."""
+        from agent_foundation.common.workflow.sop_state import SOPState
+
+        self._messages = state["messages"]
+        self.prior_context = dict(state.get("prior_context", {}))
+
+        sop_dict = state.get("sop_state")
+        if sop_dict:
+            self.sop_state = SOPState.from_dict(sop_dict)
+            if self.sop_state.sop_name:
+                from agent_foundation.resources.sops.registry import load_sop
+                sop_info = load_sop(self.sop_state.sop_name)
+                self.sop_state.sop = sop_info.sop
+        else:
+            self.sop_state = None
+
+        if state.get("dynamic_context") is not None and hasattr(self, "_dynamic_context"):
+            self._dynamic_context = self._dynamic_context.__class__.from_dict(
+                state["dynamic_context"]
+            )
+        self._pending_resume_state = {
+            "turn_number": state.get("turn_number", 0),
+            "iteration": state.get("iteration", 0),
+        }
+        self._paused = False
+
+    # =========================================================================
+    # Backslash Commands (Model A)
+    # =========================================================================
+
+    @command("help", description="List available commands", aliases=("?",))
+    async def _cmd_help(self) -> str:
+        lines = ["Available commands:"]
+        for meta in self._commands.list_commands():
+            aliases = f" (aliases: {', '.join('/' + a for a in meta.aliases)})" if meta.aliases else ""
+            lines.append(f"  /{meta.name}{aliases} — {meta.description}")
+        return "\n".join(lines)
+
+    @command("status", description="Show SOP state and session info", aliases=("s",))
+    async def _cmd_status(self) -> str:
+        if not self.sop_state:
+            return f"No active SOP. Messages: {len(self._messages)}. Paused: {self._paused}."
+        s = self.sop_state
+        completed = [
+            c.phase if hasattr(c, "phase") else str(c) for c in s.completed_phases
+        ]
+        return (
+            f"SOP: {s.sop_name}\n"
+            f"Phase: {s.current_phase} ({s.phase_status})\n"
+            f"Completed: {completed}\n"
+            f"Messages: {len(self._messages)}. Paused: {self._paused}."
+        )
+
+    @command("clear", description="Clear conversation history")
+    async def _cmd_clear(self) -> str:
+        self._messages = []
+        return "Conversation history cleared."
+
+    @command("pause", description="Pause SOP execution", requires_active_sop=True)
+    async def _cmd_pause(self) -> str:
+        self._paused = True
+        return "SOP paused. Use /resume to continue."
+
+    @command("resume", description="Resume paused SOP")
+    async def _cmd_resume(self) -> str:
+        if not self._paused and not getattr(self, "_pending_resume_state", None):
+            return "Nothing to resume — session is not paused."
+        self._paused = False
+        return "SOP resumed."
+
+    @command("exit_sop", description="Exit the active SOP", aliases=("exit",),
+             requires_active_sop=True)
+    async def _cmd_exit_sop(self) -> str:
+        sop_name = self.sop_state.sop_name if self.sop_state else "unknown"
+        self.sop_state = None
+        return f"Exited SOP: {sop_name}."
+
+    # =========================================================================
+    # Phase Completion Detection (Model A)
+    # =========================================================================
+
+    def _check_phase_completion(self, tool_name: str = "") -> None:
+        """Detect SOP phase completion and advance to next phase.
+
+        Called after _execute_tool_call() applies context_updates.
+        Three detection strategies:
+          1. Tool-mapped: tool from tool_phase_map completed
+          2. Confirmation: confirmation_gate_passed + requires_confirmation
+          3. All-outputs-present: every declared output in phase_outputs
+        """
+        if not self.sop_state or not self.sop_state.sop:
+            return
+
+        from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
+
+        s = self.sop_state
+        sop = s.sop
+        current = s.current_phase
+        if not current:
+            return
+
+        from rich_python_utils.common_objects.workflow.stategraph import StateGraphTracker
+
+        completed_ids = [
+            r.phase if hasattr(r, "phase") else str(r)
+            for r in s.completed_phases
+        ]
+        if current in completed_ids:
+            return
+
+        phase = None
+        for p in sop.phases:
+            if p.id == current:
+                phase = p
+                break
+        if phase is None:
+            return
+
+        detected = False
+
+        if tool_name and s.tool_phase_map.get(tool_name) == current:
+            detected = True
+
+        if not detected and s.confirmation_gate_passed:
+            if "requires confirmation" in " ".join(getattr(phase, "directives", [])):
+                detected = True
+
+        if not detected and hasattr(phase, "outputs") and phase.outputs:
+            if all(o in s.phase_outputs for o in phase.outputs):
+                detected = True
+
+        if not detected:
+            return
+
+        completed_ids.append(current)
+        s.completed_phases = completed_ids
+
+        tracker = StateGraphTracker(
+            graph=sop,
+            current_state=None,
+            state_status=PhaseStatus.COMPLETED,
+            completed_states=completed_ids,
+            state_outputs=s.phase_outputs,
+            goto_counts=s.goto_counts,
+        )
+        available = tracker.get_available_next()
+        if available:
+            s.current_phase = available[0].id
+            s.phase_status = PhaseStatus.RUNNING
+        else:
+            s.current_phase = None
+            s.phase_status = PhaseStatus.COMPLETED
+
+        s.confirmation_gate_passed = False
+        logger.info("SOP phase %s completed; next=%s", current, s.current_phase)
 
     # =========================================================================
     # Prompt Rendering
@@ -651,70 +894,59 @@ class ConversationalInferencer(InferencerBase):
 
         # Evaluate SOP to generate nextstep guidance
         nextstep_guidance = ""
-        sop_path = getattr(self.prompt_renderer, "find_sop_file", lambda: None)()
-        if sop_path is not None:
+        sop = self.sop_state.sop if self.sop_state else None
+
+        # Legacy auto-discover: only if no SOPState is active
+        if sop is None and self.sop_state is None:
+            sop_path = getattr(self.prompt_renderer, "find_sop_file", lambda: None)()
+            if sop_path is not None:
+                from pathlib import Path as _Path
+                from agent_foundation.common.workflow.sop_state import SOPState as _SOPState
+                loaded_sop = SOPManager.load(sop_path)
+                self.sop_state = _SOPState(
+                    sop=loaded_sop,
+                    sop_name=loaded_sop.name or _Path(sop_path).stem,
+                    tool_phase_map=(
+                        loaded_sop.tool_to_phase_map
+                        if hasattr(loaded_sop, "tool_to_phase_map") else {}
+                    ),
+                )
+                sop = loaded_sop
+
+        if sop is not None and self.sop_state is not None:
             try:
                 from rich_python_utils.common_objects.workflow.stategraph import (
                     StateGraphTracker,
                 )
 
-                sop = SOPManager.load(sop_path)
-                # Store SOP for confirmation gate checks in _execute_tool_call
-                self.prior_context["_sop"] = sop
-
-                # Extract and store tool-to-phase mapping from SOP
-                if hasattr(sop, 'tool_to_phase_map'):
-                    tool_map = sop.tool_to_phase_map
-                    if tool_map:
-                        self.prior_context["tool_phase_map"] = tool_map
-
-                # Validate SOP phase IDs match workflow_description (single source of truth)
-                workflow_desc_phases = self.prior_context.get("workflow_description", "")
-                if workflow_desc_phases:
-                    from agent_foundation.server.workflow_context import _WORKFLOW_DESC_PHASE_RE
-                    desc_phase_ids = {
-                        m.group(1) for m in _WORKFLOW_DESC_PHASE_RE.finditer(workflow_desc_phases)
-                    }
-                    sop_phase_ids = set(sop.phase_ids) if hasattr(sop, 'phase_ids') else set()
-                    if desc_phase_ids and sop_phase_ids and desc_phase_ids != sop_phase_ids:
-                        logger.warning(
-                            "SOP phase IDs %s do not match workflow_description phase IDs %s. "
-                            "workflow_description is the single source of truth for phase definitions.",
-                            sop_phase_ids, desc_phase_ids,
-                        )
-
-                # Build tracker from prior_context state
+                s = self.sop_state
                 completed = [
                     r.phase if hasattr(r, "phase") else str(r)
-                    for r in self.prior_context.get("completed_phases", [])
+                    for r in s.completed_phases
                 ]
                 tracker = StateGraphTracker(
                     graph=sop,
-                    current_state=self.prior_context.get("current_phase"),
-                    state_status=self.prior_context.get("phase_status", "idle"),
+                    current_state=None,
+                    state_status="idle",
                     completed_states=completed,
-                    state_outputs=self.prior_context.get("phase_outputs", {}),
-                    goto_counts=self.prior_context.get("goto_counts", {}),
+                    state_outputs=s.phase_outputs,
+                    goto_counts=s.goto_counts,
                 )
 
-                # Auto-complete confirmation-gate phases (no tools, no outputs)
-                # after user confirmed via a confirmation widget
-                if self.prior_context.pop("_confirmation_gate_passed", False):
+                if s.confirmation_gate_passed:
                     from rich_python_utils.string_utils.formatting.template_manager.sop_manager import SOPPhase
                     for node in tracker.get_available_next():
                         if not isinstance(node, SOPPhase):
                             continue
                         has_tools = any(
-                            s.name.lower() in ("tools", "command")
-                            for s in getattr(node, "subsections", [])
+                            sub.name.lower() in ("tools", "command")
+                            for sub in getattr(node, "subsections", [])
                         )
                         if not has_tools and "requires confirmation" in " ".join(
                             getattr(node, "directives", [])
                         ):
                             tracker.completed_states.add(node.id)
-                            self.prior_context.setdefault(
-                                "_completed_gate_phases", []
-                            ).append(node.id)
+                            s.confirmation_gate_passed = False
                             break
 
                 nextstep_guidance = SOPManager.render_guidance(
@@ -723,27 +955,22 @@ class ConversationalInferencer(InferencerBase):
             except Exception as e:
                 logger.warning("SOP evaluation failed: %s", e)
 
-        # Workflow manager sections (added AFTER prior_context so they
-        # cannot be overridden by prior_context keys)
-        workflow_sections: dict[str, str] = {}
-        if self.workflow_manager is not None:
-            try:
-                workflow_sections = self.workflow_manager.render_prompt_sections()
-            except Exception as e:
-                logger.warning("Workflow prompt rendering failed: %s", e)
+        # Build feed using build_feed — merges dicts + FeedBase objects
+        from rich_python_utils.common_objects.feed_base import build_feed
 
-        feed = {
-            **template_vars,
-            "workflow_nextstep_guidance": nextstep_guidance,
-            "action_tools": available_tools,
-            **self.prior_context,
-            "completed_actions": all_actions,
-            "conversation_history": messages,
-            "current_turn": {"role": "user", "content": current_message},
-            "conversation_tools": conversation_tools_text,
-            # Workflow sections after prior_context to prevent override
-            **workflow_sections,
-        }
+        feed = build_feed(
+            template_vars,
+            self.prior_context,
+            self.sop_state,
+            {
+                "workflow_nextstep_guidance": nextstep_guidance,
+                "action_tools": available_tools,
+                "completed_actions": all_actions,
+                "conversation_history": messages,
+                "current_turn": {"role": "user", "content": current_message},
+                "conversation_tools": conversation_tools_text,
+            },
+        )
 
         # Resolve feed values that are themselves templates (e.g., SOP guidance
         # containing {{ session_root_path }}).  Uses the same Jinja2 Environment
@@ -797,31 +1024,20 @@ class ConversationalInferencer(InferencerBase):
         if is_async:
             executor = self.tool_executor
 
-            tool_map = self.prior_context.get("tool_phase_map", {})
-            sop_phase = tool_map.get(canonical, canonical)
-            self.prior_context["current_phase"] = sop_phase
-            self.prior_context["phase_status"] = "running"
-            phase_name = sop_phase
-            try:
-                from agent_foundation.server.workflow_context import _WORKFLOW_DESC_PHASE_RE
-                wd = self.prior_context.get("workflow_description", "")
-                if wd:
-                    for m in _WORKFLOW_DESC_PHASE_RE.finditer(wd):
-                        if m.group(1) == sop_phase:
-                            phase_name = m.group(2).strip()
-                            break
-            except Exception:
-                pass
-            self.prior_context["workflow_status"] = (
-                f"Current phase: Phase {sop_phase} — {phase_name} (running)\n"
-                f"  Active task: {canonical} — {str(tool_call.arguments.get('target', ''))[:80]}"
-            )
+            if self.sop_state:
+                from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
+                tool_map = self.sop_state.tool_phase_map
+                sop_phase = tool_map.get(canonical)
+                if sop_phase:
+                    self.sop_state.current_phase = sop_phase
+                    self.sop_state.phase_status = PhaseStatus.RUNNING
 
             async def _run_async() -> None:
                 try:
                     result = await executor(canonical, tool_call.arguments)
                     if hasattr(result, "context_updates") and result.context_updates:
                         self.update_prior_context(**result.context_updates)
+                    self._check_phase_completion(tool_name=canonical)
                 except Exception as e:
                     logger.error("Async tool %s failed: %s", canonical, e)
 
@@ -837,6 +1053,7 @@ class ConversationalInferencer(InferencerBase):
             # result is ToolExecutionResult — apply context_updates to prior_context
             if hasattr(result, "context_updates") and result.context_updates:
                 self.update_prior_context(**result.context_updates)
+            self._check_phase_completion(tool_name=canonical)
             if hasattr(result, "result"):
                 return result.result
             return str(result)
@@ -1253,6 +1470,8 @@ class ConversationalInferencer(InferencerBase):
                 and str(result).lower() in ("yes", "proceed")
             ):
                 self.update_prior_context(_confirmation_gate_passed=True)
+                if self.sop_state:
+                    self.sop_state.confirmation_gate_passed = True
             var_name = tools[0].output_vars[0] if tools[0].output_vars else "input"
             return {var_name: result}
 

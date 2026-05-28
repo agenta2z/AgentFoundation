@@ -21,7 +21,6 @@ from rich_python_utils.string_utils.formatting.template_manager.sop_manager impo
 from agent_foundation.common.workflow.definition import WorkflowDefinition
 from agent_foundation.common.workflow.instance import WorkflowInstance
 from agent_foundation.common.workflow.registry import WorkflowRegistry
-from agent_foundation.common.workflow.sop_workgraph import build_sop_workgraph
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,11 @@ class WorkflowManager:
     async def enter_workflow(
         self, definition_id: str, *, yolo_mode: bool = False
     ) -> str:
-        """Create and start a new WorkflowInstance. Returns instance_id."""
+        """Create a new WorkflowInstance. Returns instance_id.
+
+        Under Model A, the CI's agentic loop drives execution — no WorkGraph.
+        The instance is a state holder for tracking and prompt rendering.
+        """
         definition = self.registry.get(definition_id)
         instance_id = uuid.uuid4().hex[:8]
 
@@ -67,19 +70,6 @@ class WorkflowManager:
             last_active_at=datetime.now(UTC),
         )
         instance.workspace.mkdir(parents=True, exist_ok=True)
-
-        graph, tracker = build_sop_workgraph(
-            sop=definition.sop,
-            inferencer_factory=self.inferencer_factory,
-            workspace=instance.workspace,
-            yolo_mode=yolo_mode,
-            graph_reporter=self.graph_reporter,
-            max_goto_iterations=definition.frontmatter.get("max_goto_iterations", 10),
-            max_total_nodes=definition.frontmatter.get("max_total_nodes", 500),
-        )
-        instance.graph = graph
-        instance.tracker = tracker
-        instance._graph_task = asyncio.create_task(graph.arun())
 
         self.active_instances[instance_id] = instance
         self.focused_instance_id = instance_id
@@ -109,29 +99,8 @@ class WorkflowManager:
                 f"Instance {instance_id} is {instance.status}, not suspended"
             )
 
-        definition = self.registry.get(instance.definition_id)
-        graph, tracker = build_sop_workgraph(
-            sop=definition.sop,
-            inferencer_factory=self.inferencer_factory,
-            workspace=instance.workspace,
-            yolo_mode=instance.yolo_mode,
-            graph_reporter=self.graph_reporter,
-        )
-
-        if instance.tracker:
-            saved = instance.tracker.to_dict()
-            tracker.current_state = saved.get("current_state")
-            tracker.state_status = saved.get("state_status", "idle")
-            tracker.completed_states = saved.get("completed_states", [])
-            tracker.state_outputs = saved.get("state_outputs", {})
-            tracker.goto_counts = saved.get("goto_counts", {})
-            tracker.foreach_state = saved.get("foreach_state", {})
-
-        instance.graph = graph
-        instance.tracker = tracker
         instance.status = "active"
         instance.last_active_at = datetime.now(UTC)
-        instance._graph_task = asyncio.create_task(graph.arun())
         self.focused_instance_id = instance_id
         logger.info("Workflow instance %s resumed", instance_id)
 

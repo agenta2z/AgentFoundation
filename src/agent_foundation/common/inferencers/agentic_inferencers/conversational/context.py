@@ -121,3 +121,11 @@ class AgenticResult:
     last_template_source: str = ""  # for View Prompt
     last_template_feed: dict[str, Any] = field(default_factory=dict)
     last_template_config: dict[str, Any] = field(default_factory=dict)  # for UI rendering
+
+
+@dataclass
+class PausedResult(AgenticResult):
+    """Returned when the agentic loop is cooperatively paused via /pause."""
+
+    paused: bool = True
+    pause_state: dict = field(default_factory=dict)
