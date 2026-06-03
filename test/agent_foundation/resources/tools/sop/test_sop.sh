@@ -15,11 +15,29 @@ OS_ROOT="$AF_ROOT/../OpenStartup"
 
 export PYTHONPATH="$AF_ROOT/src:$RPU_ROOT/src:$OS_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-PYTHON="${OPENSTARTUP_PYTHON:-python3}"
+# Auto-detect Python >= 3.11 (required for StrEnum).
+# Honors OPENSTARTUP_PYTHON if set, otherwise searches common paths.
+_find_python() {
+    for candidate in "${OPENSTARTUP_PYTHON:-}" \
+                     /opt/homebrew/anaconda3/bin/python \
+                     python3.13 python3.12 python3.11 python3; do
+        [ -z "$candidate" ] && continue
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
+                echo "$candidate"
+                return 0
+            fi
+        fi
+    done
+    echo "python3"
+    return 1
+}
+PYTHON="$(_find_python)"
 
 SOP_NAME="${1:-role_creation}"
 REQUEST="${2:-hire a machine learning engineer}"
 MODEL="${SOP_MODEL:-opus[1m]}"
+BACKEND="${SOP_BACKEND:-}"
 EXTRA_SOP_DIRS="$OS_ROOT/src/openteam/server/resources/sops"
 EXTRA_TOOL_DIRS="$OS_ROOT/src/openteam/server/resources/tools"
 
@@ -33,6 +51,7 @@ echo "╠═══════════════════════�
 echo "║  SOP:     $SOP_NAME"
 echo "║  Request: $REQUEST"
 echo "║  Model:   $MODEL"
+echo "║  Backend: ${BACKEND:-default (claude_code)}"
 echo "║  Python:  $PYTHON"
 echo "║  Log:     $LOG_FILE"
 echo "╚══════════════════════════════════════════════╝"
@@ -41,13 +60,17 @@ echo "╚═══════════════════════�
     echo "ERROR: Cannot import SOP CLI"; exit 1
 }
 
+BACKEND_FLAG=""
+[ -n "$BACKEND" ] && BACKEND_FLAG="--backend $BACKEND"
+
 "$PYTHON" -m agent_foundation.resources.tools.sop \
     "$SOP_NAME" \
     --yolo \
     --model "$MODEL" \
+    $BACKEND_FLAG \
+    --request "$REQUEST" \
     --extra-sop-dirs "$EXTRA_SOP_DIRS" \
     --extra-tool-dirs "$EXTRA_TOOL_DIRS" \
-    "$REQUEST" \
     2>&1 | tee "$LOG_FILE"
 
 echo ""

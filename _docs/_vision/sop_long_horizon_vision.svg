@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 860" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3B82F6"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#D97706"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="860" fill="#FAFBFC"/>
+
+  <!-- Title -->
+  <text x="600" y="36" text-anchor="middle" fill="#1E293B" font-size="22" font-weight="700">SOP-Guided Long-Horizon Execution</text>
+  <text x="600" y="58" text-anchor="middle" fill="#64748B" font-size="13">Agent state machine: free chat &#x2194; SOP skills, with prompt context management</text>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- PART 1: STATE MACHINE                               -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <text x="40" y="98" fill="#94A3B8" font-size="11" font-weight="600" letter-spacing="1.5">AGENT STATE MACHINE</text>
+  <line x1="40" y1="106" x2="1160" y2="106" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- FREE CHAT box -->
+  <rect x="60" y="130" width="260" height="120" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="190" y="160" text-anchor="middle" fill="#475569" font-size="14" font-weight="700">FREE CHAT MODE</text>
+  <line x1="80" y1="172" x2="300" y2="172" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="190" y="192" text-anchor="middle" fill="#64748B" font-size="11">Normal conversation</text>
+  <text x="190" y="209" text-anchor="middle" fill="#64748B" font-size="11">Agent decides what to do</text>
+  <text x="190" y="226" text-anchor="middle" fill="#64748B" font-size="11">Hub state between SOPs</text>
+
+  <!-- Arrow: Free → SOP catalog -->
+  <line x1="320" y1="170" x2="438" y2="170" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="380" y="160" text-anchor="middle" fill="#3B82F6" font-size="10" font-weight="600">NL trigger or /sop</text>
+  <text x="380" y="148" text-anchor="middle" fill="#94A3B8" font-size="9">&#x201C;optimize this model&#x201D;</text>
+
+  <!-- SOP CATALOG box (contains multiple SOPs) -->
+  <rect x="440" y="118" width="370" height="145" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="625" y="142" text-anchor="middle" fill="#1E40AF" font-size="14" font-weight="700">SOP MODE (from catalog)</text>
+  <line x1="460" y1="152" x2="790" y2="152" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="625" y="170" text-anchor="middle" fill="#3B82F6" font-size="11" font-weight="500">Prompt expanded with full work state:</text>
+  <text x="625" y="187" text-anchor="middle" fill="#64748B" font-size="10">&#8226; Current phase + next available phases</text>
+  <text x="625" y="202" text-anchor="middle" fill="#64748B" font-size="10">&#8226; SOP instructions &amp; tool mappings</text>
+  <text x="625" y="217" text-anchor="middle" fill="#64748B" font-size="10">&#8226; Phase outputs &amp; artifacts collected</text>
+  <text x="625" y="232" text-anchor="middle" fill="#64748B" font-size="10">&#8226; Quality gate status &amp; dependencies</text>
+  <!-- SOP skill chips inside the box -->
+  <rect x="460" y="240" width="90" height="18" rx="9" fill="#DBEAFE" stroke="#93C5FD" stroke-width="0.8"/>
+  <text x="505" y="253" text-anchor="middle" fill="#1E40AF" font-size="8" font-weight="500">code_optimization</text>
+  <rect x="558" y="240" width="92" height="18" rx="9" fill="#DBEAFE" stroke="#93C5FD" stroke-width="0.8"/>
+  <text x="604" y="253" text-anchor="middle" fill="#1E40AF" font-size="8" font-weight="500">model_optimization</text>
+  <rect x="658" y="240" width="70" height="18" rx="9" fill="#DBEAFE" stroke="#93C5FD" stroke-width="0.8"/>
+  <text x="693" y="253" text-anchor="middle" fill="#1E40AF" font-size="8" font-weight="500">role_creation</text>
+  <rect x="736" y="240" width="60" height="18" rx="9" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="766" y="253" text-anchor="middle" fill="#94A3B8" font-size="8">deploy ...</text>
+
+  <!-- Arrow: SOP → Free (exit) -->
+  <line x1="810" y1="190" x2="878" y2="190" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="845" y="180" text-anchor="middle" fill="#059669" font-size="10" font-weight="600">complete / exit</text>
+
+  <!-- POST-SOP box -->
+  <rect x="880" y="130" width="280" height="120" rx="10" fill="#F0FDF4" stroke="#059669" stroke-width="1.5"/>
+  <text x="1020" y="160" text-anchor="middle" fill="#065F46" font-size="14" font-weight="700">FREE CHAT + SUMMARY</text>
+  <line x1="900" y1="172" x2="1140" y2="172" stroke="#BBF7D0" stroke-width="1"/>
+  <text x="1020" y="192" text-anchor="middle" fill="#64748B" font-size="11">Work state collapsed to summary</text>
+  <text x="1020" y="209" text-anchor="middle" fill="#64748B" font-size="11">Key outputs &amp; artifacts retained</text>
+  <text x="1020" y="226" text-anchor="middle" fill="#64748B" font-size="11">Agent back in free mode</text>
+
+  <!-- Arrow: Post-SOP → same or different SOP (resume / re-enter) -->
+  <path d="M 1020,250 L 1020,290 L 625,290 L 625,263" fill="none" stroke="#3B82F6" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrowBlue)"/>
+  <text x="822" y="284" text-anchor="middle" fill="#3B82F6" font-size="10" font-weight="500">resume same SOP or enter a different one</text>
+
+  <!-- Small footnote: SOP→SOP jump -->
+  <text x="625" y="312" text-anchor="middle" fill="#D97706" font-size="9" opacity="0.7">* direct SOP-to-SOP jump also possible (without returning to free chat)</text>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- PART 2: SOP INTERNAL FLOW                           -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <text x="40" y="350" fill="#94A3B8" font-size="11" font-weight="600" letter-spacing="1.5">SOP PHASE PROGRESSION (inside any active SOP)</text>
+  <line x1="40" y1="358" x2="1160" y2="358" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- Phase 0 -->
+  <rect x="60" y="380" width="150" height="70" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.2"/>
+  <text x="135" y="405" text-anchor="middle" fill="#1E40AF" font-size="12" font-weight="600">Phase 0: Clarify</text>
+  <text x="135" y="422" text-anchor="middle" fill="#64748B" font-size="9">clarification tool</text>
+  <text x="135" y="436" text-anchor="middle" fill="#059669" font-size="9" font-weight="500">[requires user input]</text>
+  <!-- Gate -->
+  <line x1="210" y1="415" x2="248" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="248" y="401" width="28" height="28" rx="4" fill="#F0FDF4" stroke="#059669" stroke-width="1.2"/>
+  <text x="262" y="420" text-anchor="middle" fill="#059669" font-size="14" font-weight="700">&#x2713;</text>
+
+  <!-- Phase 1 -->
+  <line x1="276" y1="415" x2="300" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="300" y="380" width="150" height="70" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.2"/>
+  <text x="375" y="405" text-anchor="middle" fill="#1E40AF" font-size="12" font-weight="600">Phase 1: Investigate</text>
+  <text x="375" y="422" text-anchor="middle" fill="#64748B" font-size="9">understand-codebase</text>
+  <text x="375" y="436" text-anchor="middle" fill="#64748B" font-size="9">understand-data</text>
+  <line x1="450" y1="415" x2="488" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="488" y="401" width="28" height="28" rx="4" fill="#F0FDF4" stroke="#059669" stroke-width="1.2"/>
+  <text x="502" y="420" text-anchor="middle" fill="#059669" font-size="14" font-weight="700">&#x2713;</text>
+
+  <!-- Phase 2 -->
+  <line x1="516" y1="415" x2="540" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="540" y="380" width="150" height="70" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.2"/>
+  <text x="615" y="405" text-anchor="middle" fill="#1E40AF" font-size="12" font-weight="600">Phase 2: Execute</text>
+  <text x="615" y="422" text-anchor="middle" fill="#64748B" font-size="9">research-propose</text>
+  <text x="615" y="436" text-anchor="middle" fill="#059669" font-size="9" font-weight="500">[requires user input]</text>
+  <line x1="690" y1="415" x2="728" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="728" y="401" width="28" height="28" rx="4" fill="#F0FDF4" stroke="#059669" stroke-width="1.2"/>
+  <text x="742" y="420" text-anchor="middle" fill="#059669" font-size="14" font-weight="700">&#x2713;</text>
+
+  <!-- Phase ... -->
+  <line x1="756" y1="415" x2="780" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="800" y="420" text-anchor="middle" fill="#94A3B8" font-size="16">&#8230;</text>
+
+  <!-- Phase N -->
+  <line x1="820" y1="415" x2="844" y2="415" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="844" y="380" width="150" height="70" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.2"/>
+  <text x="919" y="405" text-anchor="middle" fill="#1E40AF" font-size="12" font-weight="600">Phase N: Verify</text>
+  <text x="919" y="422" text-anchor="middle" fill="#64748B" font-size="9">tests &amp; benchmarks</text>
+  <text x="919" y="436" text-anchor="middle" fill="#64748B" font-size="9">quality check</text>
+
+  <!-- Completion -->
+  <line x1="994" y1="415" x2="1030" y2="415" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="1080" y="412" fill="#059669" font-size="12" font-weight="600">SOP</text>
+  <text x="1080" y="428" fill="#059669" font-size="12" font-weight="600">complete</text>
+
+  <!-- Annotation -->
+  <text x="600" y="474" text-anchor="middle" fill="#94A3B8" font-size="10" font-style="italic">Each LLM iteration: prompt re-rendered with updated phase state. Each SOP has its own phases, tools, and gates.</text>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- PART 3: PROMPT CONTEXT LIFECYCLE                    -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <text x="40" y="514" fill="#94A3B8" font-size="11" font-weight="600" letter-spacing="1.5">PROMPT CONTEXT LIFECYCLE</text>
+  <line x1="40" y1="522" x2="1160" y2="522" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- Free chat prompt -->
+  <rect x="60" y="540" width="240" height="170" rx="6" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+  <rect x="60" y="540" width="240" height="24" rx="6" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+  <text x="180" y="556" text-anchor="middle" fill="#475569" font-size="10" font-weight="600">Free Chat Prompt</text>
+  <text x="75" y="582" fill="#1E293B" font-size="10" font-weight="500">system prompt</text>
+  <rect x="75" y="588" width="210" height="3" rx="1" fill="#E2E8F0"/>
+  <text x="75" y="607" fill="#1E293B" font-size="10" font-weight="500">conversation history</text>
+  <rect x="75" y="613" width="210" height="3" rx="1" fill="#E2E8F0"/>
+  <text x="75" y="632" fill="#1E293B" font-size="10" font-weight="500">tool definitions</text>
+  <rect x="75" y="638" width="210" height="3" rx="1" fill="#E2E8F0"/>
+  <text x="180" y="690" text-anchor="middle" fill="#CBD5E1" font-size="9" font-style="italic">no SOP state</text>
+
+  <!-- Arrow: expand -->
+  <line x1="300" y1="625" x2="348" y2="625" stroke="#3B82F6" stroke-width="1.2" marker-end="url(#arrowBlue)"/>
+  <text x="325" y="615" text-anchor="middle" fill="#3B82F6" font-size="8" font-weight="500">enter SOP</text>
+  <text x="325" y="605" text-anchor="middle" fill="#3B82F6" font-size="8">expand &#x25BC;</text>
+
+  <!-- SOP active prompt -->
+  <rect x="350" y="535" width="280" height="195" rx="6" fill="#FFFFFF" stroke="#3B82F6" stroke-width="1.5"/>
+  <rect x="350" y="535" width="280" height="24" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+  <text x="490" y="551" text-anchor="middle" fill="#1E40AF" font-size="10" font-weight="600">SOP Active Prompt</text>
+  <text x="365" y="577" fill="#1E293B" font-size="10">system + history + tools</text>
+  <rect x="365" y="583" width="250" height="3" rx="1" fill="#E2E8F0"/>
+  <!-- Expanded SOP block -->
+  <rect x="365" y="595" width="250" height="120" rx="4" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="375" y="612" fill="#1E40AF" font-size="10" font-weight="600">SOP Work State (expanded)</text>
+  <text x="375" y="628" fill="#3B82F6" font-size="9">&#8226; phase graph + current position</text>
+  <text x="375" y="642" fill="#3B82F6" font-size="9">&#8226; per-phase instructions &amp; tool map</text>
+  <text x="375" y="656" fill="#3B82F6" font-size="9">&#8226; outputs, artifacts, variables</text>
+  <text x="375" y="670" fill="#3B82F6" font-size="9">&#8226; gate status &amp; dependencies</text>
+  <text x="375" y="684" fill="#3B82F6" font-size="9">&#8226; prior SOP summaries (if any)</text>
+  <!-- Braces showing expansion -->
+  <text x="340" y="660" fill="#3B82F6" font-size="30" opacity="0.2">&#x007B;</text>
+
+  <!-- Arrow: collapse -->
+  <line x1="630" y1="625" x2="678" y2="625" stroke="#059669" stroke-width="1.2" marker-end="url(#arrowGreen)"/>
+  <text x="655" y="615" text-anchor="middle" fill="#059669" font-size="8" font-weight="500">exit SOP</text>
+  <text x="655" y="605" text-anchor="middle" fill="#059669" font-size="8">collapse &#x25B2;</text>
+
+  <!-- Post-SOP prompt -->
+  <rect x="680" y="540" width="240" height="170" rx="6" fill="#FFFFFF" stroke="#059669" stroke-width="1.2"/>
+  <rect x="680" y="540" width="240" height="24" rx="6" fill="#F0FDF4" stroke="#059669" stroke-width="1.2"/>
+  <text x="800" y="556" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">Post-SOP Prompt</text>
+  <text x="695" y="582" fill="#1E293B" font-size="10">system + history + tools</text>
+  <rect x="695" y="588" width="210" height="3" rx="1" fill="#E2E8F0"/>
+  <!-- Collapsed summary -->
+  <rect x="695" y="600" width="210" height="36" rx="4" fill="#F0FDF4" stroke="#059669" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="705" y="618" fill="#065F46" font-size="9" font-weight="600">SOP Summary (collapsed)</text>
+  <text x="705" y="632" fill="#059669" font-size="8">completed + key outputs + artifact refs</text>
+  <text x="800" y="682" text-anchor="middle" fill="#CBD5E1" font-size="9" font-style="italic">lean context, expandable on resume</text>
+
+  <!-- Arrow: enter next SOP -->
+  <line x1="920" y1="620" x2="958" y2="620" stroke="#3B82F6" stroke-width="1.2" marker-end="url(#arrowBlue)"/>
+  <text x="940" y="610" text-anchor="middle" fill="#3B82F6" font-size="8" font-weight="500">enter next</text>
+  <text x="940" y="600" text-anchor="middle" fill="#3B82F6" font-size="8">SOP</text>
+
+  <!-- Next SOP prompt -->
+  <rect x="960" y="535" width="200" height="195" rx="6" fill="#FFFFFF" stroke="#3B82F6" stroke-width="1.2"/>
+  <rect x="960" y="535" width="200" height="24" rx="6" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.2"/>
+  <text x="1060" y="551" text-anchor="middle" fill="#1E40AF" font-size="10" font-weight="600">Next SOP Active</text>
+  <text x="975" y="577" fill="#1E293B" font-size="10">sys + history + prior summary</text>
+  <rect x="975" y="583" width="170" height="3" rx="1" fill="#E2E8F0"/>
+  <rect x="975" y="595" width="170" height="120" rx="4" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="985" y="612" fill="#1E40AF" font-size="10" font-weight="600">New SOP Work State</text>
+  <text x="985" y="628" fill="#3B82F6" font-size="9">&#8226; different phases &amp; tools</text>
+  <text x="985" y="642" fill="#3B82F6" font-size="9">&#8226; prior SOP summary retained</text>
+  <text x="985" y="656" fill="#3B82F6" font-size="9">&#8226; can reference prior outputs</text>
+  <text x="985" y="670" fill="#3B82F6" font-size="9">&#8226; fresh state for this SOP</text>
+
+  <!-- Resume arrow -->
+  <path d="M 800,710 L 800,745 L 490,745 L 490,730" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrowBlue)"/>
+  <text x="645" y="758" text-anchor="middle" fill="#3B82F6" font-size="9">resume: expand summary back to full work state</text>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- BOTTOM: KEY INSIGHT                                 -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <line x1="40" y1="790" x2="1160" y2="790" stroke="#E2E8F0" stroke-width="1"/>
+  <rect x="80" y="802" width="1040" height="48" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="600" y="823" text-anchor="middle" fill="#1E293B" font-size="12" font-weight="600">SOPs are skills from a catalog. Prompt expands on entry, collapses to summary on exit.</text>
+  <text x="600" y="841" text-anchor="middle" fill="#64748B" font-size="11">Free chat is the hub. NL triggers the transition. Agent carries only summaries of past SOPs, keeping context lean.</text>
+</svg>

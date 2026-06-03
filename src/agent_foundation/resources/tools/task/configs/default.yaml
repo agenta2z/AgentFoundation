@@ -1,0 +1,193 @@
+# ============================================================================
+# Topology B-extended for documentation-shaped tasks.
+# ============================================================================
+#
+# Tree structure:
+#   Outer Dual                                    review + fix the FULL deliverable
+#   ├── base_inferencer = PTI                     plan-then-execute on the whole task
+#   │   ├── planner_inferencer = Dual             review + fix the integrated PLAN
+#   │   │   ├── base_inferencer = BTA             decompose the PLANNING task
+#   │   │   │   ├── breakdown_inferencer          → N sub-planning subtasks
+#   │   │   │   ├── worker_factory = MFDual       each sub-plan explored by N parallel flows
+#   │   │   │   │                                 with peer visibility + winner picking
+#   │   │   │   └── aggregator_inferencer         integrate sub-plans → ONE coherent
+#   │   │   │                                     prose plan (no structured output —
+#   │   │   │                                     decomposition is the exec BTA's job)
+#   │   │   └── review_inferencer                 judge plan structure + quality
+#   │   └── executor_inferencer = BTA             decompose execution per plan, run parallel
+#   │       ├── breakdown_inferencer              read plan → M execution subtasks (RST files)
+#   │       ├── worker_factory = Dual             each section: write + review + fix
+#   │       └── aggregator_inferencer             combine sections + sphinx-build HTML
+#   ├── review_inferencer                         judge final deliverable (RST + HTML)
+#   └── fixer_inferencer = PTI                    mirror of base — fires if outer review rejects
+#
+# Why this shape: planning is convergent (sub-plans may overlap/conflict; need
+# integration review + fix loop), execution is divergent (each section is
+# independent; per-section review is enough; integration review at outer Dual).
+#
+# ----------------------------------------------------------------------------
+# Cascades (`_-prefix` keys → propagated to descendants accepting un-prefixed param)
+# ----------------------------------------------------------------------------
+#   GLOBAL (declared at file root):
+#     _logger, _debug_mode, _model_name, _idle_timeout_seconds, _target_path,
+#     _template_manager, _output_path, _consensus_config.
+#
+#   SUBTREE-SCOPED (Refactor 14) — `_template_root_space` declared per-stage:
+#       planner_inferencer       → plan
+#       executor_inferencer      → implementation
+#     Three-layer precedence: leaf > role-specific SLOT_DEFAULTS > subtree cascade.
+#     Example: every BTA's breakdown_inferencer.template_root_space=task_breakdown
+#     comes from BREAKDOWN_TEMPLATE_DEFAULTS (role layer), beating the subtree cascade.
+#
+# ----------------------------------------------------------------------------
+# Template-stack key facts
+# ----------------------------------------------------------------------------
+#   - BTA modern slot semantics (default): worker outputs go into the aggregator's
+#     template_extra_feed["upstream_artifacts"], breakdown's `aggregation_guidance`
+#     is forwarded to the aggregator, original BTA query goes into {{ input }}.
+#     Replaces the legacy UpstreamInjectingAggregatorPromptBuilder factory.
+#   - Three aggregators (per-flow followup, MFDual flow aggregator, plan BTA
+#     aggregator) all share the `aggregation` task_* triplet via SLOT_DEFAULTS,
+#     differing only by `template_extra_feed` flags (winner_pick / iteration_judgment).
+#   - `winner_pick: true` (MFDual feature toggle): auto-sets include_winner_pick
+#     on multi_flow_aggregator + wires the default WinnerParser/FinalPlanParser.
+#   - `iteration_judgment: true` (per-flow toggle): auto-sets end_condition=
+#     parse_decision_stop + include_iteration_judgment on followup_inferencer.
+#   - `propagate_runtime_input: true` (MFDual): MultiFlow fills cfg["input"] from
+#     the runtime inference_input per call (PTI's subtask reaches each flow this way).
+#   - Per-flow followup step ≥ 1: input is assembled by MultiFlow's Python
+#     formatter `_format_followup_input` (no Jinja); upstream artifacts flow via
+#     template_extra_feed["upstream_artifacts"] into the followup's wrapper template.
+#   - Outer review_inferencer uses `implementation/review` (not plan/review) because
+#     the deliverable IS the implementation, not a plan about implementation.
+#   - Fixer PTI uses `_inherits_: base_inferencer` to deep-copy the base subtree,
+#     overriding only `name:` fields so plan_bta / exec_bta have distinct identities.
+#     The deep-copy preserves all `_-prefix` cascade declarations (incl. Refactor 14).
+#
+# ----------------------------------------------------------------------------
+# Hyperparameters (`_params:` convention, Refactor 15)
+# ----------------------------------------------------------------------------
+# Tunable scalar values are declared once at the top under `_params:` and
+# referenced via `${_params.<name>}` in the body. The walker auto-strips
+# `_-prefix` keys at root (no constructor sees `params`); OmegaConf eager
+# resolution in `load_config` substitutes the values BEFORE instantiation.
+#
+# Override at load time:
+#     load_config(path, overrides={"_params.default_inferencer": "RovoDevCLI"})
+#     load_config(path, overrides={"_params.plan_max_breakdown": 4})
+#
+# Required (no default) → use the `???` sentinel; OmegaConf raises
+# MissingMandatoryValue if the caller doesn't supply a value.
+#
+# ----------------------------------------------------------------------------
+# Caveats
+# ----------------------------------------------------------------------------
+#   1. `propagate_runtime_input: true` on each MFDual is incompatible with
+#      `/task --resume` — checkpoint reconstruction may use stale per-flow inputs.
+#      Acceptable for shallow real-CLI tests where resume isn't exercised.
+#   2. `/task --no-dual` collapses each Dual to its base; outer review-and-fix
+#      disappears. Acceptable cheap mode.
+#   3. `predefined_variables: false` on TemplateManager suppresses AI HR persona
+#      auto-load (would otherwise contaminate from OpenStartup's _variables.yaml).
+
+# ---------------------------------------------------------------------------
+# HYPERPARAMETERS — defaults; override via load_config(overrides=...)
+# ---------------------------------------------------------------------------
+_params:
+  workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
+  default_inferencer: ClaudeCodeCLI  # leaf inferencer alias; override with e.g. RovoDevCLI
+  plan_max_breakdown: 3              # planner BTA: number of sub-planning subtasks
+  exec_max_breakdown: 4              # executor BTA: number of execution subtasks
+  flow_max_dynamic_steps: 3          # per-flow MFDual followup iterations cap
+  consensus_max_iterations: 3        # cheap-mode default for ALL Dual review-and-fix loops
+
+# ---------------------------------------------------------------------------
+# GLOBAL CASCADES
+# ---------------------------------------------------------------------------
+_logger: auto
+_debug_mode: true
+_model_name: opus[1m]
+_idle_timeout_seconds: 600
+_tool_use_idle_timeout_seconds: 5400  # 90 min; covers very slow tool calls (e.g., codebase-wide grep, large doc generation). Previously 1800 (30 min) caused timeouts in deep codebase-understanding runs.
+_output_path: "output.md"
+
+_template_manager:
+  _target_: TemplateManager
+  templates:
+    - ${templates_dir}
+    - ${modpath:agent_foundation.resources.prompt_templates}
+  active_template_type: main
+  predefined_variables: false        # suppress AI HR persona auto-load
+  default_template_key: initial
+  enable_templated_feed: true
+
+_consensus_config:
+  _target_: ConsensusConfig
+  max_iterations: ${_params.consensus_max_iterations}
+
+# ---------------------------------------------------------------------------
+# OUTER DUAL — review and fix the FULL deliverable
+# ---------------------------------------------------------------------------
+_target_: Dual
+_template_root_space: implementation
+# Workspace block (explicit form replaces the prior `workspace_root` shorthand).
+# Reason: the shorthand path constructs InferencerWorkspace(root=...) with
+# defaults, leaving `use_final_deliverables_folder=False`. To opt into the
+# `outputs/final_deliverables/` separation (so the BTA can copy worker
+# deliverables into a distinct folder vs. intermediate outputs), we need to
+# pass the flag explicitly via the workspace block.
+workspace:
+  _target_: InferencerWorkspace
+  root: ${_params.workspace_root}
+  use_final_deliverables_folder: true
+templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
+
+# ---------------------------------------------------------------------------
+# BASE PTI — plan-then-execute on the whole task
+# ---------------------------------------------------------------------------
+base_inferencer:
+  _target_: PTI
+
+  # ---- PLAN STAGE: imported from breakdown-multiflow-plan.yaml ----
+  # The imported YAML is a standalone Dual{BTA{MFDual}} planner topology.
+  # workspace: null strips the standalone workspace block so workspace
+  # assignment cascades from the parent PTI (not from the standalone's block).
+  planner_inferencer:
+    _import_: breakdown-multiflow-plan
+    workspace: null
+
+  # ---- EXECUTE STAGE: bare BTA with Dual workers ----
+  executor_inferencer:
+    _target_: BTA
+    name: exec_bta
+    breakdown_format: json_subtasks
+    max_breakdown: ${_params.exec_max_breakdown}
+
+    breakdown_inferencer:
+      _target_: ${_params.default_inferencer}
+
+    worker_factory:
+      _default:
+        _target_: Dual
+        # Per-worker retry budget — see commentary on planner worker_factory.
+        max_retry: 3
+        base_inferencer:
+          _target_: ${_params.default_inferencer}
+        review_inferencer:
+          _target_: ${_params.default_inferencer}
+
+    aggregator_inferencer:
+      _target_: ${_params.default_inferencer}
+
+# ---------------------------------------------------------------------------
+# OUTER REVIEWER — judges final deliverable (RST + built HTML)
+# ---------------------------------------------------------------------------
+review_inferencer:
+  _target_: ${_params.default_inferencer}
+
+# ---------------------------------------------------------------------------
+# FIXER — lightweight leaf; takes reviewer feedback and makes targeted fixes.
+# NOT a full PTI re-run (that would be ~10-20× the cost for a fix iteration).
+# ---------------------------------------------------------------------------
+fixer_inferencer:
+  _target_: ${_params.default_inferencer}

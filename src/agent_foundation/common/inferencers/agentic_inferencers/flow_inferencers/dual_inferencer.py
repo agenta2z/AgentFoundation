@@ -436,6 +436,26 @@ class DualInferencer(LinearWorkflowInferencer):
                 base._workspace = child_ws
         super()._propagate_workspace_to_children(parent_workspace)
 
+    def _write_step_marker(self, step_name):
+        """Write completion markers to both the outer and per-round workspaces.
+
+        Extends LWI's marker (outer ``artifacts/.{step}_completed``) with a
+        per-round marker in the child inferencer's workspace — e.g.,
+        ``children/round_01/children/review/artifacts/.review_completed``.
+        """
+        super()._write_step_marker(step_name)
+        child_inf = {
+            "review": self.review_inferencer,
+            "fix": self.fixer_inferencer,
+            "propose": self.base_inferencer,
+        }.get(step_name)
+        child_ws = getattr(child_inf, "_workspace", None) if child_inf else None
+        if child_ws is not None and hasattr(child_ws, "write_marker"):
+            try:
+                child_ws.write_marker(step_name)
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Output finalization (orchestrator override)
     # ------------------------------------------------------------------
@@ -1068,7 +1088,7 @@ class DualInferencer(LinearWorkflowInferencer):
                 state["counter_feedback_str"],
                 iteration=iteration,
                 attempt=attempt_num,
-                inference_config=inference_config,
+                inference_config=getattr(self, "_current_inference_config", {}),
             )
             review_leaf_can_render = self._leaf_can_self_render(
                 self.review_inferencer

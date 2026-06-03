@@ -1,0 +1,3 @@
+_target_: RovoDevCLI
+model_id: opus[1m]
+yolo: true

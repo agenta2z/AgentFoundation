@@ -102,7 +102,7 @@ If the artifact has no meaningful issues, return an empty `issues` array and set
 ---
 
 ## NOTES (on agent behavior):
-- Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. {%- if enable_deep_mode %}{{ instructions.modes.deep_mode }}{%- endif %}
+- Deep Investigation Requirement: YOU MUST make a careful, deep, thorough and accurate investigation with critical thinking. {%- if enable_deep_mode | default(true) %}{{ instructions.modes.deep_mode }}{%- endif %}
 - However, stay focused on the artifact and the materials it references. DO NOT explore beyond what is needed.
 - {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback_for_review }}

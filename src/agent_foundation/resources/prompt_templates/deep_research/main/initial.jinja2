@@ -25,10 +25,10 @@ If the task preamble specifies a research methodology, source guidance, or outpu
 4. **Structure**: Organize findings into a clear, actionable report.
 
 ## NOTES (on agent behavior):
-{%- if enable_deep_mode %}
+{%- if enable_deep_mode | default(true) %}
 - {{ instructions.modes.deep_mode }}
 {%- endif %}
-{%- if enable_elegant_mode %}
+{%- if enable_elegant_mode | default(true) %}
 - {{ instructions.modes.elegant_mode }}
 {%- endif %}
 

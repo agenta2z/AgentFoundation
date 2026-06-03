@@ -10,6 +10,7 @@
   "category": "workflow",
   "is_bridge": true,
   "asynchronous": true,
+  "executor": "agent_foundation.resources.tools.task.executor:execute",
   "description": "Execute a dual-agent consensus workflow for planning and/or implementation. Two AI agents (proposer + reviewer) iterate until consensus on a plan, then optionally execute it.",
   "parameters": [
     {
@@ -133,6 +134,32 @@
       "name": "--initial-plan",
       "type": "path",
       "description": "Load initial plan from file, skip the proposal phase."
+    },
+    {
+      "name": "--tool-name",
+      "type": "string",
+      "description": "Workspace identity — controls directory naming under _runtime/tasks/. Default: 'task'. E.g., 'understand_codebase' creates tasks/understand_codebase/understand_codebase_<ts>/."
+    },
+    {
+      "name": "--config",
+      "type": "string",
+      "description": "Topology config: preset name (e.g., 'default'), YAML path, or inline YAML. Defaults to 'default'."
+    },
+    {
+      "name": "--override",
+      "type": "string",
+      "multi": true,
+      "description": "YAML config override as key=value. Repeatable. E.g.: --override '_params.default_inferencer=RovoDevCLI' --override '_params.plan_max_breakdown=4'"
+    },
+    {
+      "name": "--template-version",
+      "type": "string",
+      "description": "Template variant version suffix for variable resolution (e.g., 'aggregation')."
+    },
+    {
+      "name": "--template-master-version",
+      "type": "string",
+      "description": "Template master version for subdirectory routing (e.g., 'understand_codebase')."
     }
   ],
   "returns": "Workspace path containing plan and/or implementation outputs at _rankevolve_workspace/task_<timestamp>/.",

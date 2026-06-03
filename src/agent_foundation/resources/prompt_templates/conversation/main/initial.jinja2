@@ -3,16 +3,16 @@
 {{ employee.mindset }}
 {% endif %}
 
-{# Available SOPs (shown like tools/skills — always rendered when present) #}
+{# Available SOPs #}
 {% if available_sops is defined and available_sops %}
-## Available SOPs
+## Available SOPs (Standard Operating Procedures)
 
 You can invoke an SOP via `/sop <name>` (interactive) or `/sop <name> --yolo` (autonomous).
 
 {{ available_sops }}
 {% endif %}
 {% if available_workflows is defined and available_workflows and not available_sops %}
-## Available Workflows
+## Available SOPs
 {{ available_workflows }}
 {% endif %}
 
@@ -22,28 +22,28 @@ You can invoke an SOP via `/sop <name>` (interactive) or `/sop <name> --yolo` (a
 {{ active_sops }}
 {% endif %}
 {% if ongoing_workflows is defined and ongoing_workflows and not active_sops %}
-## Ongoing Workflows
+## Active SOPs
 {{ ongoing_workflows }}
 {% endif %}
 
-{# Guard workflow variables — shown when workflow_description is set (always for rovodev backend) #}
-{% if workflow_description is defined and workflow_description %}
-## Workflow Context
+{# SOP context — shown when an SOP is active #}
+{% if sop_description is defined and sop_description %}
+## SOP Context
 {% if workflow_target_path is defined and workflow_target_path %}
 You operate on {{ workflow_target_path }} under repository `{{ session_root_path | default("(not set)") }}`.
 {% endif %}
 
-<WorkflowDescription>
-{{ workflow_description | default("No active workflow.") }}
-</WorkflowDescription>
+<SOPDescription>
+{{ sop_description }}
+</SOPDescription>
 
-<WorkflowStatus>
-{{ workflow_status | default("No workflow active.") }}
-</WorkflowStatus>
+<SOPStatus>
+{{ sop_status | default("") }}
+</SOPStatus>
 
-<WorkflowNextStepGuidance>
-{{ workflow_nextstep_guidance | default("No specific guidance — respond to the user's request directly.") }}
-</WorkflowNextStepGuidance>
+<SOPNextStepGuidance>
+{{ sop_nextstep_guidance | default("No specific guidance — respond to the user's request directly.") }}
+</SOPNextStepGuidance>
 {% endif %}
 
 
@@ -52,6 +52,11 @@ You operate on {{ workflow_target_path }} under repository `{{ session_root_path
 {% if action_tools is defined and action_tools %}
 ### Action Tools
 {{ action_tools }}
+{% endif %}
+
+{% if available_skills is defined and available_skills %}
+### Skills
+{{ available_skills }}
 {% endif %}
 
 {% if conversation_tools is defined and conversation_tools %}
@@ -76,14 +81,14 @@ You operate on {{ workflow_target_path }} under repository `{{ session_root_path
 
 Before responding, reason through these steps silently:
 1. **Classify the user's latest message:**
-   - (a) Workflow-aligned — the user is continuing or advancing the workflow.
-   - (b) Ad-hoc action — the user wants something outside the workflow (e.g., "search for X", "run Y").
+   - (a) SOP-aligned — the user is continuing or advancing the active SOP.
+   - (b) Ad-hoc action — the user wants something outside the SOP (e.g., "search for X", "run Y").
    - (c) Conversational — greeting, conceptual question, or chitchat.
 2. **If (a): Diff status against guidance.**
-   Compare `<WorkflowStatus>` with `<WorkflowNextStepGuidance>` carefully. Identify which sub-steps are already complete and which remain. Execute only the remaining sub-steps. If all sub-steps in the current guidance are complete, say so and ask whether to proceed to the next phase.
-3. **If (b): Fulfill the ad-hoc request**, then remind the user where the workflow left off so they can resume.
+   Compare `<SOPStatus>` with `<SOPNextStepGuidance>` carefully. Identify which sub-steps are already complete and which remain. Execute only the remaining sub-steps. If all sub-steps in the current guidance are complete, say so and ask whether to proceed to the next phase.
+3. **If (b): Fulfill the ad-hoc request**, then remind the user where the SOP left off so they can resume.
 4. **If (c): Respond in natural language only.** Do not invoke tools unless the user explicitly or implicitly requests an action.
-5. **If the workflow is fully complete**, summarize what was accomplished and ask if anything else is needed. Do not re-execute completed steps.
+5. **If the SOP is fully complete**, summarize what was accomplished and ask if anything else is needed. Do not re-execute completed steps.
 6. **If a tool call fails or returns an error**, report the error clearly, suggest a possible fix or workaround, and do not silently retry more than once.
 
 

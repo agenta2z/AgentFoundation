@@ -229,7 +229,8 @@ class TemplatedInferencerBase(InferencerBase):
         if self.template_root_space:
             feed["__template_space__"] = self.template_root_space
 
-        feed["input"] = inference_input
+        if inference_input:
+            feed["input"] = inference_input
         # Expose ``has_local_access`` so templates can gate shell/filesystem-only
         # advice (e.g., ``{% if has_local_access %}...{% endif %}``).  Critical
         # for prompts shared between CLI agents (RovoDev, ClaudeCodeCli) and
@@ -242,6 +243,8 @@ class TemplatedInferencerBase(InferencerBase):
         resolved = self.resolve_output_path()
         if resolved and os.path.isabs(resolved) and self.has_local_access:
             feed["output_path"] = resolved
+        if self.target_path:
+            feed.setdefault("target_path", self.target_path)
         ws = getattr(self, "_workspace", None)
         if ws is not None and hasattr(ws, "root") and feed["has_local_access"]:
             feed["workspace_root"] = str(ws.root)

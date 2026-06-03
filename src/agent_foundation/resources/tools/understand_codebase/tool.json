@@ -1,18 +1,23 @@
 {
   "name": "understand_codebase",
   "tool_type": "Action",
-  "aliases": ["understand-codebase", "uc"],
+  "aliases": [
+    "understand-codebase",
+    "uc"
+  ],
   "category": "workflow",
   "is_bridge": true,
   "asynchronous": true,
   "derived_from": {
     "tool": "task",
-    "template_version": "understand_codebase",
     "arg_mappings": {
       "target": "request",
       "docs_only": "no_planning",
       "investigation_only": "no_implementation"
-    }
+    },
+    "defaults": {"template_master_version": "understand_codebase", "full": true},
+    "target_path_arg": "target",
+    "expose_params": ["--template-version", "--template-master-version", "--model"]
   },
   "description": "Deep-dive codebase investigation. Analyzes a target file or directory to produce comprehensive architectural documentation covering model structure, data flow, dependencies, extension points, and bottlenecks.",
   "parameters": [

@@ -9,15 +9,12 @@ The workflow target path can be either:
 
 When asking for the workflow target path, use a `clarification` conversation tool with `expected_input_type: "path"` and `prefix` set to `{{ session_root_path }}`. This enables path autocomplete in the UI. The output variable MUST be named `workflow_target_path` for this conversation tool.
 
-**Tools**[__must__]:
-- /set-workflow-target-path <path>
-
 ## Phase 1 -- Codebase Investigation:
 [__depends on__ Phase 0]
 
-[__requires confirmation__] **IMPORTANT**: Before executing any tool for this phase, you MUST first use a `confirmation tool` to get explicit user approval.** Do NOT invoke /understand-codebase until the user confirms. Present a summary of what will be investigated (target path, strategy, estimated scope, expected output structure) and let the user approve or adjust. Once confirmed, continue with the following codebase understanding operation.
+[__requires user input__] **STOP: Before executing any tool for this phase, you MUST use a `confirmation` conversation tool to get explicit user approval.** Do NOT invoke /understand-codebase until the user confirms. Present a summary of what will be investigated (target path, estimated scope) and let the user approve or adjust.
 
-Once confirmed, perform in-depth static analysis of the target codebase at `{{ workflow_target_path }}` to understand its design, architecture, module boundaries, dependencies, data flow, hotspots, and historical change patterns. Produces reStructured documentation of findings with a navigable HTML documentation site. 
+Once confirmed, perform in-depth analysis of the target codebase at `{{ workflow_target_path }}` to understand its design, architecture, dependencies, data flow, hotspots, and extension points. Produces structured documentation of findings with a navigable HTML documentation site.
 
 **Tools**[__must__]:
 - /understand-codebase <codebase_path>
@@ -25,12 +22,12 @@ Once confirmed, perform in-depth static analysis of the target codebase at `{{ w
 ### Phase 1b -- Codebase Documentation Review
 [__depends on__ Phase 1]
 
-[__requires confirmation__] After the codebase investigation completes, present the results to the user for review. Use a `confirmation` conversation tool with the `view` parameter pointing to the generated documentation. Summarize key architectural findings (top hotspots, biggest files, ownership map, refactor candidates) and invite the user to review the full documentation via the "View Documentation" button. Only proceed to the next Phase after the user confirms they are satisfied.
+[__requires user input__] After the codebase investigation completes, present the results to the user for review. Use a `confirmation` conversation tool with the `view` parameter pointing to the generated documentation. Summarize key architectural findings and invite the user to review the full documentation via the "View Documentation" button. Only proceed to the next phase after the user confirms they are satisfied.
 
 ## Phase 2 -- System & Signals Investigation
 [__depends on__ Phase 1b]
 
-[__requires confirmation__] Before executing any tool for this phase, you MUST first use a `confirmation tool` to get explicit user approval. Static code analysis alone is insufficient for code optimization — runtime signals are required to ground prioritization in real-world impact. This phase explicitly investigates **operational reality**, not just code structure. nce confirmed, continue with the following codebase system & signals understanding operation.
+[__requires user input__] **STOP: Before executing any tool for this phase, you MUST use a `confirmation` conversation tool to get explicit user approval.** Present what will be investigated and let the user approve. Once confirmed, investigate the production system and operational signals — runtime signals are required to ground prioritization in real-world impact beyond static code analysis.
 
 Investigate the production system and operational signals associated with the target code. Sources to consult in priority order (use whatever is reachable):
 
@@ -50,7 +47,7 @@ Investigate the production system and operational signals associated with the ta
 6. **Org context** (LOW-MEDIUM confidence — useful for direction-of-travel, not facts)
    - Strategic blogs, OKR documents, team announcements about deprecation / migration plans
 
-**IMPORTANT**: Many of above require MFA / interactive auth; if blocked, use `clarification tool` asking user to address the authentication issues; if unable to resolve authentication, declare the limitation explicitly and fall back to IaC + ticket-based inference
+**IMPORTANT**: Many of these require MFA / interactive auth; if blocked, use a `clarification` conversation tool asking the user to address authentication. If unable to resolve, declare the limitation explicitly and fall back to IaC + ticket-based inference.
 
 **Tools**[__must__]:
 - /investigate-system <codebase_path> --docs <codebase_docs_path>
@@ -62,17 +59,17 @@ Investigate the production system and operational signals associated with the ta
 
 [__depends on__ Phase 2]
 
-[__requires confirmation__] After the system investigation completes, present the results to the user for review using a `confirmation` conversation tool. 
+[__requires user input__] After the system investigation completes, present the results to the user for review. Use a `confirmation` conversation tool where:
 - The `summary` parameter MUST include:
   * A **data-source-transparency table** showing what was verifiable via primary source vs. inferred
   * A **gaps section** listing what could NOT be verified (e.g. "Splunk auth blocked", "TWG didn't have this repo indexed") so the user can choose to upgrade tooling before proceeding
-- The `view` parameter MUST point to the generated system-and-signals-understanding documentation. Only proceed to the next Phase after the user confirms.
+- The `view` parameter MUST point to the generated system-and-signals documentation. Only proceed to the next phase after the user confirms.
 
 ## Phase 3 -- Research & Proposal:
 
 [__depends on__ Phase 2b]
 
-Perform a holistic deep dive into the outcome codebase and system investigation, and identify concrete refactor / fix / observability opportunities, and synthesize them into a unified, ranked proposal.
+Perform a holistic deep dive into the codebase and system investigation outcomes, identify concrete refactor / fix / observability opportunities, and synthesize them into a unified, ranked proposal.
 
 For each proposed item, the synthesis MUST capture:
 - **Type classification** — e.g. OPP (opportunity / new initiative), REFA (refactor), BUG (defect fix), STRA (strategic / planning-only)
@@ -92,21 +89,21 @@ For each opportunity surfaced, the SOP MUST record:
 ### Phase 3b -- Proposal Review & Selection
 [__depends on__ Phase 3; __goto__ Phase 3 __afterwards__ __wait__ 1h]
 
-[__requires confirmation__; __must__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `review proposal tool` (DO NOT use the simpler `confirmation tool`). The tool will decide how to present the proposal to the user. The user selects which proposals to advance to Phase 4.
+[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `review proposal` conversation tool (DO NOT use the simpler `confirmation` tool). The user selects which proposals to advance to Phase 4.
 
 ## Phase 4 -- Proposal Implementation
 [__depends on__ Phase 3b; __branch__]
 
-Perform proper, elegant implementation with the proposed item. 
-- Re-read the issue and re-validate against current codebase main or master branch.
-- For testing
-  * You MUST perform local validation per the codebase's testing SOP: per-module unit tests + lint/formatter auto-fixes
-  * If the user request includes submitting pull requests, and online pipeline build is avaialble, then skip heavy integration tests locally; rely on online build pipeline for heavy testing.
+Perform proper, elegant implementation of the proposed item.
+- Re-read the issue and re-validate against the current codebase main or master branch.
+- For testing:
+  * You MUST perform local validation per the codebase's testing SOP: per-module unit tests + lint/formatter auto-fixes.
+  * If the user request includes submitting pull requests and an online pipeline build is available, skip heavy integration tests locally; rely on the online build pipeline.
 
-If the implementation inlcudes pull requests (PRs), mointor non-merged PRs to address 
-- pipeline build failure
-- comments
-- rebase PR to latest master if PR has not been updated for 7days+
+If the implementation includes pull requests (PRs), monitor non-merged PRs to address:
+- Pipeline build failures
+- Review comments
+- Rebase PR to latest master if not updated for 7+ days
 
 **Tools**[__must__]:
 - /task <request>

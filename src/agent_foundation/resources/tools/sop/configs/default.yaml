@@ -1,0 +1,10 @@
+# SOP CLI — Conversational Inferencer configuration.
+#
+# The base_inferencer is imported from a backend YAML.
+# Override via --backend CLI flag (e.g., --backend rovodev).
+# Runtime values (target_path, model_name) are injected by the CLI.
+_target_: Conversational
+base_inferencer: ClaudeCodeCLI
+# CI default is 5; SOP needs more iterations for multi-phase tool call chains.
+# The CI also dynamically adjusts via n_phases * 3 when an SOP is active.
+max_iterations: 30

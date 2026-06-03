@@ -103,7 +103,7 @@ class TestSOPExecutor(unittest.TestCase):
         assert s.current_phase == "0"
         assert s.sop is not None
         assert s.tool_phase_map == {"create_role": "1", "role_setup": "2"}
-        assert s.workflow_description != ""
+        assert s.sop_description != ""
 
     def test_executor_yolo_bridges(self):
         ci = _make_ci()
@@ -190,7 +190,7 @@ class TestPromptRendering(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(_enter_sop(ci))
         rendered = ci._render_prompt("test")
         feed = ci._last_template_feed
-        guidance = feed.get("workflow_nextstep_guidance", "")
+        guidance = feed.get("sop_nextstep_guidance", "")
         assert len(guidance) > 100
         assert "Role Specification" in guidance
 

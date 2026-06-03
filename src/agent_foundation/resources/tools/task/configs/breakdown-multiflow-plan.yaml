@@ -1,0 +1,167 @@
+# ============================================================================
+# Plan-Only Topology: Dual{BTA{MFDual}}
+# ============================================================================
+#
+# Standalone multi-perspective planning topology. Use directly via:
+#   --agent-config breakdown-multiflow-plan
+#
+# Also imported by the full plan-then-implement topology via _import_.
+# When imported, the parent overrides `workspace: null` so workspace
+# assignment cascades from the parent (not from this file's block).
+#
+# Tree structure:
+#   Dual                                    review + fix the integrated PLAN
+#   ├── base_inferencer = BTA               decompose the PLANNING task
+#   │   ├── breakdown_inferencer            → N sub-planning subtasks
+#   │   ├── worker_factory = MFDual         each sub-plan explored by N parallel
+#   │   │                                   flows with peer visibility + winner
+#   │   │                                   picking + runner-up-as-reviewer
+#   │   └── aggregator_inferencer           integrate sub-plans → ONE coherent
+#   │                                       prose plan
+#   ├── review_inferencer                   judge plan structure + quality
+#   └── fixer_inferencer = LEAF             refine plan based on review feedback
+#                                           (lightweight: single leaf with
+#                                           plan/main/followup.jinja2 — NOT
+#                                           the full BTA{MFDual} re-decomposition)
+#
+# Why a lightweight fixer?
+#   The default DualInferencer behavior makes fixer = base_inferencer (same
+#   object). For this topology that means fix iterations re-run the FULL
+#   BTA{MFDual} breakdown — ~10-20× more LLM calls than needed for typical
+#   plan-quality feedback (which is incremental refinement, not structural
+#   rewrites). A single-leaf fixer is proportional to fix size and uses
+#   `plan/main/followup.jinja2`, which is purpose-built to receive the
+#   prior plan + reviewer feedback and produce a refined plan.
+#
+#   Caveat: structural feedback ("rewrite this entire breakdown") cannot be
+#   served by the leaf fixer alone — the leaf will patch prose. If the
+#   reviewer keeps rejecting, consensus_max_iterations triggers and the
+#   user re-runs from scratch. This is the right UX for that case.
+
+# ---------------------------------------------------------------------------
+# HYPERPARAMETERS
+# ---------------------------------------------------------------------------
+# When used standalone, these are the defaults.
+# When imported by the full topology, the parent's _params takes precedence
+# (OmegaConf resolves ${_params.*} from the config root).
+_params:
+  workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
+  default_inferencer: ClaudeCodeCLI
+  main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
+  flow_inferencers:
+    - ${_params.main_inferencer}
+    - ${_params.main_inferencer}
+  num_flows: 2
+  plan_max_breakdown: 3
+  flow_max_dynamic_steps: 3
+  consensus_max_iterations: 3
+
+# ---------------------------------------------------------------------------
+# CASCADES (standalone mode; redundant but harmless when imported)
+# ---------------------------------------------------------------------------
+_logger: auto
+_debug_mode: true
+_model_name: opus[1m]
+_idle_timeout_seconds: 600
+_tool_use_idle_timeout_seconds: 5400
+_output_path: "output.md"
+
+_template_manager:
+  _target_: TemplateManager
+  templates:
+    - ${templates_dir}
+    - ${modpath:agent_foundation.resources.prompt_templates}
+  active_template_type: main
+  predefined_variables: true
+  default_template_key: initial
+  enable_templated_feed: true
+
+_consensus_config:
+  _target_: ConsensusConfig
+  max_iterations: ${_params.consensus_max_iterations}
+
+# ---------------------------------------------------------------------------
+# ROOT: Plan-stage Dual (review + fix the plan)
+# ---------------------------------------------------------------------------
+_target_: Dual
+_template_root_space: plan
+
+# Phase 2 (leaf-owned template rendering, 2026-05):
+# DualInferencer.SLOT_DEFAULTS now cascades template_key="review" to
+# review_inferencer and template_key="followup" to fixer_inferencer.
+# Combined with _template_root_space: plan above, both leaves resolve
+# their own templates (plan/main/review.jinja2, plan/main/followup.jinja2)
+# without orchestrator-side rendering. This eliminates the doubly-templated
+# rendering bug that occurred when both Dual and the leaf rendered the
+# same template. The orchestrator (Dual) builds the feed dict and passes
+# it to the leaves via extra_feed=; the leaves do the actual templating.
+#
+# review_prompt and followup_prompt are no longer set — they default to
+# None and the modern leaf-rendering path is auto-detected via
+# _leaf_can_self_render (isinstance check on TemplatedInferencerBase).
+
+workspace:
+  _target_: InferencerWorkspace
+  root: ${_params.workspace_root}
+  use_final_deliverables_folder: true
+templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
+
+base_inferencer:
+  _target_: BTA
+  name: plan_bta
+  breakdown_format: json_subtasks
+  max_breakdown: ${_params.plan_max_breakdown}
+
+  breakdown_inferencer:
+    _target_: ${_params.main_inferencer}
+
+  worker_factory:
+    _factory_: MultiFlowDual
+    propagate_runtime_input: true
+    winner_pick: true
+    reviewer_match_second: true
+    fixer_match_winner: true
+    visible_flows: all
+    max_retry: 3
+
+    flow_configs:
+      - _repeat_: ${_params.num_flows}
+        max_dynamic_steps: ${_params.flow_max_dynamic_steps}
+        iteration_judgment: true
+        initial_inferencer:
+          _target_: ${_params.flow_inferencers}
+        followup_inferencer:
+          _target_: ${_params.flow_inferencers}
+
+    multi_flow_aggregator_inferencer:
+      _target_: ${_params.main_inferencer}
+      output_is_deliverable: true
+
+  aggregator_inferencer:
+    _target_: ${_params.main_inferencer}
+    output_is_deliverable: true
+
+review_inferencer:
+  _target_: ${_params.main_inferencer}
+
+# Lightweight fixer (single leaf, NOT BTA{MFDual}).
+#
+# Phase 2 DESIGN (leaf-owned template rendering, 2026-05): this leaf
+# renders ``plan/main/followup.jinja2`` itself. ``template_key="followup"``
+# is auto-cascaded by Dual.SLOT_DEFAULTS via FOLLOWUP_TEMPLATE_DEFAULTS;
+# ``template_root_space="plan"`` cascades from the outer Dual's
+# ``_template_root_space: plan``. The leaf's ``_render_prompt`` consumes
+# the feed dict (``main_response``, ``prior_output_path``,
+# ``reviewer_response``, ``output_path``, ...) passed by Dual via
+# ``extra_feed=`` in ``_step_fix_impl``.
+#
+# Without this declaration, DualInferencer defaults fixer to the same
+# instance as base_inferencer (BTA{MFDual}) — see plan rationale in the
+# header comment. We declare it as a leaf for the lightweight-fixer reason.
+fixer_inferencer:
+  _target_: ${_params.main_inferencer}
+  output_is_deliverable: true       # self-promotes output.md → fixer/outputs/final_deliverables/
+                                    # DualInferencer._finalize_response() will then
+                                    # surface it upward to Dual's own final_deliverables/
+                                    # via the has_deliverables workspace-state check
+                                    # (no is_deliverable_boundary flag needed on leaves).

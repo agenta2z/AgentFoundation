@@ -1,0 +1,13 @@
+Produce careful, in-depth, comprehensive, structured documentation of the data landscape at {{ target_path }}/.ai-employee/docs/data/ in reStructuredText format. Cover:
+- **Core data entities**: primary data objects, schemas, relationships, and how they map to business or product concepts.
+- **Data sources & ingestion**: where data originates, how it's collected or received, update frequency, upstream dependencies.
+- **Storage & query patterns**: databases, warehouses, caches, file stores; frequently-used queries, access patterns, hot vs. cold data.
+- **Data pipelines & transformations**: ETL/ELT flows, orchestration (Airflow/Kubeflow/Spark/etc.), transformation logic, scheduling, failure handling.
+- **Logging & telemetry**: what gets logged, event schemas, traffic data capture, instrumentation coverage.
+- **Data quality**: completeness, freshness, consistency, validation checks, known issues.
+- **Data infrastructure**: storage formats, partitioning, retention policies, cost, latency characteristics.
+- **Data lineage & governance**: provenance tracking, PII handling, compliance constraints, access controls.
+
+Include concrete file/path references to actual data configs, pipeline definitions, and schemas throughout the documentation.
+
+After writing the documentation, build a navigable HTML site from the reStructuredText sources using Sphinx (or equivalent) so the documentation is browsable locally.

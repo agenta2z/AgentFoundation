@@ -50,7 +50,7 @@ async def execute(arguments: dict[str, Any], session_context: dict[str, Any]) ->
         tool_phase_map=sop.tool_to_phase_map,
         yolo_mode=yolo_mode,
         instance_id=instance_id,
-        workflow_description=sop_info.body or sop_info.description,
+        sop_description=sop_info.description or sop_info.body,
     )
 
     desc_preview = (sop_info.description or "")[:80]
