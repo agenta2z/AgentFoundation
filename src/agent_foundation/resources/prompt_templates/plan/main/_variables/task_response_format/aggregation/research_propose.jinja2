@@ -1,0 +1,115 @@
+{#- Research-propose aggregator response format.
+    Inlines the generic aggregation primitives (iteration_judgment, winner_pick)
+    then appends the structured proposal_index JSON fence.
+    NOTE: {% include %} is NOT available in AF's variable rendering environment.
+    Generic primitives are inlined below instead.
+-#}
+{%- if include_iteration_judgment %}
+
+Conclude with the iteration judgment as a fenced JSON block. This signals whether the integration and consolidation step itself produced new value over the upstream inputs:
+
+```json iteration_judgment
+{
+  "decision": "continue",
+  "reason": "<one or two sentences. Pick \"continue\" if integrating the upstream inputs surfaced new signal worth another iteration. Pick \"stop\" if the upstream inputs were mostly identical and integration added little information, AND the consolidated artifact is internally consistent.>"
+}
+```
+
+`decision` MUST be exactly the string `"continue"` or `"stop"`.
+{%- endif %}
+{%- if include_winner_pick %}
+
+Conclude with the winner-pick judgment as a fenced JSON block. This is the answer to: if forced to pick one upstream input rather than integrate them all, which would you pick?
+
+```json winner_pick
+{
+  "winner_index": 0,
+  "reason": "<one or two sentences on why this input stands out. If none stands out, pick the most complete and grounded one.>"
+}
+```
+
+`winner_index` is the 0-based integer index of the chosen upstream input.
+{%- endif %}
+{%- if include_ranking %}
+
+Rank all upstream inputs from strongest to weakest as a fenced JSON block:
+
+```json ranking
+{
+  "ranking": [0, 1],
+  "reason": "<brief justification for the ordering>"
+}
+```
+
+`ranking` is a list of 0-based integer indices ordered from strongest (best) to weakest. Must include all upstream input indices exactly once.
+{%- endif %}
+{%- if separate_proposal_files %}
+
+## Per-Proposal File Output
+
+For each proposal, write its **full detailed content** to an individual file at:
+`{{ output_path | default("outputs") }}/proposals/<ID>.md` (e.g., `proposals/P1.md`).
+
+Each proposal file should be a complete, self-contained document covering
+the proposal in depth — including but not limited to problem context, approach
+details, implementation considerations, impact analysis, risks, and any
+supporting evidence or references gathered during research.
+
+The unified plan artifact still contains the integrated narrative. The per-proposal
+files provide the full detail that downstream tools need when picking individual
+proposals for execution.
+{%- endif %}
+
+## Structured Proposal Index
+
+Conclude your response with a structured proposal index as a fenced JSON block.
+Each proposal must be individually addressable by a unique ID (use sequential
+IDs like P1, P2, ...). Group proposals into phases by implementation priority.
+{%- if separate_proposal_files %}
+
+The `proposal_file` field MUST point to the per-proposal file you wrote above.
+{%- endif %}
+
+```json proposal_index
+{
+  "version": "1",
+  "groups": [
+    {
+      "phase": 1,
+      "label": "Quick Wins",
+      "description": "Low complexity, high impact changes",
+      "proposals": [
+        {
+          "id": "P1",
+          "rank": 1,
+          "title": "Short descriptive title",
+          "summary": "One-line summary of the proposal",
+          "impact": "high",
+          "complexity": "low",
+          "problem": "What problem this solves",
+          "approach": "How to implement it",
+{%- if separate_proposal_files %}
+          "proposal_file": "proposals/P1.md",
+{%- endif %}
+          "dependencies": [],
+          "cross_refs": "Synergistic with P3; alternative to P5",
+          "tags": ["category"]
+        }
+      ]
+    }
+  ],
+  "constraints": [],
+  "total_count": 0
+}
+```
+
+**Rules for the proposal index:**
+- Every proposal from the unified plan MUST appear in exactly one group.
+- `rank` is globally unique across all groups (1 = highest priority).
+{%- if separate_proposal_files %}
+- `proposal_file` points to the per-proposal detail file (relative to workspace outputs).
+{%- endif %}
+- `dependencies` lists proposal IDs that must be implemented first.
+- `cross_refs` captures informal relationships (synergies, alternatives, conflicts).
+- `constraints` captures formal inter-proposal rules (mutually exclusive, requires, recommends).
+- `total_count` must equal the actual number of proposals.

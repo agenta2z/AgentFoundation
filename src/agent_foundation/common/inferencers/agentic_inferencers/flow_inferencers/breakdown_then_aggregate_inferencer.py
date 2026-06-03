@@ -1086,6 +1086,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             resolved = self.resolve_output_path()
             if resolved and os.path.isfile(resolved):
                 self._emit_output_manifest(resolved)
+            self._try_extract_proposal_index(response)
             return response
         else:
             # No aggregator: workers' outputs ARE the deliverables
@@ -1104,6 +1105,39 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         )
             # Fall through to base for outputs/output.md summary write
             return super()._finalize_output(response)
+
+    def _try_extract_proposal_index(self, response) -> None:
+        """Extract ``proposal_index`` JSON fence from aggregator output and write sidecar.
+
+        Runs unconditionally after every aggregation. Silently skips when no
+        fence is present (expected for non-research aggregators). Cost: one
+        regex search — microseconds.
+        """
+        if self._workspace is None:
+            return
+        text = str(response) if response is not None else ""
+        if not text or "proposal_index" not in text:
+            return
+        try:
+            from agent_foundation.common.data_models.proposal.parser import (
+                parse_proposal_index_from_text,
+                write_proposal_index,
+                make_empty_index,
+            )
+            from agent_foundation.common.data_models.proposal.model import ProposalIndex
+            idx = parse_proposal_index_from_text(text)
+            if idx is not None:
+                from datetime import datetime, timezone
+                idx.created_at = datetime.now(timezone.utc).isoformat()
+                idx.source_workspace = str(self._workspace.root)
+                from pathlib import Path as _PP
+                sidecar = _PP(self._workspace.root) / "outputs" / "proposals.json"
+                write_proposal_index(sidecar, idx)
+                _logger.info("Wrote proposal index (%d proposals) to %s",
+                             idx.total_count, sidecar)
+            # else: no fence found — silently skip
+        except Exception as exc:
+            _logger.warning("Proposal index extraction failed (non-fatal): %s", exc)
 
     def _finalize_response(self, result):
         """BTA audit bookkeeping (surfacing moved to _finalize_output).

@@ -136,6 +136,16 @@
       "description": "Load initial plan from file, skip the proposal phase."
     },
     {
+      "name": "--use-proposal",
+      "type": "path",
+      "description": "Path to proposals.json from a research_propose run. Selected proposals seed the plan phase. Mutually exclusive with --initial-plan."
+    },
+    {
+      "name": "--proposal-ids",
+      "type": "string",
+      "description": "Comma-separated proposal IDs to pick (e.g., 'P1,P3'). Used with --use-proposal. Omit to pick all."
+    },
+    {
       "name": "--tool-name",
       "type": "string",
       "description": "Workspace identity — controls directory naming under _runtime/tasks/. Default: 'task'. E.g., 'understand_codebase' creates tasks/understand_codebase/understand_codebase_<ts>/."
