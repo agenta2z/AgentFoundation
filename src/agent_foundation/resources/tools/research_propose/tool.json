@@ -8,6 +8,26 @@
   ],
   "category": "workflow",
   "is_bridge": true,
+  "asynchronous": true,
+  "derived_from": {
+    "tool": "task",
+    "arg_mappings": {
+      "workflow_target_path": "request"
+    },
+    "defaults": {
+      "template_master_version": "research_propose",
+      "plan": true,
+      "config": "breakdown-multiflow-plan",
+      "config_overrides": {
+        "_params.flow_inferencers": ["${oc.env:DEFAULT_RESEARCH_INFERENCER}", "${oc.env:DEFAULT_MAIN_INFERENCER}"],
+        "_params.plan_max_breakdown": 5,
+        "_params.flow_max_dynamic_steps": 3,
+        "_params.consensus_max_iterations": 3
+      }
+    },
+    "target_path_arg": "workflow_target_path",
+    "expose_params": ["--template-version", "--template-master-version"]
+  },
   "description": "Decompose a research question into subtasks, run parallel deep research (literature + internal knowledge), generate code-grounded individual proposals, then synthesize into a unified plan. Supports resumable checkpointing at every stage.",
   "parameters": [
     {

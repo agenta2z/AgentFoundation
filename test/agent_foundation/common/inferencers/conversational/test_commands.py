@@ -67,7 +67,7 @@ class TestCommandRegistry(unittest.TestCase):
 
     def test_command_count(self):
         ci = _make_ci()
-        assert len(ci._commands.list_commands()) == 6
+        assert len(ci._commands.list_commands()) == 9
 
     def test_is_command_slash(self):
         ci = _make_ci()

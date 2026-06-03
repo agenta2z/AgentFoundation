@@ -65,7 +65,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.comm
 )
 from agent_foundation.resources.tools.formatters.markdown import ToolMarkdownFormatter
 from agent_foundation.resources.tools.models import ToolDefinition
-from rich_python_utils.string_utils.formatting.template_manager.sop_manager import SOPManager
+from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
+    DIRECTIVE_REQUIRES_USER_INPUT,
+    SOPManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +158,14 @@ class ConversationalInferencer(InferencerBase):
         self._paused = False
         self.sop_state = None  # SOPState | None — set by /sop executor
 
+        # Inbox event loop fields (opt-in via enable_inbox)
+        self._inbox = None  # asyncio.Queue[InboxItem] | None
+        self._shutdown_requested = False
+        self._default_interactive = None
+        self._auto_shutdown_on_sop_complete = False
+        self._turn_counter = 0
+        self._running = False
+
     @property
     def supports_prompt_rendering(self) -> bool:
         return self.prompt_renderer is not None
@@ -227,6 +238,29 @@ class ConversationalInferencer(InferencerBase):
             n_phases = len(self.sop_state.sop.phases)
             effective_max = max(effective_max, n_phases * 3)
 
+        # Local helpers to reduce callback boilerplate
+        async def _fire_turn_complete(turn_num: int) -> None:
+            if on_turn_complete:
+                try:
+                    await on_turn_complete(turn_num)
+                except Exception as _e:
+                    logger.warning("[agentic_loop] on_turn_complete error: %s", _e)
+
+        async def _fire_new_turn(turn_num: int, user_input: str) -> int:
+            if on_new_turn:
+                try:
+                    new = await on_new_turn(turn_num, user_input)
+                    if new is not None:
+                        return new
+                except Exception as _e:
+                    logger.warning("[agentic_loop] on_new_turn error: %s", _e)
+            return turn_num
+
+        # Initialize first turn BEFORE the loop so cache_folder is set
+        # before the first LLM call (streaming files land in turn_001/).
+        if start_iteration == 0:
+            turn_number = await _fire_new_turn(turn_number, content)
+
         for iteration in range(start_iteration, effective_max):
             # Cooperative pause check at iteration boundary
             if self._paused:
@@ -291,6 +325,8 @@ class ConversationalInferencer(InferencerBase):
                     )
                 else:
                     raw_response = await self.base_inferencer.ainfer(rendered)
+                    if not isinstance(raw_response, str):
+                        raw_response = str(raw_response)
             except Exception as e:
                 logger.error("Inferencer error in agentic loop: %s", e)
                 raise
@@ -328,11 +364,11 @@ class ConversationalInferencer(InferencerBase):
 
             # Flush prompt + response artifacts to disk so "View Prompt"
             # works even while waiting for user input (confirmation, etc.).
-            if False and on_prompt_rendered:  # DISABLED: debugging hang
+            if on_prompt_rendered:
                 try:
                     await on_prompt_rendered(self, raw_response)
-                except Exception:
-                    pass
+                except Exception as _pr_err:
+                    logger.warning("[agentic_loop] on_prompt_rendered error: %s", _pr_err)
 
             # Add CLEAN output to conversation history so subsequent turns
             # include exact LLM text (not noisy TUI stdout).
@@ -370,12 +406,10 @@ class ConversationalInferencer(InferencerBase):
                         "content": f"[Synthetic auto-advance] {synthetic_summary}",
                         "synthetic": True,
                     })
-                    # Set confirmation gate for phase completion detection
-                    for tool in conv_response.conversation_tools:
-                        if getattr(tool, "tool_type", "") == "confirmation":
-                            if self.sop_state:
-                                self.sop_state.confirmation_gate_passed = True
-                            break
+                    # In yolo mode, any conversation tool response is auto-approved.
+                    # Set user input gate so requires_user_input phases advance.
+                    if self.sop_state:
+                        self.sop_state.user_input_gate_passed = True
                     self._check_phase_completion()
                 elif effective_interactive:
                     collected = await self._handle_conversation_tools(
@@ -387,6 +421,7 @@ class ConversationalInferencer(InferencerBase):
                 else:
                     collected = None
                 if collected is None:
+                    await _fire_turn_complete(iteration + 1)
                     return AgenticResult(
                         text=conv_response.text,
                         raw_response=raw_response,
@@ -414,10 +449,7 @@ class ConversationalInferencer(InferencerBase):
 
                 # Notify server of new turn boundary so it can start
                 # a new turn directory and send stream_start/stream_end
-                if on_new_turn:
-                    new_turn = await on_new_turn(turn_number, user_input)
-                    if new_turn is not None:
-                        turn_number = new_turn
+                turn_number = await _fire_new_turn(turn_number, user_input)
 
                 # Execute any action tools from the same ToolsToInvoke block,
                 # resolving __var__ placeholders with the collected user inputs.
@@ -482,6 +514,7 @@ class ConversationalInferencer(InferencerBase):
                 content = _CONTINUE_AFTER_TOOLS
                 if getattr(self, '_async_tool_dispatched', False):
                     self._async_tool_dispatched = False
+                    await _fire_turn_complete(iteration + 1)
                     return AgenticResult(
                         text=conv_response.text or "",
                         raw_response=last_raw_response,
@@ -492,12 +525,7 @@ class ConversationalInferencer(InferencerBase):
                         last_template_feed=self._last_template_feed,
                         last_template_config=self._last_template_config,
                     )
-                # Fire on_turn_complete after all messages for this turn are committed
-                if on_turn_complete:
-                    try:
-                        await on_turn_complete(iteration + 1)
-                    except Exception as _tc_err:
-                        logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
+                await _fire_turn_complete(iteration + 1)
                 continue
 
             # 5a. Execute action tools from ToolsToInvoke (if any)
@@ -525,6 +553,7 @@ class ConversationalInferencer(InferencerBase):
                 content = _CONTINUE_AFTER_TOOLS
                 if getattr(self, '_async_tool_dispatched', False):
                     self._async_tool_dispatched = False
+                    await _fire_turn_complete(iteration + 1)
                     return AgenticResult(
                         text=conv_response.text or "",
                         raw_response=last_raw_response,
@@ -535,17 +564,13 @@ class ConversationalInferencer(InferencerBase):
                         last_template_feed=self._last_template_feed,
                         last_template_config=self._last_template_config,
                     )
-                # Fire on_turn_complete after all messages for this turn are committed
-                if on_turn_complete:
-                    try:
-                        await on_turn_complete(iteration + 1)
-                    except Exception as _tc_err:
-                        logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
+                await _fire_turn_complete(iteration + 1)
                 continue
 
             # 5b. Parse for action tool calls (legacy XML format)
             parsed = parse_llm_response(raw_response, self._valid_tool_names)
             if not parsed.has_tool_calls:
+                await _fire_turn_complete(iteration + 1)
                 return AgenticResult(
                     text=parsed.text,
                     raw_response=raw_response,
@@ -585,6 +610,7 @@ class ConversationalInferencer(InferencerBase):
             content = _CONTINUE_AFTER_TOOLS
             if getattr(self, '_async_tool_dispatched', False):
                 self._async_tool_dispatched = False
+                await _fire_turn_complete(iteration + 1)
                 return AgenticResult(
                     text=parsed.text or "",
                     raw_response=last_raw_response,
@@ -595,14 +621,10 @@ class ConversationalInferencer(InferencerBase):
                     last_template_feed=self._last_template_feed,
                     last_template_config=self._last_template_config,
                 )
-            # Fire on_turn_complete after all messages for this turn are committed
-            if on_turn_complete:
-                try:
-                    await on_turn_complete(iteration + 1)
-                except Exception as _tc_err:
-                    logger.warning("[agentic_loop] on_turn_complete error: %s", _tc_err)
+            await _fire_turn_complete(iteration + 1)
 
         # Exhausted max iterations — return last raw response
+        await _fire_turn_complete(self.max_iterations)
         return AgenticResult(
             text=last_raw_response,
             raw_response=last_raw_response,
@@ -625,6 +647,20 @@ class ConversationalInferencer(InferencerBase):
             if self.sop_state and self.sop_state.yolo_mode:
                 self.yolo_mode = True
         self.prior_context.update(kwargs)
+
+    def set_session_variables(self, variables: dict[str, Any]) -> None:
+        """Store variables in both variable_manager and prior_context.
+
+        Used by conversation tool handlers to persist user-provided values
+        (e.g., workflow_target_path, strategy) so they're available in both
+        template rendering (variable_manager) and SOP guidance (prior_context).
+        """
+        for name, value in variables.items():
+            self.prior_context[name] = value
+            if self.prompt_renderer:
+                vm = getattr(self.prompt_renderer, "variable_manager", None)
+                if vm and hasattr(vm, "set"):
+                    vm.set(name, value)
 
     def set_messages(self, messages: list) -> None:
         """Set conversation messages for prompt rendering.
@@ -761,6 +797,129 @@ class ConversationalInferencer(InferencerBase):
         self.sop_state = None
         return f"Exited SOP: {sop_name}."
 
+    @command("model", description="Change the LLM model",
+             aliases=("set_model",), requires_args=True)
+    async def _cmd_set_model(self, model_name: str = "") -> str:
+        if not model_name:
+            current = self.prior_context.get("model_name", "default")
+            return f"Current model: {current}. Usage: /model <name>"
+        self.prior_context["model_name"] = model_name
+        return f"Model set to {model_name}."
+
+    @command("root", description="Set the session root directory",
+             aliases=("set_session_root",), requires_args=True)
+    async def _cmd_set_session_root(self, path: str = "") -> str:
+        if not path:
+            current = self.prior_context.get("session_root_path", "not set")
+            return f"Current session root: {current}. Usage: /root <path>"
+        self.prior_context["session_root_path"] = path
+        return f"Session root set to {path}."
+
+    @command("target", description="Set the workflow target path",
+             aliases=("set_workflow_target_path",), requires_args=True)
+    async def _cmd_set_target(self, path: str = "") -> str:
+        if not path:
+            current = self.prior_context.get("workflow_target_path", "not set")
+            return f"Current target path: {current}. Usage: /target <path>"
+        self.prior_context["workflow_target_path"] = path
+        return f"Target path set to {path}."
+
+    # =========================================================================
+    # Inbox Event Loop
+    # =========================================================================
+
+    def enable_inbox(
+        self,
+        interactive=None,
+        *,
+        auto_shutdown_on_sop_complete: bool = False,
+        maxsize: int = 0,
+        on_new_turn=None,
+        on_prompt_rendered=None,
+        on_turn_complete=None,
+    ) -> None:
+        """Enable the inbox event loop. Must be called before run()."""
+        import asyncio as _asyncio
+
+        if self._inbox is not None:
+            raise RuntimeError("Inbox already enabled")
+        self._inbox = _asyncio.Queue(maxsize=maxsize)
+        self._default_interactive = interactive
+        self._auto_shutdown_on_sop_complete = auto_shutdown_on_sop_complete
+        self._on_new_turn = on_new_turn
+        self._on_prompt_rendered = on_prompt_rendered
+        self._on_turn_complete = on_turn_complete
+
+    def inbox_put(self, item) -> None:
+        """Non-blocking enqueue. Raises RuntimeError if inbox not enabled."""
+        if self._inbox is None:
+            raise RuntimeError("Inbox not enabled; call enable_inbox() first")
+        self._inbox.put_nowait(item)
+
+    def inbox_put_user(self, content: str, source: str = "user") -> None:
+        """Convenience: enqueue a UserMessage."""
+        from agent_foundation.common.inferencers.agentic_inferencers.conversational.inbox import (
+            UserMessage,
+        )
+        self.inbox_put(UserMessage(content=content, source=source))
+
+    def request_shutdown(self) -> None:
+        """Cooperative termination. Current run_agentic_loop finishes, then run() returns."""
+        self._shutdown_requested = True
+
+    def _next_turn_number(self) -> int:
+        self._turn_counter += 1
+        return self._turn_counter
+
+    def _content_for_item(self, item) -> str | None:
+        from agent_foundation.common.inferencers.agentic_inferencers.conversational.inbox import (
+            UserMessage,
+            ToolCompletion,
+            SyntheticContinue,
+            _SYNTHETIC_CONTINUE,
+        )
+        if isinstance(item, UserMessage):
+            return item.content
+        if isinstance(item, ToolCompletion):
+            return _CONTINUE_AFTER_TOOLS
+        if isinstance(item, SyntheticContinue):
+            return _SYNTHETIC_CONTINUE
+        return None
+
+    async def run(self) -> AgenticResult | None:
+        """Long-lived event loop. Drains inbox, calls run_agentic_loop per item.
+
+        Returns when request_shutdown() is called.
+        """
+        if self._inbox is None:
+            raise RuntimeError("Inbox not enabled; call enable_inbox() first")
+        if self._running:
+            raise RuntimeError("run() is already executing")
+        self._running = True
+        try:
+            last_result: AgenticResult | None = None
+            while not self._shutdown_requested:
+                item = await self._inbox.get()
+                try:
+                    content = self._content_for_item(item)
+                    if content is None:
+                        continue
+                    last_result = await self.run_agentic_loop(
+                        content=content,
+                        interactive=self._default_interactive,
+                        turn_number=self._next_turn_number(),
+                        on_new_turn=self._on_new_turn,
+                        on_prompt_rendered=self._on_prompt_rendered,
+                        on_turn_complete=self._on_turn_complete,
+                    )
+                except Exception as e:
+                    logger.exception("Inbox item %r failed: %s", item, e)
+                finally:
+                    self._inbox.task_done()
+            return last_result
+        finally:
+            self._running = False
+
     # =========================================================================
     # Phase Completion Detection (Model A)
     # =========================================================================
@@ -771,7 +930,7 @@ class ConversationalInferencer(InferencerBase):
         Called after _execute_tool_call() applies context_updates.
         Three detection strategies:
           1. Tool-mapped: tool from tool_phase_map completed
-          2. Confirmation: confirmation_gate_passed + requires_confirmation
+          2. User input: user_input_gate_passed + DIRECTIVE_REQUIRES_USER_INPUT
           3. All-outputs-present: every declared output in phase_outputs
         """
         if not self.sop_state or not self.sop_state.sop:
@@ -807,8 +966,8 @@ class ConversationalInferencer(InferencerBase):
         if tool_name and s.tool_phase_map.get(tool_name) == current:
             detected = True
 
-        if not detected and s.confirmation_gate_passed:
-            if "requires confirmation" in " ".join(getattr(phase, "directives", [])):
+        if not detected and s.user_input_gate_passed:
+            if DIRECTIVE_REQUIRES_USER_INPUT in " ".join(getattr(phase, "directives", [])):
                 detected = True
 
         if not detected and hasattr(phase, "outputs") and phase.outputs:
@@ -837,8 +996,16 @@ class ConversationalInferencer(InferencerBase):
             s.current_phase = None
             s.phase_status = PhaseStatus.COMPLETED
 
-        s.confirmation_gate_passed = False
+        s.user_input_gate_passed = False
         logger.info("SOP phase %s completed; next=%s", current, s.current_phase)
+
+        # Auto-shutdown bridge: signal run() to exit when SOP finishes
+        if (
+            self._auto_shutdown_on_sop_complete
+            and s.current_phase is None
+            and s.phase_status == PhaseStatus.COMPLETED
+        ):
+            self.request_shutdown()
 
     # =========================================================================
     # Prompt Rendering
@@ -853,6 +1020,11 @@ class ConversationalInferencer(InferencerBase):
         agent_tools = [t for t in tools_list if getattr(t, 'agent_enabled', True)]
         action_tools = [t for t in agent_tools if t.tool_type != "Conversation"]
         available_tools = formatter.format_all(action_tools)
+
+        # Append commands to action tools — indistinguishable to the LLM
+        commands_text = self._commands.render_for_prompt()
+        if commands_text:
+            available_tools = f"{available_tools}\n\n{commands_text}" if available_tools else commands_text
 
         # Build conversation history (exclude last user msg to avoid duplication)
         messages = list(self._messages)
@@ -933,7 +1105,7 @@ class ConversationalInferencer(InferencerBase):
                     goto_counts=s.goto_counts,
                 )
 
-                if s.confirmation_gate_passed:
+                if s.user_input_gate_passed:
                     from rich_python_utils.string_utils.formatting.template_manager.sop_manager import SOPPhase
                     for node in tracker.get_available_next():
                         if not isinstance(node, SOPPhase):
@@ -942,11 +1114,11 @@ class ConversationalInferencer(InferencerBase):
                             sub.name.lower() in ("tools", "command")
                             for sub in getattr(node, "subsections", [])
                         )
-                        if not has_tools and "requires confirmation" in " ".join(
+                        if not has_tools and "requires user input" in " ".join(
                             getattr(node, "directives", [])
                         ):
                             tracker.completed_states.add(node.id)
-                            s.confirmation_gate_passed = False
+                            s.user_input_gate_passed = False
                             break
 
                 nextstep_guidance = SOPManager.render_guidance(
@@ -963,7 +1135,8 @@ class ConversationalInferencer(InferencerBase):
             self.prior_context,
             self.sop_state,
             {
-                "workflow_nextstep_guidance": nextstep_guidance,
+                "session_root_path": getattr(self.base_inferencer, "effective_cwd", ""),
+                "sop_nextstep_guidance": nextstep_guidance,
                 "action_tools": available_tools,
                 "completed_actions": all_actions,
                 "conversation_history": messages,
@@ -1014,6 +1187,15 @@ class ConversationalInferencer(InferencerBase):
         import asyncio
 
         canonical = self._resolve_tool_name(tool_call.name)
+
+        # Commands can be invoked as tools by the LLM (e.g., "set_model")
+        if self._commands.is_command_name(canonical):
+            result = await self._commands.dispatch_as_tool(
+                canonical, tool_call.arguments or {},
+            )
+            self._check_phase_completion(tool_name=canonical)
+            return result
+
         if self.tool_executor is None:
             return f"No tool executor configured for: {canonical}"
 
@@ -1037,7 +1219,21 @@ class ConversationalInferencer(InferencerBase):
                     result = await executor(canonical, tool_call.arguments)
                     if hasattr(result, "context_updates") and result.context_updates:
                         self.update_prior_context(**result.context_updates)
+                    if hasattr(result, "result"):
+                        self.add_message(
+                            "user",
+                            f"{_TOOL_RESULTS_PREFIX}\n{canonical}: {result.result}",
+                        )
                     self._check_phase_completion(tool_name=canonical)
+                    # Wake the event loop (if inbox enabled)
+                    if self._inbox is not None:
+                        from agent_foundation.common.inferencers.agentic_inferencers.conversational.inbox import (
+                            ToolCompletion,
+                        )
+                        try:
+                            self._inbox.put_nowait(ToolCompletion(tool_name=canonical))
+                        except Exception:
+                            logger.warning("Inbox put failed for tool %s", canonical)
                 except Exception as e:
                     logger.error("Async tool %s failed: %s", canonical, e)
 
@@ -1386,14 +1582,12 @@ class ConversationalInferencer(InferencerBase):
 
             # Apply variable override if user edited the content
             variable_override = response.get("variable_override")
-            if variable_override and self.prompt_renderer:
-                vm = self.prompt_renderer.variable_manager
-                for vname, edited_content in variable_override.items():
-                    vm.set(vname, edited_content)
-            elif tool.output_vars and self.prompt_renderer:
-                # No override — apply choice value (triggers sub-key resolution)
-                vm = self.prompt_renderer.variable_manager
-                vm.set(tool.output_vars[0], choice_value)
+            if variable_override:
+                self.set_session_variables(variable_override)
+            elif tool.output_vars:
+                self.set_session_variables(
+                    {var: choice_value for var in tool.output_vars}
+                )
 
             return choice_value
 
@@ -1447,11 +1641,11 @@ class ConversationalInferencer(InferencerBase):
                     tool._tool_params = tool_params
             # Inject view path for generated documentation if available
             if tool.tool_type == ConversationToolType.CONFIRMATION:
-                target_path = self.prior_context.get("workflow_target_path", "")
-                if target_path:
+                workflow_target_path = self.prior_context.get("workflow_target_path", "")
+                if workflow_target_path:
                     from pathlib import Path as _Path
 
-                    target_dir = _Path(target_path)
+                    target_dir = _Path(workflow_target_path)
                     if target_dir.is_file():
                         target_dir = target_dir.parent
                     docs_index = target_dir / "docs" / "_build" / "html" / "index.html"
@@ -1469,9 +1663,9 @@ class ConversationalInferencer(InferencerBase):
                 tool.tool_type == ConversationToolType.CONFIRMATION
                 and str(result).lower() in ("yes", "proceed")
             ):
-                self.update_prior_context(_confirmation_gate_passed=True)
+                self.update_prior_context(_user_input_gate_passed=True)
                 if self.sop_state:
-                    self.sop_state.confirmation_gate_passed = True
+                    self.sop_state.user_input_gate_passed = True
             var_name = tools[0].output_vars[0] if tools[0].output_vars else "input"
             return {var_name: result}
 
@@ -1577,18 +1771,16 @@ class ConversationalInferencer(InferencerBase):
                     raw_value = values.get(var, "")
                     collected[var] = str(raw_value)
 
-                    # Apply variable override or choice value to template system
                     if (
                         variable_override
                         and isinstance(variable_override, dict)
                         and var in variable_override
-                        and self.prompt_renderer
                     ):
-                        vm = self.prompt_renderer.variable_manager
-                        vm.set(var, variable_override[var])
-                    elif tool.output_vars and self.prompt_renderer and raw_value:
-                        vm = self.prompt_renderer.variable_manager
-                        vm.set(tool.output_vars[0], str(raw_value))
+                        self.set_session_variables({var: variable_override[var]})
+                    elif tool.output_vars and raw_value:
+                        self.set_session_variables(
+                            {v: str(raw_value) for v in tool.output_vars}
+                        )
             else:
                 # Fallback: single value
                 collected["input"] = str(values)

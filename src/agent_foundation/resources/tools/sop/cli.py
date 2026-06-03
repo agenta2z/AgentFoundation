@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,22 +16,58 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _build_base_inferencer(model: str) -> Any:
-    """Try available CLI backends (Claude Code → RovoDev)."""
-    if shutil.which("claude"):
-        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
-            ClaudeCodeCliInferencer,
-        )
-        return ClaudeCodeCliInferencer(model_name=model)
+def _build_ci_from_config(
+    model: str,
+    backend: str | None = None,
+    tool_registry: dict | None = None,
+    tool_executor: Any = None,
+    interactive: Any = None,
+) -> Any:
+    """Build a ConversationalInferencer from YAML config.
 
-    if shutil.which("acli"):
-        from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
-            RovoDevCliInferencer,
-        )
-        return RovoDevCliInferencer(model_name="sonnet", yolo=True)
+    Loads configs/default.yaml which uses alias-file cascade to resolve
+    ``base_inferencer: ClaudeCodeCLI`` → loads ``base_inferencer/ClaudeCodeCLI.yaml``.
+    Override with ``--backend RovoDevCLI`` (any registered alias with a
+    matching YAML in ``configs/base_inferencer/``).
+    """
+    import agent_foundation.common.configs.registered_targets  # noqa: F401
+    from rich_python_utils.config_utils import load_config, instantiate
+    from omegaconf import OmegaConf
 
-    print("ERROR: No LLM backend found. Install Claude Code (claude) or RovoDev (acli).")
-    sys.exit(1)
+    configs_dir = Path(__file__).parent / "configs"
+    cfg = load_config(str(configs_dir / "default.yaml"))
+    cfg = OmegaConf.to_container(cfg, resolve=True)
+
+    if backend:
+        backend_path = configs_dir / "base_inferencer" / f"{backend}.yaml"
+        if not backend_path.exists():
+            available = ", ".join(
+                p.stem for p in (configs_dir / "base_inferencer").glob("*.yaml")
+            )
+            print(f"ERROR: Unknown backend '{backend}'. Available: {available}")
+            sys.exit(1)
+        cfg["base_inferencer"] = OmegaConf.to_container(
+            OmegaConf.load(str(backend_path)), resolve=True,
+        )
+
+    if model:
+        bi = cfg["base_inferencer"]
+        if "model_name" in bi:
+            bi["model_name"] = model
+        elif "model_id" in bi:
+            bi["model_id"] = model
+        else:
+            bi["model_name"] = model
+    cfg["base_inferencer"]["target_path"] = str(Path.cwd())
+
+    ci = instantiate(OmegaConf.create(cfg))
+    if tool_registry:
+        ci.tool_registry = tool_registry
+    if tool_executor:
+        ci.tool_executor = tool_executor
+    if interactive:
+        ci.interactive = interactive
+    return ci
 
 
 async def run_sop(
@@ -41,21 +76,14 @@ async def run_sop(
     *,
     yolo: bool = False,
     model: str = "opus[1m]",
+    backend: str | None = None,
     extra_sop_dirs: list[str] | None = None,
     extra_tool_dirs: list[str] | None = None,
 ) -> int:
     """Run an SOP end-to-end. Returns exit code."""
-    from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
-        PausedResult,
-    )
-    from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-        ConversationalInferencer,
-    )
     from agent_foundation.resources.tools.sop.executor import execute
     from agent_foundation.resources.tools.registry import load_all_tools
     from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
-
-    base = _build_base_inferencer(model)
 
     interactive = None
     if not yolo:
@@ -68,16 +96,151 @@ async def run_sop(
     tool_dirs = [Path(d) for d in extra_tool_dirs] if extra_tool_dirs else None
     tool_registry = load_all_tools(extra_dirs=tool_dirs)
 
+    # Force all tools to synchronous mode for CLI.
+    # In the server, async tools fire-and-forget while the chat continues.
+    # In CLI, we need tools to complete inline before the loop continues.
+    for tool_def in tool_registry.values():
+        if hasattr(tool_def, "asynchronous"):
+            tool_def.asynchronous = False
+
+    # Session workspace: _runtime/sop/<sop_name>__<timestamp>/
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    session_id = f"{sop_name}__{ts}__{uuid4().hex[:8]}"
+    runtime_root = Path.cwd() / "_runtime" / "sop"
+    session_dir = runtime_root / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    turns_dir = session_dir / "turns"
+    turns_dir.mkdir(exist_ok=True)
+
     session_context: dict[str, Any] = {
         "extra_sop_dirs": [Path(d) for d in extra_sop_dirs] if extra_sop_dirs else [],
         "extra_tool_dirs": [Path(d) for d in extra_tool_dirs] if extra_tool_dirs else [],
+        "session_root": str(session_dir),
+        "working_dir": str(Path.cwd()),
+        "session_id": session_id,
     }
 
-    ci = ConversationalInferencer(
-        base_inferencer=base,
+    # Turn logging callbacks — create rich turn artifacts per CI turn.
+    #
+    # Structure:
+    #   turn_001/
+    #     user_input.txt          ← one per turn (the trigger)
+    #     messages.json           ← cumulative snapshot at turn end
+    #     round_001/              ← per-LLM-call artifacts
+    #       rendered_prompt.txt
+    #       response.md
+    #       template_source.txt
+    #       template_feed.json
+    #       template_config.json
+    #     round_002/              ← second LLM call (after tool execution)
+    #       ...
+    #
+    _turn_counter = [0]
+    _round_counter = [0]
+    _ci_ref = [None]  # populated after CI construction
+
+    async def _on_new_turn(turn_number, user_input):
+        _turn_counter[0] += 1
+        _round_counter[0] = 0
+        turn_dir = turns_dir / f"turn_{_turn_counter[0]:03d}"
+        turn_dir.mkdir(exist_ok=True)
+        (turn_dir / "user_input.txt").write_text(user_input or "", encoding="utf-8")
+        ci = _ci_ref[0]
+        if ci and hasattr(ci, "base_inferencer"):
+            ci.base_inferencer.cache_folder = str(turn_dir)
+        return _turn_counter[0]
+
+    async def _on_prompt_rendered(ci_instance, raw_response):
+        import json as _json
+        _round_counter[0] += 1
+        turn_dir = turns_dir / f"turn_{_turn_counter[0]:03d}"
+        round_dir = turn_dir / f"round_{_round_counter[0]:03d}"
+        round_dir.mkdir(parents=True, exist_ok=True)
+        rendered = getattr(ci_instance, "_last_rendered_prompt", "")
+        (round_dir / "rendered_prompt.txt").write_text(rendered, encoding="utf-8")
+        tmpl_src = getattr(ci_instance, "_last_template_source", "")
+        (round_dir / "template_source.txt").write_text(tmpl_src, encoding="utf-8")
+        feed = getattr(ci_instance, "_last_template_feed", {})
+        try:
+            (round_dir / "template_feed.json").write_text(
+                _json.dumps(feed, indent=2, default=str), encoding="utf-8",
+            )
+        except Exception:
+            pass
+        config = getattr(ci_instance, "_last_template_config", {})
+        try:
+            (round_dir / "template_config.json").write_text(
+                _json.dumps(config, indent=2, default=str), encoding="utf-8",
+            )
+        except Exception:
+            pass
+        (round_dir / "response.md").write_text(
+            str(raw_response) if raw_response else "", encoding="utf-8",
+        )
+
+    async def _on_turn_complete(turn_number):
+        turn_dir = turns_dir / f"turn_{_turn_counter[0]:03d}"
+        turn_dir.mkdir(exist_ok=True)
+        ci = _ci_ref[0]
+        if ci:
+            import json as _json
+            try:
+                (turn_dir / "messages.json").write_text(
+                    _json.dumps(ci._messages, indent=2, default=str),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
+    logger.info("SOP session: %s", session_dir)
+
+    # Build a synchronous tool executor that resolves executors from tool.json
+    async def _tool_executor(tool_name: str, arguments: dict) -> Any:
+        import importlib
+        import json as _json
+        from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
+            ToolExecutionResult as _TER,
+        )
+        # Search tool directories for matching tool.json with "executor" field
+        search_dirs = [
+            Path(__file__).resolve().parent.parent,  # AF tools root
+        ]
+        if tool_dirs:
+            search_dirs.extend(tool_dirs)
+        for tools_root in search_dirs:
+            tool_json_path = tools_root / tool_name / "tool.json"
+            if not tool_json_path.exists():
+                # Try with hyphens→underscores
+                tool_json_path = tools_root / tool_name.replace("-", "_") / "tool.json"
+            if tool_json_path.exists():
+                meta = _json.loads(tool_json_path.read_text())
+                executor_ref = meta.get("executor", "")
+                if ":" in executor_ref:
+                    mod_path, func_name = executor_ref.rsplit(":", 1)
+                    mod = importlib.import_module(mod_path)
+                    func = getattr(mod, func_name)
+                    return await func(arguments, session_context)
+                # Derived tool with no explicit executor — use generic
+                derived_from = meta.get("derived_from")
+                if derived_from:
+                    from agent_foundation.resources.tools.registry import derived_tool_execute
+                    return await derived_tool_execute(
+                        arguments, session_context,
+                        derived_from=derived_from, tool_name=tool_name,
+                    )
+        return _TER(result=f"Unknown tool: {tool_name}")
+
+    ci = _build_ci_from_config(
+        model=model,
+        backend=backend,
         tool_registry=tool_registry,
+        tool_executor=_tool_executor,
         interactive=interactive,
     )
+    _ci_ref[0] = ci
 
     result = await execute(
         {"workflow": sop_name, "yolo": yolo},
@@ -90,33 +253,46 @@ async def run_sop(
 
     ci.update_prior_context(**result.context_updates)
     print(f"Entered SOP: {sop_name}")
+    print(f"Session: {session_dir}")
+
+    # Enable inbox event loop with turn logging callbacks
+    ci.enable_inbox(
+        interactive=interactive,
+        auto_shutdown_on_sop_complete=True,
+        on_new_turn=_on_new_turn,
+        on_prompt_rendered=_on_prompt_rendered,
+        on_turn_complete=_on_turn_complete,
+    )
+    ci.inbox_put_user(request)
 
     if yolo:
-        agentic_result = await ci.run_agentic_loop(request, interactive=interactive)
-        if getattr(agentic_result, "exhausted_max_iterations", False):
-            print("WARNING: SOP exhausted max_iterations — may be incomplete")
+        # Yolo: run() processes all phases via inbox, exits when SOP completes
+        last_result = await ci.run()
         if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
             print("SOP completed successfully.")
         elif ci.sop_state:
             print(f"SOP ended at phase {ci.sop_state.current_phase} ({ci.sop_state.phase_status})")
     else:
-        content = request
-        while True:
-            agentic_result = await ci.run_agentic_loop(content, interactive=interactive)
-            if ci.sop_state is None:
-                print("SOP exited.")
-                break
-            if ci.sop_state.phase_status == PhaseStatus.COMPLETED:
-                print("SOP completed successfully.")
-                break
-            if isinstance(agentic_result, PausedResult):
-                print("SOP paused.")
-                break
-            try:
-                content = input("\n> ")
-            except (EOFError, KeyboardInterrupt):
-                print("\nAborted.")
-                break
+        # Interactive: run() in background, user input feeds inbox
+        import asyncio as _aio
+
+        run_task = _aio.create_task(ci.run())
+        try:
+            while not ci._shutdown_requested:
+                try:
+                    line = await _aio.to_thread(input, "\n> ")
+                    ci.inbox_put_user(line)
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted.")
+                    ci.request_shutdown()
+                    break
+        finally:
+            if not ci._shutdown_requested:
+                ci.request_shutdown()
+            await run_task
+
+        if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
+            print("SOP completed successfully.")
 
     return 0
 
@@ -127,9 +303,11 @@ def main(argv: list[str] | None = None) -> int:
         description="Run a Standard Operating Procedure end-to-end.",
     )
     parser.add_argument("sop_name", help="SOP name (e.g., role_creation, code_optimization)")
-    parser.add_argument("request", nargs="?", default="", help="Initial request/context for the SOP")
+    parser.add_argument("request", nargs="?", default="", help="Initial request/context for the SOP (place before flags, or use --request)")
+    parser.add_argument("--request", dest="request_flag", default=None, help="Initial request (alternative to positional arg, safe with nargs=* flags)")
     parser.add_argument("--yolo", action="store_true", help="Auto-resolve all confirmations")
     parser.add_argument("--model", default="opus[1m]", help="LLM model (default: opus[1m])")
+    parser.add_argument("--backend", default=None, help="Backend inferencer: claude_code (default), rovodev, or custom YAML name")
     parser.add_argument("--extra-sop-dirs", nargs="*", default=[], help="Additional SOP directories")
     parser.add_argument("--extra-tool-dirs", nargs="*", default=[], help="Additional tool directories")
 
@@ -138,9 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(
         run_sop(
             sop_name=args.sop_name,
-            request=args.request or f"Starting SOP: {args.sop_name}",
+            request=args.request_flag or args.request or f"Starting SOP: {args.sop_name}",
             yolo=args.yolo,
             model=args.model,
+            backend=args.backend,
             extra_sop_dirs=args.extra_sop_dirs,
             extra_tool_dirs=args.extra_tool_dirs,
         )

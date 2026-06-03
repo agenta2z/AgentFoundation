@@ -1,0 +1,47 @@
+{
+  "name": "understand_data",
+  "tool_type": "Action",
+  "aliases": [
+    "understand-data",
+    "ud"
+  ],
+  "category": "workflow",
+  "is_bridge": true,
+  "asynchronous": true,
+  "derived_from": {
+    "tool": "task",
+    "arg_mappings": {
+      "target": "request",
+      "docs_only": "no_planning",
+      "investigation_only": "no_implementation"
+    },
+    "defaults": {"template_master_version": "understand_data", "full": true},
+    "target_path_arg": "target",
+    "expose_params": ["--template-version", "--template-master-version", "--model"]
+  },
+  "description": "Deep-dive data investigation. Analyzes training and evaluation data pipelines, dataset characteristics, feature engineering, data quality signals, and infrastructure for a target codebase.",
+  "parameters": [
+    {
+      "name": "target",
+      "type": "path",
+      "required": true,
+      "positional": true,
+      "description": "The target file or directory whose data landscape to investigate."
+    },
+    {
+      "name": "--docs-only",
+      "type": "flag",
+      "description": "Skip planning, generate documentation directly."
+    },
+    {
+      "name": "--investigation-only",
+      "type": "flag",
+      "description": "Run investigation only, skip implementation/documentation phase."
+    }
+  ],
+  "returns": "Workspace path containing the data investigation documentation.",
+  "examples": [
+    "understand-data /path/to/model_training/",
+    "understand-data /path/to/feature_pipeline.py"
+  ]
+}

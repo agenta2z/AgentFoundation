@@ -1,0 +1,3 @@
+_target_: ClaudeCodeCLI
+model_name: opus[1m]
+permission_mode: bypassPermissions

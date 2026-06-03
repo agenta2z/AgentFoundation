@@ -91,7 +91,7 @@ Wrap a structured response in `<Response>` tags:
 - {{ instructions.behavior.file_reading_efficiency }}
 - {{ instructions.behavior.file_reading_fallback_for_followup }}
 - Prefer copying the prior version artifact and making incremental targeted edits over full regeneration when full regeneration is not necessary. If fixes are mostly localized—small edits within 1–2 sections, or limited cross-section changes, YOU MUST copy the prior version artifact and apply targeted edits. The coping-prior-version-then-edit approach avoids regeneration of unchanged contents to save time, an prevents content drifting or regression.
-{%- if enable_elegant_mode %}
+{%- if enable_elegant_mode | default(true) %}
 - {{ instructions.modes.elegant_mode }} Double check we apply right fixes for true issues.
 {%- endif %}
 - You can briefly check the refined artifact file to ensure it is complete (e.g. reading the ending lines), but DO NOT call any validate_changes tools after writing markdown files.

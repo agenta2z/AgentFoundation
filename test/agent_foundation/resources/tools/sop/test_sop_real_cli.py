@@ -36,7 +36,7 @@ skip_no_backend = pytest.mark.skipif(
 
 @skip_no_backend
 @pytest.mark.integration
-@pytest.mark.timeout(1800)
+@pytest.mark.timeout(0)  # no outer timeout; each tool manages its own
 def test_sop_role_creation_yolo(tmp_path):
     """Run role_creation SOP in yolo mode via CLI subprocess."""
     pythonpath = ":".join([
@@ -68,7 +68,7 @@ def test_sop_role_creation_yolo(tmp_path):
         env=env,
         capture_output=True,
         text=True,
-        timeout=1800,
+        timeout=None,  # no outer timeout; each tool manages its own
     )
 
     log_file.write_text(

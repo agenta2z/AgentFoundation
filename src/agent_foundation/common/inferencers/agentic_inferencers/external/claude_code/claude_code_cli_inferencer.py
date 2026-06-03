@@ -577,6 +577,13 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 except (ProcessLookupError, OSError):
                     pass
             await process.wait()
+            if process.returncode != 0:
+                logger.warning(
+                    "[%s] streaming subprocess exited with code %s. stderr: %s",
+                    self.__class__.__name__,
+                    process.returncode,
+                    self._last_streaming_stderr[:500] if self._last_streaming_stderr else "(empty)",
+                )
 
     def _resolve_subprocess_timeout(
         self, override: Optional[float] = None

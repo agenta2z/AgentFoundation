@@ -18,14 +18,92 @@ from agent_foundation.resources.tools.models import ToolDefinition
 _TOOLS_DIR: Path = Path(__file__).parent  # common/tools/
 
 
-def load_tool(name: str, base_dir: Path | None = None) -> ToolDefinition:
-    """Load a single tool definition from its tool.json."""
+def load_tool(
+    name: str,
+    base_dir: Path | None = None,
+    _all_dirs: list[Path] | None = None,
+) -> ToolDefinition:
+    """Load a single tool definition from its tool.json.
+
+    If the tool declares ``derived_from.expose_params``, the named parameters
+    are inherited from the parent tool (looked up in ``_all_dirs`` or the
+    framework default). Child parameters with the same name take precedence.
+    """
     tool_json_path = (base_dir or _TOOLS_DIR) / name / "tool.json"
     with open(tool_json_path) as f:
         data: dict[str, Any] = json.load(f)
     tool = ToolDefinition.from_dict(data)
     tool.source_path = str(tool_json_path)
+
+    if tool.derived_from:
+        expose = tool.derived_from.get("expose_params", [])
+        if expose:
+            parent_name = tool.derived_from["tool"]
+            parent = _resolve_parent_tool(parent_name, _all_dirs or [base_dir or _TOOLS_DIR])
+            if parent:
+                child_names = {p.name for p in tool.parameters}
+                expose_set = set(expose)
+                for p in parent.parameters:
+                    if p.name in expose_set and p.name not in child_names:
+                        tool.parameters.append(p)
+
     return tool
+
+
+def _resolve_parent_tool(
+    name: str, search_dirs: list[Path],
+) -> ToolDefinition | None:
+    """Find and load a parent tool by name across search directories."""
+    for d in search_dirs:
+        tool_json = d / name / "tool.json"
+        if tool_json.exists():
+            with open(tool_json) as f:
+                data: dict[str, Any] = json.load(f)
+            return ToolDefinition.from_dict(data)
+    return None
+
+
+async def derived_tool_execute(
+    arguments: dict[str, Any],
+    session_context: dict[str, Any],
+    *,
+    derived_from: dict[str, Any],
+    tool_name: str,
+) -> Any:
+    """Generic executor for any tool with ``derived_from`` — no per-tool code.
+
+    Reads ``arg_mappings``, ``defaults``, ``target_path_arg`` from the
+    ``derived_from`` declaration and delegates to the parent tool's executor.
+    """
+    from agent_foundation.resources.tools.task.executor import execute as task_execute
+
+    arg_mappings = derived_from.get("arg_mappings", {})
+    defaults = derived_from.get("defaults", {})
+    target_path_arg = derived_from.get("target_path_arg")
+
+    task_args: dict[str, Any] = {}
+    for key, value in arguments.items():
+        if value is None:
+            continue
+        normalized = key.lstrip("-").replace("-", "_")
+        task_args[arg_mappings.get(normalized, normalized)] = value
+
+    if target_path_arg:
+        mapped_name = arg_mappings.get(target_path_arg, target_path_arg)
+        target = task_args.pop(mapped_name, "")
+        target_path = Path(target).resolve() if target else Path.cwd()
+        overrides = list(task_args.pop("override", []) or [])
+        overrides.append(f"_target_path={target_path}")
+        task_args["request"] = task_args.get("request", "")
+        task_args["override"] = overrides
+
+    for k, v in defaults.items():
+        task_args.setdefault(k, v)
+
+    ctx = dict(session_context)
+    ctx["tool_name"] = tool_name
+
+    return await task_execute(task_args, ctx)
 
 
 def load_all_tools(extra_dirs: list[str | Path] | None = None) -> dict[str, ToolDefinition]:
@@ -48,7 +126,7 @@ def load_all_tools(extra_dirs: list[str | Path] | None = None) -> dict[str, Tool
         for child in sorted(tools_dir.iterdir()):
             tool_json = child / "tool.json"
             if child.is_dir() and tool_json.exists():
-                tool = load_tool(child.name, base_dir=tools_dir)
+                tool = load_tool(child.name, base_dir=tools_dir, _all_dirs=dirs_to_scan)
                 tools[tool.name] = tool
     return tools
 

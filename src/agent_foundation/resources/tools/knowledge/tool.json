@@ -5,6 +5,7 @@
     "kn"
   ],
   "category": "knowledge",
+  "agent_enabled": false,
   "is_bridge": false,
   "description": "Manage the persistent knowledge base. Supports adding, searching, loading files, and maintaining knowledge pieces for context-aware assistance.",
   "subcommands": [

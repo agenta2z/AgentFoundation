@@ -387,7 +387,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     #   - Callable(sub_query, index) -> InferencerBase  (homogeneous, all same type)
     #   - dict[str, Callable | functools.partial]: maps task type -> factory.
     #     functools.partial entries are called with no args to create fresh instances.
-    #     "__default__" can be a string referencing another key.
+    #     "_default" can be a string referencing another key.
     #     Requires task_type_arg_name and parser returning List[dict] with "args".
     worker_factory: Any = attrib(default=None)
 
@@ -1456,7 +1456,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # Determine if this task type should expand todos
             task_type = None
             if isinstance(self.worker_factory, dict) and self.task_type_arg_name:
-                task_type = sq_args.get(self.task_type_arg_name, "__default__")
+                task_type = sq_args.get(self.task_type_arg_name, "_default")
 
             if isinstance(self.expand_todos_to_workers, dict):
                 should_expand = self.expand_todos_to_workers.get(task_type, False) if task_type else False
@@ -1466,7 +1466,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             factory_entry = None
             if task_type and isinstance(self.worker_factory, dict):
                 factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("__default__")
+                    task_type, self.worker_factory.get("_default")
                 )
                 if isinstance(factory_entry, dict):
                     should_expand = factory_entry.get("expand_todos", should_expand)
@@ -1506,19 +1506,19 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             task_type = None
             if isinstance(self.worker_factory, dict):
                 task_type = (
-                    sq_args.get(self.task_type_arg_name, "__default__")
+                    sq_args.get(self.task_type_arg_name, "_default")
                     if self.task_type_arg_name
-                    else "__default__"
+                    else "_default"
                 )
                 factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("__default__")
+                    task_type, self.worker_factory.get("_default")
                 )
                 if isinstance(factory_entry, str):
                     factory_entry = self.worker_factory.get(factory_entry)
                 if factory_entry is None:
                     raise ValueError(
                         f"No worker factory for task type '{task_type}' "
-                        f"and no '__default__' fallback"
+                        f"and no '_default' fallback"
                     )
                 if isinstance(factory_entry, dict) and "factory" in factory_entry:
                     factory = factory_entry["factory"]
@@ -1533,7 +1533,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         "LazyConfigFactory. This causes cross-worker instance "
                         "sharing. Ensure *_factory attrs use LazyConfigFactory "
                         "(auto-applied by the config walker for _target_: entries).",
-                        getattr(self, "name", "?"), task_type or "__default__",
+                        getattr(self, "name", "?"), task_type or "_default",
                     )
                 if isinstance(factory, (functools.partial, LazyConfigFactory)):
                     worker = factory()

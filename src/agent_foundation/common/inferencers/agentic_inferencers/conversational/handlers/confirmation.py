@@ -135,9 +135,9 @@ class ConfirmationHandler(ConversationToolHandler):
 
         # 2b. workflow_target_path docs index
         if run_view_fallback and "view" not in tool.metadata:
-            target_path = ctx.prior_context.get("workflow_target_path", "")
-            if target_path and target_path != "not set":
-                target_dir = Path(target_path)
+            workflow_target_path = ctx.prior_context.get("workflow_target_path", "")
+            if workflow_target_path and workflow_target_path != "not set":
+                target_dir = Path(workflow_target_path)
                 if target_dir.is_file():
                     target_dir = target_dir.parent
                 docs_index = target_dir / "docs" / "_build" / "html" / "index.html"

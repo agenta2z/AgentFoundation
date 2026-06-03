@@ -26,15 +26,35 @@ class SOPState(FeedBase):
     tool_phase_map: dict = field(default_factory=dict)
     yolo_mode: bool = False
     instance_id: str = ""
-    workflow_description: str = ""
-    confirmation_gate_passed: bool = False
+    sop_description: str = ""
+    user_input_gate_passed: bool = False
 
     sop: Any = field(default=None, repr=False)
+
+    @property
+    def sop_status(self) -> str:
+        """Human-readable status for the template."""
+        n_completed = len(self.completed_phases)
+        n_total = len(self.sop.phases) if self.sop and hasattr(self.sop, "phases") else 0
+        phase_name = ""
+        if self.sop and hasattr(self.sop, "phases") and self.current_phase:
+            for p in self.sop.phases:
+                if p.id == self.current_phase:
+                    phase_name = p.name
+                    break
+        if self.phase_status == "completed":
+            return f"Completed ({n_completed}/{n_total} phases done)"
+        if self.current_phase and phase_name:
+            return f"Phase {self.current_phase} of {n_total}: {phase_name} ({self.phase_status})"
+        if self.current_phase:
+            return f"Phase {self.current_phase} of {n_total} ({self.phase_status})"
+        return f"{n_completed}/{n_total} phases completed"
 
     def to_feed(self) -> dict[str, Any]:
         """Template-visible keys only. Excludes sop (non-serializable)."""
         return {
-            "workflow_description": self.workflow_description,
+            "sop_description": self.sop_description,
+            "sop_status": self.sop_status,
             "current_phase": self.current_phase,
             "phase_status": self.phase_status,
             "sop_name": self.sop_name,

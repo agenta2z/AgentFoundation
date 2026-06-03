@@ -407,5 +407,76 @@ class TestLegacyRenderPathThresholdInjection(unittest.TestCase):
         self.assertIn("true if no CRITICAL issues", rendered)
 
 
+# ---------------------------------------------------------------------------
+# End-to-end: exercise _step_review_impl call path (catches NameError
+# regressions where inference_config is not in scope).
+# ---------------------------------------------------------------------------
+
+
+def _make_approved_review_json():
+    """Return a review JSON string that approves immediately."""
+    import json
+    return "```json\n" + json.dumps({
+        "approve": True,
+        "overall_severity": "NONE",
+        "issues": [],
+        "reasoning": "Looks good.",
+    }) + "\n```"
+
+
+def _make_mock_inferencer_for_e2e(response):
+    """Mock inferencer that works with the full ainfer() path."""
+    inf = MagicMock()
+    inf.ainfer = AsyncMock(return_value=response)
+    inf.infer = MagicMock(return_value=response)
+    inf.aconnect = AsyncMock()
+    inf.adisconnect = AsyncMock()
+    inf.supports_prompt_rendering = False
+    inf._workspace = None
+    inf.id = "mock"
+    return inf
+
+
+class TestEndToEndReviewPathNoNameError(unittest.TestCase):
+    """Exercise the full ainfer() → _step_review_impl → _build_review_feed
+    path to catch NameError regressions (e.g., referencing 'inference_config'
+    when it's not in _step_review_impl's scope)."""
+
+    def _run(self, coro):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def test_ainfer_completes_without_name_error(self):
+        review_json = _make_approved_review_json()
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer_for_e2e("proposal text"),
+            review_inferencer=_make_mock_inferencer_for_e2e(review_json),
+            consensus_config=ConsensusConfig(consensus_threshold="COSMETIC"),
+        )
+        try:
+            result = self._run(dual.ainfer("test request"))
+        except NameError as e:
+            self.fail(
+                f"NameError in review path — likely inference_config "
+                f"not in scope in _step_review_impl: {e}"
+            )
+
+    def test_ainfer_with_custom_threshold(self):
+        review_json = _make_approved_review_json()
+        dual = DualInferencer(
+            base_inferencer=_make_mock_inferencer_for_e2e("proposal"),
+            review_inferencer=_make_mock_inferencer_for_e2e(review_json),
+            consensus_config=ConsensusConfig(consensus_threshold="MINOR"),
+        )
+        try:
+            result = self._run(dual.ainfer("test"))
+        except NameError as e:
+            self.fail(f"NameError with custom threshold: {e}")
+
+
 if __name__ == "__main__":
     unittest.main()
