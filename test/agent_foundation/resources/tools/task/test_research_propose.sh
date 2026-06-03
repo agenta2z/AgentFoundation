@@ -31,7 +31,7 @@ _find_python() {
 }
 PYTHON="$(_find_python)"
 
-REQUEST="${1:-Investigate opportunities for agentic AI in Jira admin workflows}"
+REQUEST="${1:-Investigate opportunities for improvement}"
 
 RUNTIME_DIR="$AF_ROOT/_runtime/research_propose_tests"
 mkdir -p "$RUNTIME_DIR"
@@ -46,31 +46,36 @@ echo "║  Python:  $PYTHON                                "
 echo "╚══════════════════════════════════════════════════╝"
 
 exec "$PYTHON" -u -c "
-import asyncio, json, sys, os
+import asyncio, json, sys
 from pathlib import Path
 
 async def main():
     from agent_foundation.resources.tools.task.executor import execute
 
+    # Load tool.json to get defaults (same as derived_tool_execute would)
     tool_json = Path('$AF_ROOT/src/agent_foundation/resources/tools/research_propose/tool.json')
     tool = json.loads(tool_json.read_text())
     defaults = tool['derived_from']['defaults']
 
+    # Build arguments with all defaults applied
     arguments = {
         'request': '''$REQUEST''',
-        'plan': True,
-        'config': defaults.get('config', 'breakdown-multiflow-plan'),
-        'template_master_version': defaults.get('template_master_version', 'research_propose'),
-        'config_overrides': defaults.get('config_overrides', {}),
     }
+    for k, v in defaults.items():
+        arguments.setdefault(k, v)
 
-    print(f'Config: {arguments[\"config\"]}')
-    print(f'Config overrides: {json.dumps(arguments[\"config_overrides\"], indent=2)}')
-    print(f'Template master: {arguments[\"template_master_version\"]}')
+    print(f'Config: {arguments.get(\"config\")}')
+    print(f'Template master: {arguments.get(\"template_master_version\")}')
+    print(f'Tool name: {tool[\"name\"]}')
     print('---')
+    sys.stdout.flush()
 
-    result = await execute(arguments, {})
-    print(result.result if hasattr(result, 'result') else str(result))
+    # Call execute() with tool_name in session_context for correct workspace naming
+    result = await execute(arguments, {'tool_name': tool['name']})
+
+    output = result.result if hasattr(result, 'result') else str(result)
+    print('=== RESULT ===')
+    print(output[:3000] if len(output) > 3000 else output)
 
 asyncio.run(main())
 " 2>&1 | tee "$LOG_FILE"

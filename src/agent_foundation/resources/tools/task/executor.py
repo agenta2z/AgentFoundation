@@ -138,6 +138,86 @@ def _parse_overrides(items) -> dict:
     return out
 
 
+def _resolve_proposal_plan(
+    proposal_path: str, proposal_ids_str: Optional[str],
+) -> Optional[str]:
+    """Load proposals, filter by IDs, format as initial plan, return temp file path."""
+    from agent_foundation.common.data_models.proposal.parser import (
+        parse_proposal_file,
+    )
+
+    proposal_abs = Path(proposal_path).resolve()
+    idx = parse_proposal_file(proposal_abs)
+    if idx is None:
+        _logger.error("Cannot parse proposals from: %s", proposal_abs)
+        return None
+
+    if proposal_ids_str:
+        ids = [s.strip() for s in proposal_ids_str.split(",") if s.strip()]
+        try:
+            selected = idx.get_proposals_by_ids(ids)
+        except KeyError as exc:
+            _logger.error("%s", exc)
+            return None
+    else:
+        selected = idx.all_proposals()
+
+    if not selected:
+        _logger.error("No proposals selected from: %s", proposal_abs)
+        return None
+
+    lines = [
+        "# Initial Plan — Selected from research-propose proposals\n",
+        f"_Source: {proposal_abs}_\n",
+        f"_Selected: {', '.join(p.id for p in selected)}_\n",
+        "",
+    ]
+    index_dir = proposal_abs.parent
+    for p in selected:
+        lines.append(f"## {p.id} — {p.title}")
+        lines.append(f"**Rank:** {p.rank} | **Impact:** {p.impact or 'n/a'} | **Complexity:** {p.complexity or 'n/a'}\n")
+        if p.problem:
+            lines.append(f"### Problem\n{p.problem}\n")
+        if p.approach:
+            lines.append(f"### Approach\n{p.approach}\n")
+        if p.dependencies:
+            lines.append(f"**Dependencies:** {', '.join(p.dependencies)}\n")
+        if p.cross_refs:
+            lines.append(f"**Cross-refs:** {p.cross_refs}\n")
+        if p.proposal_file:
+            detail_path = (index_dir / p.proposal_file).resolve()
+            if detail_path.is_file():
+                detail = detail_path.read_text(encoding="utf-8", errors="replace")
+                lines.append(f"### Full Proposal Detail\n_(from {p.proposal_file})_\n")
+                lines.append(detail)
+            else:
+                lines.append(f"_Full proposal detail at: {p.proposal_file}_\n")
+        lines.append("")
+
+    import tempfile
+    plan_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix="_proposal_plan.md", delete=False, encoding="utf-8",
+    )
+    plan_text = "\n".join(lines)
+    plan_file.write(plan_text)
+    plan_file.close()
+
+    import json as _json
+    from datetime import datetime, timezone
+    audit = {
+        "index_path": str(proposal_abs),
+        "selected_ids": [p.id for p in selected],
+        "picked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    audit_path = Path(plan_file.name).parent / "_picked_proposals.json"
+    with open(audit_path, "w", encoding="utf-8") as f:
+        _json.dump(audit, f, indent=2)
+
+    _logger.info("Resolved %d proposals from %s → %s",
+                 len(selected), proposal_abs, plan_file.name)
+    return plan_file.name
+
+
 def _derive_mode_from_flags(arguments: dict) -> Optional[str]:
     """Map mutually-exclusive --plan/--execute/--full/--confirm flags to a mode string."""
     for f, m in (("plan", "plan"), ("execute", "execute"), ("full", "full"), ("confirm", "confirm")):
@@ -596,6 +676,15 @@ async def execute(arguments: dict, session_context: dict):
         if not plan_abs.is_file():
             return _error(f"--initial-plan file not found: {init_plan}")
         init_plan_path = str(plan_abs)
+
+    use_proposal = arguments.get("use_proposal")
+    proposal_ids_str = arguments.get("proposal_ids")
+    if use_proposal:
+        if init_plan_path:
+            return _error("--use-proposal and --initial-plan are mutually exclusive.")
+        init_plan_path = _resolve_proposal_plan(use_proposal, proposal_ids_str)
+        if init_plan_path is None:
+            return _error(f"Failed to resolve proposals from: {use_proposal}")
 
     if template_version:
         overrides["_template_manager.template_version"] = template_version

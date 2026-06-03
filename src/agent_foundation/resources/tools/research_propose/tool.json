@@ -22,7 +22,8 @@
         "_params.flow_inferencers": ["${oc.env:DEFAULT_RESEARCH_INFERENCER}", "${oc.env:DEFAULT_MAIN_INFERENCER}"],
         "_params.plan_max_breakdown": 5,
         "_params.flow_max_dynamic_steps": 3,
-        "_params.consensus_max_iterations": 3
+        "_params.consensus_max_iterations": 3,
+        "base_inferencer.aggregator_inferencer.template_variables.task_response_format": "research_propose"
       }
     },
     "target_path_arg": "workflow_target_path",
