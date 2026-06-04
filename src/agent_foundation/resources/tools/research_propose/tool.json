@@ -23,11 +23,15 @@
         "_params.plan_max_breakdown": 5,
         "_params.flow_max_dynamic_steps": 3,
         "_params.consensus_max_iterations": 3,
-        "base_inferencer.aggregator_inferencer.template_variables.task_response_format": "research_propose"
+        "base_inferencer._template_master_version": "research_propose",
+        "base_inferencer.aggregator_inferencer.template_master_version": ["research_propose", "aggregation"]
       }
     },
     "target_path_arg": "workflow_target_path",
-    "expose_params": ["--template-version", "--template-master-version"]
+    "expose_params": ["--template-version", "--template-master-version"],
+    "feed_mappings": {
+      "separate_proposal_files": "base_inferencer.aggregator_inferencer.template_extra_feed.separate_proposal_files"
+    }
   },
   "description": "Decompose a research question into subtasks, run parallel deep research (literature + internal knowledge), generate code-grounded individual proposals, then synthesize into a unified plan. Supports resumable checkpointing at every stage.",
   "parameters": [
@@ -47,6 +51,11 @@
       "name": "--docs-path",
       "type": "path",
       "description": "Optional path to documentation directory (included in query and session context)."
+    },
+    {
+      "name": "--separate-proposal-files",
+      "type": "flag",
+      "description": "Write each proposal's full detail to an individual file (proposals/P1.md, etc.) instead of a single unified file."
     },
     {
       "name": "--research-only",

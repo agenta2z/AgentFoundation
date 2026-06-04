@@ -100,6 +100,17 @@ async def derived_tool_execute(
     for k, v in defaults.items():
         task_args.setdefault(k, v)
 
+    feed_mappings = derived_from.get("feed_mappings", {})
+    if feed_mappings:
+        config_overrides = task_args.setdefault("config_overrides", {})
+        if not isinstance(config_overrides, dict):
+            config_overrides = {}
+            task_args["config_overrides"] = config_overrides
+        for arg_name, override_path in feed_mappings.items():
+            val = task_args.pop(arg_name, None)
+            if val is not None:
+                config_overrides[override_path] = val
+
     ctx = dict(session_context)
     ctx["tool_name"] = tool_name
 

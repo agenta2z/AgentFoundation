@@ -1,0 +1,12 @@
+{
+  "name": "sop_creation",
+  "display_name": "SOP Creation from Runbook",
+  "version": "1.0.0",
+  "description": "Convert a free-form operational runbook (typically a Confluence page) into a well-architected, automation-ready SOP that follows the agent_foundation SOP convention. Use when the user wants to turn a one-off process document into a repeatable, agent-executable standard operating procedure. Includes live-verifying every automation surface (CLIs, MCPs, APIs, permissions) before claiming it works.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["clarification", "confirmation", "task"],
+  "labels": ["sop", "automation", "documentation", "runbook"],
+  "linear_only": false,
+  "max_goto_iterations": 5,
+  "max_total_nodes": 100
+}
