@@ -1,0 +1,1200 @@
+<!--
+ui_components_formalization_plan v3.0
+Supersedes v2.0 (which integrated cryptic-clock 2026-05-23 11:30 + wide PLAN).
+Integrates the UPDATED cryptic-clock (2026-05-23 20:42) which is itself
+an integrated plan. This file is the new canonical source of truth.
+-->
+
+# UI Components Formalization — Integrated Plan (v3.0)
+
+**Status:** PROPOSED — supersedes v1.0 (wide) and v2.0 (first integration).
+**Date:** 2026-05-23 20:51
+**Scope:** AgentFoundation + OpenStartup + RankEvolve UI consolidation
+           (Python interaction protocol + React component library)
+
+---
+
+## 0. Why v3.0?
+
+The two source documents have **converged** rather than competed:
+
+| Plan | Lines | Phase 0? | Phase classification matrix? | Anti-drift CI? | Verified ground truth? |
+|------|-------|----------|------------------------------|----------------|------------------------|
+| v2.0 canonical (`ui_components_formalization_plan.md`) | 1,496 | yes (§3) | yes (§9, ~80 rows) | yes (§8) | yes (§1, evidence-backed) |
+| cryptic-clock (updated 20:42) | 617 | yes (§0) | yes (~50 rows) | yes (§4) | implicit (no §1) |
+
+So instead of "deep vs wide" the gap is now:
+
+1. **The updated cryptic-clock has lost the explicit verified-ground-truth section** that v2.0 has. That section was the single most valuable artifact of v2.0 because it stopped both plans from drifting back into wrong assumptions. v3.0 keeps it.
+2. **Cryptic-clock now adds two new Python-side items v2.0 was silent on**: (a) `send_turn_boundary()` / `stream_token_batches()` / heartbeat in `queue_interactive.py`, and (b) making `webaxon` a lazy import in `terminal_interactive.py`. The latter is a **real, verified** hard dependency that we should fix.
+3. **Cryptic-clock and v2.0 disagree on three architectural choices**:
+   - **Directory name:** `ui/widgets/` (cryptic) vs `ui/react-shared/` (v2.0).
+   - **Build strategy:** `craco` override in every consumer (cryptic) vs `tsup` pre-build (v2.0).
+   - **`useAgentChat` / `useAgentWebSocket`:** KEEP-IN-APP (cryptic) vs CANONICALIZE (v2.0).
+4. **v2.0 has features cryptic-clock dropped**: 15-row risk register, 10-point objective acceptance criteria, codegen banner format, registry-completeness test, `messageAdapter` prop design, OS theme lift, MUI 5/7 testing matrix, `Debuggable` decoupling decision, deprecation lifetime policy.
+5. **Cryptic-clock dropped some things v2.0 included** that should *not* be dropped: explicit `WIDGET_APPROVAL`, `WIDGET_CHOICE`, `WIDGET_CONFIRMATION` constants (its widget_type union still lists `'confirmation'` etc. but not `'approval'` or `'card_choice'`).
+
+v3.0 keeps the verified §1, adopts cryptic's good additions (turn boundary, webaxon lazy import, "ABC kept intentionally"), preserves v2.0's risk register / acceptance criteria / governance, and **explicitly resolves** the three disagreements with evidence-backed reasoning.
+
+---
+
+## 1. Verified ground truth (re-checked 2026-05-23 20:51)
+
+Every claim was re-verified against the filesystem in this session. Numbers in
+parentheses are line counts / file sizes observed.
+
+### 1.1 Python side
+
+| Fact | Evidence |
+|------|----------|
+| AF `interactive_base.py` has `get_input` / `send_response` but **no `aget_input` / `asend_response`**. `interactive_checkpoint.py` calls the missing async methods → **latent runtime bug**. | Re-verified this session. |
+| AF `widget_protocol.py` has 6 constants; v2.0 adds 6 more (`WIDGET_CONFIRMATION`, `WIDGET_MULTI_INPUT`, `WIDGET_GROUPED`, `WIDGET_APPROVAL`, `WIDGET_CHOICE`, `WIDGET_DEFAULT`) plus `WIDGET_TYPES`. | Re-verified. |
+| AF `__init__.py` is 0 bytes. | Re-verified. |
+| AF `email_interactive.py` and `simulated_interactive.py` are 0 bytes. | Re-verified. |
+| AF `terminal_interactive.py` line 6 hard-imports `from webaxon.html_utils.common import is_html_string`. Used inside `_send_response()` (line 78). **Top-level import is a real hard dependency**; not lazy today. | **NEW** finding in this session. v2.0 missed this. Cryptic-clock 20:42 added it. |
+| AF `terminal_interactive.py` and `queue_interactive.py` inherit from `ABC` (`class TerminalInteractive(InteractiveBase, ABC)` line 10; `class QueueInteractive(RichInteractiveBase, ABC)` line 10). `RichInteractiveBase` does **not** inherit ABC. ABC is **intentional** — prevents direct instantiation; subclasses must implement abstract methods. | Re-verified. v2.0 said "ABC is fine, no change". Cryptic-clock 20:42 agrees. **Decision: leave ABC alone.** |
+| RE `queue_interactive.py` has `send_turn_boundary()` (line 226), `stream_token_batches()` (line 255), `_heartbeat()` (line 312), diagnostic logging (line 197). AF version is a minimal transport without any of these. | Re-verified. **These are not RE-domain-coupled** — they are streaming/transport primitives. v2.0 didn't mention them. Cryptic-clock 20:42 added them. **Decision: port them with non-RE-specific naming.** |
+| RE `web_interactive.py` is 266 lines; uses `asyncio.Queue`; has hard import on `rankevolve.src.utils.common_objects.debuggable.Debuggable`. | Re-verified. |
+| RE `input_modes.py` has `description: str = ''` on `ChoiceOption` (line 22) that AF (line 20-24) lacks. RE also has `MULTIPLE_CHOICES` (plural) enum variant. | Re-verified. |
+| RE has a complete parallel Python fork at `rankevolve/src/agentic_foundation/common/ui/` (12 files). | Re-verified. |
+| AF `interactive_checkpoint.py` calls `await interactive.aget_input()` / `await interactive.asend_response()` — currently broken until Phase 0. | Re-verified. |
+| OpenStartup has **no** Python protocol fork. | Re-verified. |
+
+### 1.2 React side
+
+| Fact | Evidence |
+|------|----------|
+| All three apps use **CRA `react-scripts 5.0.1`**. No Vite. | Re-verified. |
+| AF/RE: MUI 5.15 + React 18.2. OS: MUI 7.3.9 + React 19.2.4. | Re-verified. |
+| **No monorepo config** exists anywhere in `CoreProjects/` (`lerna.json`, `pnpm-workspace.yaml`, `package.json` with `workspaces`). | Re-verified. |
+| `ui/widgets/` does **not** exist today; safe to create. `ui/react-shared/` also does **not** exist. **Both are valid directory names.** | Verified this session. |
+| Relative path from RE (`atlassian-packages/rankevolve/src/webui/react/`) → AF `widgets/` is `../../../../../AgentFoundation/src/agent_foundation/ui/widgets` — **5 levels up**, not 4 as cryptic-clock 20:42 claims. Compute: `react → webui → src → rankevolve → atlassian-packages → CoreProjects`. From CoreProjects we descend into `AgentFoundation/src/agent_foundation/ui/widgets`. The cryptic-clock plan's example path was off-by-one. | Verified this session. |
+| AF `WidgetRegistry.js` exports `getWidget` but **no `registerWidget`**. Registry is closed today. | Re-verified. |
+| AF `ThemeProvider.js` accepts a `createThemeFn` prop (verified MUI-agnostic). | Re-verified. |
+| AF `MarkdownRenderer.js` uses bare `theme.custom.surfaces.*` — crashes when consumer's theme lacks `custom` namespace. | Re-verified. |
+| OS `chat-widgets/SingleChoiceWidget.js` has double-submit guard (lines 46, 139) + read-only post-submit view (lines 56, 148). AF version lacks both. | Re-verified. |
+| OS `chat-widgets/TextInputWidget.js` has double-submit guard + read-only view. | Re-verified. |
+| OS `chat/MarkdownRenderer.js` has `preprocessContent()` for Unicode bullet normalization (lines 160–174). | Re-verified. |
+| OS `chat-widgets/ConfirmationWidget.js` accepts `onView` / `onViewFolder` props at line 20. **Does NOT** have a `toolConfigComponent` render prop (cryptic-clock 20:42 still has this incorrect claim in its reconciliation table — "Keep `toolConfigComponent` as optional render prop"; that prop **does not exist today**). | Re-verified. |
+| OS `shared/index.js` carries the literal attribution to AgentFoundation. | Re-verified. |
+| AF `webui/react/src/hooks/useAgentChat.js` and `useAgentWebSocket.js` are **byte-identical to RE's** (only a small error string differs). They are **already generic**: `useAgentWebSocket` accepts `onMessage` callback, filters only `heartbeat`/`pong` types, no domain coupling. | **NEW** finding this session. v2.0 said CANONICALIZE; cryptic-clock 20:42 says KEEP-IN-APP. **The evidence supports CANONICALIZE** — these are already shared, identical, and generic. |
+| AF `webui/src/` directory still exists as dead duplicate. | Re-verified. |
+| AF `widgets/index.js` barrel still missing `MultiInputWidget` re-export. | Re-verified. |
+
+### 1.3 Implications
+
+1. **Phase 0 must address `webaxon`.** v2.0 missed this; cryptic-clock 20:42 caught it. Verified ground-truth confirms it. Decision: lazy-import + provide a no-op fallback so `terminal_interactive` doesn't crash when webaxon isn't installed (e.g., in a server-only Python environment).
+2. **Phase 0 must port `send_turn_boundary` / `stream_token_batches` / heartbeat.** These are not RE-domain; they are streaming-transport primitives an `agent_foundation.ui` package should ship.
+3. **`useAgentChat` / `useAgentWebSocket` should be CANONICALIZE, not KEEP-IN-APP.** They are already identical between AF and RE, and the only RE-specific bit (one error string) is trivial to parameterize. Cryptic-clock 20:42 is wrong here; v2.0 is right. v3.0 keeps CANONICALIZE.
+4. **Directory name resolution:** both names are free. `widgets/` is shorter and matches Python `widget_protocol.py` semantics. But it's narrower in meaning than the contents (which also include `theme/`, `hooks/`, `layout/`, `progress/`). v3.0 picks **`widgets/`** because (a) the cryptic-clock plan picked it and is the more recently-updated source; (b) it aligns with the package name `@agent-foundation/ui-react`; (c) hooks/theme being inside `widgets/` is a one-line clarification in CONTRIBUTING.md.
+5. **Build strategy resolution:** `craco` (15-line config per consumer) vs `tsup` pre-build (one-time complexity in library). Verdict: **adopt `tsup`** because (a) consumers shouldn't be forced to swap build tools to use a UI library; (b) RankEvolve in `atlassian-packages/` has its own CI pipeline we don't fully control; (c) `tsup` config is trivial; (d) ships proper CJS+ESM treeshakeable artifacts. The cryptic-clock plan's `file:` + `craco` approach works but is more hostile to the RE team. v3.0 sticks with v2.0's `tsup` decision but documents the `craco` fallback for any consumer that prefers source-linking.
+6. **Off-by-one in cryptic-clock's `file:` path example** (4 vs 5 `..`s) is a small but real correctness bug. v3.0 fixes it.
+7. **Cryptic-clock's `toolConfigComponent` claim is still wrong** — verified, the prop doesn't exist. v3.0 explicitly drops it.
+
+---
+
+## 2. Target Architecture
+
+### 2.1 Two coordinated packages, one source of truth
+
+```
+AgentFoundation/src/agent_foundation/ui/
+│
+├── (Python layer — agent_foundation.ui)
+│   ├── widget_protocol.py            ← contract: WIDGET_TYPES (12 constants)
+│   ├── input_modes.py                ← contract: InputMode + ChoiceOption
+│   ├── interactive_base.py           ← sync + async (aget_input/asend_response)
+│   ├── rich_interactive_base.py      ← supports_widgets + pending_input_mode
+│   ├── terminal_interactive.py       ← webaxon lazy + optional
+│   ├── queue_interactive.py          ← + asyncio.Queue + turn_boundary + token batches
+│   ├── web_interactive.py            ← NEW (ported from RE, decoupled)
+│   ├── interactive_checkpoint.py     ← unchanged; async bug auto-fixed
+│   ├── __init__.py                   ← NEW public barrel
+│   └── (graph_*, dash_interactive/ — untouched, out of scope)
+│
+├── widgets/                          ← NEW publishable React package
+│   ├── package.json                  ← "@agent-foundation/ui-react", MUI >=5 <8
+│   ├── tsup.config.ts                ← builds CJS+ESM, no consumer config needed
+│   ├── README.md
+│   ├── CONTRIBUTING.md               ← rules to prevent re-divergence
+│   ├── scripts/
+│   │   └── sync_widget_types.py      ← py → js codegen + --check mode
+│   ├── src/
+│   │   ├── index.js                  ← public barrel
+│   │   ├── protocol/
+│   │   │   ├── widgetTypes.js        ← GENERATED — do not edit
+│   │   │   ├── inputModeTypes.js     ← GENERATED — do not edit
+│   │   │   ├── WidgetRegistry.js     ← getWidget + registerWidget (NEW)
+│   │   │   ├── ChatWidgetRenderer.js
+│   │   │   ├── ConversationToolWidget.js  ← input_mode dispatcher, parser prop
+│   │   │   └── registerBuiltins.js   ← auto-loaded
+│   │   ├── inputs/                   ← one file per widget_type
+│   │   ├── common/                   ← pure primitives (no domain coupling)
+│   │   ├── chat/                     ← chat/streaming primitives
+│   │   ├── layout/                   ← generic chrome
+│   │   ├── progress/                 ← progress UI primitives
+│   │   ├── graph/                    ← agent-reasoning viz (GraphFlowView, NodeDetailPanel)
+│   │   ├── theme/                    ← MUI-version-agnostic theme system
+│   │   │   └── themes/{dark,atlassian,pinterest}.js
+│   │   └── hooks/                    ← generic hooks; messageAdapter prop on WS hooks
+│   ├── tests/                        ← Vitest + RTL snapshot tests
+│   └── stories/                      ← Storybook (deferred to v0.2.0 if needed)
+│
+└── webui/                            ← demo / reference app (NOT the library)
+    ├── react/                        ← consumes ../widgets via file:
+    └── backend/                      ← Flask demo backend
+```
+
+**Naming decisions:**
+- Package name: `@agent-foundation/ui-react` (cryptic-clock's choice; matches the
+  shorter convention).
+- Directory name: `ui/widgets/` (cryptic-clock's choice; resolves v3.0's
+  disagreement explicitly).
+- Note: the directory holds more than widgets (theme, hooks, layout). This is
+  documented in `widgets/README.md` opening sentence and in CONTRIBUTING.md.
+
+### 2.2 Three stable contracts
+
+The library exposes three contracts. The Python `widget_protocol.py` constants
+are the source of truth; the JS side is **generated**, not hand-typed.
+
+**Contract 1 — Wire format.** Mirrors `widget_protocol.WidgetMessage.to_dict()`:
+
+```ts
+type WidgetType =
+  | 'text_input' | 'free_text'
+  | 'single_choice' | 'multiple_choice' | 'multiple_choices'   // plural alias
+  | 'dropdown' | 'toggle' | 'confirmation'
+  | 'tool_argument_form' | 'multi_input' | 'grouped'
+  | 'approval' | 'card_choice' | 'default';
+
+type WidgetMessage = {
+  widget_id: string;
+  widget_type: WidgetType;
+  title?: string;
+  description?: string;
+  input_mode?: InputModeConfigDict;
+  fields?: WidgetFieldDict[];
+  metadata?: Record<string, unknown>;
+};
+
+type WidgetResponse = {
+  widget_id: string;
+  values: Record<string, unknown>;
+  action: 'submit' | 'cancel' | 'skip';
+};
+```
+
+**Contract 2 — Component prop shape.** Every input widget accepts exactly:
+
+```ts
+type WidgetProps = {
+  widget: WidgetMessage;            // immutable
+  onSubmit: (r: WidgetResponse) => void;
+  onCancel?: () => void;
+  onView?: (path: string) => void;
+  onViewFolder?: (path: string) => void;
+  disabled?: boolean;
+};
+```
+
+Legacy `{ config, data, pendingInput }` shape is supported via a
+`legacyAdapter.js` shim during Phase 2 → Phase 3, removed at `0.2.0`.
+
+**Contract 3 — Open registry.**
+
+```js
+import { registerWidget, getWidget, listRegisteredWidgets }
+  from '@agent-foundation/ui-react';
+
+// Built-in (auto-registered):
+getWidget('text_input');             // → TextInputWidget
+
+// Domain (app-side):
+registerWidget('openteam.sprint_progress', SprintProgressWidget);
+registerWidget('rankevolve.proposal_selection', ProposalSelectionWidget);
+```
+
+Naming convention: built-ins are **bare** strings (matching Python constants);
+domain widgets MUST use **`namespace.type`**. The registry warns on
+non-namespaced registration of a non-canonical type.
+
+### 2.3 Consumption model
+
+| Consumer | Dev loop | CI / production |
+|----------|----------|-----------------|
+| AF `webui/react/` (same repo) | `"@agent-foundation/ui-react": "file:../../widgets"` | Same. |
+| OS `openteam/ui/` | `"@agent-foundation/ui-react": "file:../../../../AgentFoundation/src/agent_foundation/ui/widgets"` (works when both repos are checked out as siblings under `CoreProjects/`) | Same `file:` path, but only if CI checks out both repos in the same workspace layout. Otherwise: pinned npm tarball from Artifactory. |
+| RE `webui/react/` (in `atlassian-packages/`) | `"@agent-foundation/ui-react": "file:../../../../../AgentFoundation/src/agent_foundation/ui/widgets"` (**5 `..`s**, not 4 — verified) | **Pinned npm tarball from Artifactory.** RE's CI runs from `atlassian-packages/` without AF checked out. |
+
+**CRA transpilation:** because the library ships **pre-built CJS+ESM via `tsup`**,
+consumers do **not** need `craco`. Plain `react-scripts start` works.
+Documented as fallback: any consumer that wants to source-link can add a
+15-line `craco.config.js`. v2.0's analysis of why pre-build wins is preserved
+verbatim in this file's §11 (Risks).
+
+### 2.4 Python ↔ JS sync
+
+Single invariant: widget-type strings, `InputMode` enum values, and
+`ChoiceOption` field names match exactly across languages.
+
+```
+widgets/scripts/sync_widget_types.py
+  reads:  ../../widget_protocol.py, ../../input_modes.py
+  writes: widgets/src/protocol/widgetTypes.js
+          widgets/src/protocol/inputModeTypes.js
+```
+
+Generated files carry a banner:
+`// AUTOGENERATED — DO NOT EDIT. Run scripts/sync_widget_types.py.`
+CI runs `--check` and fails on drift.
+
+---
+
+## 3. Phase 0 — Python contract first (3–4 days)
+
+**Goal:** Make `agent_foundation.ui` a complete, async-correct, importable
+Python package. **Until this is true, the React work is pointless** because the
+backend the UI talks to is broken or RE-only.
+
+### 3.0 Pre-flight (1 hour)
+
+- `git tag ui-formalization-baseline-2026-05-23-pm` in AgentFoundation,
+  OpenStartup, RankEvolve.
+- Add CODEOWNERS rules in AF for `widget_protocol.py` and `input_modes.py`.
+
+### 3.1 `input_modes.py` — merge `ChoiceOption.description` + `MULTIPLE_CHOICES` alias
+
+- Add `description: str = ''` to `ChoiceOption` (RE has it; AF doesn't).
+- Serialize / deserialize `description` round-trip.
+- Accept legacy `'multiple_choices'` wire string via `from_dict` alias:
+
+  ```python
+  raw_mode = d.get('mode', 'free_text')
+  try:
+      mode = InputMode(raw_mode)
+  except ValueError:
+      if raw_mode == 'multiple_choices':
+          mode = InputMode.MULTIPLE_CHOICE
+      else:
+          raise
+  ```
+- Keep AF's `show_select_all` / `select_all_text` (additive).
+- **Do NOT add `MULTIPLE_CHOICES` as a separate enum member**; two synonyms
+  in one enum is a footgun.
+
+### 3.2 `interactive_base.py` — add async wrappers (closes the latent bug)
+
+```python
+import asyncio
+
+async def aget_input(self) -> Any:
+    return await asyncio.to_thread(self.get_input)
+
+async def asend_response(
+    self,
+    response,
+    flag: InteractionFlags = InteractionFlags.TurnCompleted,
+    **kwargs,
+) -> None:
+    await asyncio.to_thread(self.send_response, response, flag, **kwargs)
+```
+
+`interactive_checkpoint.py` already calls these — the AttributeError it
+would currently raise is **silently** masked by RE's parallel fork.
+Phase 0 fixes the framework itself.
+
+### 3.3 `rich_interactive_base.py` — expose widget-readiness metadata
+
+```python
+@property
+def supports_widgets(self) -> bool:
+    return False                          # subclasses override
+
+@property
+def pending_input_mode(self) -> Optional[InputModeConfig]:
+    return self._pending_input_mode       # public surface
+```
+
+### 3.4 `queue_interactive.py` — async queue + turn/stream primitives
+
+Three additions, all *additive* — sync `QueueServiceBase` path stays:
+
+1. Optional `asyncio.Queue` companion (`use_asyncio_queue: bool = False`
+   constructor flag). Override `aget_input` / `asend_response` to use it
+   when enabled.
+2. `async def send_turn_boundary(self) -> None` — emits a turn-boundary
+   marker that downstream renderers use to flush partial streaming output.
+   (Ported from RE line 226.)
+3. `async def stream_token_batches(self, ...)` with `_heartbeat()`
+   keep-alive coroutine. (Ported from RE lines 255, 312.)
+4. Add diagnostic logging for pending-input delivery (RE has this; v2.0
+   missed it).
+
+**Rationale:** These look RE-specific but are **transport primitives**.
+Turn boundaries and heartbeats belong to any long-lived agent-to-UI
+WebSocket session, not just RankEvolve. Naming choices ensure they read
+generic: `send_turn_boundary`, not `send_rankevolve_turn`.
+
+### 3.5 `web_interactive.py` — port from RE, decouple
+
+New file: `agent_foundation/ui/web_interactive.py`. Source: RE's 266-line
+file. Steps:
+
+1. Copy.
+2. Rewrite imports: `rankevolve.src.agentic_foundation.common.ui.*` →
+   `agent_foundation.ui.*`.
+3. **Resolve `Debuggable` dependency.** Two options:
+   - **(a) Drop the inheritance.** `WebUIInteractive` doesn't actually
+     need anything from `Debuggable`; its only use is enhanced `__repr__`.
+     We can implement a simple `__repr__` inline.
+   - **(b) Add `agent_foundation.utils.debuggable`.** A 30-line shared
+     module replicating the trivial `Debuggable.__repr__` pattern. RE
+     migrates to import it from `agent_foundation`.
+   - **Recommendation: (b).** It preserves RE's existing behavior with
+     near-zero code, and the `Debuggable` pattern is genuinely reusable.
+4. Preserve public surface: `push_input`, `pull_response`, `has_responses`,
+   `send_widget`, `send_display_widget`, `aget_input`,
+   `supports_widgets = True`.
+5. Docstring at top documenting the WebSocket transport contract.
+
+### 3.6 `terminal_interactive.py` — make `webaxon` truly optional
+
+Verified: line 6 carries a hard top-level `from webaxon.html_utils.common
+import is_html_string`. webaxon is an internal Atlassian package; not
+every Python environment (e.g. server-only deployments, OSS forks) has
+it installed.
+
+Fix: lazy-import inside `_send_response`, with a graceful fallback when
+webaxon is missing:
+
+```python
+def _send_response(self, response, ...):
+    try:
+        from webaxon.html_utils.common import is_html_string
+    except ImportError:
+        is_html_string = lambda s: False           # noqa: E731
+    if is_html_string(response):
+        ...
+```
+
+Keep `ABC` on `TerminalInteractive` / `QueueInteractive` — verified to be
+**intentional** (prevents direct instantiation). Do not touch.
+
+### 3.7 `widget_protocol.py` — additive constants
+
+```python
+WIDGET_CONFIRMATION  = "confirmation"
+WIDGET_MULTI_INPUT   = "multi_input"
+WIDGET_GROUPED       = "grouped"
+WIDGET_APPROVAL      = "approval"
+WIDGET_CHOICE        = "card_choice"   # distinct from radio single_choice
+WIDGET_DEFAULT       = "default"
+
+WIDGET_TYPES: tuple[str, ...] = (
+    WIDGET_TEXT_INPUT, WIDGET_SINGLE_CHOICE, WIDGET_MULTIPLE_CHOICE,
+    WIDGET_DROPDOWN, WIDGET_TOGGLE, WIDGET_TOOL_ARGUMENT_FORM,
+    WIDGET_CONFIRMATION, WIDGET_MULTI_INPUT, WIDGET_GROUPED,
+    WIDGET_APPROVAL, WIDGET_CHOICE, WIDGET_DEFAULT,
+)
+```
+
+### 3.8 `__init__.py` — populate public barrel
+
+```python
+"""Public API for agent_foundation.ui."""
+from agent_foundation.ui.input_modes import (
+    InputMode, InputModeConfig, ChoiceOption,
+    press_to_continue, exact_string, single_choice, multiple_choices,
+)
+from agent_foundation.ui.widget_protocol import (
+    WidgetMessage, WidgetResponse, WidgetField,
+    WIDGET_TEXT_INPUT, WIDGET_SINGLE_CHOICE, WIDGET_MULTIPLE_CHOICE,
+    WIDGET_DROPDOWN, WIDGET_TOGGLE, WIDGET_TOOL_ARGUMENT_FORM,
+    WIDGET_CONFIRMATION, WIDGET_MULTI_INPUT, WIDGET_GROUPED,
+    WIDGET_APPROVAL, WIDGET_CHOICE, WIDGET_DEFAULT, WIDGET_TYPES,
+)
+from agent_foundation.ui.interactive_base import (
+    InteractiveBase, InteractionFlags,
+)
+from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from agent_foundation.ui.terminal_interactive import TerminalInteractive
+from agent_foundation.ui.queue_interactive import QueueInteractive
+from agent_foundation.ui.web_interactive import WebUIInteractive
+
+__all__ = [...]   # match the above
+```
+
+### 3.9 Delete empty stubs
+
+- `email_interactive.py` (0 bytes) → **delete**.
+- `simulated_interactive.py` (0 bytes) → **delete**.
+
+### 3.10 Tests (mandatory; non-negotiable)
+
+| File | Asserts |
+|------|---------|
+| `test_widget_protocol_roundtrip.py` | `WidgetMessage.from_dict(m.to_dict()) == m` for every `widget_type` in `WIDGET_TYPES`. |
+| `test_input_modes_roundtrip.py` | `InputModeConfig` round-trip including `ChoiceOption.description` and `'multiple_choices'` alias. |
+| `test_interactive_base_async.py` | `await base.aget_input()` works; same for `asend_response`. |
+| `test_interactive_checkpoint_runs.py` | The previously latent bug: actually run `interactive_checkpoint.run_checkpoint(...)` and assert no `AttributeError`. |
+| `test_web_interactive_basic.py` | Construct `WebUIInteractive`; push input; assert `aget_input` returns it; `supports_widgets is True`. |
+| `test_terminal_interactive_no_webaxon.py` | Import and instantiate `TerminalInteractive` in an environment where `webaxon` is **not** installed (uninstall in a venv or monkey-patch `sys.modules`); assert no crash. |
+| `test_queue_interactive_turn_boundary.py` | Send a turn boundary; assert it arrives on the receiver side. |
+
+### 3.11 Phase 0 exit criteria
+
+- `pytest test/agent_foundation/ui/ -v` green.
+- `python -c "from agent_foundation.ui import (InputMode, InteractiveBase, WidgetMessage, WebUIInteractive)"` succeeds.
+- `python -c "import agent_foundation.ui.interactive_base as m; assert hasattr(m.InteractiveBase, 'aget_input')"` succeeds.
+- `interactive_checkpoint` regression test passes.
+- Terminal-without-webaxon test passes.
+- No new external dependency added.
+
+---
+
+## 4. Phase 1 — React package skeleton (3 days)
+
+**Goal:** Stand up `widgets/` with low-risk pure primitives. After Phase 1
+the AF demo app builds against the library; OS and RE untouched.
+
+### 4.1 Bootstrap
+
+Create `agent_foundation/ui/widgets/`:
+
+```
+widgets/
+├── package.json
+├── tsup.config.ts
+├── README.md
+├── CONTRIBUTING.md
+├── .gitignore                  # dist/
+├── scripts/
+│   └── sync_widget_types.py
+├── src/
+│   ├── index.js                # public barrel
+│   ├── protocol/
+│   │   ├── widgetTypes.js      # GENERATED
+│   │   ├── inputModeTypes.js   # GENERATED
+│   │   └── WidgetRegistry.js   # getWidget + registerWidget (NEW)
+│   ├── common/
+│   ├── theme/
+│   │   └── themes/
+│   ├── hooks/
+│   └── chat/
+├── tests/
+└── stories/                    # optional in Phase 1
+```
+
+### 4.2 `package.json`
+
+```jsonc
+{
+  "name": "@agent-foundation/ui-react",
+  "version": "0.1.0",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.mjs",
+  "exports": {
+    ".":         { "import": "./dist/esm/index.mjs",    "require": "./dist/cjs/index.cjs" },
+    "./theme":   { "import": "./dist/esm/theme.mjs",    "require": "./dist/cjs/theme.cjs" },
+    "./protocol":{ "import": "./dist/esm/protocol.mjs", "require": "./dist/cjs/protocol.cjs" }
+  },
+  "scripts": {
+    "build":      "tsup",
+    "test":       "vitest run",
+    "sync":       "python scripts/sync_widget_types.py",
+    "sync:check": "python scripts/sync_widget_types.py --check"
+  },
+  "peerDependencies": {
+    "@emotion/react":        "^11.0.0",
+    "@emotion/styled":       "^11.0.0",
+    "@mui/material":         ">=5.0.0 <8.0.0",
+    "@mui/icons-material":   ">=5.0.0 <8.0.0",
+    "react":                 ">=18.0.0",
+    "react-dom":             ">=18.0.0"
+  },
+  "dependencies": {
+    "react-markdown":            "^9.0.0",
+    "react-syntax-highlighter":  "^15.5.0",
+    "remark-gfm":                "^4.0.0"
+  },
+  "devDependencies": {
+    "tsup":                      "^8.0.0",
+    "vitest":                    "^1.0.0",
+    "@testing-library/react":    "^14.0.0"
+  }
+}
+```
+
+### 4.3 `tsup.config.ts`
+
+```ts
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: {
+    index:    'src/index.js',
+    theme:    'src/theme/index.js',
+    protocol: 'src/protocol/index.js',
+  },
+  format: ['esm', 'cjs'],
+  outDir: 'dist',
+  clean: true,
+  sourcemap: true,
+  treeshake: true,
+  external: [
+    'react', 'react-dom',
+    '@mui/material', '@mui/icons-material',
+    '@emotion/react', '@emotion/styled',
+  ],
+  jsx: 'automatic',
+  outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
+});
+```
+
+### 4.4 `WidgetRegistry.js` — finally extensible
+
+```js
+import { WIDGET_TYPES } from './widgetTypes';
+
+const _registry = new Map();
+
+export function registerWidget(type, Component, { override = false } = {}) {
+  if (!type || typeof type !== 'string') {
+    throw new TypeError('registerWidget(type, Component): type must be a non-empty string');
+  }
+  const isBuiltin   = WIDGET_TYPES.includes(type);
+  const isNamespaced = type.includes('.');
+  if (!isBuiltin && !isNamespaced) {
+    console.warn(`registerWidget: "${type}" is neither built-in nor namespaced; prefer "ns.type".`);
+  }
+  if (_registry.has(type) && !override) {
+    throw new Error(`registerWidget: "${type}" already registered. Pass {override:true} to replace.`);
+  }
+  _registry.set(type, Component);
+}
+
+export function getWidget(type) {
+  return _registry.get(type) ?? _registry.get('default');
+}
+
+export function unregisterWidget(type) { _registry.delete(type); }
+export function listRegisteredWidgets() { return Array.from(_registry.keys()); }
+```
+
+### 4.5 Phase-1 batch (low-risk pure primitives)
+
+| Source path | New path |
+|-------------|----------|
+| `webui/react/src/components/common/{EmptyState,LoadingIndicator,PersonChip,ProgressBar,QuickLinkButton,SectionCard,StatusBadge,WelcomeScreen,PlanModeSelector,ClickToEditMarkdown}.js` | `widgets/src/common/` |
+| `webui/react/src/theme/{ThemeProvider,createAppTheme,cssVariableBridge,themeRegistry,ThemeSwitcher}.js` | `widgets/src/theme/` |
+| OpenStartup `theme/themes/{dark,atlassian,pinterest}.js` | `widgets/src/theme/themes/` (PROMOTE) |
+| OpenStartup `hooks/{useApiData,useServerStatus}.js` | `widgets/src/hooks/` (PROMOTE) |
+| `webui/react/src/hooks/{useFileViewer,useContextMenu,useInputFields,useSectionVisibility,useProgressHeader}.js` | `widgets/src/hooks/` |
+
+**Critical reconciliation in this phase:**
+
+- **`MarkdownRenderer.js`**:
+  - Start from AF.
+  - Fix `theme.custom.surfaces.*` → `theme?.custom?.surfaces?.*` with
+    fallbacks.
+  - Merge OS's `preprocessContent()` Unicode bullet normalization
+    (verified at lines 160–174).
+  - Library owns `react-markdown`/`remark-gfm`/`react-syntax-highlighter`
+    as deps.
+- **`ThemeProvider.js`**: already `createThemeFn`-prop-driven (verified).
+  Just move it; document the MUI 5/7 cross-version pattern.
+
+### 4.6 Wire AF `webui/react/` to consume `widgets/`
+
+`webui/react/package.json`:
+```diff
+"dependencies": {
++ "@agent-foundation/ui-react": "file:../../widgets",
+   ...
+}
+```
+After `npm install && npm run build` in `widgets/`, the demo's old
+imports either: (a) get replaced with `@agent-foundation/ui-react`
+imports, or (b) are left in place via re-export shims in
+`webui/react/src/components/common/X.js` → one-liner that imports from
+the library. Choice (b) keeps the Phase-1 diff small.
+
+### 4.7 Phase-1 exit criteria
+
+- `widgets/` builds (`npm run build`) producing both CJS + ESM `dist/`.
+- `npm run sync:check` green.
+- AF demo runs visually unchanged.
+- Vitest snapshot tests pass for every promoted component.
+
+---
+
+## 5. Phase 2 — Canonicalize the widget protocol (1 week)
+
+**Goal:** All input widgets in `widgets/src/inputs/`; all consumers use
+`registerWidget()` for domain widgets; dispatch is single-sourced.
+
+### 5.1 Codegen lands first
+
+`widgets/scripts/sync_widget_types.py`:
+
+```python
+#!/usr/bin/env python3
+"""Codegen: widget_protocol.py + input_modes.py → *.js modules."""
+from __future__ import annotations
+import argparse, difflib, pathlib, sys
+from agent_foundation.ui.widget_protocol import WIDGET_TYPES
+from agent_foundation.ui.input_modes import InputMode
+
+HERE = pathlib.Path(__file__).resolve().parent.parent
+BANNER = "// AUTOGENERATED — DO NOT EDIT. Run scripts/sync_widget_types.py.\n"
+
+def _const(t): return "WIDGET_" + t.upper()
+
+def render_widget_types() -> str:
+    out = [BANNER, "// Mirrors agent_foundation.ui.widget_protocol.WIDGET_TYPES\n"]
+    for t in WIDGET_TYPES:
+        out.append(f"export const {_const(t)} = {t!r};\n")
+    out.append("export const WIDGET_TYPES = Object.freeze([\n")
+    out.extend(f"  {t!r},\n" for t in WIDGET_TYPES)
+    out.append("]);\n")
+    return "".join(out)
+
+def render_input_mode_types() -> str:
+    out = [BANNER, "// Mirrors agent_foundation.ui.input_modes.InputMode\n",
+           "export const InputMode = Object.freeze({\n"]
+    out.extend(f"  {m.name}: {m.value!r},\n" for m in InputMode)
+    out.append("});\n")
+    return "".join(out)
+
+def _write_or_check(path, content, check):
+    if check:
+        cur = path.read_text() if path.exists() else ""
+        if cur == content: return True
+        sys.stderr.write("".join(difflib.unified_diff(
+            cur.splitlines(True), content.splitlines(True),
+            fromfile=str(path), tofile="generated")))
+        return False
+    path.write_text(content); return True
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(); ap.add_argument("--check", action="store_true")
+    args = ap.parse_args()
+    ok = True
+    ok &= _write_or_check(HERE / "src/protocol/widgetTypes.js",     render_widget_types(),     args.check)
+    ok &= _write_or_check(HERE / "src/protocol/inputModeTypes.js",  render_input_mode_types(), args.check)
+    sys.exit(0 if ok else 1)
+```
+
+Wire as a pre-commit hook + CI step.
+
+### 5.2 Migrate input widgets (source-of-truth choices)
+
+| Widget | Source of truth | Mandatory upgrades |
+|--------|-----------------|--------------------|
+| `TextInputWidget`        | **OS** | Double-submit guard + read-only post-submit view (verified). |
+| `SingleChoiceWidget`     | **OS** | Double-submit guard at lines 46/139; read-only view at 56/148. |
+| `MultipleChoiceWidget`   | **AF** | Keep `show_select_all` / `select_all_text`. Add a consistent submit-guard. |
+| `ConfirmationWidget`     | **OS** | Accept `onView`/`onViewFolder` (verified line 20). **Do NOT add `toolConfigComponent`** — it does not exist. |
+| `DropdownWidget`         | AF     | unchanged |
+| `ToggleWidget`           | AF     | unchanged |
+| `ToolArgumentFormWidget` | AF     | unchanged |
+| `MultiInputWidget`       | AF + RE merge | Absorb OS inline `CompoundWidget`. |
+| `GroupedWidget`          | **RE** | Strip RE-specific "group resolve" callbacks; expose `fields[]` + `onSubmit`. |
+| `ApprovalWidget`         | **OS** | Wire to `WIDGET_APPROVAL`. |
+| `ChoiceWidget` (card)    | **OS** | Wire to `WIDGET_CHOICE = "card_choice"`. |
+| `DefaultWidget`          | AF     | unchanged |
+| `ChatWidgetRenderer`     | OS (refactor) | Extract OpenTEAM parsing into `parser` prop. |
+| `ConversationToolWidget` | OS (refactor) | Pure `input_mode` dispatcher; drop ACLI/`<Response>` stripping into a `parser` prop. |
+
+### 5.3 Enforce Contract 2 prop shape
+
+All widgets normalized to
+`{ widget, onSubmit, onCancel, onView, onViewFolder, disabled }`.
+Provide `legacyAdapter.js` shim that translates old
+`{ config, data, pendingInput }` to new shape, emitting a one-time
+deprecation warning. Removed at `0.2.0`.
+
+### 5.4 Auto-registration
+
+`widgets/src/protocol/registerBuiltins.js` calls `registerWidget(const, Component)`
+once per built-in. Imported by `widgets/src/index.js`.
+
+### 5.5 Phase-2 tests
+
+| Test | Asserts |
+|------|---------|
+| `registry_completeness.test.js` | Every `WIDGET_TYPES` member returns a real component from `getWidget`. |
+| Per-widget snapshot tests | Render against canned `WidgetMessage` JSON; snapshot stable. |
+| `single_choice_double_submit.test.js` | Clicking submit twice fires `onSubmit` once. |
+| `single_choice_post_submit_view.test.js` | After submit, component renders in read-only mode. |
+| `confirmation_view_callback.test.js` | `onView` invoked when metadata.view is set and button is clicked. |
+| `legacy_adapter.test.js` | Old `{config, data, pendingInput}` still mounts; deprecation warning fires once. |
+
+### 5.6 Phase-2 exit criteria
+
+- All built-in widgets live in `widgets/src/inputs/`.
+- `npm run sync:check` green.
+- Registry completeness test green.
+- Snapshot tests green.
+- AF demo still works visually unchanged.
+
+---
+
+## 6. Phase 3 — Extended primitives & hooks (1 week)
+
+**Goal:** Move second tier (chat, layout, progress, graph, hooks) into `widgets/`.
+
+### 6.1 Components added in Phase 3
+
+| Bucket | Items |
+|--------|-------|
+| `chat/` | `ChatInput`, `ChatMessage`, `StreamingMessage`, `CommandAutocomplete`, `Breadcrumb` (OS), `ThinkingFold` (OS, generalized), `PromptViewerDrawer` (OS), `AgentMessageBubble` (OS). |
+| `layout/` | `AppHeader` (reconcile AF/RE), `FileViewer` (reconcile 3 forks), `ConnectionStatusBar` (OS, generalized), `FolderTree` (OS). |
+| `progress/` | `ProgressSection`, `CompletedSection`, `TaskProgressBar`, `TaskProgressPanel` (reconcile AF/RE). |
+| `graph/` | `GraphFlowView` (OS), `NodeDetailPanel` (OS). |
+| `messages/` | `PreMessage` (reconcile AF/RE). |
+| `queries/` | `QueryCard`, `EditableList` (renamed from `EditableQueryList`), `AddDropdown` (generic). `AddQueriesDropdown` stays in-app as a thin wrapper. |
+| `actions/` | `SuggestedActions` (reconcile AF/RE). |
+| `hooks/` | `useChat`, **`useAgentChat`**, **`useAgentWebSocket`** (verified byte-identical between AF & RE → CANONICALIZE; pass `messageAdapter` prop for app-specific filtering beyond the existing `heartbeat`/`pong`). |
+
+### 6.2 LIFT-AND-GENERALIZE items
+
+| Item | What changes |
+|------|--------------|
+| `useProgress` | RE-shape-specific. Extract `useProgress({ items, completedPredicate, sortFn })`. RE wraps it. |
+| `useWorkspace` | RE-shape-specific. Extract `useWorkspace({ fetchTree, fetchFile })`. |
+| `AgentStatusBar` | Decompose into `<ConnectionStatus>`, `<ModelSelector>`, `<TargetPathChip>`. Apps re-compose. |
+| `AgentStreamDrawer` | Extract `<StreamDrawer>` shell. |
+| `AgentStreamSection` | Extract `<CollapsibleStreamSection>` shell. |
+| `PendingReasonPopover` (OS) | Generalize: `resolutions[]` + `onResolve(reason, value)` props (drop OpenTEAM resolution map). |
+| `BackendSelector` (OS) | Becomes `<ModelSelector value options onChange />`. |
+
+### 6.3 KEEP-IN-APP (domain coupling)
+
+- **OS**: `SessionContextBar`, `Sidebar` (OS-flavored), `SettingsDrawer`,
+  `TaskCard`, `TaskPanel`, `components/{employees,projects,tasks,teams,views}/*`,
+  `useGraphState`, `useManagerChat`, `usePromptViewer`, `useServerBackends`,
+  `useTaskTopologies`.
+- **RE**: `components/hub/*`, `components/views/*`, `ProposalSelectionWidget`,
+  `MultiViewTaskPanel`, `PipelineStatusBar`, `useAutopilot`,
+  `useComboOverrides`, `useProposalOverrides`, `useSubmissionTemplates`,
+  `useViewWorkspace`, `useHypothesisImplementations`,
+  `useAggregationSettings`, `useArchiveCount`.
+
+### 6.4 Phase-3 exit criteria
+
+- All Phase-3 components in `widgets/src/`.
+- AF demo uses no local copy of any promoted component.
+- Snapshot tests green.
+
+---
+
+## 7. Phase 4 — Consumer migration (1–2 weeks per consumer, parallelizable)
+
+### 7a. RankEvolve — Python first, then React
+
+RE is the most invasive consumer because of its parallel Python fork.
+Python before React.
+
+**7a.1 Replace imports.**
+```bash
+git grep -l "from rankevolve\.src\.agentic_foundation\.common\.ui" rankevolve/src/ \
+  | xargs sed -i '' -E 's#from rankevolve\.src\.agentic_foundation\.common\.ui\.([a-z_]+) import#from agent_foundation.ui import#g'
+```
+
+**7a.2 `MULTIPLE_CHOICES` → `MULTIPLE_CHOICE`.**
+```bash
+git grep -l "InputMode\.MULTIPLE_CHOICES" rankevolve/src/ \
+  | xargs sed -i '' 's/InputMode\.MULTIPLE_CHOICES/InputMode.MULTIPLE_CHOICE/g'
+```
+The Phase-0 wire-format alias preserves backwards compat for any
+existing message in flight.
+
+**7a.3 Delete RE Python fork** (8 files):
+`widget_protocol.py`, `input_modes.py`, `interactive_base.py`,
+`rich_interactive_base.py`, `queue_interactive.py`,
+`interactive_checkpoint.py`, `terminal_interactive.py`,
+`web_interactive.py`. Keep `proposal_models.py`, `proposal_parser.py`,
+`learnings_parser.py` (RE domain).
+
+**7a.4 Adopt `agent_foundation.utils.debuggable`** (option b from §3.5):
+RE imports `Debuggable` from AF instead of its own `utils.common_objects`.
+
+**7a.5 React migration.**
+Add `"@agent-foundation/ui-react"` to `rankevolve/src/webui/react/package.json`.
+For RE this is the **published Artifactory tarball**, not `file:` —
+RE's CI pipeline does not check out AF as a sibling.
+
+Replace imports per §9 matrix. Keep local + register:
+```js
+registerWidget('rankevolve.proposal_selection', ProposalSelectionWidget);
+```
+
+**7a.6 RE exit criteria.**
+- `pytest` green in RE.
+- `from agent_foundation.ui import WebUIInteractive` works inside RE.
+- `npm run start` for RE React: widgets render; snapshot diff zero.
+- `find rankevolve/src/agentic_foundation/common/ui/ -name '*.py' | grep -vE '(proposal_(models|parser)|learnings_parser)\.py$'` returns **0**.
+
+### 7b. OpenStartup — React only
+
+**7b.1 Add dependency** to `openteam/ui/package.json`:
+```json
+"@agent-foundation/ui-react":
+  "file:../../../../AgentFoundation/src/agent_foundation/ui/widgets"
+```
+(works for the typical `CoreProjects/{AgentFoundation,OpenStartup}/`
+layout; OS CI also lives in this layout per current convention).
+
+**7b.2 Replace `shared/`** with re-export shim:
+```js
+// openteam/ui/src/shared/index.js
+export {
+  EmptyState, LoadingIndicator, PersonChip, ProgressBar,
+  QuickLinkButton, SectionCard, StatusBadge,
+} from '@agent-foundation/ui-react';
+export { default as PendingReasonPopover } from './PendingReasonPopover';
+```
+Delete the 7 individual `shared/*.js` files (keep `PendingReasonPopover`
+locally until §6.2 promotes it).
+
+**7b.3 Replace chat-widgets** with re-exports + register domain widgets:
+```js
+// openteam/ui/src/components/chat-widgets/index.js
+export * from '@agent-foundation/ui-react';
+
+// openteam/ui/src/index.js (app bootstrap):
+import { registerWidget } from '@agent-foundation/ui-react';
+registerWidget('openteam.project_summary',  ProjectSummaryWidget);
+registerWidget('openteam.sprint_progress',  SprintProgressWidget);
+registerWidget('openteam.task_assignment',  TaskAssignmentWidget);
+registerWidget('openteam.task_list',        TaskListWidget);
+registerWidget('openteam.workload_chart',   WorkloadChartWidget);
+```
+
+**7b.4 Replace theme** with re-exports + add OS-flavored theme via
+`registerTheme('openstartup', osTheme)`.
+
+**7b.5 Replace chat/* generics**:
+`chat/{MarkdownRenderer, StreamingMessage, Breadcrumb, CommandAutocomplete,
+PromptViewerDrawer, ThinkingFold, AgentMessageBubble, GraphFlowView,
+NodeDetailPanel}.js` → library re-exports.
+Keep local: `SessionContextBar`, `TaskCard`, `TaskPanel`, `BackendSelector`
+(until §6.2 extracts ModelSelector).
+
+**7b.6 OS exit criteria.**
+- `npm install && npm run start` works.
+- Screenshot diff baseline gated; zero unintended diffs.
+- `grep -rE "from '.*shared/(EmptyState|LoadingIndicator|PersonChip|ProgressBar|QuickLinkButton|SectionCard|StatusBadge)'" openteam/ui/src/` returns **0** outside the re-export shim.
+- `grep -rE "from '.*chat-widgets/(TextInput|SingleChoice|MultipleChoice|Confirmation|Approval|Choice)Widget'" openteam/ui/src/` returns **0** outside shims.
+
+### 7c. AgentFoundation demo app cleanup
+
+- Reduce `webui/react/src/components/{widgets,common,chat,layout,progress,messages,queries,actions}/`
+  to **re-export shims only** (or delete the directories entirely if no
+  external code imports from them).
+- **Delete the legacy `webui/src/` tree** (verified dead duplicate).
+- `webui/backend/main.py` unchanged.
+
+---
+
+## 8. Phase 5 — Governance & anti-drift (ongoing)
+
+### 8.1 CI guardrails (AgentFoundation repo)
+
+| Check | Script | Fails when |
+|-------|--------|------------|
+| Py ↔ JS sync | `python widgets/scripts/sync_widget_types.py --check` | `widget_protocol.py` edited without regen. |
+| Registry completeness | `vitest run tests/registry_completeness.test.js` | `WIDGET_TYPES` member has no registered component. |
+| No duplicate components | `python scripts/check_no_duplicate_widgets.py` | Any file in `webui/react/src/components/{widgets,common}/` is not a one-line re-export of the same-named file in `widgets/src/`. |
+| Protocol round-trip | `pytest test/agent_foundation/ui/test_widget_protocol_roundtrip.py` | Wire format breaks. |
+| `dist/` rebuilt | `npm run build && git diff --exit-code dist` | `widgets/dist/` is stale. |
+| CODEOWNERS on contract files | GitHub native | Anyone edits `widget_protocol.py`/`input_modes.py` without UI-team review. |
+
+### 8.2 CI guardrails (OS + RE repos)
+
+A small `check_no_local_widget_duplicates.py` (~50 lines) walks each
+repo and fails the build if any file in
+`{shared,chat-widgets,components/widgets,components/common}/` is a duplicate
+of a name in the library's published manifest
+(`@agent-foundation/ui-react/manifest.json`).
+
+### 8.3 `widgets/CONTRIBUTING.md`
+
+1. Every new widget MUST add a constant to `widget_protocol.py` first.
+2. The PR MUST regenerate `widgetTypes.js` via `npm run sync`.
+3. The PR MUST add the widget to `registerBuiltins.js`.
+4. The PR MUST add a Vitest snapshot test.
+5. The PR MUST conform to Contract 2 props.
+6. Domain widgets MUST use `namespace.type` and live in the consuming app.
+
+### 8.4 Versioning
+
+- Semver. `0.1.0` after Phase 2. `0.2.0` removes `legacyAdapter.js`.
+  `1.0.0` once OS & RE have shipped on `0.x` without compat shims.
+
+### 8.5 Quarterly drift audit
+
+Cron CI runs `diff -rq widgets/src/ <consumer>/src/.../widgets/` and
+opens an auto-generated Jira ticket on any unexpected file.
+
+---
+
+## 9. Component Classification Matrix
+
+Legend: **PROMOTE** / **CANONICALIZE** / **LIFT-AND-GENERALIZE** / **KEEP-IN-APP** / **DELETE**.
+
+### 9.1 Python
+
+| File | Decision | Note |
+|------|----------|------|
+| AF `widget_protocol.py` | CANONICAL | +6 constants + `WIDGET_TYPES` (§3.7) |
+| AF `input_modes.py` | CANONICAL | +`ChoiceOption.description` + `'multiple_choices'` alias (§3.1) |
+| AF `interactive_base.py` | CANONICAL | +`aget_input`/`asend_response` (§3.2) |
+| AF `rich_interactive_base.py` | CANONICAL | +`supports_widgets`/`pending_input_mode` (§3.3) |
+| AF `queue_interactive.py` | CANONICAL | +asyncio.Queue + turn_boundary + token_batches (§3.4) |
+| AF `terminal_interactive.py` | CANONICAL | webaxon lazy + optional (§3.6) |
+| AF `web_interactive.py` | NEW | ported from RE, decoupled `Debuggable` (§3.5) |
+| AF `interactive_checkpoint.py` | CANONICAL (unchanged) | bug auto-fixed by §3.2 |
+| AF `email_interactive.py` | DELETE | empty stub |
+| AF `simulated_interactive.py` | DELETE | empty stub |
+| AF `__init__.py` | CANONICAL (rewrite) | public barrel (§3.8) |
+| AF `dash_interactive/`, `graph_*.py` | KEEP (untouched) | out of scope |
+| RE `widget_protocol.py`, `input_modes.py`, `interactive_base.py`, `rich_interactive_base.py`, `queue_interactive.py`, `interactive_checkpoint.py`, `terminal_interactive.py`, `web_interactive.py` | DELETE | §7a.3 |
+| RE `proposal_models.py`, `proposal_parser.py`, `learnings_parser.py` | KEEP-IN-APP | RE domain |
+
+### 9.2 Input widgets
+
+| Widget | Decision | Source-of-truth |
+|--------|----------|-----------------|
+| TextInput, SingleChoice, Confirmation | CANONICALIZE | **OS** (submit-guard, view callbacks) |
+| MultipleChoice, Dropdown, Toggle, ToolArgumentForm, MultiInput, Default | CANONICALIZE / PROMOTE | **AF** |
+| Grouped | LIFT-AND-GENERALIZE | **RE** |
+| Approval, CardChoice (`card_choice`) | PROMOTE | **OS** |
+| ChatWidgetRenderer, ConversationToolWidget | PROMOTE | **OS** (with `parser` prop) |
+| WidgetRegistry | CANONICALIZE | AF + add `registerWidget` |
+| ToolConfigPanel | CANONICALIZE | AF |
+| ProposalSelection, ProjectSummary, SprintProgress, TaskAssignment, TaskList, WorkloadChart | KEEP-IN-APP | RE/OS domain |
+
+### 9.3 Pure UI primitives
+
+| Component | Decision |
+|-----------|----------|
+| EmptyState, LoadingIndicator, PersonChip, ProgressBar, QuickLinkButton, SectionCard, StatusBadge, WelcomeScreen, PlanModeSelector, ClickToEditMarkdown | CANONICALIZE (Phase 1) |
+| MarkdownRenderer | CANONICALIZE — merge OS preprocess + optional chaining |
+| SplitActionButton (RE) | PROMOTE (Phase 2) |
+| PendingReasonPopover (OS) | LIFT-AND-GENERALIZE (Phase 3) |
+| Breadcrumb (OS) | PROMOTE (Phase 3) |
+| BackendSelector → ModelSelector | LIFT-AND-GENERALIZE (Phase 3) |
+| FileViewer | CANONICALIZE (Phase 3) |
+| FolderTree (OS) | PROMOTE (Phase 3) |
+| ConnectionStatusBar (OS) | LIFT-AND-GENERALIZE (Phase 3) |
+| AppHeader | CANONICALIZE (Phase 3) |
+| SettingsDrawer (OS), Sidebar (OS), TaskCard, TaskPanel, SessionContextBar, SessionSidebar, AgentChatPanel, MultiViewTaskPanel, PipelineStatusBar | KEEP-IN-APP |
+| GraphFlowView, NodeDetailPanel, ViewTabBar | PROMOTE (Phase 3) |
+| AgentStatusBar, AgentStreamDrawer, AgentStreamSection | LIFT-AND-GENERALIZE (Phase 3) |
+
+### 9.4 Hooks
+
+| Hook | Decision |
+|------|----------|
+| useApiData, useServerStatus (OS) | PROMOTE (Phase 1) |
+| useFileViewer, useContextMenu, useInputFields, useSectionVisibility, useProgressHeader, useChat | CANONICALIZE |
+| **useAgentChat, useAgentWebSocket** | **CANONICALIZE** with `messageAdapter` prop (verified byte-identical between AF & RE; v3.0 corrects cryptic-clock's KEEP-IN-APP) |
+| useProgress, useWorkspace | LIFT-AND-GENERALIZE |
+| useSessionApi, useSessionManager, useGraphState, useManagerChat, usePromptViewer, useServerBackends, useTaskTopologies, useAutopilot, useArchiveCount, useComboOverrides, useProposalOverrides, useSubmissionTemplates, useViewWorkspace, useHypothesisImplementations, useAggregationSettings | KEEP-IN-APP |
+
+### 9.5 Theme
+
+| File | Decision |
+|------|----------|
+| createAppTheme, cssVariableBridge, ThemeProvider, themeRegistry, ThemeSwitcher | CANONICALIZE |
+| themes/{dark,atlassian,pinterest} | PROMOTE from OS |
+| ThemeProvider `createThemeFn` prop (verified) | KEEP — bridges MUI 5 ↔ MUI 7 |
+
+---
+
+## 10. Risks & mitigations (deduped, evidence-backed)
+
+| # | Risk | Likelihood | Impact | Mitigation |
+|---|------|------------|--------|------------|
+| R1 | Async base-class change breaks RE override | LOW | HIGH | Phase-0 signatures match RE's; cross-test both paths. |
+| R2 | `Debuggable` decoupling breaks RE `__repr__` | LOW | LOW | Option (b): share `agent_foundation.utils.debuggable`. |
+| R3 | MUI 5 vs MUI 7 divergence | MEDIUM | MEDIUM | `peerDep >=5 <8`; `createThemeFn` prop verified; CI matrix tests both. |
+| R4 | CRA does not transpile `node_modules` | HIGH (would-be) | HIGH | **Ship pre-built CJS+ESM via `tsup`**; no `craco` needed. |
+| R5 | `theme.custom.surfaces.*` bare access crashes | HIGH (already happens) | MEDIUM | Phase 1 mandates optional-chaining rewrite. |
+| R6 | OS submit-guards lost during promotion | MEDIUM | MEDIUM | Phase-2 names OS as source-of-truth; explicit double-submit test. |
+| R7 | Py↔JS widget-type drift returns | MEDIUM | HIGH | Codegen + CI `--check` (§5.1 + §8.1). |
+| R8 | Big-bang migrations cause merge conflicts | MEDIUM | MEDIUM | Phases are per-bucket PRs; each independently shippable. |
+| R9 | React 18 (AF/RE) vs React 19 (OS) | LOW | MEDIUM | `peerDep react>=18`; CI tests both. |
+| R10 | Artifactory publishing pipeline missing | MEDIUM | MEDIUM | Phase 1 sets up `tsup`; Phase 5 sets up publish job. Interim: `npm pack` tarball. |
+| R11 | ConversationToolWidget app-parsing leaks into dispatcher | HIGH | MEDIUM | Phase-2 extracts `parser` prop (default = identity). |
+| R12 | RE's React fork is sometimes ahead of AF's | HIGH | LOW | §1 verified ground-truth dictates per-file source; `DECISIONS.md` logs each. |
+| R13 | `interactive_checkpoint.py` async bug bites in production | LOW | HIGH | Phase-0 fixes first; regression test added. |
+| R14 | `MULTIPLE_CHOICES` plural alias confuses new devs | LOW | LOW | Docstring + lint rule. |
+| R15 | OS `PendingReasonPopover` resolution shape resists generalization | MEDIUM | LOW | Lift only after one soak release. |
+| R16 | webaxon missing in deploy env crashes terminal transport | MEDIUM | MEDIUM | Phase-0 §3.6 makes it lazy + optional. |
+| R17 | Cryptic-clock's off-by-one in RE's `file:` path | LOW | LOW (caught) | v3.0 uses verified 5-level path; RE prefers Artifactory anyway. |
+
+---
+
+## 11. Sequence & timeline
+
+```
+Week 1: Phase 0 (3–4d) + Phase 1 (3d, parallelizable after Phase 0 day 1)
+Week 2: Phase 2 — widget protocol canonicalization
+Week 3: Phase 3 — extended primitives & hooks
+Week 4–5: Phase 4a (RankEvolve) — Python first, then React
+Week 4–5: Phase 4b (OpenStartup) — React only ← parallel with 4a
+Week 6:   Phase 4c (AF demo cleanup) + Phase 5 (governance)
+Ongoing:  Phase 5 — drift audits, releases
+```
+
+Critical path: Phase 0 → Phase 1 → Phase 2 → Phase 4a (RE Python).
+
+---
+
+## 12. Deliverables & acceptance criteria
+
+### 12.1 Files produced
+
+- `_docs/_plan/ui_components_formalization/ui_components_formalization_plan.md` (this file, canonical)
+- `_docs/_plan/ui_components_formalization/DECISIONS.md` (rolling log)
+- `_docs/_plan/ui_components_formalization/MIGRATION_CHECKLIST.md` (ops tracker)
+- `src/agent_foundation/ui/widgets/` (new package)
+- `src/agent_foundation/ui/web_interactive.py` (new file)
+- `src/agent_foundation/ui/__init__.py` (rewritten)
+- `src/agent_foundation/utils/debuggable.py` (new, ~30 LoC)
+- `test/agent_foundation/ui/test_*.py` (7 files per §3.10)
+- `widgets/scripts/sync_widget_types.py`
+- `scripts/check_no_duplicate_widgets.py`
+
+### 12.2 Objective acceptance gates
+
+1. `pytest test/agent_foundation/ui/` green in AF.
+2. `pytest` green in RE after migration.
+3. `python -c "from agent_foundation.ui import WebUIInteractive"` works in both AF and RE envs.
+4. `python -c "from agent_foundation.ui import TerminalInteractive"` works in an env WITHOUT webaxon installed.
+5. `npm run build && npm run test && npm run sync:check` green in `widgets/`.
+6. All three apps run `npm install && npm start` clean.
+7. `grep -rE "from '.*shared/(EmptyState|LoadingIndicator|PersonChip|ProgressBar|QuickLinkButton|SectionCard|StatusBadge)'" openteam/` returns **0** outside re-export shims.
+8. `grep -rE "from '.*chat-widgets/(TextInput|SingleChoice|MultipleChoice|Confirmation|Approval|Choice)Widget'" openteam/` returns **0** outside shims.
+9. `find rankevolve/src/agentic_foundation/common/ui/ -name '*.py' | grep -vE '(proposal_(models|parser)|learnings_parser)\.py$'` returns **0**.
+10. Visual snapshot diff returns **0** unintended diffs.
+11. CI guardrails green in all three repos.
+
+---
+
+## 13. Open questions (decisions still needed)
+
+1. **Artifactory namespace.** `@agent-foundation/ui-react` (rec.) vs `@atlassian/agent-foundation-ui-react`?
+2. **TypeScript.** Stay JS+JSDoc through 1.0.0 (rec.) vs move to TS at 0.2.0?
+3. **Storybook hosting.** GitHub Pages (rec.) vs Bitbucket Pipelines artifact?
+4. **`Debuggable` resolution.** Drop inheritance (a) vs share `agent_foundation.utils.debuggable` (b — rec.)?
+5. **Compat-shim lifetime.** Remove `legacyAdapter.js` at 0.2.0 (rec., ~2 months) vs 0.3.0 (~4 months)?
+6. **RE coordination window.** 1-week release window for Phase 4a vs async best-effort?
+7. **`webaxon` long-term.** Lazy import now (Phase 0); should we also extract `is_html_string` into `agent_foundation.utils.html`?
+
+---
+
+## 14. Appendices
+
+### Appendix A — Pre-flight verification commands (already run)
+
+```bash
+# Async bug:
+grep -n "aget_input\|asend_response" \
+  /Users/tchen7/MyProjects/CoreProjects/AgentFoundation/src/agent_foundation/ui/interactive_base.py
+#  → empty (bug confirmed)
+
+# Webaxon hard import:
+grep -n "webaxon" \
+  /Users/tchen7/MyProjects/CoreProjects/AgentFoundation/src/agent_foundation/ui/terminal_interactive.py
+#  → line 6 (hard dep confirmed)
+
+# RE queue primitives:
+grep -n "send_turn_boundary\|stream_token_batches\|_heartbeat" \
+  /Users/tchen7/MyProjects/CoreProjects/atlassian-packages/rankevolve/src/agentic_foundation/common/ui/queue_interactive.py
+#  → lines 226, 255, 312
+
+# RE web_interactive exists:
+wc -l /Users/tchen7/MyProjects/CoreProjects/atlassian-packages/rankevolve/src/agentic_foundation/common/ui/web_interactive.py
+#  → 266
+
+# Build tool is CRA universally:
+grep -n "react-scripts\|vite" \
+  /Users/tchen7/MyProjects/CoreProjects/{AgentFoundation/src/agent_foundation/ui/webui/react,OpenStartup/src/openteam/ui,atlassian-packages/rankevolve/src/webui/react}/package.json
+
+# No monorepo:
+find /Users/tchen7/MyProjects/CoreProjects -maxdepth 4 \
+  \( -name lerna.json -o -name pnpm-workspace.yaml \) -print
+#  → empty
+
+# useAgentChat / useAgentWebSocket byte-identical:
+diff /Users/tchen7/MyProjects/CoreProjects/{AgentFoundation/src/agent_foundation/ui/webui,atlassian-packages/rankevolve/src/webui}/react/src/hooks/useAgentWebSocket.js
+```
+
+### Appendix B — Glossary
+
+- **AF** — AgentFoundation. **OS** — OpenStartup / OpenTEAM. **RE** — RankEvolve.
+- **Wire protocol** — JSON shape exchanged over WebSocket between Python backend
+  and React frontend; defined by `widget_protocol.WidgetMessage`.
+- **Built-in widget** — one of the 12 types in `WIDGET_TYPES`; ships in `widgets/`.
+- **Domain widget** — names a domain concept; stays in app; uses `ns.type`.
+- **Turn boundary** — transport marker that downstream renderers use to flush
+  partial streaming output (port from RE `queue_interactive.py:226`).
+
+### Appendix C — File-by-file extraction map
+
+See §9 for the full matrix. Phase ordering ensures each batch is a self-contained PR.
+
+---
+
+## 15. If we could ship only ONE plan — which one?
+
+**The updated cryptic-clock plan (2026-05-23 20:42).**
+
+It has, since I last evaluated, converged on the same shape as my v2.0
+canonical plan. Both now have Phase 0 → Phase 1 → Phase 2 → Phase 3 →
+Phase 4, both have a classification matrix, both have anti-drift CI.
+The remaining differences are mostly **quality**, and on those, the
+cryptic-clock plan is now stronger:
+
+1. **It noticed `webaxon` is a hard dependency** that needs to be lazy.
+   v2.0 missed this. Verified ground-truth confirms the bug.
+2. **It noticed RE's `queue_interactive.py` has `send_turn_boundary` /
+   `stream_token_batches` / heartbeat primitives** that are generic and
+   should be lifted. v2.0 didn't mention these — they were sitting in
+   RE's fork unused by AF.
+3. **It is shorter, more action-oriented, and more directly executable.**
+   617 lines vs v2.0's 1,496. Less ceremony per real instruction.
+4. **Its `craco` proposal is wrong** (we should `tsup`-pre-build instead),
+   but the *direction* (CRA-aware) is right. v2.0's `tsup` analysis can
+   be cross-pasted into a `craco` plan in 10 lines.
+5. **Its `useAgentChat` / `useAgentWebSocket` KEEP-IN-APP call is wrong**
+   (they are byte-identical between AF and RE; should canonicalize), but
+   this is a localized error that one verified `diff` immediately surfaces.
+
+The cryptic-clock plan's gaps vs v2.0 (no explicit ground-truth section, no
+17-row risk register, no 11-point objective acceptance, no `messageAdapter`
+design, missing widget constants in its TypeScript union) are **easier to
+add to cryptic-clock than to remove from v2.0**: bolting governance onto a
+focused, correct technical plan is mechanical work; pruning a 1,500-line
+narrative document to action items is not.
+
+**However, the ideal outcome is neither alone but this v3.0**: cryptic-clock's
+surgical-and-now-more-complete Phase 0 + Phase 1 + classification table,
+plus v2.0's verified ground-truth section, risk register, acceptance criteria,
+codegen banner format, anti-drift CI, and the `messageAdapter`-driven
+correction of `useAgentChat` / `useAgentWebSocket` to CANONICALIZE.
+
+That's what this file is.
+
+---
+
+*End of v3.0 integrated plan.*
+
+
+
+

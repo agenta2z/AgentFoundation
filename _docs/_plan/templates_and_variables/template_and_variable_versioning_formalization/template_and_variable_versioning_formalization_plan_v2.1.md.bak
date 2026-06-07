@@ -1,0 +1,704 @@
+# Template & Variable Versioning Formalization — Plan v2.1
+
+**Status**: DRAFT v2.1 (2026-05-23 06:57) — Supersedes v2.0
+**Owner**: Tony Chen / Rovo Dev
+**Scope**: Introduce `FileSpaceManager` abstraction in `RichPythonUtils` that unifies file-cascade + version resolution as a **key-resolver with pluggable backends**. Migrate `FileBasedVariableManager` + `TemplateManager`'s variable resolution onto it. Add `master_version` as a first-class feature. Migrate the filesystem on both `AgentFoundation` and `OpenStartup` template trees.
+
+### v2.1 Locks-In (vs v2.0)
+1. ✅ `.config.yaml` is **LOCAL-only** — not cascading; affects only the folder it lives in
+2. ✅ Sidecar variables (`.subfolder.yaml`, `.type.yaml`, `.space.yaml`) cascade NATURALLY via variable lookup walk
+3. ✅ `_variables` and `.variables` are EQUIVALENT — match by stripping leading `_` or `.`
+4. ✅ URI-shape return value: `ResolvedContent(path, name, uri, backend_type)` from day 1
+5. ✅ `FieldResolver` protocol DEFINED in v2.0 — only the file backend IMPLEMENTED
+6. ⏭️ yaml-field-backend deferred to **v2.2** (renamed from v2.1)
+7. ⏭️ json-field-backend deferred to **v2.3** (renamed from v2.2)
+8. ⏭️ Pluggable env/http backends deferred to **v3.0**
+
+---
+
+## §0 Executive Summary
+
+### What v2.0 Changes Over v1.0
+
+v1.0 proposed adding `master_version` to TWO parallel implementations. After deeper audit, the duplication is real and inferior — `template_manager.py`'s copy lacks dotted-key support, underscore-splits, and override-suffix handling.
+
+**v2.0 strategy**: Extract the common file-cascade + version-resolution logic into a NEW `FileSpaceManager` class. Both managers consume it. Add `master_version` ONCE inside the abstraction.
+
+### Constraints (User Feedback)
+
+| # | Constraint |
+|---|---|
+| **A** | `<name>/<version>.jinja2` (flat-version) is enabled ONLY when `master_version` is unset |
+| **B** | API is concrete: `find_file(name, master_version="X", version="Y")` |
+| **C** | Migrate existing files with full back-compat + comprehensive tests |
+| **D** | Extract common space/cascade/sidecar/default logic into `FileSpaceManager` |
+| **E** | `FileSpaceManager` supports root-folder + cross-space (root-space) lookup natively |
+
+---
+
+## §1 Scope Boundary
+
+**What v2.0 DOES consolidate** (per audits):
+- ✅ File-cascade across spaces (root → space/type → space → global)
+- ✅ Multi-root overlay (priority-ordered)
+- ✅ Version cascade (Pass 1A → 1B → 2A → 2B → 3 → 4)
+- ✅ Folder-default convention (`name/default.ext`)
+- ✅ Flat-versioned (`name.version.ext`)
+- ✅ Override suffix (`name.override.ext`)
+- ✅ Dot-to-slash, slash-paths, underscore-splits
+- ✅ Per-folder `.config.yaml` (filename aliases)
+- ✅ Sidecar `.variables.yaml` (scoped variable dict)
+
+**What v2.0 DOES NOT touch** (templates use a different model):
+- ❌ Template lookup (`templates: Dict[str, str]` flat-dict-after-merge)
+- ❌ Template multi-root deep-merge at construction
+- ❌ Template version suffix lookup against flat dict
+- ❌ Component-versioning machinery
+- ❌ Hydra/SLOT_DEFAULTS infrastructure
+
+**Why templates are out**: templates are deep-merged into a flat dict at construction time, with no cascade at render time. Forcing them into FileSpaceManager would be over-engineering.
+
+---
+
+## §2 Current State (Verified)
+
+### §2.1 Duplication Map
+
+| Concept | `template_manager.py` | `file_based.py` | Verdict |
+|---|---|---|---|
+| Find file in folder | `_find_in_variable_folder` line 43 (~30 lines) | `_find_in_variable_folder` line 620 (~50 lines) | Duplicate; template_mgr is inferior |
+| Cascade folder list | `_cascade_load_variable_path` line 657 (~55 lines) | `_get_cascade_paths` line 502 (~65 lines) | Duplicate cascade ordering |
+| Two-pass version | inline lines 692-708 | `_find_variable_file` line 670-811 (Pass 1/2/3) | template_mgr is partial subset |
+| Dotted-key nesting | `_set_nested_key` line 91 (module-level helper) | `_store_nested` line 793 (wraps `_set_nested_key`) | Already consolidated (v1 work) |
+| Content resolution | `_resolve_templated_feed` line 1332 | `_resolve_content` line 1067 | Two engines (Jinja2 vs regex); out of scope for FileSpaceManager |
+
+### §2.2 Filesystem Inventory (Migration Target Files)
+
+| Current path | Migrates to | Reason |
+|---|---|---|
+| `AgentFoundation/.../plan/main/_variables/task_preamble/aggregation.jinja2` | `.../task_preamble/aggregation/default.jinja2` | aggregation context fallback |
+| `AgentFoundation/.../plan/main/_variables/task_instructions/aggregation.jinja2` | `.../task_instructions/aggregation/default.jinja2` | same |
+| `AgentFoundation/.../plan/main/_variables/task_response_format/aggregation.jinja2` | `.../task_response_format/aggregation/default.jinja2` | same |
+| `AgentFoundation/.../implementation/main/_variables/task_preamble/aggregation.jinja2` | `.../task_preamble/aggregation/default.jinja2` | same |
+| `AgentFoundation/.../implementation/main/_variables/task_instructions/aggregation.jinja2` | `.../task_instructions/aggregation/default.jinja2` | same |
+| `OpenStartup/.../plan/main/_variables/task_instructions/create_role.jinja2` | `.../task_instructions/aggregation/create_role.jinja2` | this IS aggregation-context create_role |
+
+**Wave 1 (mandatory)**: above 6 files. **Wave 2 (deferred)**: `task_breakdown/.../create_role.jinja2` etc. — kept as plain flat files since they don't need a master_version qualifier.
+
+### §2.3 Test Coverage Today
+
+10 existing test files in `RichPythonUtils/test/.../template_manager/` cover: version cascade, dotted keys, wrapper variables (our recent fix), cross-root multi-root, slash-separated versions, override suffix, YAML sidecar, predefined variables, dynamic root addition. **All 10 must remain green after refactor.**
+
+---
+
+## §3 FileSpaceManager Design
+
+### §3.1 Conceptual Model
+
+A `FileSpaceManager` is a **key-resolver** with a chain of **pluggable backends**. A "key" is a tuple `(name, space, type_, master_version, version)`. A "backend" knows how to resolve a key into `ResolvedContent`. v2.1 ships ONE backend (file); v2.2 adds yaml-field; v2.3 adds json-field.
+
+```
+FileSpaceManager
+├── roots: List[Path]                              # priority-ordered overlay roots
+├── reserved_subfolder_canonical: str              # "variables" (no prefix)
+├── reserved_subfolder_prefixes: List[str]         # ["_", "."] → matches _variables AND .variables
+├── space_cascade_strategy: SpaceCascade           # expands (space, type_) → folder list
+├── version_cascade_strategy: VersionCascade       # expands (master_version, version) → name/path patterns
+├── file_extensions: List[str]                     # [".jinja2", ".jinja", ".j2", ".hbs", ".txt", ""]
+├── override_suffix: str                           # ".override"
+├── enable_overrides: bool
+├── folder_config_filename: str                    # ".config.yaml" — LOCAL ONLY (does not cascade)
+├── sidecar_filename_patterns: List[str]           # ["{prefix}{type_}.yaml", "{prefix}{space}.yaml", ".sidecar.yaml"] — naturally cascades via variable lookup
+├── enable_sidecar: bool
+├── backends: List[FieldBackend]                   # [FileBackend()] in v2.1; +YamlFieldBackend in v2.2; +JsonFieldBackend in v2.3
+├── encoding: str
+└── trace_log: Optional[Callable]                  # diagnostic hook (records each lookup)
+```
+
+#### §3.1.1 Backend Protocol (Defined In v2.1, Only `FileBackend` Shipped)
+
+```python
+class FieldBackend(Protocol):
+    """A pluggable backend that resolves a (folder, name, version_pattern) into ResolvedContent."""
+
+    name: str           # "file" | "yaml" | "json" | ...
+    priority: int       # Lower = higher priority (file=10, yaml=20, json=30)
+
+    def try_resolve(
+        self,
+        folder: Path,
+        name: str,
+        master_version: Optional[str],
+        version: Optional[str],
+        config: "FileSpaceManagerConfig",
+    ) -> Optional["ResolvedContent"]:
+        """Return ResolvedContent if this backend can resolve the key here, else None."""
+
+    def read(self, resolved: "ResolvedContent") -> str | bytes | Any:
+        """Read the actual content (lazy after path is resolved)."""
+```
+
+`FileBackend` (v2.1, the only implementation):
+- `try_resolve` returns the first existing file under `folder` matching the version cascade
+- `read` returns file contents decoded with `encoding`
+
+`YamlFieldBackend` (v2.2, reserved):
+- `try_resolve` looks for `.sidecar.yaml` / `.type.yaml` / `.space.yaml` in cascade and probes for field `name`
+- `read` returns the YAML value (could be Dict, List, scalar) — composition layer handles non-string values
+
+`JsonFieldBackend` (v2.3, reserved):
+- Same as YamlFieldBackend but `.json`
+
+#### §3.1.2 ResolvedContent — The Universal Return Shape
+
+```python
+@dataclass(frozen=True)
+class ResolvedContent:
+    name: str                  # the key as requested (after dot-to-slash normalization)
+    backend_type: str          # "file" | "yaml" | "json"
+    path: Path                 # the physical file path
+    uri: str                   # e.g. "file:///abs/path", "yaml:///abs/path#field.subfield"
+    field_path: Optional[List[str]] = None  # None for "file" backend; non-None for field-in-file backends
+    encoding: str = "utf-8"
+```
+
+The `uri` is a string that uniquely identifies WHERE the content came from. This is used for:
+- **Caching keys** (cheap dict lookup by URI)
+- **Diagnostic trace logs** ("variable X resolved from yaml:///foo.yaml#bar")
+- **Future tooling** (e.g., "find all usages of `file:///abs/path`")
+
+The `uri` scheme is `<backend_type>://<absolute path>[#<field path>]`. v2.1 always produces `file://` URIs with no fragment.
+
+#### §3.1.3 `_variables` ↔ `.variables` Equivalence
+
+To find the reserved subfolder, FileSpaceManager iterates `reserved_subfolder_prefixes` in order:
+```python
+for prefix in self.reserved_subfolder_prefixes:    # default: ["_", "."]
+    candidate = parent / f"{prefix}{self.reserved_subfolder_canonical}"
+    if candidate.is_dir():
+        return candidate
+return None
+```
+
+If BOTH `_variables/` AND `.variables/` exist in the same parent:
+- The **first** in `reserved_subfolder_prefixes` wins (default order: `_` then `.`)
+- A WARNING is logged once per affected folder (since this is almost certainly a mistake)
+- This deterministic rule prevents non-determinism while leaving authors free to migrate one to the other safely
+
+#### §3.1.4 `.config.yaml` Is LOCAL ONLY
+
+Each folder's `.config.yaml` affects only that folder. No cascade walk. Rationale:
+- WYSIWYG mental model: see config in folder → only that folder is affected
+- Aliases are inherently folder-local (they map alias→filename for files in THAT folder)
+- Cross-folder routing chaos avoided (an alias at a higher level would apply to every sibling subfolder, which is almost always wrong)
+- Mirrors `pytest.ini`/`tsconfig.json`/`package.json` conventions where config files don't silently cascade
+- Override mechanism (`.override.<ext>` files) handles the per-folder override case cleanly
+
+This is an explicit DESIGN DECISION, not an oversight. v2.x will NOT add config cascade.
+
+### §3.2 Single Source-Of-Truth API
+
+All resolution methods return `ResolvedContent` (see §3.1.2) — a structured handle that includes path, URI, backend type, and (for field backends) field path.
+
+```python
+class FileSpaceManager:
+    # ── Resolution (returns handle, no I/O on read-target) ─────────────
+    def resolve(
+        self,
+        name: str,                            # e.g. "task_preamble" or "notes.fallback"
+        space: Optional[str] = None,          # e.g. "plan"
+        type_: Optional[str] = None,          # e.g. "main"
+        master_version: Optional[str] = None, # e.g. "aggregation"
+        version: Optional[str] = None,        # e.g. "create_role"
+    ) -> Optional[ResolvedContent]:
+        """Find first backend+location matching the cascade. Returns None if none match.
+        DOES read folder-config files and reserved-subfolder lookups (cheap directory scans)."""
+
+    # ── Read (I/O on the target) ───────────────────────────────────────
+    def read(self, resolved: ResolvedContent) -> Any:
+        """Read the resolved content via its backend (str for file, Any for field backends)."""
+
+    def resolve_and_read(self, name: str, **kwargs) -> Optional[Any]:
+        """Convenience: resolve(...) + read(...) in one call. Returns None if not found."""
+
+    # ── Discovery (list keys at a scope) ───────────────────────────────
+    def list_keys(
+        self,
+        space: Optional[str] = None,
+        type_: Optional[str] = None,
+    ) -> List[Tuple[str, ResolvedContent]]:
+        """Discover all keys available at this scope across all backends + roots."""
+
+    # ── Folder config (LOCAL only, never cascades) ─────────────────────
+    def load_folder_config(self, folder: Path) -> Dict[str, str]:
+        """Read `.config.yaml` filename aliases for a SINGLE folder. Returns empty dict if absent."""
+
+    # ── Sidecar (used by v2.2+ yaml-field-backend; v2.1 exposes for legacy callers) ───
+    def load_sidecar(
+        self,
+        space: Optional[str] = None,
+        type_: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Read sidecar files (`.subfolder.yaml`, `.type.yaml`, `.space.yaml`) at given scope.
+        Cross-root merge: root[0] overrides root[1]; deeper scope overrides shallower."""
+
+    # ── Diagnostic ─────────────────────────────────────────────────────
+    def explain(self, name: str, **kwargs) -> List[str]:
+        """Return human-readable trace of resolution attempts (every backend × every folder × every pass)."""
+```
+
+#### §3.2.1 Why Split `resolve` + `read` Instead Of Single `find_file_content`?
+
+- **Diagnostics**: callers can capture which URI was resolved (for trace logs / error context) without paying read cost
+- **Caching**: callers can hash by URI (cheap) without reading content
+- **Lazy I/O**: a list of resolved keys (`list_keys`) doesn't read all files
+- **Field backends in v2.2+**: yaml file may be opened once and field-extracted multiple times; resolve identifies the field path, read does the actual extraction
+
+#### §3.2.2 Why Add `explain()`?
+
+This single method removes the need for callers to instrument trace logs themselves. The current code has `_trace` debug strings scattered throughout `_find_variable_file`; `explain()` consolidates them behind a stable API. Essential for debugging the version cascade in production.
+
+### §3.3 Space Cascade Strategy (Per Root)
+
+For each `root` in `self.roots` (priority order), expand `(space, type_)` into folder paths:
+
+```
+1. {root}/{space}/{type_}/{reserved_subfolder}/{name}    # most specific
+2. {root}/{space}/{reserved_subfolder}/{name}            # space-level
+3. {root}/{reserved_subfolder}/{name}                    # global (root-level)
+[Optional] 4. {root}/<cross_space_root>/{reserved}/{name}  # cross-space root sweep
+```
+
+Constraint E satisfied: root-folder addressing is the outer loop; cross-space is an optional sweep level within each root.
+
+### §3.4 Version Cascade Strategy (Per Folder)
+
+Per folder from §3.3, attempt in order:
+
+| Pass | Condition | Path |
+|---|---|---|
+| **1A** | master_version AND version set | `{folder}/{master_version}/{version}.{ext}` |
+| **1B** | master_version set | `{folder}/{master_version}/default.{ext}` |
+| **2A** | master_version is unset AND version set (Constraint A) | `{folder}/{version}.{ext}` |
+| **2B** | always (terminal default) | `{folder}/default.{ext}` |
+| **3** | back-compat | `{folder}.{version}.{ext}`, `{folder}.{master_version}.{ext}` |
+| **4** | truly bare | `{folder}.{ext}` |
+
+**Constraint A enforced**: when `master_version` is set, Pass 2A is SKIPPED. This prevents the aggregator (with `master_version="aggregation"`) from accidentally loading a non-aggregation `name/create_role.jinja2` from a different context.
+
+### §3.5 Resolution Order (Cross-Product Sweep With Backend Chain)
+
+```
+def resolve(name, space, type_, master_version, version):
+    for root in self.roots:                          # OUTER: root priority
+        for folder in space_cascade(root, space, type_):  # MID: scope specificity
+            for backend in sorted(self.backends, key=lambda b: b.priority):  # backend priority
+                result = backend.try_resolve(
+                    folder, name, master_version, version, self.config
+                )
+                if result is not None:
+                    self.trace_log and self.trace_log(f"HIT: {result.uri}")
+                    return result
+                self.trace_log and self.trace_log(f"MISS: backend={backend.name} folder={folder}")
+    return None
+```
+
+Three nested loops, processed OUTER→INNER:
+- **Root priority** (outer): root[0] wins over root[1] at the same scope
+- **Scope specificity** (middle): specific scopes win over general scopes WITHIN a root
+- **Backend priority** (inner): for a given (root, folder), file backend wins over yaml-field, yaml-field wins over json-field
+
+This preserves today's "specificity beats proximity" and adds "concreteness beats indirection" (file > field).
+
+#### §3.5.1 Files-First Rationale (CRITICAL DESIGN DECISION)
+
+**Files always win over fields-in-files at the same (root, folder).** Rationale:
+- Backward compatibility: today, only file backend exists. Files-first preserves all current behavior.
+- Surprise minimization: an author who creates `name.jinja2` expects that file to be used, not silently shadowed by an entry in a YAML sidecar.
+- Diagnostics: file paths are self-documenting in error messages; field paths require knowing the sidecar location.
+- Override pattern (`name.override.jinja2`) continues to work uniformly.
+
+If you NEED a YAML field to win, delete the file. Don't add precedence-inversion magic.
+
+### §3.6 Naming Cascade Within A Backend (FileBackend Reference)
+
+The `FileBackend.try_resolve` implementation walks the version cascade (§3.4) for the given folder. Each backend may implement its own cascade as long as it honors the API contract.
+
+```
+def file_backend_try_resolve(folder, name, master_version, version, config):
+    for path_pattern in version_cascade(folder, name, master_version, version, config):
+        candidate = path_pattern + ext  for ext in config.file_extensions:
+        # Override check (.override.<ext>) always preferred at same path
+        override = path with override_suffix injected
+        if override.is_file(): return ResolvedContent(name, "file", override, f"file://{override}")
+        if candidate.is_file(): return ResolvedContent(name, "file", candidate, f"file://{candidate}")
+    return None
+```
+
+### §3.7 Reserved Subfolder Prefix Equivalence (`_variables` ↔ `.variables`)
+
+`FileSpaceManager` accepts a `reserved_subfolder_canonical` (e.g., `"variables"`) and a list of allowed prefixes (e.g., `["_", "."]`).
+
+**Resolution order at each scope folder**:
+1. Try `<folder>/<prefix0><canonical>/...` for each prefix in order: `_variables/`, `.variables/`
+2. If multiple prefixed folders coexist in the same parent (which we DISCOURAGE but tolerate), the order in `reserved_subfolder_prefixes` decides precedence
+3. If none match, fall through to the next scope in the cascade
+
+**Rationale**:
+- Convention parity: dotted prefix (`.variables/`) is common in dotfile tradition (hidden config); underscore prefix (`_variables/`) is current convention.
+- Migration ease: teams can rename underscore→dot OR add a parallel dotted folder without breaking existing lookups.
+- Forward compat: when v2.2 introduces yaml-field backend, the same `.variables.yaml` sidecar file becomes a first-class source — both spellings (underscore folder, dot file) participate symmetrically.
+
+**Anti-precedent**: We do NOT allow arbitrary prefixes (like `~variables/` or `@variables/`). The fixed list `["_", "."]` makes the contract enumerable, testable, and code-reviewable.
+
+### §3.8 `.config.yaml` Is Strictly Level-Local (No Cascade)
+
+A `.config.yaml` file in folder X affects ONLY folder X's lookups (e.g., filename aliases like `aggregator: aggregation`). It is NOT inherited by subfolders, NOT inherited by parent folders, NOT looked up at any other scope in the cascade.
+
+**Rationale** (recorded for posterity, see chat 2026-05-23 06:55):
+1. **WYSIWYG mental model**: see `.config.yaml` here → it affects here only. No surprises.
+2. **No phantom precedence ambiguity**: if `.config.yaml` cascaded, authors would need to know "does ancestor's alias win over my own?" — a non-trivial question with no obviously-right answer.
+3. **Performance**: cascading config means EVERY lookup must walk the parent chain. Level-local means O(1) per folder visited.
+4. **Diagnostic clarity**: when an alias resolution is wrong, the relevant `.config.yaml` is unambiguous — it's the one in the resolved folder.
+5. **Convention parallel**: matches `.gitignore`, `.editorconfig`'s effective scope at each level (with explicit `root = true` for editorconfig; `.config.yaml` has no equivalent need).
+
+**Sidecar variables (e.g., `.subfolder.yaml`, `.type.yaml`, `.space.yaml`) DO cascade naturally**: they participate in the same space/version cascade as files, since they ARE keyed by scope.
+
+### §3.9 Summary Of v2.1 Locked-In Design Decisions
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | `.config.yaml` LOCAL-only | §3.8 above — WYSIWYG, no precedence ambiguity, O(1) lookup |
+| 2 | Sidecar variables cascade naturally | They're already keyed by scope; the cascade is the resolution mechanism |
+| 3 | `_variables` ↔ `.variables` equivalence | §3.7 above — convention parity, migration ease |
+| 4 | URI-shape `ResolvedContent` return | §3.2.1 — diagnostics, caching by URI, lazy I/O, forward-compat for field backends |
+| 5 | `FieldBackend` protocol DEFINED in v2.1; only `FileBackend` IMPLEMENTED | Lock in API shape NOW so v2.2/v2.3 backends are non-breaking additions |
+| 6 | yaml/json field backends → v2.2 / v2.3 (deferred) | Avoid scope creep; protocol is what matters for future-proofing |
+| 7 | Files-first resolution (files always beat fields-in-files) | §3.5.1 — backward compat + surprise minimization |
+| 8 | `explain()` diagnostic method | §3.2.2 — production debug requires structured trace; bury the scattered `_trace` strings behind a stable API |
+| 9 | Reserved-subfolder prefixes are a FIXED LIST (`["_", "."]`), not arbitrary | Enumerable contract, testable, code-reviewable |
+| 10 | URI scheme is open-set (`file://`, `yaml-field://`, future `json-field://`, ...) | Standard pattern; integrates with `urlparse` and external tooling |
+
+### §3.10 The A14a Bug Resolution
+
+Aggregator: `master_version="aggregation"`, `space="plan"`, `type_="main"`, `name="task_preamble"`, `version=None`.
+
+| Sweep | Path | Outcome |
+|---|---|---|
+| root_0, folder_0, Pass 1A | `plan/main/_variables/task_preamble/aggregation/<None>.jinja2` | skip (no version) |
+| root_0, folder_0, Pass 1B | `plan/main/_variables/task_preamble/aggregation/default.jinja2` | ✅ **FOUND** (post-migration) |
+
+For `task_instructions` with `version="create_role"`:
+
+| Sweep | Path | Outcome |
+|---|---|---|
+| root_0 (OS), folder_0, Pass 1A | `plan/main/_variables/task_instructions/aggregation/create_role.jinja2` | ✅ **FOUND** in OpenStartup root (post-migration) |
+
+For breakdown inferencer (no master_version): `name="task_preamble"`, `version="create_role"`:
+
+| Sweep | Path | Outcome |
+|---|---|---|
+| root_0, folder_0, Pass 2A | `task_breakdown/main/_variables/task_preamble/create_role.jinja2` | ✅ **FOUND** (no migration needed for this) |
+
+---
+
+## §4 Implementation Plan
+
+### §4.1 New Module: `rich_python_utils/common_objects/file_space_manager/`
+
+```
+file_space_manager/
+├── __init__.py                    # Public API exports
+├── manager.py                     # FileSpaceManager class (~350 lines)
+├── resolved_content.py            # ResolvedContent dataclass + URI helpers (~80 lines)
+├── space_cascade.py               # SpaceCascade dataclass (~50 lines)
+├── version_cascade.py             # VersionCascade dataclass + Pass logic (~140 lines)
+├── config.py                      # FileSpaceManagerConfig (~100 lines)
+├── exceptions.py                  # FileSpaceLookupError, BackendError (~30 lines)
+├── _filename_patterns.py          # Glob + underscore-split + reserved-prefix helpers (~100 lines)
+├── backends/
+│   ├── __init__.py                # FieldBackend protocol + registry
+│   ├── _base.py                   # FieldBackend abstract class (~60 lines)
+│   ├── file_backend.py            # FileBackend implementation (~150 lines)
+│   ├── yaml_field_backend.py      # PLACEHOLDER stub for v2.2 (raises NotImplementedError)
+│   └── json_field_backend.py      # PLACEHOLDER stub for v2.3 (raises NotImplementedError)
+└── README.md                      # Architecture doc + URI scheme + backend protocol
+```
+
+**Public API** (`__init__.py`):
+```python
+from .manager import FileSpaceManager
+from .resolved_content import ResolvedContent
+from .space_cascade import SpaceCascade
+from .version_cascade import VersionCascade
+from .config import FileSpaceManagerConfig
+from .exceptions import FileSpaceLookupError, BackendError
+from .backends import FieldBackend, FileBackend
+```
+
+**v2.1 ships**: `FileBackend` is the only registered backend by default. The yaml/json backend files exist as stubs with documented signatures, ready for v2.2/v2.3 implementation. This locks in the protocol shape NOW so subsequent versions are non-breaking additions.
+
+### §4.2 Migration Of `FileBasedVariableManager`
+
+`FileBasedVariableManager` keeps its public API (`get_variable`, `resolve_variables`, `resolve_from_content`, `__getitem__`, `set`, `load_yaml_sidecar`, etc.) but delegates internal file-lookup to a `FileSpaceManager` instance:
+
+```python
+class FileBasedVariableManager:
+    def __init__(self, base_path, config=None, ...):
+        self._space_manager = FileSpaceManager(
+            roots=[Path(base_path)],
+            reserved_subfolder_canonical="variables",
+            reserved_subfolder_prefixes=["_", "."],          # _variables OR .variables
+            file_extensions=config.file_extensions,
+            override_suffix=config.override_suffix,
+            enable_overrides=config.enable_overrides,
+            enable_sidecar=True,
+            sidecar_filename_patterns=[
+                ".sidecar.yaml",                              # generic per-folder
+                ".{type_}.yaml",                              # e.g. .main.yaml
+                ".{space}.yaml",                              # e.g. .plan.yaml
+            ],
+            folder_config_filename=".config.yaml",            # LOCAL only
+            backends=[FileBackend()],                         # v2.1 ships file-only
+            trace_log=None,                                   # opt-in diagnostic hook
+        )
+```
+
+**Methods that get GUTTED and delegate to FileSpaceManager**:
+- `_find_variable_file` → `self._space_manager.resolve(name=..., space=..., type_=..., master_version=..., version=...)` returning `ResolvedContent`; then `self._space_manager.read(resolved)` for content
+- `_find_variable_file_with_slash` → same call path (slash already handled by name normalization)
+- `_find_in_variable_folder` → DELETED (folded into `FileBackend.try_resolve`)
+- `_get_cascade_paths` → DELETED (moves into `SpaceCascade`)
+- `_read_variable_folder_config` → `self._space_manager.load_folder_config(folder)` (local-only, no walk)
+- `_match_filename_patterns` → DELETED (moves into `_filename_patterns`)
+- `_generate_underscore_splits` → moves into `_filename_patterns`
+- `_resolve_variable_folder` → DELETED (folded into version cascade Pass 2B)
+
+**Example refactored call inside `get_variable`**:
+```python
+def get_variable(self, name, version=None, root_space=None, vtype=None):
+    # ... apply overrides first (KEPT in this layer) ...
+    resolved = self._space_manager.resolve(
+        name=name,
+        space=root_space,
+        type_=vtype,
+        master_version=None,           # v2.1: variables don't have master concept yet
+        version=version,
+    )
+    if resolved is None:
+        return None
+    raw = self._space_manager.read(resolved)
+    # ... composition + extractor + formatter (KEPT in this layer) ...
+    return composed
+```
+
+**Methods that REMAIN in FileBasedVariableManager** (composition + overrides + sidecar merge):
+- `get_variable` (orchestrator)
+- `resolve_variables`, `resolve_from_content`
+- `_resolve_variable` (composition + circular-ref detection)
+- `_resolve_content` (regex/extractor invocation)
+- `_get_variable_extractor`, `_get_variable_formatter`
+- `set`, `clear`, `clear_all`, `get_effective_value`, `get_all_variables`
+- `load_yaml_sidecar` (still owned at this layer for the scoped storage semantics — calls into FileSpaceManager for the read)
+- `_init_override_layer`, `_cascade_scopes`, `_resolve_alias_cascaded`
+
+### §4.3 Migration Of `TemplateManager`
+
+`TemplateManager` keeps its public API. Its DUPLICATE file-cascade is gutted:
+
+**Methods that get GUTTED and delegate to FileSpaceManager**:
+- Module-level `_find_in_variable_folder` (line 43) → DELETED
+- `_cascade_load_variable_path` (line 657) → thin wrapper around `FileSpaceManager.resolve(...)` returning `ResolvedContent` (caller reads via `.read()`)
+- `_cascade_load_variable` (line 712) → unchanged signature, returns `(content_str, resolved_path)` via `resolve+read` pair
+- `_find_version_only_across_roots` (line 615) → uses `FileSpaceManager.resolve(...)` with `master_version=version, version=None` semantics for an exact-version search
+- `template_master_version` propagation: when set on `TemplateManager`, passed as `master_version` kwarg in ALL above resolve calls
+
+**Methods that REMAIN in TemplateManager** (template-specific):
+- All template-flat-dict logic (lines 1001-1330): `get_raw_template`, `_try_get_template`, `_try_versioned_and_unversioned_lookup`, `_get_template_*`, version-suffix lookup
+- All component-versioning (lines 1086-1213)
+- `__call__` (line 1385) orchestration
+- `_resolve_templated_feed` (line 1332) — Jinja2-engine-specific recursive resolution
+- Multi-root deep-merge at construction
+- VariableLoader plumbing (lines 487-557) — but the loaders themselves use FileSpaceManager internally
+
+### §4.4 New TemplateManager Attribute: `template_master_version`
+
+To wire master_version through to `_build_template_feed` callers:
+
+```python
+class TemplateManager:
+    template_master_version: Optional[str] = attrib(default=None)
+    # Already exists: template_version: Optional[str] = attrib(default=None)
+```
+
+When `__call__` invokes the predefined-variable resolution path (line 1968), it now passes `master_version=self.template_master_version` to FileSpaceManager calls.
+
+### §4.5 New InferencerBase Attribute: `template_master_version`
+
+To allow inferencers to set their master_version:
+
+```python
+# templated_inferencer_base.py
+@attrs.define(slots=False)
+class TemplatedInferencerBase(InferencerBase):
+    template_master_version: Optional[str] = attrib(default=None)
+    # Existing: template_version: Optional[str] = attrib(default=None)
+```
+
+`_build_template_feed` (line 200) now passes `master_version=self.template_master_version` to `load_variables(...)`. SLOT_DEFAULTS for aggregators set `template_master_version="aggregation"` instead of (or in addition to) `template_version="aggregation"`.
+
+---
+
+## §5 Filesystem Migration
+
+### §5.1 Wave 1 — Mandatory (6 Files)
+
+For each file, the migration is: **move** `<folder>/<master>.jinja2` → `<folder>/<master>/default.jinja2`.
+
+| # | Source | Destination |
+|---|---|---|
+| 1 | `AgentFoundation/.../plan/main/_variables/task_preamble/aggregation.jinja2` | `.../task_preamble/aggregation/default.jinja2` |
+| 2 | `AgentFoundation/.../plan/main/_variables/task_instructions/aggregation.jinja2` | `.../task_instructions/aggregation/default.jinja2` |
+| 3 | `AgentFoundation/.../plan/main/_variables/task_response_format/aggregation.jinja2` | `.../task_response_format/aggregation/default.jinja2` |
+| 4 | `AgentFoundation/.../implementation/main/_variables/task_preamble/aggregation.jinja2` | `.../task_preamble/aggregation/default.jinja2` |
+| 5 | `AgentFoundation/.../implementation/main/_variables/task_instructions/aggregation.jinja2` | `.../task_instructions/aggregation/default.jinja2` |
+| 6 | `OpenStartup/.../plan/main/_variables/task_instructions/create_role.jinja2` | `.../task_instructions/aggregation/create_role.jinja2` |
+
+**Note**: file #6 is a real reclassification — it IS the `master_version=aggregation, version=create_role` cell. After migration, the lookup `find_file(name="task_instructions", master_version="aggregation", version="create_role")` will resolve to it via Pass 1A.
+
+### §5.2 Wave 2 — Deferred
+
+`task_breakdown/main/_variables/{task_preamble,task_instructions}/create_role.jinja2` and similar — these are NOT under an aggregation context. They remain plain `{name}/{version}.jinja2` files and resolve via Pass 2A (Constraint A: only when master_version is unset).
+
+### §5.3 Back-Compat: Pass 3
+
+Pass 3 (`{folder}.{version}.{ext}` and `{folder}.{master}.{ext}`) ensures that ANY file we forget to migrate still works. This is the safety net that lets the migration be incremental and reversible.
+
+### §5.4 Migration Procedure
+
+For each Wave 1 file:
+```bash
+mkdir -p <folder>/<master>
+git mv <folder>/<master>.jinja2 <folder>/<master>/default.jinja2
+```
+
+After all 6 migrations, run the full E2E test suite + a `create_role` real-CLI run to verify aggregator prompts contain "aggregating".
+
+---
+
+## §6 Test Plan
+
+### §6.1 New Unit Tests (`RichPythonUtils/test/.../file_space_manager/`)
+
+| Test File | Coverage |
+|---|---|
+| `test_find_file_basic.py` | Pass 1A/1B/2A/2B/3/4 resolution against fixtures |
+| `test_find_file_constraint_a.py` | Verify Pass 2A is SKIPPED when master_version set |
+| `test_find_file_multi_root.py` | Priority ordering across roots; root 0 wins exact match over root 1's exact match |
+| `test_find_file_cross_space.py` | space → root cascade |
+| `test_find_file_overrides.py` | `.override` suffix beats direct file |
+| `test_find_file_folder_config.py` | `.config.yaml` alias map |
+| `test_find_file_sidecar.py` | `.variables.yaml` scoped loading |
+| `test_find_file_dotted_keys.py` | `notes.fallback` → `notes/fallback/...` |
+| `test_find_file_underscore_splits.py` | `notes_mindset` → `notes/mindset/...` AND `notes_mindset/...` |
+| `test_find_file_directory_config.py` | `<name>/config.json` directory-config discovery |
+| `test_read_file_encoding.py` | Encoding handling |
+| `test_list_files_discovery.py` | `_discover_keys` equivalent |
+
+### §6.2 Regression Tests (Existing — Must Stay Green)
+
+All 10 existing test files in `RichPythonUtils/test/.../template_manager/` MUST pass without changes. This proves that the FileSpaceManager refactor is behavior-preserving for current callers.
+
+### §6.3 Integration Tests
+
+| Test | Purpose |
+|---|---|
+| `test_aggregator_master_version_e2e.py` (RPU) | Render aggregator's `task_preamble` with master_version="aggregation"; assert content == aggregation.jinja2 content |
+| `test_create_role_aggregation_e2e.py` (RPU) | Render aggregator's `task_instructions` with master_version="aggregation", version="create_role"; assert content == OS-specific create_role.jinja2 (Wave 1 file #6) |
+| `test_back_compat_pass3.py` (RPU) | A fixture that still uses pre-migration `aggregation.jinja2` (flat) resolves correctly via Pass 3 |
+
+### §6.4 Production E2E
+
+After all code + filesystem changes land:
+1. `create_role` real-CLI run with MLE role
+2. Inspect aggregator's `InferenceInput/*.txt`
+3. **Pass criterion**: contains "aggregating" (i.e., `aggregation.jinja2` content rendered)
+
+---
+
+## §7 Phasing (Sequenced Execution)
+
+| Phase | Duration | Deliverable | Validation Gate |
+|---|---|---|---|
+| **P1** | 2h | `FileSpaceManager` module (~600 lines) + unit tests (12 files) | All P1 tests green |
+| **P2** | 2h | Migrate `FileBasedVariableManager` internals to delegate | All 10 existing tests still green |
+| **P3** | 2h | Migrate `TemplateManager` internals to delegate | All 10 existing tests still green |
+| **P4** | 1h | Add `template_master_version` to TemplateManager + InferencerBase | New AF unit test passes |
+| **P5** | 30min | Migrate 6 Wave-1 files via `git mv` | Filesystem inventory matches §5.1 |
+| **P6** | 30min | Update `template_defaults.py` SLOT_DEFAULTS: aggregator gets `template_master_version="aggregation"` | YAML render test passes |
+| **P7** | 1h | RPU integration tests (3 files §6.3) | All green |
+| **P8** | 1h | Production E2E (`create_role` MLE run) | Aggregator input contains "aggregating" |
+| **P9** | 30min | Documentation: README in `file_space_manager/`, update `VERIFICATION.md` with new audit checks | Doc review passes |
+
+**Total**: ~10.5 hours
+
+**Stop-gate after each phase**: if validation fails, do not proceed.
+
+---
+
+## §8 Acceptance Criteria
+
+| # | Criterion | Verified By |
+|---|---|---|
+| AC1 | `FileSpaceManager.find_file` resolves all 6 fixture patterns (§6.1) | Unit tests |
+| AC2 | Constraint A is enforced (Pass 2A skipped when master_version set) | Unit test `test_find_file_constraint_a.py` |
+| AC3 | All 10 existing RPU template_manager tests pass | Regression run |
+| AC4 | `_find_in_variable_folder` in template_manager.py is DELETED (no longer present in code) | `grep` returns 0 hits |
+| AC5 | `_cascade_load_variable_path` in template_manager.py is ≤20 lines (delegates) | Line count |
+| AC6 | `TemplatedInferencerBase` exposes `template_master_version` attrib | Attribute audit |
+| AC7 | Aggregator's InferenceInput contains "aggregating" in next `create_role` run | E2E run |
+| AC8 | Back-compat: non-migrated `aggregation.jinja2` flat file still resolves via Pass 3 | Unit test |
+| AC9 | All 6 Wave-1 files migrated; old paths gone | `git status` + filesystem check |
+| AC10 | Aggregator's `task_instructions` for `create_role` resolves to OpenStartup-specific file (NOT default) | E2E inspection |
+
+---
+
+## §9 Risks & Mitigations
+
+| # | Risk | Mitigation |
+|---|---|---|
+| R1 | Refactor breaks subtle behavior in `_find_variable_file_with_slash` | Port behavior 1:1; cover with regression tests |
+| R2 | YAML sidecar scoped storage interacts oddly with multi-root | Keep sidecar storage in `FileBasedVariableManager` (per §4.2); FileSpaceManager only does the file READ |
+| R3 | Override-suffix priority differs across managers | Codify in `VersionCascade` once; remove duplicate logic |
+| R4 | Constraint A breaks existing flat-version lookups when caller didn't realize they were setting master_version | Document loud + add lint check (warn if master_version is set without explicit intent in inferencer config) |
+| R5 | Pass 3 back-compat masks migration bugs (file should have moved but didn't) | After P5, run a "stale flat-file scan" that warns on any `{folder}.{master}.{ext}` matching a known master_version |
+| R6 | Cross-root sidecar overwrite=False semantics get lost | Pin down in `FileBasedVariableManager.get_all_variables` + add multi-root sidecar test |
+| R7 | Performance regression from extra abstraction layer | Benchmark a 100-variable resolution before/after; target <5% slowdown |
+| R8 | Production runs break before E2E lands | Roll out behind feature flag (e.g., `FILE_SPACE_MANAGER_ENABLED=true`) for first 24h |
+| R9 | The "scope tax" — too many open files during a single render | Cache resolved paths per-render (memoize within `__call__`) |
+| R10 | Documentation drift between manager docstrings and FileSpaceManager docstrings | Single canonical doc in `file_space_manager/README.md`; both managers' docstrings link to it |
+
+---
+
+## §10 Open Questions
+
+| OQ | Question | Default Position |
+|---|---|---|
+| OQ1 | Should `template_version` and `template_master_version` co-exist, or should master replace version when both are wanted? | Co-exist. They have different semantics — version says "which variant", master says "which qualified family". |
+| OQ2 | Should FileSpaceManager support multi-root WRITE (e.g., for `set` overrides)? | NO — write to root[0] only, by convention |
+| OQ3 | Should the `master_version` cascade support multi-level masters? (e.g., `aggregation/role_creation/default.jinja2`) | NOT in v2.0. Defer to v2.1 if a real need emerges. |
+| OQ4 | Should `FileSpaceManager` be Pythonic-multi-callable (`__call__`) instead of explicit `find_file`? | NO — explicit method names are clearer for refactor |
+| OQ5 | Should we deprecate Pass 3 immediately or keep indefinitely? | KEEP for v2.0; revisit in v2.x once filesystem is fully migrated |
+| OQ6 | Should TemplatedInferencerBase auto-derive `template_master_version` from a tag (e.g., `is_aggregator=True`)? | NO — explicit attrib is clearer; SLOT_DEFAULTS already provides the convention |
+
+---
+
+## §11 Provenance / Change History
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| v1.0 | 2026-05-23 05:34 | Rovo Dev | Initial plan: add `master_version` to two implementations |
+| v2.0 | 2026-05-23 06:04 | Rovo Dev | Replaced v1.0 strategy: extract `FileSpaceManager` abstraction; master_version becomes a feature of it. Triggered by user feedback to consolidate duplicated cascade logic between template_manager.py and file_based.py. |
+| v2.1 | 2026-05-23 07:05 | Rovo Dev | Added §3.8 (`_variables`↔`.variables` prefix equivalence), §3.9 (`.config.yaml` LOCAL-only, NOT cascading), §3.10 (10 locked-in design decisions); upgraded API to URI-shape `ResolvedContent` return; defined `FieldBackend` Protocol now (only `FileBackend` implemented); deferred yaml/json field backends to v2.2/v2.3; added `explain()` diagnostic method; updated §4.2/§4.3 method signatures to `resolve()`/`read()` API. Per user feedback "no urgent fix; we need to first get the mechanism right to avoid coming back to fix again". |
+
+
