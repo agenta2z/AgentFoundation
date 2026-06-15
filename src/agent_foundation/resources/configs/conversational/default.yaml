@@ -1,0 +1,37 @@
+# Default ConversationalInferencer config (framework default).
+#
+# The canonical CI for AgentFoundation consumers. OpenStartup (and any external
+# consumer) SHOULD load this rather than hand-construct the CI.
+#
+# Underscore-prefix injectables (_debug_mode, _model_name) cascade to EVERY
+# descendant _target_ node at config-instantiation time via _instantiate.py's
+# verified cascade — so `_debug_mode: true` reaches the backend leaf. Override
+# by setting the matching named field on a specific child.
+#
+# Framework default keeps debug OFF (conservative). The OpenStartup session
+# factory (_wrap_in_conversational) loads THIS file directly and injects its
+# pre-built backend `base`, so these wrapper values (max_iterations,
+# soft_max_iterations, compression_threshold) govern live server sessions.
+# Operators opt into debug at runtime via the OPENTEAM_DEBUG_MODE env var
+# (the factory then calls enable_debug_mode(), which cascades to the backend).
+
+_debug_mode: false
+_model_name: opus[1m]
+
+_target_: Conversational
+# base_inferencer is normally selected by build_ci_from_config(backend=...) which
+# loads base_inferencer/<backend>.yaml; this is the fallback when no backend is given.
+base_inferencer: ClaudeCodeCLI
+# Max agentic-loop rounds per message. Set to <= 0 (or false/null) to mean
+# "no fixed cap" — run until the model stops on its own (final answer / async
+# dispatch / user handback), bounded only by a high internal safety ceiling.
+# We rely on the model's self-governance (soft_max_iterations) instead.
+max_iterations: -1
+# Soft, prompt-level self-governance threshold (rounds). Injected into the
+# conversation template as {{ soft_max_iterations }}: the model is told to stop
+# and use the confirmation tool if it makes no meaningful progress after this
+# many consecutive autonomous rounds. Guidance only (model self-assesses from
+# context); null/0 disables the instruction.
+soft_max_iterations: 30
+compression_threshold: 8000
+

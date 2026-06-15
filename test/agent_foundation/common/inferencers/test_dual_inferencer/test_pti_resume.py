@@ -267,7 +267,7 @@ class TestPTISynthesizeCheckpoint(unittest.TestCase):
 
         self.assertIsNotNone(ckpt)
         self.assertEqual(ckpt["next_step_index"], 2)  # implement step
-        self.assertEqual(ckpt["state"]["plan_output_text"], "plan content")
+        self.assertEqual(ckpt["state"]["plan_text"], "plan content")
         self.assertTrue(ckpt["state"]["plan_approved"])
 
     def test_synthesize_creates_sentinel_file(self):
@@ -354,8 +354,8 @@ class TestPTIBuildResponse(unittest.TestCase):
             "iteration": 1,
             "current_input": "req",
             "original_request": "req",
-            "plan_output_text": "the plan",
-            "plan_file_path": "/tmp/plan.md",
+            "plan_text": "the plan",
+            "plan_path": "/tmp/plan.md",
             "plan_approved": True,
             "executor_output_text": "the implementation",
             "should_continue": False,

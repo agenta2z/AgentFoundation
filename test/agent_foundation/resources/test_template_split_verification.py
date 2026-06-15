@@ -204,3 +204,69 @@ class TestSharedVariableLoading:
         )
         assert "Now start your decomposition" in rendered
         assert "UndefinedError" not in rendered
+
+    def test_task_breakdown_implementation_version_resolves_task_instructions(self) -> None:
+        """With per-variable version 'implementation', task_instructions resolves
+        to task_breakdown/main/_variables/task_instructions/implementation/default.jinja2."""
+        from rich_python_utils.string_utils.formatting.template_manager import (
+            TemplateManager,
+        )
+
+        tm = TemplateManager(
+            templates=str(AF_TEMPLATES_ROOT),
+            active_template_type="main",
+        )
+        result = tm.load_variables(
+            {"task_instructions": "implementation"},
+            root_space="task_breakdown",
+        )
+        assert "task_instructions" in result, (
+            "task_instructions should resolve with version='implementation'"
+        )
+        content = result["task_instructions"]
+        assert "execution/implementation" in content, (
+            "Implementation task_instructions should contain 'execution/implementation'"
+        )
+        assert "non-overlapping" in content.lower(), (
+            "Implementation task_instructions should mention non-overlapping"
+        )
+        assert "Reference plan sections" in content, (
+            "Implementation task_instructions should instruct to reference plan sections"
+        )
+
+    def test_task_breakdown_implementation_instructions_render_in_template(self) -> None:
+        """Full render: task_breakdown/main/initial.jinja2 with
+        implementation-versioned task_instructions includes the
+        implementation-specific content in the rendered output."""
+        from rich_python_utils.string_utils.formatting.jinja2_format import (
+            format_template,
+        )
+        from rich_python_utils.string_utils.formatting.template_manager import (
+            TemplateManager,
+        )
+
+        tm = TemplateManager(
+            templates=str(AF_TEMPLATES_ROOT),
+            active_template_type="main",
+            template_formatter=format_template,
+        )
+        feed = tm.load_variables(
+            {"task_instructions": "implementation"},
+            root_space="task_breakdown",
+        )
+        rendered = tm(
+            "initial",
+            active_template_root_space="task_breakdown",
+            input="Implement the approved plan",
+            task_preamble="",
+            output_path="/tmp/test_output.md",
+            max_breakdown=4,
+            **feed,
+        )
+        assert "execution/implementation" in rendered, (
+            "Rendered breakdown template with implementation task_instructions "
+            "should contain the implementation-specific content"
+        )
+        assert "Now start your decomposition" in rendered, (
+            "Generic breakdown structure should still render"
+        )

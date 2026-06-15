@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Iterable, Iterator, List, Optional, Sequence, Type, Union
+from typing import Any, AsyncIterator, Callable, ClassVar, Iterable, Iterator, List, Optional, Sequence, Type, Union
 
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
@@ -447,6 +447,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # creating orphan dirs at construction time.
     _workspace_propagation_skip: frozenset = frozenset()
 
+    # Attributes that cascade from a parent inferencer to its direct children
+    # (recursively) when the child has not set an explicit value. Mirrors the
+    # ``_propagate_workspace_to_children`` precedent: explicit child values win.
+    # Each entry is either:
+    #   - a str ``name`` — cascade when the child's value is ``None`` (unset);
+    #   - a ``(name, should_propagate)`` tuple, where
+    #     ``should_propagate(parent_value, child_value) -> bool``.
+    # Subclasses may extend (idiomatic ClassVar inheritance), e.g.:
+    #     _CASCADING_ATTRIBUTES = InferencerBase._CASCADING_ATTRIBUTES + [("x", cond)]
+    _CASCADING_ATTRIBUTES: ClassVar[list] = ["debug_mode"]
+
     def _propagate_workspace_to_children(self, parent_workspace):
         """When a workspace is assigned, give each direct child inferencer a
         child workspace.
@@ -511,6 +522,70 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return None  # factories assigned at runtime; don't mutate
 
         self._for_each_child_inferencer(_on_instance, _on_partial)
+
+    def _propagate_cascading_attributes(self) -> None:
+        """Cascade ``_CASCADING_ATTRIBUTES`` to direct child inferencers, recursively.
+
+        Uses ``_for_each_child_inferencer`` (the attrs-field walker that also
+        backs ``_propagate_workspace_to_children`` and ``template_extra_feed``
+        propagation) so children declared as attrs fields — e.g.
+        ``ConversationalInferencer.base_inferencer`` — are discovered without
+        each subclass overriding ``_iter_child_inferencers``.
+
+        Semantics mirror workspace propagation: an explicit child value wins
+        (only unset children inherit). For each attr the parent's own value
+        must be set (non-``None``) to cascade. ``functools.partial`` factory
+        children are intentionally NOT mutated (``on_partial`` returns ``None``,
+        same as the workspace precedent) — they receive cascaded values at
+        instantiation time via the YAML ``_``-prefix injectable, not here.
+
+        Recursion: after assigning a child, the child's own
+        ``_propagate_cascading_attributes`` runs so the value reaches
+        grandchildren.
+        """
+        for spec in self._CASCADING_ATTRIBUTES:
+            if isinstance(spec, str):
+                name = spec
+                should_propagate = lambda _p, c: c is None
+            else:
+                name, should_propagate = spec
+            parent_val = getattr(self, name, None)
+            if parent_val is None:
+                continue  # parent unset — nothing to cascade for this attr
+
+            def _on_instance(child, field_name, key,
+                             _name=name, _cond=should_propagate, _pv=parent_val):
+                if not isinstance(child, InferencerBase):
+                    return  # duck-typed callables don't participate
+                if _cond(_pv, getattr(child, _name, None)):
+                    setattr(child, _name, _pv)
+                    child._propagate_cascading_attributes()  # reach grandchildren
+
+            def _on_partial(partial, field_name, key):
+                return None  # factory children inherit at instantiation, not here
+
+            self._for_each_child_inferencer(_on_instance, _on_partial)
+
+    def enable_debug_mode(self):
+        """Enable debug mode and cascade it to child inferencers.
+
+        Overrides ``Debuggable.enable_debug_mode`` to additionally run the
+        cascade, so a runtime toggle propagates to children. This is the
+        reliable path for inferencers (e.g. ``ConversationalInferencer``)
+        whose ``__attrs_post_init__`` does not chain ``super()`` and thus do
+        not get the construction-time cascade.
+        """
+        super().enable_debug_mode()
+        self._propagate_cascading_attributes()
+
+    def disable_debug_mode(self):
+        """Disable debug mode and cascade the (explicit ``False``) value.
+
+        Note: cascade only reaches children whose value is still unset
+        (``None``); children with an explicit value keep it (explicit wins).
+        """
+        super().disable_debug_mode()
+        self._propagate_cascading_attributes()
 
     def _configure_for_workspace(self, workspace):
         """Auto-configure infrastructure when a workspace is assigned.
@@ -658,6 +733,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     break
 
         super().__attrs_post_init__()
+
+        # Cascade declared infrastructure attrs (e.g. debug_mode) to children
+        # passed at construction time. Subclasses that override
+        # __attrs_post_init__ MUST call super() for this to run; orchestrators
+        # (Dual/BTA/PTI/LWI/MFDual/MultiFlow) do. NOTE: ConversationalInferencer
+        # does NOT call super() today, so it relies on enable_debug_mode() /
+        # the YAML cascade instead (see plan F1).
+        self._propagate_cascading_attributes()
 
     def _for_each_child_inferencer(self, on_instance, on_partial):
         """Walk attrs fields and invoke callbacks for child inferencers.

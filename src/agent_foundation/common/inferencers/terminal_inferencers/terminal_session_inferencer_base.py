@@ -303,6 +303,7 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                     try:
                         line = read_task.result()
                     except asyncio.IncompleteReadError as e:
+                        logger.info("[%s] _exit_detect: IncompleteReadError (partial=%d bytes)", self.__class__.__name__, len(e.partial) if e.partial else 0)
                         if e.partial:
                             yield e.partial.decode("utf-8", errors="replace")
                         break
@@ -316,13 +317,16 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                         _fell_back_to_chunked = True
                         continue
                     if not line:  # EOF
+                        logger.info("[%s] _exit_detect: EOF on stdout", self.__class__.__name__)
                         break
                     yield line.decode("utf-8", errors="replace")
 
                     # If exit also fired simultaneously, drain and break
                     if exit_task in done:
+                        logger.info("[%s] _exit_detect: read+exit simultaneous — breaking", self.__class__.__name__)
                         break
                 elif exit_task in done:
+                    logger.info("[%s] _exit_detect: exit fired while read pending — draining (timeout=%.1fs)", self.__class__.__name__, self.subprocess_exit_drain_timeout)
                     # Process exited but readline is stuck on pipe.
                     # Cancel the stuck read and drain buffered output.
                     read_task.cancel()
@@ -372,6 +376,7 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
         """
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
+        logger.info("[%s] subprocess command: %s", self.__class__.__name__, full_command[:500])
 
         process = await asyncio.create_subprocess_shell(
             full_command,

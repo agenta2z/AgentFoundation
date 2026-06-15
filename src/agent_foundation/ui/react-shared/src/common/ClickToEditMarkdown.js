@@ -94,7 +94,7 @@ const ClickToEditMarkdown = ({
               lineHeight: 1.6,
               fontFamily: 'monospace',
             },
-          }}
+          })}
         />
         <Typography
           variant="caption"

@@ -9,7 +9,7 @@
 import React, { useState } from 'react';
 import { Box, Typography, Collapse } from '@mui/material';
 import { Psychology as ThinkingIcon } from '@mui/icons-material';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 
 /**
  * Strip tool invocation blocks from content.

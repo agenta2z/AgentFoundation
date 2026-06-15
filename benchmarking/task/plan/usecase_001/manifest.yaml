@@ -1,0 +1,144 @@
+# manifest.yaml — top-level machine-readable index for usecase_001
+# This is the file an automated runner reads first to understand the benchmark.
+
+usecase:
+  id: usecase_001
+  family: plan
+  task_class: plan-quality-evaluation
+  created_at: "2026-06-06T11:09:00-07:00"
+  created_by: tony (Tony Chen <tchen7@atlassian.com>)
+  self_path: benchmarking/task/plan/usecase_001
+  schema_version: "1.0"
+
+description: |
+  Compare and score three candidate plans that all answer the same upstream
+  request (designing an atlassian-agi data-builder package + post-training
+  corpus strategy). The benchmark captures the original prompt, the three
+  plans verbatim, the repo state at evaluation time, and a reference judgment
+  produced by Rovo Dev on 2026-06-06. Re-running the evaluation with a new
+  judge (model / prompt / human) and diffing against the reference judgment
+  measures judge-stability across the candidate set.
+
+inputs:
+  request: request.md
+  plans_dir: plans/
+  plan_index: plan_sources.yaml
+  repo_state: repos.yaml
+  instructions:
+    dir: instructions/
+    template: instructions/judge_instruction.template.md   # reusable, placeholder-based
+    historical_3way: instructions/judge_instruction.3way.md  # verbatim, frozen (typos preserved)
+    historical_4way: instructions/judge_instruction.4way.md  # current canonical
+    renderer: instructions/render_instruction.py           # generic template renderer (Python 3, PyYAML)
+    schema_version: "1.0"
+
+plan_id_to_author_tool:
+  A: Claude Code      # ~/.claude/plans/ → Claude Code's default plans dir
+  B: Rovo Dev         # self-attributed in plan body (line 3 + changelog line 412)
+  C: AgentFoundation  # propose-aggregate pipeline under AgentFoundation/_runtime/
+  D: Cursor           # ~/.cursor/plans/ → Cursor IDE's plan-mode storage (added 2026-06-06 12:20)
+
+reference_outputs:
+  - path: evaluation/2026-06-06_rovo-dev_judgment.md
+    label: "3-way reference judgment (A, B, C)"
+    judge: rovo-dev
+    judge_model_family: anthropic-claude (specific version not disclosed by host)
+    judged_at: "2026-06-06T10:08:00-07:00"
+    judge_independence_note: |
+      The judge (Rovo Dev) is the same tool that authored Plan B. This is a
+      potential self-favoring bias — re-running with a different judge family
+      (e.g., Claude Code or AgentFoundation or Cursor) is recommended for triangulation.
+    coverage:
+      plans_scored: [A, B, C]
+      plans_not_scored: [D]
+      coverage_note: |
+        This reference judgment is a 3-way comparison made on 2026-06-06 ~10:08 PDT,
+        BEFORE Plan D (Cursor) was added to the benchmark on 2026-06-06 12:20. The
+        scores and ranking below cover only {A, B, C}. See the 4-way judgment at
+        evaluation/2026-06-06_rovo-dev_judgment_4way.md for Plan D's score.
+    session_axes_weights:
+      depth: 1.5
+      comprehensiveness: 1.5
+      correctness: 1.5
+      elegance: 1.5
+      operationalizability: 1.0
+    headline_ranking: [C, B, A]   # 1st, 2nd, 3rd per weighted score (3-way only — see coverage)
+    headline_ranking_by_tool:     # human-readable mirror of headline_ranking
+      - {rank: 1, id: C, author_tool: AgentFoundation}
+      - {rank: 2, id: B, author_tool: Rovo Dev}
+      - {rank: 3, id: A, author_tool: Claude Code}
+    headline_scores_over_70:
+      A: 47.5
+      B: 51.0
+      C: 62.5
+      D: null   # not yet judged in this 3-way run
+
+  - path: evaluation/2026-06-06_rovo-dev_judgment_4way.md
+    label: "4-way judgment (A, B, C, D) — supersedes the 3-way as the current canonical ranking"
+    judge: rovo-dev
+    judge_model_family: anthropic-claude (specific version not disclosed by host)
+    judged_at: "2026-06-06T12:25:00-07:00"
+    predecessor: evaluation/2026-06-06_rovo-dev_judgment.md
+    judge_independence_note: |
+      Same judge (Rovo Dev) as 3-way; same self-evaluation bias caveat applies
+      to Plan B. The 4-way ranking demotes Plan B from 2nd to 3rd, which is
+      evidence AGAINST naive self-favoring bias — but the bias remains a
+      concern worth triangulating against Claude Code / AgentFoundation /
+      Cursor as alternative judges.
+    coverage:
+      plans_scored: [A, B, C, D]
+      plans_not_scored: []
+      coverage_note: |
+        Full coverage. This is the current canonical judgment. The 3-way
+        predecessor is preserved for judge-stability analysis (per §7 of
+        the 4-way judgment, A/B/C scores were NOT revised between runs —
+        only D was added; this is a deliberate stability discipline).
+    session_axes_weights:
+      depth: 1.5
+      comprehensiveness: 1.5
+      correctness: 1.5
+      elegance: 1.5
+      operationalizability: 1.0
+    headline_ranking: [C, D, B, A]   # 1st, 2nd, 3rd, 4th per weighted score
+    headline_ranking_by_tool:
+      - {rank: 1, id: C, author_tool: AgentFoundation}
+      - {rank: 2, id: D, author_tool: Cursor}
+      - {rank: 3, id: B, author_tool: Rovo Dev}
+      - {rank: 4, id: A, author_tool: Claude Code}
+    headline_scores_over_70:
+      A: 47.5   # unchanged from 3-way
+      B: 51.0   # unchanged from 3-way
+      C: 62.5   # unchanged from 3-way
+      D: 58.0   # new
+    rubric_sensitivity_finding: |
+      §4 of the 4-way judgment explicitly notes the ranking is rubric-sensitive:
+      under a build-today-weighted rubric ({correctness: 2.0, operationalizability: 1.5},
+      others as-is), Plan D overtakes Plan C (61.5 vs 60.5). This is worth
+      surfacing because "which plan wins" depends on whether the decision is
+      "design for 6-month integration" (C wins) or "start building today" (D wins).
+
+reproduce:
+  scripts:
+    capture: scripts/capture.sh
+    restore: scripts/restore.sh
+    render_instruction: instructions/render_instruction.py
+  steps:
+    - "1. (optional) bash scripts/restore.sh   # fetches + checks out pinned commits in repos.yaml; plans/ is self-sufficient"
+    - "2. Verify md5s in plan_sources.yaml match plans/*.md (drift check)."
+    - "3. Use the canonical judge instruction at instructions/judge_instruction.4way.md (current) OR"
+    - "   instructions/judge_instruction.3way.md (frozen historical) OR"
+    - "   render a fresh one: python3 instructions/render_instruction.py"
+    - "4. Give the judge: instruction + the N plans in plans/. Optional: also provide request.md if scoring fidelity-to-upstream-prompt."
+    - "5. Capture the new judgment under evaluation/<YYYY-MM-DD>_<judge>_judgment.md."
+    - "6. Compare new ranking + scores against reference_outputs[*].headline_*."
+
+acceptance_criteria_for_replay:
+  - "All three plan md5s in plan_sources.yaml match the files in plans/."
+  - "Both repo commits in repos.yaml are reachable after restore.sh."
+  - "Judge produces a ranking of {A, B, C} with a numeric weighted score per plan."
+  - "Judge addresses all 4 top-weighted axes (depth, comprehensiveness, correctness, elegance) per plan."
+
+notes:
+  - "This is a JUDGE-stability benchmark, not a code-execution benchmark."
+  - "The reference judgment is one data point; subsequent judgments are diffed against it but are not required to match."
+  - "If repos.yaml commits become unreachable, plans/ is still authoritative for the eval input."

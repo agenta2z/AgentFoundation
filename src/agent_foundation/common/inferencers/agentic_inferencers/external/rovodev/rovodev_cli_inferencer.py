@@ -525,6 +525,49 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     # Override: _yield_filter() — ANSI stripping for streaming
     # =========================================================================
 
+    async def _safe_process_cleanup(
+        self, process: "asyncio.subprocess.Process", timeout: float = 5.0
+    ) -> None:
+        """Wait for --output-file before killing the process group.
+
+        The base class kills the entire process group in cleanup. But in
+        legacy mode, the child agent is STILL writing the --output-file
+        when the main ``acli`` process exits. We must wait for the file
+        to appear with content before the process group is killed,
+        otherwise the clean response is lost forever.
+        """
+        import asyncio
+        import time as _time
+
+        if self.enable_legacy:
+            output_path = _current_output_file.get(None) or self.output_file
+            if output_path:
+                p = Path(output_path)
+                max_wait = min(self.idle_timeout_seconds or 120, 120)
+                start = _time.monotonic()
+                while _time.monotonic() - start < max_wait:
+                    if p.exists() and p.stat().st_size > 0:
+                        try:
+                            content = p.read_text(encoding="utf-8").strip()
+                            if content:
+                                self._last_clean_output = content
+                                logger.info(
+                                    "[%s] output file ready after %.1fs (%d chars)",
+                                    self.__class__.__name__,
+                                    _time.monotonic() - start, len(content),
+                                )
+                                break
+                        except OSError:
+                            pass
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(
+                        "[%s] output file %s still empty after %.0fs — killing",
+                        self.__class__.__name__, output_path,
+                        _time.monotonic() - start,
+                    )
+        await super()._safe_process_cleanup(process, timeout)
+
     def _get_clean_output_for_cache(self) -> Optional[str]:
         """Read clean output from --output-file while it still exists.
 

@@ -465,10 +465,29 @@ class DualInferencer(LinearWorkflowInferencer):
 
         The canonical child is tracked by ``_last_output_child_ws``,
         set by ``_step_propose_impl`` and ``_step_fix_impl``.
+
+        When the fix phase refines the propose output, it typically
+        reproduces ``output_path`` but not auxiliary deliverables (e.g.
+        per-proposal files from research-propose).  After surfacing the
+        fix child's deliverables, we merge any propose-phase deliverables
+        that the fix phase did not reproduce — ``_symlink_or_copy`` skips
+        entries that already exist, so the fix output always takes
+        precedence.
         """
         child_ws = getattr(self, "_last_output_child_ws", None)
         if child_ws is not None:
             self._symlink_child_output(child_ws)
+            propose_ws = getattr(self, "_propose_child_ws", None)
+            if propose_ws is not None and propose_ws is not child_ws:
+                propose_fd = getattr(propose_ws, "deliverables_dir", None)
+                own_fd = getattr(self._workspace, "deliverables_dir", None)
+                if propose_fd and own_fd and os.path.isdir(propose_fd):
+                    os.makedirs(own_fd, exist_ok=True)
+                    for entry in os.listdir(propose_fd):
+                        self._symlink_or_copy(
+                            os.path.join(propose_fd, entry),
+                            os.path.join(own_fd, entry),
+                        )
             resolved = self.resolve_output_path()
             if resolved and os.path.isfile(resolved):
                 self._emit_output_manifest(resolved)
@@ -992,6 +1011,7 @@ class DualInferencer(LinearWorkflowInferencer):
         # Track canonical output child for _finalize_output symlink
         if getattr(self.base_inferencer, "_workspace", None) is not None:
             self._last_output_child_ws = self.base_inferencer._workspace
+            self._propose_child_ws = self.base_inferencer._workspace
         _sf = f"Round{state['total_iterations'] + 1:02d}"
         self.log_debug(
             _raw_base,

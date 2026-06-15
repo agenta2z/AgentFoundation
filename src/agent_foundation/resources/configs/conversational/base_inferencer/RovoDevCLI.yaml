@@ -1,0 +1,11 @@
+# Rovo Dev CLI backend for the default conversational inferencer.
+# Inherits _debug_mode / _model_name from the parent via _instantiate.py's
+# underscore-prefix cascade. target_path / cache_folder are runtime values
+# injected by the host (build_ci_from_config sets target_path; the OpenStartup
+# factory sets cache_folder from its per-session cache dir).
+_target_: RovoDevCLI
+model_id: opus[1m]
+yolo: true
+idle_timeout_seconds: 600
+tool_use_idle_timeout_seconds: 600
+enable_legacy: true

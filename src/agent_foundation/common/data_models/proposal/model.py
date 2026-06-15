@@ -6,8 +6,25 @@ batches) go in ``Proposal.metadata`` or in subclasses.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+
+def _as_list(x: Any) -> list[str]:
+    """Normalise a scalar OR list into a ``list[str]``.
+
+    Real LLM constraint output emits the ``from``/``to`` edge fields as either a
+    single id (``"P5"``) or a list of ids (``["P1", "P3"]``); both must
+    round-trip to ``list[str]`` so downstream consumers never branch on type.
+    """
+    if x is None:
+        return []
+    if isinstance(x, (list, tuple)):
+        return [str(i) for i in x]
+    return [str(x)]
 
 
 @dataclass
@@ -131,13 +148,21 @@ class ProposalConstraint:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ProposalConstraint:
+        # Tolerant of real LLM constraint dialects, which deviate from the
+        # canonical schema. Aliases observed in production output:
+        #   kind         <- type
+        #   proposal_ids <- from   (scalar or list)
+        #   requires_ids <- to     (scalar or list)
+        #   reason       <- rule | note
+        # Missing keys fall back to sensible defaults rather than raising
+        # KeyError, so a single odd constraint cannot abort the whole parse.
         return cls(
-            id=d["id"],
-            kind=d["kind"],
-            proposal_ids=list(d.get("proposal_ids", [])),
-            requires_ids=list(d.get("requires_ids", [])),
+            id=str(d.get("id", "")),
+            kind=str(d.get("kind", d.get("type", "unknown"))),
+            proposal_ids=_as_list(d.get("proposal_ids", d.get("from"))),
+            requires_ids=_as_list(d.get("requires_ids", d.get("to"))),
             label=d.get("label", ""),
-            reason=d.get("reason", ""),
+            reason=d.get("reason", d.get("rule", d.get("note", ""))),
             severity=d.get("severity", "error"),
         )
 
@@ -187,15 +212,23 @@ class ProposalIndex:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ProposalIndex:
+        # Per-constraint tolerance: a single malformed constraint must never
+        # discard the whole index (which would lose every valid proposal too).
+        # Bad constraints are logged and skipped; everything else is kept.
+        constraints: list[ProposalConstraint] = []
+        for c in d.get("constraints", []):
+            try:
+                constraints.append(ProposalConstraint.from_dict(c))
+            except Exception as exc:  # noqa: BLE001 — defence-in-depth at parse boundary
+                _logger.warning(
+                    "Skipping malformed proposal constraint %r: %s", c, exc
+                )
         return cls(
             version=str(d.get("version", "1")),
             created_at=d.get("created_at", ""),
             source_workspace=d.get("source_workspace", ""),
             total_count=int(d.get("total_count", 0)),
             groups=[ProposalGroup.from_dict(g) for g in d.get("groups", [])],
-            constraints=[
-                ProposalConstraint.from_dict(c)
-                for c in d.get("constraints", [])
-            ],
+            constraints=constraints,
             warnings=list(d.get("warnings", [])),
         )

@@ -58,6 +58,14 @@ from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_field, artifact_type
 
 
+# ---------------------------------------------------------------------------
+# State dict field name constants — used as keys in the workflow state dict
+# passed between PTI steps. Constants prevent silent typo bugs and enable
+# IDE rename-refactoring.
+# ---------------------------------------------------------------------------
+FIELD_PLAN_TEXT = "plan_text"
+FIELD_PLAN_PATH = "plan_path"
+
 # region Data Structures
 
 
@@ -1262,17 +1270,31 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # -- Plan detection: child workspace then legacy --
         plan_file = None
 
-        child_plan_final = ws.child_output("planner", "plan.md")
-        if os.path.isfile(child_plan_final):
-            plan_file = child_plan_final
-        else:
-            child_art_dir = os.path.join(ws.children_dir, "planner", "artifacts")
-            if os.path.isdir(child_art_dir):
-                child_files = glob.glob(
-                    os.path.join(child_art_dir, "round*_plan.md")
+        # Check planner child workspace — try both the actual attribute name
+        # and the deliverables folder (where the planner Dual writes its final output).
+        for planner_child in ("planner_inferencer", "planner"):
+            for output_name in ("output.md", "plan.md"):
+                candidate = ws.child_output(planner_child, output_name)
+                if os.path.isfile(candidate):
+                    plan_file = candidate
+                    break
+            if plan_file is None:
+                deliv = os.path.join(
+                    ws.children_dir, planner_child, "outputs",
+                    "final_deliverables", "output.md",
                 )
-                if child_files:
-                    plan_file = max(child_files, key=self._extract_round)
+                if os.path.isfile(deliv):
+                    plan_file = deliv
+            if plan_file is None:
+                child_art_dir = os.path.join(ws.children_dir, planner_child, "artifacts")
+                if os.path.isdir(child_art_dir):
+                    child_files = glob.glob(
+                        os.path.join(child_art_dir, "round*_plan.md")
+                    )
+                    if child_files:
+                        plan_file = max(child_files, key=self._extract_round)
+            if plan_file is not None:
+                break
 
         if plan_file is None:
             legacy_files = glob.glob(
@@ -1293,17 +1315,29 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # -- Implementation detection: child workspace then legacy --
         impl_file = None
 
-        child_impl_final = ws.child_output("executor", "implementation.md")
-        if os.path.isfile(child_impl_final):
-            impl_file = child_impl_final
-        else:
-            child_art_dir = os.path.join(ws.children_dir, "executor", "artifacts")
-            if os.path.isdir(child_art_dir):
-                child_files = glob.glob(
-                    os.path.join(child_art_dir, "round*_implementation.md")
+        for executor_child in ("executor_inferencer", "executor"):
+            for output_name in ("output.md", "implementation.md"):
+                candidate = ws.child_output(executor_child, output_name)
+                if os.path.isfile(candidate):
+                    impl_file = candidate
+                    break
+            if impl_file is None:
+                deliv = os.path.join(
+                    ws.children_dir, executor_child, "outputs",
+                    "final_deliverables", "output.md",
                 )
-                if child_files:
-                    impl_file = max(child_files, key=self._extract_round)
+                if os.path.isfile(deliv):
+                    impl_file = deliv
+            if impl_file is None:
+                child_art_dir = os.path.join(ws.children_dir, executor_child, "artifacts")
+                if os.path.isdir(child_art_dir):
+                    child_files = glob.glob(
+                        os.path.join(child_art_dir, "round*_implementation.md")
+                    )
+                    if child_files:
+                        impl_file = max(child_files, key=self._extract_round)
+            if impl_file is not None:
+                break
 
         if impl_file is None:
             legacy_files = glob.glob(
@@ -1762,8 +1796,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             "iteration": iteration,
             "current_input": current_input,
             "original_request": original_request,
-            "plan_output_text": "",
-            "plan_file_path": None,
+            FIELD_PLAN_TEXT: "",
+            FIELD_PLAN_PATH: None,
             "plan_approved": None,
             "executor_output_text": "",
             "should_continue": False,
@@ -1779,8 +1813,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             iter_ws = self._get_iteration_workspace(base_workspace, iteration)
             plan_str, plan_file = self._load_existing_plan(iter_ws)
             if plan_str:
-                state["plan_output_text"] = plan_str
-                state["plan_file_path"] = plan_file
+                state[FIELD_PLAN_TEXT] = plan_str
+                state[FIELD_PLAN_PATH] = plan_file
                 state["_resume_plan_for_review"] = True
 
         # Load completed data for partially-done iterations
@@ -1788,8 +1822,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             plan_str, plan_file = self._load_existing_plan(
                 self._get_iteration_workspace(base_workspace, iteration)
             )
-            state["plan_output_text"] = plan_str
-            state["plan_file_path"] = plan_file
+            state[FIELD_PLAN_TEXT] = plan_str
+            state[FIELD_PLAN_PATH] = plan_file
             state["plan_approved"] = True
 
         if resume_phase in ("analysis", "new_iteration"):
@@ -1926,9 +1960,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if not self.enable_planning:
             if ws:
                 plan_str, plan_path = self._load_existing_plan(ws)
-                state["plan_output_text"] = plan_str
-                state["plan_file_path"] = plan_path
-            return state.get("plan_output_text", "")
+                state[FIELD_PLAN_TEXT] = plan_str
+                state[FIELD_PLAN_PATH] = plan_path
+            return state.get(FIELD_PLAN_TEXT, "")
 
         inference_config = self._current_inference_config or {}
         _inference_args = self._current_inference_args or {}
@@ -1948,7 +1982,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if iteration > 1 and self.reset_sessions_per_meta_iteration:
             await self._reset_sub_inferencers_for_meta_iteration()
 
-        # Inject initial plan file override (first iteration only)
+        # --use-plan: place the plan where the planner would have written it
+        # (children/planner_inferencer/outputs/final_deliverables/output.md),
+        # write the .plan_completed marker, and return. PTI's resume detection
+        # (_detect_workspace_state) sees the planner output + marker → treats
+        # planning as done → proceeds directly to implementation.
         if self.initial_plan_file and iteration == 1:
             if not os.path.isfile(self.initial_plan_file):
                 raise FileNotFoundError(
@@ -1956,17 +1994,31 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 )
             with open(self.initial_plan_file) as f:
                 plan_text = f.read()
-            # Copy initial plan to workspace as round0_plan.md
             if ws:
-                initial_plan_output = os.path.join(ws, "outputs", "round0_plan.md")
-                os.makedirs(os.path.dirname(initial_plan_output), exist_ok=True)
-                with open(initial_plan_output, "w") as f:
-                    f.write(plan_text)
-                self.log_info(
-                    f"[{self.planner_phase}] Copied initial plan to "
-                    f"{initial_plan_output}"
+                from agent_foundation.common.inferencers.inferencer_workspace import (
+                    InferencerWorkspace,
                 )
-            plan_ic = {**plan_ic, "initial_response_override": plan_text}
+                pti_ws = InferencerWorkspace(root=ws)
+                # Write to the planner's deliverables — same location as if
+                # the planner Dual had run and finalized its output.
+                planner_ws = pti_ws.child("planner_inferencer")
+                planner_ws.ensure_dirs()
+                plan_output = os.path.join(
+                    planner_ws.root, "outputs", "final_deliverables", "output.md",
+                )
+                os.makedirs(os.path.dirname(plan_output), exist_ok=True)
+                with open(plan_output, "w") as f:
+                    f.write(plan_text)
+                pti_ws.write_marker("plan")
+                self.log_info(
+                    f"[{self.planner_phase}] Using provided plan: {plan_output} "
+                    f"(planning skipped)"
+                )
+            else:
+                plan_output = self.initial_plan_file
+            state[FIELD_PLAN_TEXT] = plan_text
+            state[FIELD_PLAN_PATH] = plan_output
+            return plan_text
 
         # Resume with existing plan for review: plan_partial=True means
         # the plan content exists but was never confirmed complete (e.g.,
@@ -1974,7 +2026,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # the existing plan as initial_response_override so the
         # DualInferencer skips propose and goes directly to review.
         if state.get("_resume_plan_for_review") and not self.initial_plan_file:
-            existing_plan = state.get("plan_output_text", "")
+            existing_plan = state.get(FIELD_PLAN_TEXT, "")
             if existing_plan:
                 plan_ic = {**plan_ic, "initial_response_override": existing_plan}
                 self.log_info(
@@ -1995,8 +2047,13 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if self.planner_outputs_plan_to_file:
             plan_file_path = self._resolve_plan_file_path(plan_ic)
 
-        state["plan_output_text"] = plan_str
-        state["plan_file_path"] = plan_file_path
+        # When the plan file exists on disk, _build_executor_input uses the
+        # file path reference — the executor reads the file directly. No need
+        # to duplicate the full plan content in FIELD_PLAN_TEXT (which would
+        # bloat the state dict and context). The <Response> extract in plan_str
+        # is kept as a lightweight summary for logging/records only.
+        state[FIELD_PLAN_TEXT] = plan_str
+        state[FIELD_PLAN_PATH] = plan_file_path
         # Store iter_config in state for implement/analysis steps
         state["_iter_config"] = iter_config
         state["_plan_response"] = result
@@ -2010,7 +2067,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
     async def _step_approval_impl(self, step_input, state):
         """Approval step: optionally pause for human approval of the plan."""
-        plan_str = state.get("plan_output_text", "")
+        plan_str = state.get(FIELD_PLAN_TEXT, "")
 
         if self.interactive is None:
             state["plan_approved"] = True
@@ -2111,8 +2168,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if state.pop("_impl_was_partially_attempted", False):
             self._step_was_previously_attempted = True
 
-        plan_str = state.get("plan_output_text", "")
-        plan_file_path = state.get("plan_file_path")
+        plan_str = state.get(FIELD_PLAN_TEXT, "")
+        plan_file_path = state.get(FIELD_PLAN_PATH)
         executor_input = self._build_executor_input(
             state["current_input"], plan_str, plan_file_path=plan_file_path
         )
@@ -2202,9 +2259,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 record = MetaIterationRecord(
                     iteration=state["iteration"],
                     workspace_path=ws,
-                    plan_output=state.get("plan_output_text", ""),
+                    plan_output=state.get(FIELD_PLAN_TEXT, ""),
                     executor_output=state.get("executor_output_text", ""),
-                    plan_file_path=state.get("plan_file_path"),
+                    plan_file_path=state.get(FIELD_PLAN_PATH),
                     plan_approved=state.get("plan_approved"),
                     analysis_output=analysis_str,
                     analysis_doc_path=analysis_doc_path,
@@ -2218,9 +2275,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 record = MetaIterationRecord(
                     iteration=state["iteration"],
                     workspace_path=ws,
-                    plan_output=state.get("plan_output_text", ""),
+                    plan_output=state.get(FIELD_PLAN_TEXT, ""),
                     executor_output=state.get("executor_output_text", ""),
-                    plan_file_path=state.get("plan_file_path"),
+                    plan_file_path=state.get(FIELD_PLAN_PATH),
                     plan_approved=state.get("plan_approved"),
                 )
                 from rich_python_utils.common_utils.map_helper import dict__
@@ -2232,9 +2289,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             record = MetaIterationRecord(
                 iteration=state["iteration"],
                 workspace_path=ws,
-                plan_output=state.get("plan_output_text", ""),
+                plan_output=state.get(FIELD_PLAN_TEXT, ""),
                 executor_output=state.get("executor_output_text", ""),
-                plan_file_path=state.get("plan_file_path"),
+                plan_file_path=state.get(FIELD_PLAN_PATH),
                 plan_approved=state.get("plan_approved"),
                 analysis_output=state.get("_analysis_result_text"),
                 test_results_found=self._has_results(os.path.join(ws, "outputs")) if ws else False,
@@ -2261,9 +2318,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 analysis_doc,
                 analysis_summary,
             )
-            state["plan_output_text"] = ""
+            state[FIELD_PLAN_TEXT] = ""
             state["executor_output_text"] = ""
-            state["plan_file_path"] = None
+            state[FIELD_PLAN_PATH] = None
             state["plan_approved"] = None
             # Set up next iteration workspace
             if base_workspace:
@@ -2293,9 +2350,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         record = MetaIterationRecord(
             iteration=state.get("iteration", 1),
             workspace_path=state.get("_current_iteration_workspace"),
-            plan_output=state.get("plan_output_text", ""),
+            plan_output=state.get(FIELD_PLAN_TEXT, ""),
             executor_output=state.get("executor_output_text", ""),
-            plan_file_path=state.get("plan_file_path"),
+            plan_file_path=state.get(FIELD_PLAN_PATH),
             plan_approved=state.get("plan_approved"),
             analysis_output=state.get("_analysis_result_text"),
             should_continue=state.get("should_continue", False),
@@ -2314,9 +2371,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         iteration_records = state.get("iteration_records", [])
 
         # Try to find the last record for response metadata
-        last_plan_output = state.get("plan_output_text", "")
+        last_plan_output = state.get(FIELD_PLAN_TEXT, "")
         last_executor_output = state.get("executor_output_text", "")
-        plan_file_path = state.get("plan_file_path")
+        plan_file_path = state.get(FIELD_PLAN_PATH)
         plan_approved = state.get("plan_approved")
         plan_response = state.get("_plan_response")
         executor_response = state.get("_executor_response")
@@ -2337,7 +2394,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                         workspace_path=rec.get("workspace_path"),
                         plan_output=rec.get("plan_output", ""),
                         executor_output=rec.get("executor_output", ""),
-                        plan_file_path=rec.get("plan_file_path"),
+                        plan_file_path=rec.get(FIELD_PLAN_PATH),
                         plan_approved=rec.get("plan_approved"),
                         analysis_output=rec.get("analysis_output"),
                         analysis_doc_path=rec.get("analysis_doc_path"),
@@ -2646,8 +2703,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             "iteration": 1,
             "current_input": inference_input,
             "original_request": inference_input,
-            "plan_output_text": "",
-            "plan_file_path": None,
+            FIELD_PLAN_TEXT: "",
+            FIELD_PLAN_PATH: None,
             "plan_approved": None,
             "executor_output_text": "",
             "should_continue": False,

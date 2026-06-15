@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import { SmartToy as SmartToyIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { ThinkingFold, stripToolsToInvoke } from './ThinkingFold';
 import { SessionContextBar } from './SessionContextBar';
 import ChatWidgetRenderer from '../protocol/ChatWidgetRenderer';

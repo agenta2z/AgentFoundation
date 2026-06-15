@@ -146,3 +146,109 @@ class TestProposalIndexMethods:
     def test_all_proposals_empty_index(self):
         idx = ProposalIndex()
         assert idx.all_proposals() == []
+
+
+class TestConstraintTolerance:
+    """D2: ``from_dict`` tolerates real LLM constraint dialects without crashing.
+
+    Every case below mirrors a shape actually observed in research-propose
+    output; canonical-schema dicts must remain byte-for-byte unchanged.
+    """
+
+    def test_canonical_schema_round_trip(self):
+        d = {
+            "id": "C1",
+            "kind": "requires",
+            "proposal_ids": ["P2"],
+            "requires_ids": ["P1"],
+        }
+        c = ProposalConstraint.from_dict(d)
+        assert c.id == "C1"
+        assert c.kind == "requires"
+        assert c.proposal_ids == ["P2"]
+        assert c.requires_ids == ["P1"]
+        # Canonical dict round-trips identically (defaults omitted by to_dict).
+        assert c.to_dict() == d
+
+    def test_dialect_alpha_free_form_rule(self):
+        c = ProposalConstraint.from_dict(
+            {"type": "ordering", "rule": "P10 must precede every other proposal."}
+        )
+        assert c.kind == "ordering"
+        assert c.reason == "P10 must precede every other proposal."
+        assert c.id == ""
+        assert c.proposal_ids == []
+        assert c.requires_ids == []
+
+    def test_dialect_beta_scalar_to(self):
+        c = ProposalConstraint.from_dict(
+            {
+                "type": "requires",
+                "from": "P5",
+                "to": "P1",
+                "note": "ORPO benefits most when stacked on Reason-first base.",
+            }
+        )
+        assert c.kind == "requires"
+        assert c.proposal_ids == ["P5"]
+        assert c.requires_ids == ["P1"]
+        assert c.reason == "ORPO benefits most when stacked on Reason-first base."
+
+    def test_dialect_beta_list_to(self):
+        c = ProposalConstraint.from_dict(
+            {"type": "requires", "from": "P4", "to": ["P1", "P3"]}
+        )
+        assert c.proposal_ids == ["P4"]
+        assert c.requires_ids == ["P1", "P3"]
+
+    def test_dialect_beta_reason_not_note(self):
+        c = ProposalConstraint.from_dict(
+            {"type": "recommends", "from": "P3", "to": "P1", "reason": "stronger together"}
+        )
+        assert c.kind == "recommends"
+        assert c.reason == "stronger together"
+
+    def test_completely_empty_dict_uses_defaults(self):
+        c = ProposalConstraint.from_dict({})
+        assert c.id == ""
+        assert c.kind == "unknown"
+        assert c.proposal_ids == []
+        assert c.requires_ids == []
+        assert c.label == ""
+        assert c.reason == ""
+        assert c.severity == "error"
+
+    def test_index_partial_failure_keeps_valid_constraints(self, caplog):
+        import logging
+
+        data = {
+            "version": "1",
+            "total_count": 0,
+            "groups": [],
+            "constraints": [
+                {"type": "requires", "from": "P5", "to": "P1"},
+                "this-is-not-a-dict-and-must-be-skipped",  # malformed
+                {"id": "C2", "kind": "ordering", "rule": "P1 first"},
+            ],
+        }
+        with caplog.at_level(logging.WARNING):
+            idx = ProposalIndex.from_dict(data)
+        # The 2 valid constraints survive; the malformed one is dropped.
+        assert len(idx.constraints) == 2
+        assert idx.constraints[0].proposal_ids == ["P5"]
+        assert idx.constraints[1].kind == "ordering"
+        assert any("malformed proposal constraint" in r.message for r in caplog.records)
+
+    def test_index_with_constraints_does_not_crash_whole_parse(self):
+        # A messy mix still yields a usable index with all proposals intact.
+        data = {
+            "total_count": 1,
+            "groups": [
+                {"phase": 1, "label": "G", "proposals": [
+                    {"id": "P1", "rank": 1, "title": "Keep me"}]},
+            ],
+            "constraints": [{"type": "ordering", "rule": "free form"}],
+        }
+        idx = ProposalIndex.from_dict(data)
+        assert [p.id for p in idx.all_proposals()] == ["P1"]
+        assert idx.constraints[0].kind == "ordering"

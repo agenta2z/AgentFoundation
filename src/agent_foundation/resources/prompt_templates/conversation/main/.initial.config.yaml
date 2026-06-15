@@ -10,6 +10,6 @@ rendering:
   #   be silently stripped by react-markdown, which is fine for tags that
   #   serve as LLM output format instructions like <ActionTools>).
   structural_xml_tags:
-    - WorkflowDescription
-    - WorkflowStatus
-    - WorkflowNextStepGuidance
+    - SOPDescription
+    - SOPStatus
+    - SOPNextStepGuidance

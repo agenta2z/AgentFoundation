@@ -34,6 +34,19 @@ _CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 # resolution always falls through to the preset path.
 _PTI_PRESET_NAMES = {"pti", "pti-simple"}
 
+# Friendly `--config` names that map to a differently-named preset file.
+# Used because (a) a root-level `_import_:` alias YAML does NOT work — the
+# executor sniffs `_target_` from the raw YAML without resolving imports, so an
+# import-only alias would report an empty `_target_` and mis-drive PTI/plan
+# detection — and (b) some canonical files are named for history, not for the
+# `--config` value users type.
+_CONFIG_ALIASES: dict[str, str] = {
+    "full-plan": "breakdown-multiflow-plan",   # coverage + diversity (existing file)
+    "pti": "default",                          # full PTI plan+implement
+    "multiflow": "multiple",                   # diversity-only synonym
+    "conversation": "disabled",                # conversational router (Phase 2)
+}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
@@ -78,6 +91,15 @@ def _resolve_agent_config(spec: str, configs_dir: Path = _CONFIGS_DIR) -> tuple[
             raise ValueError(f"--agent-config file not found: {spec}")
         return ("file", path)
 
+    # Rule 2.5: friendly named aliases (e.g. full-plan, pti, multiflow, conversation).
+    # Only resolves when the target preset file actually exists, so a Phase-2
+    # alias (conversation -> disabled) cleanly falls through until disabled.yaml lands.
+    aliased = _CONFIG_ALIASES.get(spec.lower())
+    if aliased:
+        alias_path = configs_dir / f"{aliased}.yaml"
+        if alias_path.is_file():
+            return ("file", alias_path)
+
     # Rule 3: lower-cased preset filename match
     preset_path = configs_dir / f"{spec.lower()}.yaml"
     if preset_path.is_file():
@@ -93,6 +115,7 @@ def _resolve_agent_config(spec: str, configs_dir: Path = _CONFIGS_DIR) -> tuple[
     # Rule 5: error with helpful suggestions
     import difflib
     available = sorted(p.stem for p in configs_dir.glob("*.yaml"))
+    available.extend(k for k in sorted(_CONFIG_ALIASES) if k not in available)
     close = difflib.get_close_matches(spec.lower(), available, n=3)
     suggest = f"Did you mean: {', '.join(close)}?" if close else f"Available presets: {', '.join(available)}"
     raise ValueError(f"--agent-config '{spec}' is not a known preset, file path, or registered alias. {suggest}")
@@ -109,9 +132,58 @@ def _topology_target_str(source: tuple[str, Any]) -> str:
 
 
 def _topology_is_pti(source: tuple[str, Any]) -> bool:
-    """Detect whether the resolved topology is a PTI variant — for PTI-only flag validation."""
-    target = _topology_target_str(source)
-    return "PlanThenImplementInferencer" in target
+    """Detect whether the resolved topology contains a PTI — either as root or nested.
+
+    The default.yaml wraps PTI inside an outer Dual, so checking only the root
+    _target_ misses it. Read the full config text instead.
+    """
+    kind, payload = source
+    try:
+        text = str(payload) if kind == "inline" else Path(payload).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "PlanThenImplementInferencer" in text or "_target_: PTI" in text
+
+
+_CONVERSATIONAL_TARGETS = {
+    "Conversational", "ConversationalInferencer",
+    "agent_foundation.common.inferencers.agentic_inferencers.conversational"
+    ".conversational_inferencer.ConversationalInferencer",
+}
+
+# Hard cap on nested task/router recursion (router -> task -> router -> ...).
+_MAX_TASK_DEPTH = 2
+
+
+def _topology_is_conversational(source: tuple[str, Any]) -> bool:
+    """True if the resolved topology root is a ConversationalInferencer (the
+    `disabled`/`conversation` router), which the executor hosts via a dedicated
+    agentic-loop path instead of the normal instantiate+ainfer path."""
+    return _topology_target_str(source) in _CONVERSATIONAL_TARGETS
+
+
+def _config_supports_implementation(source: tuple[str, Any]) -> bool:
+    """True if the config contains a PTI / implementation phase that ``--plan`` can
+    toggle or swap (i.e. the full plan+implement ``default.yaml``).
+
+    Plan-only presets (``breakdown``, ``multiple``, ``full-plan`` / the standalone
+    planner) have NO implementation phase, so ``--plan`` must be a clean no-op for
+    them — never the ``enable_implementation=False`` fallback (which would inject a
+    constructor kwarg the plan-only root does not accept).
+
+    Detection is text-based on the raw source (cheap; no instantiation), looking for
+    PTI markers or the implementation toggles a PTI YAML exposes.
+    """
+    kind, payload = source
+    try:
+        text = str(payload) if kind == "inline" else Path(payload).read_text(encoding="utf-8")
+    except OSError:
+        return True  # conservative: preserve legacy behavior if the file can't be read
+    return (
+        "PlanThenImplementInferencer" in text
+        or "_target_: PTI" in text
+        or "enable_implementation" in text
+    )
 
 
 def _parse_yaml_scalar(s: str) -> Any:
@@ -141,7 +213,7 @@ def _parse_overrides(items) -> dict:
 def _resolve_proposal_plan(
     proposal_path: str, proposal_ids_str: Optional[str],
 ) -> Optional[str]:
-    """Load proposals, filter by IDs, format as initial plan, return temp file path."""
+    """Load proposals, filter by IDs, format as plan file, return temp file path."""
     from agent_foundation.common.data_models.proposal.parser import (
         parse_proposal_file,
     )
@@ -337,8 +409,68 @@ def _collapse_dual(cfg: Any) -> int:
     return count
 
 
+_BTA_TARGETS = {
+    "BTA", "BreakdownThenAggregateInferencer",
+    "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers"
+    ".breakdown_then_aggregate_inferencer.BreakdownThenAggregateInferencer",
+}
+_MFDUAL_TARGETS = {
+    "MultiFlowDual", "MultiFlowDualInferencer",
+    "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers"
+    ".multi_flow_dual_inferencer.MultiFlowDualInferencer",
+}
+
+
+def _disable_aggregation(cfg: Any) -> int:
+    """--no-aggregate: set ``disable_aggregator=True`` on every BTA node and
+    ``multi_flow_disable_aggregator=True`` on every MFDual node, so workers run
+    but their outputs are returned as a list (no synthesis). Operates on the
+    plain dict cfg (pre-instantiate), same as ``_collapse_dual``. Returns count.
+
+    Note: ``_factory_:`` markers are rewritten to ``_target_:`` by ``load_config``
+    before this walk runs, so ``_factory_: MultiFlowDual`` worker entries are
+    matched here too.
+    """
+    count = 0
+    if isinstance(cfg, dict):
+        tgt = cfg.get("_target_")
+        if tgt in _BTA_TARGETS:
+            cfg["disable_aggregator"] = True
+            count += 1
+        elif tgt in _MFDUAL_TARGETS:
+            cfg["multi_flow_disable_aggregator"] = True
+            count += 1
+        for v in cfg.values():
+            count += _disable_aggregation(v)
+    elif isinstance(cfg, list):
+        for v in cfg:
+            count += _disable_aggregation(v)
+    return count
+
+
+def _serialize_multi_output(parts: list) -> str:
+    """Serialize multiple worker outputs (no-aggregate mode) into one markdown
+    document so the FULL list survives into the calling conversation.
+
+    Without this, ``_extract_result_text`` collapsed a multi-worker tuple to
+    ``result[0]`` and silently dropped the rest — which made the no-aggregate /
+    list-of-outputs-to-conversation pattern impossible. Each part renders under a
+    ``### Worker N`` header.
+    """
+    blocks = []
+    for i, part in enumerate(parts, start=1):
+        text = _extract_result_text(part)
+        blocks.append(f"### Worker {i}\n\n{text}".rstrip())
+    return "\n\n".join(blocks)
+
+
 def _extract_result_text(result: Any) -> str:
-    """Defensive normalization across PTI / BTA / Dual / single result shapes."""
+    """Defensive normalization across PTI / BTA / Dual / single result shapes.
+
+    Multi-element tuples (e.g. a ``disable_aggregator`` BTA / MFDual that returns
+    one output per worker) are serialized in FULL via ``_serialize_multi_output``
+    so no worker output is silently dropped.
+    """
     if result is None:
         return ""
     base = getattr(result, "base_response", None)
@@ -350,8 +482,13 @@ def _extract_result_text(result: Any) -> str:
     output = getattr(result, "output", None)
     if isinstance(output, str) and output:
         return output
-    if isinstance(result, tuple) and result:
-        return _extract_result_text(result[0])
+    if isinstance(result, tuple):
+        non_none = [r for r in result if r is not None]
+        if not non_none:
+            return ""
+        if len(non_none) == 1:
+            return _extract_result_text(non_none[0])
+        return _serialize_multi_output(non_none)
     return str(result)
 
 
@@ -384,6 +521,96 @@ def _error(msg: str):
 # Entry point
 # ──────────────────────────────────────────────────────────────────────
 
+_TASK_TOOL_NAMES = {"task", "task-plan", "task-execute", "task-full", "task-confirm"}
+
+
+async def _run_conversational_router(
+    *,
+    config_path: Any,                  # path to disabled.yaml (the Conversational config)
+    request: str,
+    model: Optional[str],
+    working_dir: Path,
+    session_context: dict,
+):
+    """Host the `--config disabled`/`conversation` router.
+
+    Builds a ConversationalInferencer (shared `_ci_host` scaffolding), gives it the
+    `task` tool (forced synchronous so nested dispatches complete inline and the
+    router can read their results), runs the agentic loop, and returns the router's
+    final message.
+
+    Interactive-hang safety: in the main async chat, ``session_context["interactive"]``
+    is present but its receive queue is torn down after the dispatching turn — so a
+    clarifying-question round-trip would block forever. We therefore only enable
+    interactive when the caller explicitly guarantees a registered receive queue
+    via ``session_context["router_interactive_safe"]`` (e.g. the dev-slash `/task`
+    path or a CLI terminal). Otherwise the router runs autonomously (yolo).
+    """
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
+        ToolExecutionResult,
+    )
+    from agent_foundation.resources.tools import _ci_host
+    from agent_foundation.resources.tools.registry import load_all_tools
+
+    sc = session_context or {}
+    tool_dirs = sc.get("extra_tool_dirs")
+    depth = int(sc.get("task_depth", 0))
+
+    registry = load_all_tools(extra_dirs=tool_dirs)
+    # Nested tool calls must complete inline (no fire-and-forget) so the router
+    # can read results and synthesize. Mirrors sop/cli.py.
+    _ci_host.force_tools_synchronous(registry)
+
+    interactive = sc.get("interactive") if sc.get("router_interactive_safe") else None
+
+    # Depth-guarded dispatcher: increment task_depth on nested `task` calls and,
+    # at the cap, coerce a nested router (`disabled`/`conversation`/unset) to
+    # `full-plan` so we can never recurse into the router indefinitely.
+    nested_sc = {**sc, "task_depth": depth + 1}
+    nested_exec = _ci_host.make_tool_executor(nested_sc, tool_dirs=tool_dirs)
+    base_exec = _ci_host.make_tool_executor(sc, tool_dirs=tool_dirs)
+
+    async def _router_tool_executor(tool_name: str, arguments: dict) -> Any:
+        if tool_name in _TASK_TOOL_NAMES:
+            arguments = dict(arguments)
+            cfg = str(arguments.get("config") or arguments.get("agent_config") or "").lower()
+            if depth + 1 >= _MAX_TASK_DEPTH and cfg in ("", "disabled", "conversation"):
+                _logger.info(
+                    "[task] router depth cap (%d) reached: coercing nested "
+                    "--config %r -> full-plan", _MAX_TASK_DEPTH, cfg or "(unset)",
+                )
+                arguments["config"] = "full-plan"
+            return await nested_exec(tool_name, arguments)
+        return await base_exec(tool_name, arguments)
+
+    try:
+        ci = _ci_host.build_ci_from_config(
+            config_path,
+            model=model or "",
+            tool_registry=registry,
+            tool_executor=_router_tool_executor,
+            interactive=interactive,
+            target_path=working_dir,
+        )
+    except Exception as exc:
+        return _error(f"Conversational router build failed: {exc}")
+
+    if interactive is None and hasattr(ci, "yolo_mode"):
+        ci.yolo_mode = True
+
+    try:
+        result = await ci.run_agentic_loop(request, interactive=interactive)
+    except Exception as exc:
+        _logger.exception("[task] conversational router failed")
+        return _error(f"Conversational router failed: {exc}")
+
+    text = getattr(result, "text", None) or _extract_result_text(result)
+    artifacts = _discover_artifacts(working_dir)
+    context_updates = {"workspace_path": str(working_dir), "router": True, "success": True}
+    context_updates.update(artifacts)
+    return ToolExecutionResult(result=text, context_updates=context_updates)
+
+
 async def _run_topology(
     *,
     source: tuple,                              # ("file", Path) | ("inline", dict)
@@ -391,11 +618,12 @@ async def _run_topology(
     overrides: Optional[dict] = None,           # dotted-key → already-typed value (NO string parsing)
     model: Optional[str] = None,
     no_dual: bool = False,
+    aggregate: bool = True,
     mode: str = "full",
     analysis: bool = False,
     multi_iter: bool = False,
     max_iter: int = 3,
-    init_plan_path: Optional[str] = None,       # absolute path; PTI uses native initial_plan_file
+    init_plan_path: Optional[str] = None,       # absolute path; --use-plan feeds PTI's initial_plan_file
     resume_workspace: Optional[str] = None,     # absolute path; takes precedence over auto-allocation
     session_context: Optional[dict] = None,
 ):
@@ -435,11 +663,26 @@ async def _run_topology(
     else:
         working_dir = _resolve_workspace(sc, task_id)
 
-    # Stage 5 — Initial-plan validation (file-IO done by caller; we just consume the path)
+    # Stage 4b — Conversational router (--config disabled / conversation).
+    # Hosted via a dedicated agentic-loop path (NOT instantiate+ainfer), because
+    # ConversationalInferencer's loop lives in run_agentic_loop and needs a wired
+    # tool_registry + tool_executor.
+    if _topology_is_conversational(source):
+        if source[0] != "file":
+            return _error("Conversational router requires a file config (disabled.yaml).")
+        return await _run_conversational_router(
+            config_path=source[1],
+            request=request,
+            model=model,
+            working_dir=working_dir,
+            session_context=sc,
+        )
+
+    # Stage 5 — --use-plan validation (file-IO done by caller; we just consume the path)
     if init_plan_path:
         plan_abs = Path(init_plan_path).resolve()
         if not plan_abs.is_file():
-            return _error(f"--initial-plan file not found: {init_plan_path}")
+            return _error(f"--use-plan file not found: {init_plan_path}")
         init_plan_path = str(plan_abs)
 
     # Stage 6 — Build override map.
@@ -469,7 +712,11 @@ async def _run_topology(
     if resume_workspace:
         overrides["resume_workspace"] = str(working_dir)
     if init_plan_path and is_pti:
+        # PTI is the root _target_ in default.yaml. The base_inferencer
+        # prefix is kept for backward compat with any custom config that
+        # wraps PTI inside an outer Dual — harmlessly stripped if unused.
         overrides["initial_plan_file"] = init_plan_path
+        overrides["base_inferencer.initial_plan_file"] = init_plan_path
 
     # ----- Mode handling --------------------------------------------------
     # `--plan` mode: swap to the standalone planner topology.
@@ -486,7 +733,15 @@ async def _run_topology(
     # itself with `_template_root_space=plan` criteria. The full PTI
     # topology imports this same file via `_import_:`, so there's no
     # drift risk between the two paths.
-    if mode == "plan":
+    if mode == "plan" and not _config_supports_implementation(source):
+        # Plan-only presets (breakdown, multiple, full-plan / standalone planner)
+        # have no implementation phase. --plan is a clean no-op: do NOT swap and do
+        # NOT inject enable_implementation=False (the plan-only root would reject it).
+        _logger.info(
+            "[task] --plan with plan-only topology (%s): no swap/toggle needed.",
+            Path(source[1]).name if source[0] == "file" else "inline",
+        )
+    elif mode == "plan":
         if source[0] == "file":
             full_yaml_path = Path(source[1])
             standalone_path = full_yaml_path.parent / "breakdown-multiflow-plan.yaml"
@@ -563,16 +818,22 @@ async def _run_topology(
     if no_dual:
         n = _collapse_dual(cfg)
         _logger.info("[task] --no-dual collapsed %d Dual nodes", n)
+    if not aggregate:
+        n = _disable_aggregation(cfg)
+        _logger.info(
+            "[task] --no-aggregate disabled aggregation on %d node(s) "
+            "(workers return a list; the caller/conversation aggregates)", n,
+        )
 
     # Re-wrap as DictConfig for instantiate()
     cfg = OmegaConf.create(cfg)
 
-    # For non-PTI topologies, prepend an initial plan to the request as a fallback
+    # For non-PTI topologies, prepend the plan to the request as a fallback
     if init_plan_path and not is_pti:
         try:
             plan_text = Path(init_plan_path).read_text(encoding="utf-8")
             request = f"Plan (preloaded):\n{plan_text}\n\nRequest: {request}"
-            _logger.warning("--initial-plan with non-PTI topology: prepending plan to request")
+            _logger.warning("--use-plan with non-PTI topology: prepending plan to request")
         except OSError:
             pass
 
@@ -639,13 +900,14 @@ async def execute(arguments: dict, session_context: dict):
         overrides.update(config_overrides)
     model = arguments.get("model")
     no_dual = bool(arguments.get("no_dual"))
+    no_aggregate = bool(arguments.get("no_aggregate"))
     analysis = bool(arguments.get("analysis"))
     multi_iter = bool(arguments.get("multi_iter"))
     max_iter = int(arguments.get("max_iterations", 3))
     resume = arguments.get("resume")
     copy_ws = bool(arguments.get("copy_workspace"))
     in_place = bool(arguments.get("in_place", True))
-    init_plan = arguments.get("initial_plan")
+    use_plan = arguments.get("use_plan")
     template_version = arguments.get("template_version")
     template_master_version = arguments.get("template_master_version")
 
@@ -668,20 +930,20 @@ async def execute(arguments: dict, session_context: dict):
         except FileNotFoundError as e:
             return _error(str(e))
 
-    # Stage 5a — Slash-only file IO: --initial-plan path validation (file-IO inside
+    # Stage 5a — --use-plan path validation (file-IO inside
     # _run_topology handles the read for non-PTI fallback).
     init_plan_path = None
-    if init_plan:
-        plan_abs = Path(init_plan).resolve()
+    if use_plan:
+        plan_abs = Path(use_plan).resolve()
         if not plan_abs.is_file():
-            return _error(f"--initial-plan file not found: {init_plan}")
+            return _error(f"--use-plan file not found: {use_plan}")
         init_plan_path = str(plan_abs)
 
     use_proposal = arguments.get("use_proposal")
     proposal_ids_str = arguments.get("proposal_ids")
     if use_proposal:
         if init_plan_path:
-            return _error("--use-proposal and --initial-plan are mutually exclusive.")
+            return _error("--use-proposal and --use-plan are mutually exclusive.")
         init_plan_path = _resolve_proposal_plan(use_proposal, proposal_ids_str)
         if init_plan_path is None:
             return _error(f"Failed to resolve proposals from: {use_proposal}")
@@ -701,6 +963,7 @@ async def execute(arguments: dict, session_context: dict):
         overrides=overrides,
         model=model,
         no_dual=no_dual,
+        aggregate=not no_aggregate,
         mode=mode,
         analysis=analysis,
         multi_iter=multi_iter,

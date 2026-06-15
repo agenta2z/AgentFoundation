@@ -20,6 +20,10 @@ class ConversationToolType(str, Enum):
     MULTIPLE_CHOICE = "multiple_choice"
     CONFIRMATION = "confirmation"
     TOOL_ARGUMENT_FORM = "tool_argument_form"
+    # Structured multi-item selection over a ranked/grouped proposal set
+    # (richer than multiple_choice: batch/phase grouping, dependencies,
+    # impact/complexity). Used by research-propose → Phase 3b review flows.
+    PROPOSAL_SELECTION = "proposal_selection"
 
 
 @dataclass

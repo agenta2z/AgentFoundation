@@ -60,6 +60,7 @@ TEMPLATES_USING_USER_REQUEST_VAR = [
     ("plan", "followup"),
     ("plan", "review"),
     ("implementation", "initial"),
+    ("implementation", "review"),
     ("implementation", "followup"),
     ("deep_research", "initial"),
     ("task_breakdown", "initial"),
@@ -137,9 +138,10 @@ class TestConsumerTemplatesUseSharedVariables:
         path = AF_TEMPLATES_ROOT / space / "main" / f"{template_key}.jinja2"
         assert path.is_file(), f"Template missing: {path}"
         content = path.read_text(encoding="utf-8")
-        assert "{{ user_request_with_task_preamble }}" in content, (
+        assert "{{ context.user_request_with_task_preamble }}" in content, (
             f"{space}/main/{template_key}.jinja2 should reference the "
-            "shared user_request_with_task_preamble variable"
+            "shared variable with 'context.' prefix: "
+            "{{ context.user_request_with_task_preamble }}"
         )
 
     @pytest.mark.parametrize("space,template_key", TEMPLATES_USING_USER_REQUEST_VAR)

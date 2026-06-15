@@ -74,6 +74,74 @@ def markdown_with_table():
     """)
 
 
+class TestLargeRealisticFence:
+    """Commit 1 / D1: a large research-propose markdown (~80 KB) with a sizable
+    proposal_index fence (incl. real LLM constraint dialects) must parse fully.
+
+    This guards the truncated-response file-fallback path: the file on disk is
+    big, and extraction must succeed end-to-end (Strategy B + D2 tolerance).
+    """
+
+    def _build_large_index_dict(self, n_proposals: int = 40) -> dict:
+        groups = []
+        for phase in range(1, 5):
+            proposals = []
+            for i in range(n_proposals // 4):
+                pid = f"P{phase}_{i}"
+                proposals.append(
+                    {
+                        "id": pid,
+                        "rank": phase * 100 + i,
+                        "title": f"Proposal {pid} — optimize component {i}",
+                        "summary": "Lorem ipsum dolor sit amet, " * 8,
+                        "impact": "high" if i % 2 else "medium",
+                        "complexity": "low" if i % 3 else "high",
+                        "approach": "Refactor the module and add a cache. " * 6,
+                    }
+                )
+            groups.append(
+                {"phase": phase, "label": f"Phase {phase}", "proposals": proposals}
+            )
+        # Mix canonical + dialect-alpha + dialect-beta constraints (D2).
+        constraints = [
+            {"id": "C1", "kind": "requires", "proposal_ids": ["P1_0"],
+             "requires_ids": ["P2_0"]},
+            {"type": "ordering", "rule": "P1_0 must precede every other proposal."},
+            {"type": "requires", "from": "P3_0", "to": ["P1_0", "P2_0"],
+             "note": "depends on earlier phases"},
+            {"type": "recommends", "from": "P4_0", "to": "P1_0"},
+        ]
+        return {
+            "version": "1",
+            "total_count": n_proposals,
+            "groups": groups,
+            "constraints": constraints,
+        }
+
+    def test_parse_large_markdown_with_fence(self):
+        index_dict = self._build_large_index_dict(40)
+        fence_json = json.dumps(index_dict, indent=2)
+        # Pad with prose front and back so the document is comfortably large.
+        prose = ("This section discusses the rationale at length. " * 40 + "\n") * 30
+        markdown = (
+            "# Unified Research Plan\n\n" + prose
+            + "\n```json proposal_index\n" + fence_json + "\n```\n\n"
+            + "## Appendix\n\n" + prose
+        )
+        assert len(markdown) > 70_000, "fixture should be a large document"
+        assert len(fence_json) > 10_000, "fence should be sizable"
+
+        result = parse_proposal_index_from_text(markdown)
+        assert result is not None
+        assert result.total_count == 40
+        assert len(result.all_proposals()) == 40
+        # Constraints: all 4 dialects parsed (none dropped — they're all dicts).
+        assert len(result.constraints) == 4
+        # Dialect beta with list `to` normalised to a list.
+        beta = next(c for c in result.constraints if c.proposal_ids == ["P3_0"])
+        assert beta.requires_ids == ["P1_0", "P2_0"]
+
+
 class TestStrategyA:
     def test_parse_sidecar_json(self, tmp_path, sample_index):
         out = tmp_path / "outputs"

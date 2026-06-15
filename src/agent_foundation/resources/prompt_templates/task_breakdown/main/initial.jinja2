@@ -71,7 +71,16 @@ For each subtask, assign a `subtask_id` as an integer starting from 1, and rate 
 For each subtask, assign a `priority_reason` to justify the priority rating.
 
 Before producing your final decomposition, verify it against the four criteria above (Comprehensive, Independent, Non-conflicting, Actionable) and note any tradeoffs in the `reasoning` field.
+{% if include_worker_type_classification %}
+## Per-Subtask Worker Type (complexity classification)
 
+For EACH subtask, also estimate how much machinery it warrants and record it inside that subtask's `args` object under the key `worker_type`, using exactly one of:
+- **"leaf"** — focused; a single agent pass suffices. This is the DEFAULT — use it whenever unsure.
+- **"breakdown"** — still large or multi-part; benefits from being decomposed further into sub-subtasks.
+- **"multiflow"** — benefits from several independent parallel attempts followed by winner selection (e.g. open-ended design where diverse takes help).
+
+Record it inside `args`, for example: `"args": {"worker_type": "leaf"}`. Prefer "leaf" unless a subtask clearly warrants more — escalating every subtask is wasteful.
+{% endif %}
 ## Aggregation Guidance
 
 In addition to deciding what each subtask covers, you MUST also decide what should be the aggregation task. For example, if it is simply integrating final output artifacts from the workers, or there needs additional work to synthesize the results (e.g. validating workers's deliverables holistically, build on top of all workers' deliverables, etc.).

@@ -114,7 +114,31 @@ async def derived_tool_execute(
     ctx = dict(session_context)
     ctx["tool_name"] = tool_name
 
-    return await task_execute(task_args, ctx)
+    result = await task_execute(task_args, ctx)
+
+    # Bridge tools all delegate to ``task_execute``, which emits the generic
+    # ``workspace_path`` context-update. On a flat ``prior_context`` the last
+    # bridge call wins, so a multi-bridge SOP (e.g. research_propose in Phase 3
+    # then task in Phase 4) would clobber the earlier workspace. Publish an
+    # additional, collision-free, tool-name-suffixed key so each workspace stays
+    # addressable from the SOP body via Jinja, e.g.
+    #   {{ workspace_path__research_propose }}/outputs/proposals.json
+    #
+    # Duck-typed (``hasattr``/``isinstance dict``) to mirror the consumer in
+    # conversational_inferencer (``if hasattr(result, "context_updates")``) and
+    # to avoid importing ToolExecutionResult into this low-level tool-registry
+    # module. Strictly additive: the generic ``workspace_path`` is untouched.
+    updates = getattr(result, "context_updates", None)
+    if isinstance(updates, dict):
+        workspace = updates.get("workspace_path")
+        if workspace:
+            # Canonicalise to a valid Jinja identifier. Callers already pass a
+            # canonical (underscored) tool name today via _resolve_tool_name;
+            # this guards any future caller that passes the hyphenated alias.
+            safe_name = tool_name.replace("-", "_")
+            updates[f"workspace_path__{safe_name}"] = workspace
+
+    return result
 
 
 def load_all_tools(extra_dirs: list[str | Path] | None = None) -> dict[str, ToolDefinition]:

@@ -19,7 +19,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import { useTheme } from '@mui/material/styles';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 
 /**
  * Fetch file content from /api/view/{absolutePath}.

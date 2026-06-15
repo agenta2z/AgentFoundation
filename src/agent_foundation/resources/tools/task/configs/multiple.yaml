@@ -1,0 +1,111 @@
+# ============================================================================
+# Plan-Only Topology: root MFDual   (--config multiple)
+# ============================================================================
+#
+# Diversity-driven planning: N parallel single-flows explore the WHOLE task
+# independently, then a winner is picked, reviewed, and fixed.
+#
+# Root is `_target_: MultiFlowDual` — NOT wrapped in an outer Dual.
+# MultiFlowDualInferencer EXTENDS DualInferencer (multi_flow_dual_inferencer.py),
+# so it already owns the review/fix loop. Wrapping it in another Dual would be
+# double review/fix.
+#
+# Tree structure:
+#   MFDual (= DualInferencer subclass)        review + fix the WINNING plan
+#   ├── flow_configs[]                        N parallel single-flow attempts
+#   ├── multi_flow_aggregator_inferencer      synthesize + pick winner
+#   ├── review_inferencer                     judge the winning plan
+#   └── fixer_inferencer                      refine the winning plan
+#
+# Reviewer/fixer wiring: with winner_pick + reviewer_match_second +
+# fixer_match_winner, MFDual selects the reviewer (runner-up flow) and fixer
+# (winning flow) BY INDEX from flow_configs after each propose step. The
+# `_repeat_` deep-copies each flow into a distinct instance, so the is-identity
+# self-review check is satisfied WITHOUT an explicit inferencer_pool. The
+# explicit review_inferencer/fixer_inferencer below act as the no-winner
+# fallback (and suppress the "no reviewer configured" warning); they are
+# overridden at runtime whenever a winner is detected.
+
+# ---------------------------------------------------------------------------
+# HYPERPARAMETERS
+# ---------------------------------------------------------------------------
+_params:
+  workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
+  default_inferencer: ClaudeCodeCLI
+  main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
+  # COUPLING CONSTRAINT: len(flow_inferencers) MUST equal num_flows. The
+  # `_repeat_: ${num_flows}` block distributes this list per-copy; a length
+  # mismatch raises `ValueError: Distribution list length N != _repeat_ M` at
+  # config load. To change the flow count, override BOTH together (or override
+  # flow_inferencers alone — its length wins).
+  flow_inferencers:
+    - ${_params.main_inferencer}
+    - ${_params.main_inferencer}
+    - ${_params.main_inferencer}
+  num_flows: 3
+  flow_max_dynamic_steps: 3
+  consensus_max_iterations: 3
+
+# ---------------------------------------------------------------------------
+# GLOBAL CASCADES
+# ---------------------------------------------------------------------------
+_logger: auto
+_debug_mode: true
+_model_name: opus[1m]
+_idle_timeout_seconds: 600
+_tool_use_idle_timeout_seconds: 5400
+_output_path: "output.md"
+
+_template_manager:
+  _target_: TemplateManager
+  templates:
+    - ${templates_dir}
+    - ${modpath:agent_foundation.resources.prompt_templates}
+  active_template_type: main
+  predefined_variables: true
+  default_template_key: initial
+  enable_templated_feed: true
+
+_consensus_config:
+  _target_: ConsensusConfig
+  max_iterations: ${_params.consensus_max_iterations}
+
+# ---------------------------------------------------------------------------
+# ROOT: MFDual (diverse flows + winner-pick + review + fix)
+# ---------------------------------------------------------------------------
+_target_: MultiFlowDual
+_template_root_space: plan
+propagate_runtime_input: true
+winner_pick: true
+reviewer_match_second: true
+fixer_match_winner: true
+visible_flows: all
+max_retry: 3
+
+workspace:
+  _target_: InferencerWorkspace
+  root: ${_params.workspace_root}
+  use_final_deliverables_folder: true
+templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
+
+flow_configs:
+  - _repeat_: ${_params.num_flows}
+    max_dynamic_steps: ${_params.flow_max_dynamic_steps}
+    iteration_judgment: true
+    initial_inferencer:
+      _target_: ${_params.flow_inferencers}
+    followup_inferencer:
+      _target_: ${_params.flow_inferencers}
+
+multi_flow_aggregator_inferencer:
+  _target_: ${_params.main_inferencer}
+  output_is_deliverable: true
+
+# No-winner fallback (overridden at runtime by reviewer_match_second /
+# fixer_match_winner whenever a winner is detected).
+review_inferencer:
+  _target_: ${_params.main_inferencer}
+
+fixer_inferencer:
+  _target_: ${_params.main_inferencer}
+  output_is_deliverable: true

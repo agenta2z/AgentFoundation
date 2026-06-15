@@ -80,12 +80,19 @@ The research goal should be derived from the chosen strategy and the findings fr
 ### Phase 3b -- Proposal Review & Selection
 [__depends on__ Phase 3]
 
-[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `review proposal tool` (DO NOT use the simpler `confirmation tool`). The tool will decide how to present the proposal to the user. The user selects which proposals to advance to Phase 3.
+[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `proposal_selection` conversation tool (or a `confirmation` tool if `proposal_selection` is unavailable). Pass the tool argument `proposals_path = {{ workspace_path__research_propose }}/outputs/proposals.json` — this is the `proposals.json` that research-propose writes (the BTA INVARIANT location), and `workspace_path__research_propose` is published into the workflow context by the bridge dispatcher when Phase 3 runs. The user reviews the proposals (ID, title, impact, complexity, dependencies) and selects which to advance to Phase 4. The output variable MUST be named `selected_proposal_ids` for this conversation tool — Phase 4 consumes it by that name.
+
+**Tools**[__must__]:
+- proposal_selection
 
 ## Phase 4 -- Implementation, Experiment & Analysis
 [__depends on__ Phase 3b; __branch__]
 
-Plan and implement the proposed changes, run experiments to validate, and analyze results to identify bottlenecks and improvement opportunities.
+For each selected proposal from Phase 3b, plan and implement the proposed changes, run experiments to validate, and analyze results to identify bottlenecks and improvement opportunities. Invoke the `task` tool with:
+- `--use-proposal {{ workspace_path__research_propose }}/outputs/proposals.json` (the proposals produced in Phase 3)
+- `--proposal-ids {{ selected_proposal_ids }}` (the Phase 3b selection, comma-joined, e.g. `P1,P3`)
+
+The `task` tool inlines the selected proposals into its plan, implements the changes, runs experiments to validate, and records results.
 
 **Tools**[__must__]:
 - task

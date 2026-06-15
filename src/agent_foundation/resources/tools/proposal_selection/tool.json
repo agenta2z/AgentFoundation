@@ -1,0 +1,39 @@
+{
+  "name": "proposal_selection",
+  "tool_type": "Conversation",
+  "category": "conversation",
+  "description": "Present a structured set of proposals (with batch/phase grouping, dependencies, impact/complexity) and let the user select which to advance.",
+  "parameters": [
+    {
+      "name": "prompt",
+      "type": "string",
+      "required": true,
+      "description": "The selection prompt to show the user."
+    },
+    {
+      "name": "proposals_path",
+      "type": "string",
+      "required": true,
+      "description": "Path to proposals.json produced by research-propose (or any source compatible with parse_proposal_file)."
+    },
+    {
+      "name": "preselected_ids",
+      "type": "string",
+      "required": false,
+      "description": "Comma-separated proposal IDs pre-checked when the widget renders."
+    },
+    {
+      "name": "allow_zero",
+      "type": "flag",
+      "default": false,
+      "description": "Allow the user to submit zero selections (otherwise the widget requires at least one)."
+    }
+  ],
+  "usage_guidance": "Use after research-propose to let the user review and select which proposals to implement. Pairs with `task --use-proposal` for downstream execution.",
+  "examples": [
+    "{\"tool_type\": \"proposal_selection\", \"prompt\": \"Which proposals to implement?\", \"proposals_path\": \"<ws>/outputs/proposals.json\"}"
+  ],
+  "yolo_default": {
+    "mode": "select_all"
+  }
+}

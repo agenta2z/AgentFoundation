@@ -222,8 +222,8 @@ def make_conflict_aware_prompt_builder(
 
         def _format_result(idx, res, path):
             if agg_has_local and path:
-                return f"### Result {idx+1}\n(See file: `{path}`)"
-            return f"### Result {idx+1}\n{res}"
+                return f"### Upstream Outcome {idx+1}\n(See file: `{path}`)"
+            return f"### Upstream Outcome {idx+1}\n{res}"
 
         paths = worker_output_paths or [None] * len(worker_results)
         default_text = "\n\n".join(
@@ -680,16 +680,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             path = paths[idx] if idx < len(paths) else None
             fd_dir = fd_dirs[idx] if idx < len(fd_dirs) else None
             if agg_has_local and fd_dir:
-                lines = [f"### Result {idx + 1}"]
-                lines.append(f"(See deliverables: `{fd_dir}`)")
+                lines = [f"### Upstream Outcome {idx + 1}"]
+                label = "See deliverables" if "final_deliverables" in str(fd_dir) else "See outputs folder"
+                lines.append(f"({label}: `{fd_dir}`)")
                 if path:
                     lines.append(f"(See file: `{path}`)")
                 parts.append("\n".join(lines))
             elif agg_has_local and path:
-                parts.append(f"### Result {idx + 1}\n(See file: `{path}`)")
+                parts.append(f"### Upstream Outcome {idx + 1}\n(See file: `{path}`)")
             else:
                 path_ref = f"\n(Full output at: `{path}`)" if path else ""
-                parts.append(f"### Result {idx + 1}\n{res}{path_ref}")
+                parts.append(f"### Upstream Outcome {idx + 1}\n{res}{path_ref}")
         return "\n\n".join(parts)
 
     def _inject_aggregator_extra_feed(
@@ -773,9 +774,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         if response_text is None:
             response_text = str(raw_output)
 
-        # Try to extract JSON from ```json ... ``` code fence
+        # Try to extract JSON from ```json ... ``` code fence.
+        # Allow optional newline between ```json and { (standard markdown).
         json_match = re.search(
-            r"```json[^\n{]*(\{[\s\S]*\})\s*```", response_text
+            r"```json[^\n]*\n\s*(\{[\s\S]*?\})\s*\n\s*```", response_text
         )
         if not json_match:
             json_match = re.search(
@@ -791,9 +793,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
         try:
             data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            _logger.warning("JSON parse failed (%s), falling back to numbered list", e)
-            return parse_numbered_list(response_text)
+        except json.JSONDecodeError:
+            repaired = re.sub(
+                r"`(\{[^}]*\})`",
+                lambda m: "`" + m.group(1).replace('"', "'") + "`",
+                json_str,
+            )
+            try:
+                data = json.loads(repaired)
+                _logger.info("JSON parsed after repairing backtick-quoted code blocks")
+            except json.JSONDecodeError as e:
+                _logger.warning("JSON parse failed (%s), falling back to numbered list", e)
+                return parse_numbered_list(response_text)
 
         subtasks = data.get("subtasks") or data.get("decomposed_subtasks") or []
         if not subtasks:
@@ -1116,6 +1127,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         if self._workspace is None:
             return
         text = str(response) if response is not None else ""
+        if "proposal_index" not in text:
+            # (a) Text-source fallback for truncated responses. The response
+            # object surfaced to this inferencer can be truncated at the model's
+            # token limit while the full ``proposal_index`` fence is present in
+            # the aggregator's output file on disk. Re-read from that
+            # source-of-truth file and re-attempt extraction. The fast path
+            # (fence already in ``text``) is unchanged.
+            fallback = self._read_aggregator_output_text()
+            if fallback:
+                text = fallback
         if not text or "proposal_index" not in text:
             return
         try:
@@ -1131,6 +1152,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 idx.created_at = datetime.now(timezone.utc).isoformat()
                 idx.source_workspace = str(self._workspace.root)
                 from pathlib import Path as _PP
+                # INVARIANT (depended on by model_optimization/SOP.md Phase 3b
+                # and Phase 4): proposals.json lives at
+                #   <research-propose workspace>/outputs/proposals.json
+                # BTA._finalize_output early-returns when an aggregator is
+                # present, so the base class's outputs->final_deliverables move
+                # never runs for this file; this location is therefore stable
+                # and discoverable by convention. Any future refactor that
+                # relocates this file MUST also update:
+                #   - resources/sops/model_optimization/SOP.md Phase 3b/4
+                #   - the Phase 4 ``task --use-proposal`` path
+                #   - test_breakdown_then_aggregate's proposals.json assertions
                 sidecar = _PP(self._workspace.root) / "outputs" / "proposals.json"
                 write_proposal_index(sidecar, idx)
                 _logger.info("Wrote proposal index (%d proposals) to %s",
@@ -1138,6 +1170,43 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # else: no fence found — silently skip
         except Exception as exc:
             _logger.warning("Proposal index extraction failed (non-fatal): %s", exc)
+
+    def _read_aggregator_output_text(self) -> "str | None":
+        """Read the aggregator's output file as the proposal_index source.
+
+        Returns the file contents when the aggregator inferencer exposes a
+        workspace and its output file exists on disk, else ``None``. Used as a
+        fallback when the in-memory response is truncated past the
+        ``proposal_index`` fence. All I/O is guarded; failure is non-fatal.
+        """
+        agg_inf = self.aggregator_inferencer
+        if agg_inf is None:
+            return None
+        agg_ws = getattr(agg_inf, "_workspace", None)
+        if agg_ws is None:
+            return None
+        out_name = getattr(agg_inf, "output_path", None) or "output.md"
+        candidates: list[str] = []
+        for getter_name in ("output_path", "deliverable_path"):
+            getter = getattr(agg_ws, getter_name, None)
+            if callable(getter):
+                try:
+                    path = getter(out_name)
+                except Exception:  # noqa: BLE001 — path resolution is best-effort
+                    path = None
+                if path:
+                    candidates.append(path)
+        for path in candidates:
+            try:
+                if os.path.isfile(path):
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        return fh.read()
+            except (OSError, UnicodeError) as exc:
+                _logger.warning(
+                    "BTA proposal_index file-fallback read failed for %s: %s",
+                    path, exc,
+                )
+        return None
 
     def _finalize_response(self, result):
         """BTA audit bookkeeping (surfacing moved to _finalize_output).
@@ -1732,10 +1801,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 group=worker_group,
                 enable_result_save=StepResultSaveOptions.SkipResumable,
                 resume_with_saved_results=ResumeMode.SkipResumable,
-                worker_manages_resume=_worker_manages_resume,
+                checkpoint_mode=self.checkpoint_mode,
                 retry_on_exceptions=TRANSIENT_RETRY_EXCEPTIONS,
             )
             _wname = self._worker_child_name(i)
+            if self._workspace is not None:
+                _w_ckpt = os.path.join(
+                    str(self._workspace.root), "children",
+                    _wname, "checkpoints",
+                )
+                _w_ext = ".json" if self.checkpoint_mode == "jsonfy" else ".pkl"
+                node._get_result_path = (
+                    lambda rid, *a, _d=_w_ckpt, _e=_w_ext, **kw: os.path.join(
+                        _d, f"{rid}_result{_e}"
+                    )
+                )
             _raw_label = (
                 str(query_str)[:120] if isinstance(query_str, str)
                 else query_str.get("description", query_str.get("query", _wname))[:120]

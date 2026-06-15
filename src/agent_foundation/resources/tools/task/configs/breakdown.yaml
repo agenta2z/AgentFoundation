@@ -1,0 +1,165 @@
+# ============================================================================
+# Plan-Only Topology: Dual{BTA{adaptive workers}}   (--config breakdown)
+# ============================================================================
+#
+# Coverage-driven planning with per-subtask worker adaptation. BTA decomposes
+# the PLANNING task into N sub-planning subtasks; the breakdown LLM optionally
+# classifies each subtask's complexity via a `worker_type` field in `args`, and
+# BTA dispatches each subtask to the matching worker factory.
+#
+# Tree structure:
+#   Dual                                    review + fix the integrated PLAN
+#   ├── base_inferencer = BTA               decompose + (optionally) classify
+#   │   ├── breakdown_inferencer            → N subtasks; worker_type in args
+#   │   ├── worker_factory = dict:
+#   │   │     leaf:       single agent      ← simple subtask (default)
+#   │   │     breakdown:  nested BTA{leaf}  ← needs further decomposition
+#   │   │     multiflow:  MFDual            ← needs diverse perspectives
+#   │   │     _default:   leaf              ← backstop if class is omitted
+#   │   ├── task_type_arg_name: worker_type
+#   │   └── aggregator_inferencer           integrate sub-plans → ONE plan
+#   ├── review_inferencer                   judge plan structure + quality
+#   └── fixer_inferencer = LEAF             lightweight refinement
+#
+# Why adaptive-by-default?
+#   With `_default: leaf`, if the breakdown LLM classifies every subtask as
+#   "leaf" (or omits the field entirely), behavior is identical to a
+#   homogeneous Dual{BTA{Leaf}}. The adaptive dispatch is "free" — it only
+#   escalates a subtask to a heavier worker when the LLM explicitly asks for it.
+#
+#   The `worker_type` instruction is gated behind the
+#   `include_worker_type_classification` template flag (set on
+#   breakdown_inferencer below). Every OTHER BTA config in the tree omits this
+#   flag, so the shared task_breakdown template's classification block is
+#   inert for them (zero prompt blast radius).
+#
+# Why a lightweight (leaf) fixer?
+#   The default DualInferencer makes fixer == base_inferencer (same object). For
+#   this topology that means every fix iteration re-runs the FULL BTA breakdown
+#   — far more LLM calls than typical incremental plan-quality feedback needs. A
+#   single-leaf fixer is proportional to fix size and uses
+#   plan/main/followup.jinja2 (auto-cascaded via Dual.SLOT_DEFAULTS).
+
+# ---------------------------------------------------------------------------
+# HYPERPARAMETERS
+# ---------------------------------------------------------------------------
+_params:
+  workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
+  default_inferencer: ClaudeCodeCLI
+  main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
+  # Used ONLY by the `multiflow` worker type. NOTE: len(flow_inferencers) MUST
+  # equal num_flows — the `_repeat_: ${num_flows}` block below distributes this
+  # list per-copy, and a length mismatch raises ValueError at config load.
+  flow_inferencers:
+    - ${_params.main_inferencer}
+    - ${_params.main_inferencer}
+  num_flows: 2
+  plan_max_breakdown: 5
+  flow_max_dynamic_steps: 3
+  consensus_max_iterations: 3
+
+# ---------------------------------------------------------------------------
+# GLOBAL CASCADES
+# ---------------------------------------------------------------------------
+_logger: auto
+_debug_mode: true
+_model_name: opus[1m]
+_idle_timeout_seconds: 600
+_tool_use_idle_timeout_seconds: 5400
+_output_path: "output.md"
+
+_template_manager:
+  _target_: TemplateManager
+  templates:
+    - ${templates_dir}
+    - ${modpath:agent_foundation.resources.prompt_templates}
+  active_template_type: main
+  predefined_variables: true
+  default_template_key: initial
+  enable_templated_feed: true
+
+_consensus_config:
+  _target_: ConsensusConfig
+  max_iterations: ${_params.consensus_max_iterations}
+
+# ---------------------------------------------------------------------------
+# ROOT: Plan-stage Dual (review + fix the plan)
+# ---------------------------------------------------------------------------
+_target_: Dual
+_template_root_space: plan
+
+workspace:
+  _target_: InferencerWorkspace
+  root: ${_params.workspace_root}
+  use_final_deliverables_folder: true
+templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
+
+base_inferencer:
+  _target_: BTA
+  name: plan_bta
+  breakdown_format: json_subtasks
+  max_breakdown: ${_params.plan_max_breakdown}
+  task_type_arg_name: worker_type          # read args.worker_type to pick a factory
+
+  breakdown_inferencer:
+    _target_: ${_params.main_inferencer}
+    # Gate the worker_type classification block in task_breakdown/main/initial.jinja2.
+    # Absent from every other BTA config → their breakdown prompt is unchanged.
+    template_extra_feed:
+      include_worker_type_classification: true
+
+  # Heterogeneous worker dispatch (config-only; BTA supports this natively).
+  # Each dict-entry with _target_/_factory_ is auto-wrapped as a LazyConfigFactory
+  # by the config walker → a FRESH worker instance per subtask (no shared state).
+  worker_factory:
+    leaf:
+      _target_: ${_params.main_inferencer}
+      max_retry: 3
+    breakdown:
+      _target_: BTA
+      name: plan_bta_nested
+      breakdown_format: json_subtasks
+      max_breakdown: 3                       # breadth cap at this nesting level
+      breakdown_inferencer:
+        _target_: ${_params.main_inferencer}
+      # Depth is bounded by construction: nested workers are leaf-only
+      # (no `breakdown`/`multiflow` keys), so recursion stops at depth 2.
+      worker_factory:
+        _default:
+          _target_: ${_params.main_inferencer}
+      aggregator_inferencer:
+        _target_: ${_params.main_inferencer}
+        output_is_deliverable: true
+    multiflow:
+      # _target_ (not _factory_): the dict-of-factories config walker auto-wraps
+      # each _target_ entry as a LazyConfigFactory → a fresh MFDual per subtask.
+      _target_: MultiFlowDual
+      propagate_runtime_input: true
+      winner_pick: true
+      reviewer_match_second: true
+      fixer_match_winner: true
+      visible_flows: all
+      max_retry: 3
+      flow_configs:
+        - _repeat_: ${_params.num_flows}
+          max_dynamic_steps: ${_params.flow_max_dynamic_steps}
+          iteration_judgment: true
+          initial_inferencer:
+            _target_: ${_params.flow_inferencers}
+          followup_inferencer:
+            _target_: ${_params.flow_inferencers}
+      multi_flow_aggregator_inferencer:
+        _target_: ${_params.main_inferencer}
+        output_is_deliverable: true
+    _default: leaf                           # string alias → reuses the `leaf` factory
+
+  aggregator_inferencer:
+    _target_: ${_params.main_inferencer}
+    output_is_deliverable: true
+
+review_inferencer:
+  _target_: ${_params.main_inferencer}
+
+fixer_inferencer:
+  _target_: ${_params.main_inferencer}
+  output_is_deliverable: true

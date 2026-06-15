@@ -153,7 +153,7 @@ class TestResolveProposalPlan:
         assert "Full Proposal Detail" not in content
 
     def test_mutual_exclusivity_is_enforced_in_execute(self):
-        """--use-proposal + --initial-plan should error (tested at execute level)."""
+        """--use-proposal + --use-plan should error (tested at execute level)."""
         # This is tested at the execute() level, not _resolve_proposal_plan.
         # The check is: if use_proposal and init_plan_path → error.
         # We just verify the guard exists in the code.

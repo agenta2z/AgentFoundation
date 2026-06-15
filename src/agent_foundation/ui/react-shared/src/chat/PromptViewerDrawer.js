@@ -18,7 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer } from '../common/MarkdownRenderer';
 
 const PROMPT_TABS = ['Template', 'Variables', 'Rendered Prompt'];
 const RESPONSE_TABS = ['Rendered', 'Raw'];

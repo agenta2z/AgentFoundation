@@ -398,11 +398,10 @@ def test_yaml_smoke_instantiate(tmp_path, monkeypatch):
         "into the aggregator's template_extra_feed['aggregation_guidance']"
     )
     # And the upstream_artifacts slot must be populated with formatted
-    # worker outputs (matches the ### Result N format used by both the
-    # legacy default and the new injection path).
+    # worker outputs (matches the ### Upstream Outcome N format).
     upstream = plan_bta.aggregator_inferencer.template_extra_feed.get("upstream_artifacts")
-    assert upstream is not None and "### Result 1" in upstream and "### Result 2" in upstream, (
-        f"upstream_artifacts must contain formatted ### Result N entries; got {upstream!r}"
+    assert upstream is not None and "### Upstream Outcome 1" in upstream and "### Upstream Outcome 2" in upstream, (
+        f"upstream_artifacts must contain formatted ### Upstream Outcome N entries; got {upstream!r}"
     )
     # Stale aggregation_guidance must be dropped when the next breakdown
     # produces no guidance (else previous-call guidance leaks into the

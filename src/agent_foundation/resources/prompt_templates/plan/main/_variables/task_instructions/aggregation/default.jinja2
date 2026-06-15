@@ -1,5 +1,27 @@
-You are aggregating/integrating above-provided upstream outcomes into consolidated artifact(s). The above-provided upstream outcomes are your aggregaetion/integration inputs. First, double check each upstream input for any issues/problems. Then, carefully and holistically compare all the upstream inputs. Afterwards, faithfully integrate and consolidate the best parts from each.
-- If the upstream inputs have consistent structure and style, try to maintain that consistency in the integrated/consolidated artifact(s), but you can always reasonably restructure as justified.
+You are aggregating/integrating the above-provided upstream outcomes into consolidated artifact(s). Suggested actions:
+- **Audit each input**: check for issues, contradictions, or gaps.
+- **Map unique vs overlapping content**: identify what is shared across inputs (consolidate) vs what is unique to a single input (must carry).
+- **Integrate**: produce a unified, coherent artifact that a reader can act on without needing to consult the upstream inputs.
+
+## Depth Preservation (Critical)
+
+Consolidation **SHOULD reduce redundancy and noise**, but **SHOULD NOT reduce valid information**.
+- **Integrate overlapping content** into the strongest version, combining the best parts from each input.
+- **Preserve unique information**: valid and helpful decision/design/execution details that appear in only one input SHOULD NOT be summarized away just because they come from a single source.
+- **Preserve meaningful specifics**: concrete values such as numbers, file paths, API signatures, configuration values, schema definitions, and retry/concurrency parameters are load-bearing for execution. "Retry with backoff" is not a substitute for "tenacity stop_after_attempt(4), wait_exponential(min=2, max=60)."
+- **Preserve rationale**: why a design was chosen, how a business decision was made, etc., not just what it is — especially when the reasoning is non-obvious. Future readers need the "why" to avoid accidentally reversing decisions.
+
+## Provenance & Cross-References
+
+When condensing an upstream input's content, include the full file path (and relevant section heading) so downstream readers can drill into the original for details. For example: *"See `worker_0/.../output.md` §3.B3 for the full fallback chain."* This keeps the aggregated artifact concise while ensuring nothing is unreachable.
+
+## Coverage Verification
+
+After producing the consolidated artifact, mentally verify: for each upstream input, are its key topics, decisions, and deliverables represented? If any significant content was omitted, add it — even if it makes the output longer.
+
+## Style & Structure
+
+- If the upstream inputs have consistent structure and style, try to maintain that consistency, but you can reasonably restructure as justified.
 - YOU SHOULD make clean, proper, elegant integration and consolidation. DO NOT be hacky or ad-hoc.
 - When upstream inputs contain structured JSON code fences of the same type (e.g., ` ```json <label> `), **merge them into a single unified fence** in your output. Deduplicate entries, resolve conflicts, and preserve the union of information. The merged fence should follow the same schema as the individual fences but with entries combined, re-ranked, and cross-referenced where appropriate.
 - If the user's request asks for additional judgments (see above), remember to produce those as well.

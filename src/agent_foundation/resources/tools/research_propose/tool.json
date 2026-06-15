@@ -23,8 +23,7 @@
         "_params.plan_max_breakdown": 5,
         "_params.flow_max_dynamic_steps": 3,
         "_params.consensus_max_iterations": 3,
-        "base_inferencer._template_master_version": "research_propose",
-        "base_inferencer.aggregator_inferencer.template_master_version": ["research_propose", "aggregation"]
+        "base_inferencer.aggregator_inferencer.template_variables.task_response_format": "research_propose"
       }
     },
     "target_path_arg": "workflow_target_path",

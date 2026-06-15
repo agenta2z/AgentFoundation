@@ -23,51 +23,29 @@ def _build_ci_from_config(
     tool_executor: Any = None,
     interactive: Any = None,
 ) -> Any:
-    """Build a ConversationalInferencer from YAML config.
+    """Build a ConversationalInferencer from this tool's configs/default.yaml.
 
-    Loads configs/default.yaml which uses alias-file cascade to resolve
-    ``base_inferencer: ClaudeCodeCLI`` → loads ``base_inferencer/ClaudeCodeCLI.yaml``.
-    Override with ``--backend RovoDevCLI`` (any registered alias with a
-    matching YAML in ``configs/base_inferencer/``).
+    Thin wrapper over the shared ``_ci_host.build_ci_from_config`` helper (also
+    used by the task conversational router), preserving the SOP CLI behavior of
+    printing + exiting on an unknown ``--backend``.
     """
-    import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import load_config, instantiate
-    from omegaconf import OmegaConf
+    from agent_foundation.resources.tools import _ci_host
 
     configs_dir = Path(__file__).parent / "configs"
-    cfg = load_config(str(configs_dir / "default.yaml"))
-    cfg = OmegaConf.to_container(cfg, resolve=True)
-
-    if backend:
-        backend_path = configs_dir / "base_inferencer" / f"{backend}.yaml"
-        if not backend_path.exists():
-            available = ", ".join(
-                p.stem for p in (configs_dir / "base_inferencer").glob("*.yaml")
-            )
-            print(f"ERROR: Unknown backend '{backend}'. Available: {available}")
-            sys.exit(1)
-        cfg["base_inferencer"] = OmegaConf.to_container(
-            OmegaConf.load(str(backend_path)), resolve=True,
+    try:
+        return _ci_host.build_ci_from_config(
+            configs_dir / "default.yaml",
+            model=model,
+            backend=backend,
+            backend_dir=configs_dir / "base_inferencer",
+            tool_registry=tool_registry,
+            tool_executor=tool_executor,
+            interactive=interactive,
+            target_path=Path.cwd(),
         )
-
-    if model:
-        bi = cfg["base_inferencer"]
-        if "model_name" in bi:
-            bi["model_name"] = model
-        elif "model_id" in bi:
-            bi["model_id"] = model
-        else:
-            bi["model_name"] = model
-    cfg["base_inferencer"]["target_path"] = str(Path.cwd())
-
-    ci = instantiate(OmegaConf.create(cfg))
-    if tool_registry:
-        ci.tool_registry = tool_registry
-    if tool_executor:
-        ci.tool_executor = tool_executor
-    if interactive:
-        ci.interactive = interactive
-    return ci
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
 
 
 async def run_sop(
@@ -93,15 +71,15 @@ async def run_sop(
         except ImportError:
             pass
 
+    from agent_foundation.resources.tools import _ci_host
+
     tool_dirs = [Path(d) for d in extra_tool_dirs] if extra_tool_dirs else None
     tool_registry = load_all_tools(extra_dirs=tool_dirs)
 
     # Force all tools to synchronous mode for CLI.
     # In the server, async tools fire-and-forget while the chat continues.
     # In CLI, we need tools to complete inline before the loop continues.
-    for tool_def in tool_registry.values():
-        if hasattr(tool_def, "asynchronous"):
-            tool_def.asynchronous = False
+    _ci_host.force_tools_synchronous(tool_registry)
 
     # Session workspace: _runtime/sop/<sop_name>__<timestamp>/
     from datetime import UTC, datetime
@@ -197,41 +175,12 @@ async def run_sop(
 
     logger.info("SOP session: %s", session_dir)
 
-    # Build a synchronous tool executor that resolves executors from tool.json
-    async def _tool_executor(tool_name: str, arguments: dict) -> Any:
-        import importlib
-        import json as _json
-        from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
-            ToolExecutionResult as _TER,
-        )
-        # Search tool directories for matching tool.json with "executor" field
-        search_dirs = [
-            Path(__file__).resolve().parent.parent,  # AF tools root
-        ]
-        if tool_dirs:
-            search_dirs.extend(tool_dirs)
-        for tools_root in search_dirs:
-            tool_json_path = tools_root / tool_name / "tool.json"
-            if not tool_json_path.exists():
-                # Try with hyphens→underscores
-                tool_json_path = tools_root / tool_name.replace("-", "_") / "tool.json"
-            if tool_json_path.exists():
-                meta = _json.loads(tool_json_path.read_text())
-                executor_ref = meta.get("executor", "")
-                if ":" in executor_ref:
-                    mod_path, func_name = executor_ref.rsplit(":", 1)
-                    mod = importlib.import_module(mod_path)
-                    func = getattr(mod, func_name)
-                    return await func(arguments, session_context)
-                # Derived tool with no explicit executor — use generic
-                derived_from = meta.get("derived_from")
-                if derived_from:
-                    from agent_foundation.resources.tools.registry import derived_tool_execute
-                    return await derived_tool_execute(
-                        arguments, session_context,
-                        derived_from=derived_from, tool_name=tool_name,
-                    )
-        return _TER(result=f"Unknown tool: {tool_name}")
+    # Synchronous tool executor that resolves executors from each tool.json.
+    _tool_executor = _ci_host.make_tool_executor(
+        session_context,
+        tool_dirs=tool_dirs,
+        af_tools_root=Path(__file__).resolve().parent.parent,  # AF tools root
+    )
 
     ci = _build_ci_from_config(
         model=model,
@@ -240,6 +189,9 @@ async def run_sop(
         tool_executor=_tool_executor,
         interactive=interactive,
     )
+    # So the /sop command + Available-SOPs list discover the same SOPs the
+    # executor sees via session_context (static config; set before any turn).
+    ci._extra_sop_dirs = session_context.get("extra_sop_dirs") or []
     _ci_ref[0] = ci
 
     result = await execute(

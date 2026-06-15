@@ -95,6 +95,12 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         "on_group_resolve",
         "on_yes_action",
         "hide_no_button",
+        # proposal_selection args: the SOP author passes proposals_path (often
+        # via Jinja substitution); the rest tune widget behaviour.
+        "proposals",
+        "proposals_path",
+        "preselected_ids",
+        "allow_zero",
     ):
         _val = args.get(_key)
         if _val is not None and _val != "":

@@ -22,7 +22,7 @@ import {
   QuestionAnswer as QuestionIcon,
   ListAlt as ListIcon,
 } from '@mui/icons-material';
-import { getWidget } from './WidgetRegistry';
+import { getWidget } from '../protocol/WidgetRegistry';
 
 const TOOL_ICONS = {
   clarification: <QuestionIcon sx={{ fontSize: 16 }} />,

@@ -23,7 +23,7 @@ HEALTHCHECK_POLL_INTERVAL = 0.5  # seconds between health check polls
 DEFAULT_STARTUP_TIMEOUT = 60  # max seconds to wait for server startup
 
 # ANSI escape code pattern
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[\?0-9;]*[a-zA-Z]")
 
 
 class RovoDevNotFoundError(RuntimeError):
@@ -76,6 +76,19 @@ def find_acli_binary(explicit_path: Optional[str] = None) -> str:
     return path
 
 
+_CLI_NOISE_PATTERNS = [
+    re.compile(r"^\[[\?0-9;]*[a-zA-Z]"),          # bracketed paste mode [?2004h etc
+    re.compile(r"^Working in "),                    # working directory banner
+    re.compile(r"^Jira projects?: "),               # Jira project refs
+    re.compile(r"^Creating agent"),                  # agent startup
+    re.compile(r"^INTERNAL USE:"),                   # prompt collection warning
+    re.compile(r"^Turn off prompt collection"),      # prompt collection config hint
+    re.compile(r"^[✔✓] Using model:"),              # model info
+    re.compile(r"^[✔✓] Started \d+ MCP"),           # MCP server count
+    re.compile(r"^─{3,}"),                          # separator lines
+]
+
+
 def strip_ansi_codes(text: str) -> str:
     """Remove ANSI escape sequences from terminal output.
 
@@ -94,6 +107,12 @@ def strip_ansi_codes(text: str) -> str:
     # Strip carriage return overwrites (spinner lines)
     text = re.sub(r"\r[^\n]*", "", text)
     return text
+
+
+def is_cli_noise(line: str) -> bool:
+    """Check if a line is CLI startup noise that should be suppressed from streaming."""
+    stripped = line.strip()
+    return any(p.match(stripped) for p in _CLI_NOISE_PATTERNS)
 
 
 def find_available_port(

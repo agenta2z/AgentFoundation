@@ -24,12 +24,25 @@ class SOPState(FeedBase):
     phase_outputs: dict = field(default_factory=dict)
     goto_counts: dict = field(default_factory=dict)
     tool_phase_map: dict = field(default_factory=dict)
+    phase_required_tools: dict = field(default_factory=dict)
+    phase_executed_tools: dict = field(default_factory=dict)
     yolo_mode: bool = False
     instance_id: str = ""
     sop_description: str = ""
     user_input_gate_passed: bool = False
 
+    # Lifecycle: set when this SOP is moved off the active slot into the
+    # suspended bag. "" while active; "paused" (ad-hoc diversion, LLM nudges
+    # the user to resume) or "exited" (longer interruption, passive list).
+    suspension_reason: str = ""
+    suspended_at: str = ""
+
     sop: Any = field(default=None, repr=False)
+
+    @property
+    def suspension_label(self) -> str:
+        """Human-readable suspension state for prompt rendering."""
+        return {"paused": "Paused", "exited": "Exited"}.get(self.suspension_reason, "")
 
     @property
     def sop_status(self) -> str:
@@ -75,4 +88,10 @@ class SOPState(FeedBase):
             else ({"phase": r.phase} if hasattr(r, "phase") else str(r))
             for r in self.completed_phases
         ]
+        d["phase_required_tools"] = {
+            k: sorted(v) for k, v in self.phase_required_tools.items()
+        }
+        d["phase_executed_tools"] = {
+            k: sorted(v) for k, v in self.phase_executed_tools.items()
+        }
         return d

@@ -1,0 +1,39 @@
+# ============================================================================
+# Conversational Router   (--config disabled  /  --config conversation)
+# ============================================================================
+#
+# A ConversationalInferencer that READS the user's request and routes it: it
+# answers trivial/conceptual requests inline, and for a concrete planning task it
+# calls the `task` tool with a structured preset (breakdown / multiple / full-plan).
+#
+# This is hosted by the task executor's `_run_conversational_router` (NOT the
+# normal instantiate+ainfer path), which wires the tool registry + a depth-guarded
+# tool executor + (optionally) an interactive transport. See executor.py.
+#
+# The router prompt lives in prompt_templates/conversation/task_router/main/initial.jinja2
+# (selected via the prompt_renderer's active_template_root_space below).
+#
+# NOTE: `disabled`/`conversation` is OPT-IN. The bare `task` default remains
+# `default.yaml` (full PTI). The default flip is a deferred follow-up.
+
+_target_: Conversational
+max_iterations: 30
+# Raised from the CI default (4000) so a --no-aggregate list of worker outputs
+# fed back from a nested `task` call is not truncated before the router reads it.
+max_tool_result_chars: 12000
+
+base_inferencer:
+  _target_: ClaudeCodeCLI
+  model_name: opus[1m]
+  permission_mode: bypassPermissions
+
+# Point the CI at the task_router template space (the auto-created renderer would
+# otherwise default to the SOP-oriented `conversation` space).
+prompt_renderer:
+  _target_: agent_foundation.common.inferencers.agentic_inferencers.conversational.template_manager_renderer.TemplateManagerPromptRenderer
+  template_key: initial
+  template_manager:
+    _target_: TemplateManager
+    templates: ${modpath:agent_foundation.resources.prompt_templates}
+    active_template_root_space: task_router
+    active_template_type: main

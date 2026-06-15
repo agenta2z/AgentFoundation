@@ -1,0 +1,162 @@
+# plan_sources.yaml — original on-disk paths and integrity hashes for each plan
+# This file is the source-of-truth for "which plan was scored as A / B / C / D".
+# If any md5 mismatches the copy in `plans/`, replay is invalid — re-run capture.
+
+plans:
+  - id: A
+    label: "fluffy-wand (IC implementer's build plan)"
+    author_tool: Claude Code
+    author_tool_evidence: "Lives under ~/.claude/plans/ — Claude Code's default plans directory."
+    original_path: /Users/tchen7/.claude/plans/take-a-look-into-fluffy-wand.md
+    benchmark_copy: plans/plan_A-Claude_Code-fluffy_wand.md
+    bytes: 24169
+    lines: 434
+    md5: 20e6c1b133480bc2ece339bf5a22606d
+    in_repo: null
+    # Full version landscape captured for provenance (snapshot 2026-06-06 11:35 PDT):
+    version_landscape:
+      - role: live
+        path: /Users/tchen7/.claude/plans/take-a-look-into-fluffy-wand.md
+        bytes: 33516
+        md5: 47312bbfc694917f9b92ed616a78f3a8
+        mtime: "2026-06-06 11:15:37"
+        note: "Mutated since original judgment; do NOT use for replay."
+      - role: user_bak  # user-made via `cp ...md ...md.bak` on 2026-06-06 10:24
+        path: /Users/tchen7/.claude/plans/take-a-look-into-fluffy-wand.md.bak
+        bytes: 24169
+        md5: 20e6c1b133480bc2ece339bf5a22606d
+        mtime: "2026-06-06 10:24:59"
+        note: "BIT-IDENTICAL to benchmark_copy (verified 2026-06-06 11:35). No re-archive needed."
+      - role: benchmark
+        path: plans/plan_A-Claude_Code-fluffy_wand.md
+        bytes: 24169
+        md5: 20e6c1b133480bc2ece339bf5a22606d
+        note: "Source-of-truth for replay. Authoritative."
+    notes: |
+      Lives in the user's global ~/.claude/plans/ dir — not in any git repo. Copy is
+      the only durable record. The user's manual `.md.bak` snapshot is byte-identical
+      to the benchmark copy (verified 2026-06-06 11:35) — no additional archiving
+      needed. The live `.md` has drifted since judgment and is NOT a valid replay source.
+
+  - id: B
+    label: "00_PLAN_data_builder v1.0 (master strategy plan)"
+    author_tool: Rovo Dev
+    author_tool_evidence: |
+      Plan B is self-attributing: line 3 reads `> **Created:** 2026-06-06 by tony + Rovo Dev`
+      and line 412 (changelog) reads `Authored by Rovo Dev based on user §1-§6 specification`.
+    original_path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.md
+    original_backup_path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.v1.0.backup.md
+    benchmark_copy: plans/plan_B-Rovo_Dev-master_plan_data_builder.md
+    bytes: 31097
+    lines: 412
+    md5: f9013a7001689fc8cadb2d6a6f753c1d
+    in_repo: /Users/tchen7/MyProjects/atlassian-agi
+    in_repo_status: untracked  # data/src/ is `?? data/src/` per `git status --porcelain`
+    # Full version landscape captured for provenance (snapshot 2026-06-06 11:35 PDT):
+    version_landscape:
+      - role: live
+        path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.md
+        bytes: 57364
+        lines: 874
+        md5: 927c26fd1669b332d8b29f72c8fdf61d
+        mtime: "2026-06-06 11:34:06"
+        note: "v2.x+ edits; do NOT use for replay."
+      - role: rolling_backup_v1_0
+        path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.v1.0.backup.md
+        bytes: 31097
+        lines: 412
+        md5: f9013a7001689fc8cadb2d6a6f753c1d
+        mtime: "2026-06-06 10:26:26"
+        note: "AUTHORITATIVE for replay. This is what the original 2026-06-06 10:08 judgment scored."
+      - role: rolling_backup_v2_0
+        path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.v2.0.backup.md
+        bytes: 54681
+        mtime: "2026-06-06 11:29:00"
+        note: "Intermediate snapshot between v1.0 and live; not used by this benchmark."
+      - role: user_bak
+        path: /Users/tchen7/MyProjects/atlassian-agi/data/src/_docs/_plan/00_PLAN_data_builder.md.bak
+        status: ABSENT
+        note: |
+          The user intended to create this via `cp 00_PLAN_data_builder.md 00_PLAN_data_builder.md.bak`,
+          but the file is NOT present on disk as of 2026-06-06 11:35. Possible causes: the cp was
+          run in a different shell session and never executed; or it was overwritten/cleaned by
+          a rolling-backup script. Per user decision (2026-06-06 12:19), we proceed with the
+          v1.0 rolling_backup as the authoritative Plan B snapshot.
+      - role: benchmark
+        path: plans/plan_B-Rovo_Dev-master_plan_data_builder.md
+        bytes: 31097
+        lines: 412
+        md5: f9013a7001689fc8cadb2d6a6f753c1d
+        note: "Source-of-truth for replay. Authoritative. Sourced from rolling_backup_v1_0."
+    notes: |
+      The benchmark copy matches the .v1.0.backup.md file, NOT the live
+      00_PLAN_data_builder.md (which had been edited to 874 lines by 11:34).
+      The v1.0 backup is the version the evaluation scored. See version_landscape
+      for the full set of related files captured at this moment in time.
+
+  - id: C
+    label: "aggregator output.md (6-worker integration plan)"
+    author_tool: AgentFoundation
+    author_tool_evidence: |
+      Lives under AgentFoundation/_runtime/tasks/.../children/propose/outputs/final_deliverables/ —
+      the canonical output path of AgentFoundation's propose-aggregate pipeline. Plan content
+      explicitly references "aggregator pass over 6 upstream worker proposals" (line 3).
+    original_path: /Users/tchen7/MyProjects/CoreProjects/AgentFoundation/_runtime/tasks/task/task_20260606_012220_87b5ffb3/children/propose/outputs/final_deliverables/output.md
+    benchmark_copy: plans/plan_C-AgentFoundation-aggregator_output.md
+    bytes: 56793
+    lines: 734
+    md5: baa99a6e6370d62df32b8c145fa443b5
+    in_repo: /Users/tchen7/MyProjects/CoreProjects/AgentFoundation
+    in_repo_status: gitignored  # `_runtime/` is ephemeral by convention
+    notes: |
+      Aggregator pass over 6 upstream worker proposals (worker_0..worker_5).
+      The 6 worker outputs themselves are NOT copied into this benchmark (they
+      are large, ephemeral, and the aggregator absorbs them). If a future
+      evaluation requires the worker-level granularity, capture them separately
+      via a usecase_001_extended/ snapshot.
+
+  - id: D
+    label: "data_builder_corpus_pipeline (Cursor IDE plan-mode artifact)"
+    author_tool: Cursor
+    author_tool_evidence: |
+      Lives under ~/.cursor/plans/ — Cursor IDE's default plan-mode storage directory.
+      File uses the `*.plan.md` extension convention Cursor uses for plan-mode artifacts,
+      with the embedded `--- todos: [...] isProject: false ---` YAML frontmatter that
+      Cursor's plan-mode generates (visible in lines 1-31 of the file).
+    original_path: /Users/tchen7/.cursor/plans/data_builder_corpus_pipeline_78e59677.plan.md
+    benchmark_copy: plans/plan_D-Cursor-data_builder_corpus_pipeline.md
+    bytes: 11803
+    lines: 118
+    md5: 86783318412cc26822180a15e386fd86
+    in_repo: null
+    added_to_benchmark_at: "2026-06-06T12:20:41-07:00"
+    added_to_benchmark_note: |
+      Plan D was added AFTER the original 3-way judgment (2026-06-06 10:08). The
+      reference judgment in evaluation/2026-06-06_rovo-dev_judgment.md scored
+      only {A, B, C} and therefore does NOT include Plan D. A 4-way re-judgment
+      is recommended for fair comparison.
+    version_landscape:
+      - role: live
+        path: /Users/tchen7/.cursor/plans/data_builder_corpus_pipeline_78e59677.plan.md
+        bytes: 11803
+        lines: 118
+        md5: 86783318412cc26822180a15e386fd86
+        mtime: "2026-06-06 01:32:41"
+        note: |
+          Live file was BIT-IDENTICAL to benchmark_copy at archive time
+          (2026-06-06 12:20). mtime 01:32 predates Plans A/B/C judgments
+          (10:08), so Plan D was actually authored EARLIEST of the four —
+          this is worth noting for any temporal-ordering analysis.
+      - role: benchmark
+        path: plans/plan_D-Cursor-data_builder_corpus_pipeline.md
+        bytes: 11803
+        lines: 118
+        md5: 86783318412cc26822180a15e386fd86
+        note: "Source-of-truth for replay. Authoritative."
+    notes: |
+      Cursor IDE plan-mode artifact. Structurally distinct from A/B/C: it leads
+      with a YAML frontmatter `todos:` list (todo-graph-first authoring) rather
+      than a long-form markdown plan. Substantively on-topic (17 keyword hits
+      against the upstream prompt vocabulary). Notably proposes superseding
+      Plan B v1.0 with its own v2.0 — making it a meta-response to the
+      existing-plan landscape, not a greenfield response.

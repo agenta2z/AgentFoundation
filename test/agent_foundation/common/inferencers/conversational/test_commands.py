@@ -61,25 +61,29 @@ class TestCommandRegistry(unittest.TestCase):
         assert "help" in names
         assert "status" in names
         assert "clear" in names
-        assert "pause" in names
-        assert "resume" in names
+        assert "sop" in names
+        assert "pause_sop" in names
+        assert "resume_sop" in names
         assert "exit_sop" in names
 
     def test_command_count(self):
         ci = _make_ci()
-        assert len(ci._commands.list_commands()) == 9
+        # help, status, clear, sop, pause_sop, exit_sop, resume_sop, model, root, target
+        assert len(ci._commands.list_commands()) == 10
 
     def test_is_command_slash(self):
         ci = _make_ci()
         assert ci._commands.is_command("/help")
         assert ci._commands.is_command("/status")
         assert ci._commands.is_command("/clear")
+        assert ci._commands.is_command("/sop")
+        assert ci._commands.is_command("/pause_sop")
+        assert ci._commands.is_command("/resume_sop")
 
     def test_is_command_alias(self):
         ci = _make_ci()
         assert ci._commands.is_command("/?")
         assert ci._commands.is_command("/s")
-        assert ci._commands.is_command("/exit")
 
     def test_not_command_without_slash(self):
         ci = _make_ci()
@@ -115,7 +119,7 @@ class TestCommandRegistry(unittest.TestCase):
     def test_requires_active_sop_guard(self):
         ci = _make_ci()
         result = asyncio.get_event_loop().run_until_complete(
-            ci._commands.dispatch("/pause")
+            ci._commands.dispatch("/pause_sop")
         )
         assert "requires an active SOP" in result
 

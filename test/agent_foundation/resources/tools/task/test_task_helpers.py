@@ -262,7 +262,7 @@ def test_tool_json_schema():
     expected = {"request", "--plan", "--execute", "--full", "--confirm",
                 "--agent-config", "--override", "--model", "--no-dual",
                 "--analysis", "--multi-iter", "--max-iterations",
-                "--resume", "--in-place", "--copy-workspace", "--initial-plan"}
+                "--resume", "--in-place", "--copy-workspace", "--use-plan"}
     assert expected.issubset(param_names), f"missing: {expected - param_names}"
 
 

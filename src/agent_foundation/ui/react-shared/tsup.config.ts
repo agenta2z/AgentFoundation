@@ -12,10 +12,13 @@ export default defineConfig({
   sourcemap: true,
   treeshake: true,
   external: [
-    'react', 'react-dom',
+    'react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime',
     '@mui/material', '@mui/icons-material',
     '@emotion/react', '@emotion/styled',
+    'react-markdown', 'remark-gfm',
+    'react-syntax-highlighter', 'react-syntax-highlighter/dist/esm/styles/prism',
   ],
   jsx: 'automatic',
+  loader: { '.js': 'jsx' },
   outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
 });

@@ -5,6 +5,8 @@
   "category": "workflow",
   "asynchronous": false,
   "is_bridge": true,
+  "agent_enabled": false,
+  "slash_enabled": false,
   "parameters": [
     {
       "name": "workflow",

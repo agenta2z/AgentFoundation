@@ -1,0 +1,9 @@
+# Claude Code CLI backend for the default conversational inferencer.
+# Inherits _debug_mode / _model_name from the parent via _instantiate.py's
+# underscore-prefix cascade. target_path / cache_folder are runtime values
+# injected by the host (build_ci_from_config sets target_path; the OpenStartup
+# factory sets cache_folder from its per-session cache dir).
+_target_: ClaudeCodeCLI
+model_name: opus[1m]
+idle_timeout_seconds: 1800
+permission_mode: bypassPermissions

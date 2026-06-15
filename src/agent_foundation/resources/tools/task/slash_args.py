@@ -13,7 +13,7 @@ _REPEATABLE_KEYS = {"override"}
 
 TASK_BOOL_FLAGS = {
     "plan", "execute", "full", "confirm",
-    "no_dual", "analysis", "multi_iter",
+    "no_dual", "no_aggregate", "analysis", "multi_iter",
     "in_place", "copy_workspace",
 }
 

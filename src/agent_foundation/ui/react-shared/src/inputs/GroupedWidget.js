@@ -32,7 +32,7 @@
 
 import React, { useState } from 'react';
 import { Box, Typography, Alert } from '@mui/material';
-import { getWidget } from './WidgetRegistry';
+import { getWidget } from '../protocol/WidgetRegistry';
 
 // Lightweight "OR" divider between stacked children.
 function OrDivider() {

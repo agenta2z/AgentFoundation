@@ -9,6 +9,7 @@ import './protocol/registerBuiltins';
 
 // Protocol / registry
 export { registerWidget, getWidget, unregisterWidget, listRegisteredWidgets } from './protocol/WidgetRegistry';
+export { default as ConversationToolWidget } from './protocol/ConversationToolWidget';
 
 // Common primitives
 export { default as EmptyState } from './common/EmptyState';
@@ -27,9 +28,9 @@ export { default as PendingReasonPopover } from './common/PendingReasonPopover';
 
 // Theme
 export { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
-export { default as ThemeSwitcher } from './theme/ThemeSwitcher';
+export { ThemeSwitcher } from './theme/ThemeSwitcher';
 export { getTheme, listThemes, registerTheme } from './theme/themeRegistry';
-export { default as createAppTheme } from './theme/createAppTheme';
+export { createAppTheme } from './theme/createAppTheme';
 
 // Input widgets
 export { default as TextInputWidget } from './inputs/TextInputWidget';
@@ -48,6 +49,12 @@ export { default as ChatInput } from './chat/ChatInput';
 export { default as ChatMessage } from './chat/ChatMessage';
 export { default as StreamingMessage } from './chat/StreamingMessage';
 export { default as CommandAutocomplete } from './chat/CommandAutocomplete';
+export { default as AgentMessageBubble } from './chat/AgentMessageBubble';
+export { default as Breadcrumb } from './chat/Breadcrumb';
+export { default as GraphFlowView } from './chat/GraphFlowView';
+export { default as NodeDetailPanel } from './chat/NodeDetailPanel';
+export { default as PromptViewerDrawer } from './chat/PromptViewerDrawer';
+export { default as ThinkingFold, parseResponseTags, stripSessionContext, stripAnsi, stripAcliNoise, stripToolsToInvoke, stripResponseTags, parseSessionContext } from './chat/ThinkingFold';
 
 // Layout
 export { default as AppHeader } from './layout/AppHeader';

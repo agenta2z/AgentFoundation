@@ -254,6 +254,188 @@ class TestDualPerRoundWorkspace(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class TestDualMergesProposePhaseDel(unittest.TestCase):
+    """Dual merges propose-phase deliverables not reproduced by fix.
+
+    When the fix phase refines the propose output, it typically reproduces
+    output_path but not auxiliary deliverables (e.g. per-proposal files).
+    The Dual's _finalize_output should surface both: fix's output.md takes
+    precedence, propose's auxiliary directories fill in.
+    """
+
+    def test_propose_deliverables_merged_when_fix_lacks_them(self):
+        """Fix produces output.md only; propose's proposals/ should appear."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="dual_merge_")
+        try:
+            base = _Mock()
+            fixer = _Mock()
+            dual = DualInferencer(
+                base_inferencer=base,
+                review_inferencer=_Mock(),
+                fixer_inferencer=fixer,
+                workspace=InferencerWorkspace(
+                    root=tmpdir, use_final_deliverables_folder=True),
+                output_path="output.md",
+            )
+
+            # Simulate propose phase: BTA wrote output.md + proposals/
+            propose_ws = base._workspace
+            propose_fd = propose_ws.deliverables_dir
+            os.makedirs(propose_fd, exist_ok=True)
+            with open(os.path.join(propose_fd, "output.md"), "w") as f:
+                f.write("# Proposal v1")
+            proposals_dir = os.path.join(propose_fd, "proposals")
+            os.makedirs(proposals_dir)
+            for pid in ["P1", "P2", "P3"]:
+                with open(os.path.join(proposals_dir, f"{pid}.md"), "w") as f:
+                    f.write(f"# {pid} detail")
+
+            # Simulate fix phase: fixer wrote refined output.md only
+            fix_ws = dual._workspace.child("round_01").child("fix")
+            fix_ws.ensure_dirs()
+            fix_fd = fix_ws.deliverables_dir
+            os.makedirs(fix_fd, exist_ok=True)
+            with open(os.path.join(fix_fd, "output.md"), "w") as f:
+                f.write("# Fixed v2")
+
+            # Set trackers (normally done by _step_propose_impl / _step_fix_impl)
+            dual._propose_child_ws = propose_ws
+            dual._last_output_child_ws = fix_ws
+
+            dual._finalize_output("<Response>summary</Response>")
+
+            own_fd = dual._workspace.deliverables_dir
+            # Fix's output.md takes precedence
+            self.assertIn("Fixed v2",
+                          open(os.path.join(own_fd, "output.md")).read())
+            # Propose's proposals/ is merged
+            merged_proposals = os.path.join(own_fd, "proposals")
+            self.assertTrue(os.path.exists(merged_proposals),
+                            "proposals/ should be merged from propose phase")
+            self.assertEqual(
+                sorted(os.listdir(merged_proposals)),
+                ["P1.md", "P2.md", "P3.md"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_fix_deliverable_takes_precedence_over_propose(self):
+        """When both propose and fix have the same entry, fix wins."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="dual_prec_")
+        try:
+            base = _Mock()
+            fixer = _Mock()
+            dual = DualInferencer(
+                base_inferencer=base,
+                review_inferencer=_Mock(),
+                fixer_inferencer=fixer,
+                workspace=InferencerWorkspace(
+                    root=tmpdir, use_final_deliverables_folder=True),
+                output_path="output.md",
+            )
+
+            # Both propose and fix write output.md
+            propose_ws = base._workspace
+            propose_fd = propose_ws.deliverables_dir
+            os.makedirs(propose_fd, exist_ok=True)
+            with open(os.path.join(propose_fd, "output.md"), "w") as f:
+                f.write("PROPOSE VERSION")
+
+            fix_ws = dual._workspace.child("round_01").child("fix")
+            fix_ws.ensure_dirs()
+            fix_fd = fix_ws.deliverables_dir
+            os.makedirs(fix_fd, exist_ok=True)
+            with open(os.path.join(fix_fd, "output.md"), "w") as f:
+                f.write("FIX VERSION")
+
+            dual._propose_child_ws = propose_ws
+            dual._last_output_child_ws = fix_ws
+
+            dual._finalize_output("<Response>summary</Response>")
+
+            own_fd = dual._workspace.deliverables_dir
+            self.assertIn("FIX VERSION",
+                          open(os.path.join(own_fd, "output.md")).read())
+
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_merge_when_propose_is_canonical(self):
+        """When no fix ran (propose IS the canonical child), no double merge."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="dual_nomerge_")
+        try:
+            base = _Mock()
+            dual = DualInferencer(
+                base_inferencer=base,
+                workspace=InferencerWorkspace(
+                    root=tmpdir, use_final_deliverables_folder=True),
+                output_path="output.md",
+            )
+
+            propose_ws = base._workspace
+            propose_fd = propose_ws.deliverables_dir
+            os.makedirs(propose_fd, exist_ok=True)
+            with open(os.path.join(propose_fd, "output.md"), "w") as f:
+                f.write("# Only propose")
+
+            # propose IS the canonical child (no fix ran)
+            dual._propose_child_ws = propose_ws
+            dual._last_output_child_ws = propose_ws
+
+            dual._finalize_output("<Response>summary</Response>")
+
+            own_fd = dual._workspace.deliverables_dir
+            self.assertTrue(os.path.exists(os.path.join(own_fd, "output.md")))
+
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_crash_without_propose_ws(self):
+        """Graceful when _propose_child_ws is not set (e.g. legacy code)."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="dual_legacy_")
+        try:
+            base = _Mock()
+            fixer = _Mock()
+            dual = DualInferencer(
+                base_inferencer=base,
+                review_inferencer=_Mock(),
+                fixer_inferencer=fixer,
+                workspace=InferencerWorkspace(
+                    root=tmpdir, use_final_deliverables_folder=True),
+                output_path="output.md",
+            )
+
+            fix_ws = dual._workspace.child("round_01").child("fix")
+            fix_ws.ensure_dirs()
+            with open(fix_ws.output_path("output.md"), "w") as f:
+                f.write("# Fixed")
+
+            dual._last_output_child_ws = fix_ws
+            # _propose_child_ws not set — should not crash
+            dual._finalize_output("<Response>summary</Response>")
+
+            own = dual._workspace.output_path("output.md")
+            self.assertTrue(os.path.exists(own))
+
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 class TestFullDualBTAE2E(unittest.TestCase):
     """E2E: Dual wrapping BTA, verify full workspace structure after ainfer()."""
 
@@ -492,6 +674,93 @@ class TestSymlinkFallbackOnWindows(unittest.TestCase):
             self.assertEqual(open(dst_file).read(), "existing content")
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestUpstreamOutcomeFormatting(unittest.TestCase):
+    """Aggregator upstream artifacts use '### Upstream Outcome N' headings
+    and context-appropriate labels for deliverables vs outputs folders."""
+
+    def test_heading_uses_upstream_outcome_inline(self):
+        """Non-local aggregator: inlined results use '### Upstream Outcome N'."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        agg = _Mock()
+        agg.has_local_access = False
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=_Mock(),
+            aggregator_inferencer=agg,
+        )
+        text = bta._format_worker_results_text(
+            worker_results=["output A", "output B"],
+            worker_output_paths=[None, None],
+        )
+        self.assertIn("### Upstream Outcome 1", text)
+        self.assertIn("### Upstream Outcome 2", text)
+        self.assertNotIn("### Result ", text)
+        self.assertIn("output A", text)
+        self.assertIn("output B", text)
+
+    def test_heading_uses_upstream_outcome_path_reference(self):
+        """Local aggregator with paths: uses '### Upstream Outcome N' + file ref."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        agg = _Mock()
+        agg.has_local_access = True
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=_Mock(),
+            aggregator_inferencer=agg,
+        )
+        text = bta._format_worker_results_text(
+            worker_results=["output A"],
+            worker_output_paths=["/tmp/worker_0/outputs/output.md"],
+        )
+        self.assertIn("### Upstream Outcome 1", text)
+        self.assertIn("See file:", text)
+        self.assertNotIn("### Result ", text)
+
+    def test_label_deliverables_for_final_deliverables_path(self):
+        """When fd_dir contains 'final_deliverables', label is 'See deliverables'."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        agg = _Mock()
+        agg.has_local_access = True
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=_Mock(),
+            aggregator_inferencer=agg,
+        )
+        text = bta._format_worker_results_text(
+            worker_results=["result"],
+            worker_output_paths=["/tmp/w0/outputs/output.md"],
+            worker_deliverable_dirs=["/tmp/w0/outputs/final_deliverables"],
+        )
+        self.assertIn("See deliverables", text)
+        self.assertNotIn("See outputs folder", text)
+
+    def test_label_outputs_folder_for_non_deliverables_path(self):
+        """When fd_dir is outputs/ (not final_deliverables), label is 'See outputs folder'."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        agg = _Mock()
+        agg.has_local_access = True
+        bta = BreakdownThenAggregateInferencer(
+            breakdown_inferencer=_Mock(),
+            aggregator_inferencer=agg,
+        )
+        text = bta._format_worker_results_text(
+            worker_results=["result"],
+            worker_output_paths=["/tmp/w0/outputs/output.md"],
+            worker_deliverable_dirs=["/tmp/w0/outputs"],
+        )
+        self.assertIn("See outputs folder", text)
+        self.assertNotIn("See deliverables", text)
 
 
 if __name__ == "__main__":

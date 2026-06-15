@@ -9,7 +9,7 @@
 const CANONICAL_TYPES = [
   'text_input', 'single_choice', 'multiple_choice',
   'dropdown', 'toggle', 'tool_argument_form',
-  'confirmation', 'multi_input', 'grouped', 'default',
+  'confirmation', 'multi_input', 'grouped', 'proposal_selection', 'default',
 ];
 
 const _registry = new Map();

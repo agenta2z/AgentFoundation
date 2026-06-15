@@ -75,6 +75,11 @@
       "description": "Skip the implementation phase entirely."
     },
     {
+      "name": "--no-aggregate",
+      "type": "flag",
+      "description": "Run workers but skip aggregation: return the full list of worker outputs instead of one synthesized result (e.g. so a conversational caller can aggregate). Applies to BTA (disable_aggregator) and MFDual (multi_flow_disable_aggregator) nodes."
+    },
+    {
       "name": "--base-inferencer",
       "type": "string",
       "popular": true,
@@ -131,14 +136,14 @@
       "description": "Replay streamed output from previously completed phases."
     },
     {
-      "name": "--initial-plan",
+      "name": "--use-plan",
       "type": "path",
-      "description": "Load initial plan from file, skip the proposal phase."
+      "description": "Path to a plan file. Skips the planning phase and goes straight to implementation using this plan."
     },
     {
       "name": "--use-proposal",
       "type": "path",
-      "description": "Path to proposals.json from a research_propose run. Selected proposals seed the plan phase. Mutually exclusive with --initial-plan."
+      "description": "Path to proposals.json from a research-propose run. Selected proposals are formatted into a plan and fed to implementation. Mutually exclusive with --use-plan."
     },
     {
       "name": "--proposal-ids",
@@ -153,7 +158,16 @@
     {
       "name": "--config",
       "type": "string",
-      "description": "Topology config: preset name (e.g., 'default'), YAML path, or inline YAML. Defaults to 'default'."
+      "description": "Topology preset (default 'default'). 'default'/'pti': full PTI plan+implement. 'breakdown': BTA coverage planning with adaptive per-subtask workers (leaf/breakdown/multiflow). 'multiple'/'multiflow': MFDual diversity, N parallel flows + winner pick. 'full-plan': BTA+MFDual coverage+diversity (alias for breakdown-multiflow-plan). 'disabled'/'conversation': conversational router that picks a preset per request (opt-in). Mode flags (--plan/--execute/--full/--confirm) apply only to 'default'/'pti'; the other presets are plan-only. Also accepts a YAML path or inline YAML.",
+      "choices": [
+        "default",
+        "breakdown",
+        "multiple",
+        "full-plan",
+        "disabled",
+        "conversation",
+        "pti"
+      ]
     },
     {
       "name": "--override",

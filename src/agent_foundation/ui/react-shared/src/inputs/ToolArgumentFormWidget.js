@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react';
-import { getWidget } from './WidgetRegistry';
+import { getWidget } from '../protocol/WidgetRegistry';
 
 export default function ToolArgumentFormWidget({ config, onSubmit }) {
   const fields = config?.fields || [];

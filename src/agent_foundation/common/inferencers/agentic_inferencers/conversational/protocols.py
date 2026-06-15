@@ -31,6 +31,31 @@ class ToolExecutorCallable(Protocol):
 
 
 @runtime_checkable
+class HubAwareToolExecutor(ToolExecutorCallable, Protocol):
+    """Capability Protocol for executors that can create batched task hubs.
+
+    A host application that orchestrates experiments (e.g. RankEvolve's
+    ``SessionToolExecutor``) structurally satisfies this. Framework code
+    narrows ``tool_executor`` via ``isinstance(executor, HubAwareToolExecutor)``
+    before calling ``create_experiment_hub``; AF apps without a Hub simply do
+    not satisfy the Protocol and the caller degrades gracefully.
+
+    Mock gotcha: a bare ``Mock()`` will lie about satisfying this Protocol
+    (it autocreates any attribute). Tests MUST use
+    ``MagicMock(spec=ToolExecutorCallable)`` so the ``create_experiment_hub``
+    attribute is genuinely absent for the negative case.
+    """
+
+    async def create_experiment_hub(
+        self,
+        selected_details: list[dict[str, Any]],
+        proposals_data: dict[str, Any],
+        custom_queries: list[str] | None = None,
+        group_by: str = "batch",
+    ) -> str: ...
+
+
+@runtime_checkable
 class ContextCompressorCallable(Protocol):
     async def __call__(self, context: str, max_length: int) -> str: ...
 

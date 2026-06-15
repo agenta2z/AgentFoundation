@@ -35,6 +35,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     parse_conversation_response,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
+    ChoiceItem,
     ConversationTool,
     ConversationToolType,
 )
@@ -75,6 +76,16 @@ logger = logging.getLogger(__name__)
 # Maximum conversation loop iterations for standalone run_conversation()
 _MAX_CONVERSATION_ITERATIONS = 20
 
+# Safety ceiling used when ``max_iterations`` is <= 0 (or None/False), which
+# means "no fixed cap — run until the model stops on its own" (final answer /
+# async dispatch / user handback). The agentic loop has NO other backstop (no
+# no-progress or wall-clock/token guard), so a pathological autonomous loop
+# (especially in yolo mode) could otherwise spin forever. This ceiling is a
+# last-resort guard against a literal infinite loop, NOT a normal tuning knob —
+# realistic turns stop far below it. Tune/raise only if a legitimate autonomous
+# task genuinely needs more rounds.
+_UNBOUNDED_ITERATION_CEILING = 1000
+
 # Protocol-level message markers used in the agentic loop conversation history.
 # These strings are part of the LLM-facing protocol — changing them may affect
 # prompt comprehension. Keep them short and bracketed for easy parsing.
@@ -82,6 +93,22 @@ _WIDGET_RESPONSE_PREFIX = "[Collected from conversation widget]"
 _TOOL_RESULT_HEADER = "[Tool Result: {}]"  # .format(tool_name)
 _TOOL_RESULTS_PREFIX = "[Tool execution results]"
 _CONTINUE_AFTER_TOOLS = "Continue based on the tool execution results above."
+
+# Conversation role labels surfaced to the template as ``{{ user_role }}`` /
+# ``{{ agent_role }}``. ``assistant`` matches the role used for the model's own
+# messages in history (see ``add_message``), so a self-continuation CurrentTurn
+# renders consistently with prior model turns. Single source of truth for the
+# CurrentTurn tag AND the Decision Procedure's 1a/1b branches — change here if
+# the model-side role name ever differs.
+_USER_ROLE = "user"
+_AGENT_ROLE = "assistant"
+
+
+def _now_iso() -> str:
+    """UTC timestamp for SOP suspension ordering/display."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
 
 
 @attrs(slots=False)
@@ -119,8 +146,24 @@ class ConversationalInferencer(InferencerBase):
     # --- Configuration ---
     compression_threshold: int = attrib(default=8000, kw_only=True)
     context_budget: ContextBudget = attrib(factory=ContextBudget, kw_only=True)
+    # Hard bound on agentic-loop rounds per message. <= 0 / None / False means
+    # "no fixed cap" (run until the model stops on its own, bounded only by the
+    # internal _UNBOUNDED_ITERATION_CEILING safety guard); see run_agentic_loop.
     max_iterations: int = attrib(default=5, kw_only=True)
+    # Soft, prompt-level self-governance threshold (rounds). When set (truthy),
+    # it is injected into the prompt template as ``{{ soft_max_iterations }}`` so
+    # the model is instructed to stop / use the confirmation tool if it has made
+    # no meaningful progress after this many consecutive autonomous rounds. This
+    # is guidance only (the model self-assesses progress from the conversation
+    # context) — the enforced bound is max_iterations / the safety ceiling.
+    # ``None`` disables the instruction. Typically paired with max_iterations<=0.
+    soft_max_iterations: Optional[int] = attrib(default=None, kw_only=True)
     max_tool_result_chars: int = attrib(default=4000, kw_only=True)
+    # Extra directories to discover SOPs from (e.g. server/OpenTeam-provided
+    # SOPs). Set at construction by the host; mirrors session_context's
+    # extra_sop_dirs so the /sop command and the Available-SOPs prompt list see
+    # the same SOPs the executor does. Init kwarg: ``extra_sop_dirs``.
+    _extra_sop_dirs: list = attrib(factory=list, kw_only=True)
 
     # --- Internal state (init=False) ---
     _dynamic_context: AgenticDynamicContext = attrib(
@@ -156,7 +199,9 @@ class ConversationalInferencer(InferencerBase):
         )
         self._commands = CommandRegistry(self)
         self._paused = False
-        self.sop_state = None  # SOPState | None — set by /sop executor
+        self.sop_state = None  # SOPState | None — the ONE active SOP
+        # Paused + exited SOPs, most-recent-first. Resumable via /resume_sop.
+        self._suspended_sops: list = []
 
         # Inbox event loop fields (opt-in via enable_inbox)
         self._inbox = None  # asyncio.Queue[InboxItem] | None
@@ -208,11 +253,20 @@ class ConversationalInferencer(InferencerBase):
             else:
                 self.add_message("user", content)
                 self.add_message("assistant", response)
-                return AgenticResult(
-                    text=response,
-                    completed_actions=[],
-                    iterations_used=0,
-                )
+                # A command (e.g. /sop, /resume_sop) may seed an initial request
+                # to act on within the just-entered SOP. If so, persist it as the
+                # current user turn and fall through into the agentic loop so the
+                # SOP starts working immediately ("enter and act"). Otherwise the
+                # command is terminal — return its acknowledgement.
+                followup = self._consume_pending_followup()
+                if followup is None:
+                    return AgenticResult(
+                        text=response,
+                        completed_actions=[],
+                        iterations_used=0,
+                    )
+                self.add_message("user", followup)
+                content = followup
 
         loop_actions: list[CompletedAction] = []
         # Resolve interactive: prefer per-call arg, fallback to self.interactive
@@ -232,8 +286,17 @@ class ConversationalInferencer(InferencerBase):
             start_iteration = _resume.get("iteration", 0)
             self._pending_resume_state = None
 
+        # max_iterations <= 0 (or None/False) means "no fixed cap": run until
+        # the model stops on its own (final answer / async tool dispatch / user
+        # handback). We still bound by a high safety ceiling because the loop has
+        # no other backstop — an unbounded autonomous loop (esp. yolo) could
+        # otherwise spin forever. `not self.max_iterations` covers None/False/0
+        # (and short-circuits before the `<= 0` comparison so None is safe).
+        if not self.max_iterations or self.max_iterations <= 0:
+            effective_max = _UNBOUNDED_ITERATION_CEILING
+        else:
+            effective_max = self.max_iterations
         # SOP needs more iterations than the default 5
-        effective_max = self.max_iterations
         if self.sop_state and self.sop_state.sop:
             n_phases = len(self.sop_state.sop.phases)
             effective_max = max(effective_max, n_phases * 3)
@@ -396,6 +459,13 @@ class ConversationalInferencer(InferencerBase):
                 )
 
             if conv_response.has_conversation_tool:
+                # Enrich proposal_selection tools (resolve proposals_path →
+                # proposals + selectable choices) BEFORE either the yolo or the
+                # interactive branch consumes them, so yolo select_all sees the
+                # per-proposal choices and the widget gets its payload.
+                for _ps_tool in conv_response.conversation_tools:
+                    if _ps_tool.tool_type == ConversationToolType.PROPOSAL_SELECTION:
+                        self._enrich_proposal_selection(_ps_tool)
                 if self.yolo_mode:
                     collected = self._synthesize_yolo_collected(
                         conv_response.conversation_tools,
@@ -623,13 +693,16 @@ class ConversationalInferencer(InferencerBase):
                 )
             await _fire_turn_complete(iteration + 1)
 
-        # Exhausted max iterations — return last raw response
-        await _fire_turn_complete(self.max_iterations)
+        # Exhausted the effective cap (the configured max_iterations, the SOP
+        # phase-derived bound, or the unbounded safety ceiling) — return last
+        # raw response. Use effective_max (not self.max_iterations) so the
+        # reported count is correct when max_iterations is <=0/None (unbounded).
+        await _fire_turn_complete(effective_max)
         return AgenticResult(
             text=last_raw_response,
             raw_response=last_raw_response,
             completed_actions=loop_actions,
-            iterations_used=self.max_iterations,
+            iterations_used=effective_max,
             exhausted_max_iterations=True,
             last_rendered_prompt=self._last_rendered_prompt,
             last_template_source=self._last_template_source,
@@ -675,6 +748,19 @@ class ConversationalInferencer(InferencerBase):
     def add_message(self, role: str, content: str) -> None:
         self._messages.append({"role": role, "content": content})
 
+    def _consume_pending_followup(self) -> Optional[str]:
+        """Pop a one-shot initial request seeded by a command.
+
+        ``/sop <name> <request>`` and ``/resume_sop <name> <request>`` stash the
+        free-text request here so the loop can act on it as the first user turn
+        of the just-entered/resumed SOP (instead of merely entering and idling).
+        Returns the request once, then clears it.
+        """
+        followup = getattr(self, "_pending_followup", None)
+        if followup:
+            self._pending_followup = None
+        return followup
+
     def get_messages(self) -> list[dict[str, str]]:
         return list(self._messages)
 
@@ -711,6 +797,7 @@ class ConversationalInferencer(InferencerBase):
             "messages": list(self._messages),
             "prior_context": dict(self.prior_context),
             "sop_state": self.sop_state.to_dict() if self.sop_state else None,
+            "suspended_sops": [s.to_dict() for s in self._suspended_sops],
             "dynamic_context": (
                 self._dynamic_context.to_dict()
                 if hasattr(self, "_dynamic_context") else None
@@ -729,12 +816,15 @@ class ConversationalInferencer(InferencerBase):
         sop_dict = state.get("sop_state")
         if sop_dict:
             self.sop_state = SOPState.from_dict(sop_dict)
-            if self.sop_state.sop_name:
-                from agent_foundation.resources.sops.registry import load_sop
-                sop_info = load_sop(self.sop_state.sop_name)
-                self.sop_state.sop = sop_info.sop
+            self._reload_sop_definition(self.sop_state)
         else:
             self.sop_state = None
+
+        self._suspended_sops = []
+        for sw_dict in state.get("suspended_sops", []):
+            sw = SOPState.from_dict(sw_dict)
+            self._reload_sop_definition(sw)
+            self._suspended_sops.append(sw)
 
         if state.get("dynamic_context") is not None and hasattr(self, "_dynamic_context"):
             self._dynamic_context = self._dynamic_context.__class__.from_dict(
@@ -760,8 +850,13 @@ class ConversationalInferencer(InferencerBase):
 
     @command("status", description="Show SOP state and session info", aliases=("s",))
     async def _cmd_status(self) -> str:
+        n_susp = len(self._suspended_sops)
+        susp_note = f" Suspended SOPs: {n_susp}." if n_susp else ""
         if not self.sop_state:
-            return f"No active SOP. Messages: {len(self._messages)}. Paused: {self._paused}."
+            return (
+                f"No active SOP. Messages: {len(self._messages)}. "
+                f"Paused: {self._paused}.{susp_note}"
+            )
         s = self.sop_state
         completed = [
             c.phase if hasattr(c, "phase") else str(c) for c in s.completed_phases
@@ -770,7 +865,7 @@ class ConversationalInferencer(InferencerBase):
             f"SOP: {s.sop_name}\n"
             f"Phase: {s.current_phase} ({s.phase_status})\n"
             f"Completed: {completed}\n"
-            f"Messages: {len(self._messages)}. Paused: {self._paused}."
+            f"Messages: {len(self._messages)}. Paused: {self._paused}.{susp_note}"
         )
 
     @command("clear", description="Clear conversation history")
@@ -778,24 +873,174 @@ class ConversationalInferencer(InferencerBase):
         self._messages = []
         return "Conversation history cleared."
 
-    @command("pause", description="Pause SOP execution", requires_active_sop=True)
-    async def _cmd_pause(self) -> str:
-        self._paused = True
-        return "SOP paused. Use /resume to continue."
+    @command("sop",
+             description=(
+                 "Enter an SOP, optionally with an initial request to start on. "
+                 "Usage: /sop <name> [--yolo] [--fresh] [request...]"
+             ),
+             requires_args=True)
+    async def _cmd_sop(self, args: str = "") -> str:
+        tokens = args.split()
+        if not tokens:
+            return "Usage: /sop <name> [--yolo] [--fresh] [request...]"
+        name = tokens[0]
+        rest = tokens[1:]
+        # Only known flags are flags; everything else is the free-text request
+        # (order-independent, so the request can come before or after a flag).
+        _KNOWN_FLAGS = {"--yolo", "--fresh"}
+        yolo = "--yolo" in rest
+        fresh = "--fresh" in rest
+        request = " ".join(t for t in rest if t not in _KNOWN_FLAGS).strip()
 
-    @command("resume", description="Resume paused SOP")
-    async def _cmd_resume(self) -> str:
-        if not self._paused and not getattr(self, "_pending_resume_state", None):
-            return "Nothing to resume — session is not paused."
-        self._paused = False
-        return "SOP resumed."
+        # Same-name resume-vs-fresh detection (deterministic, no LLM guesswork).
+        suspended = next(
+            (s for s in self._suspended_sops if s.sop_name == name), None
+        )
+        if suspended is not None and not fresh:
+            return (
+                f"You have an in-progress '{name}' ({suspended.sop_status}, "
+                f"{suspended.suspension_label.lower()}). "
+                f"Use /resume_sop {name} to resume, or "
+                f"/sop {name} --fresh to start over."
+            )
 
-    @command("exit_sop", description="Exit the active SOP", aliases=("exit",),
+        state, error = self._enter_sop(name, yolo=yolo)
+        if error:
+            return error
+        # At most one active SOP — auto-pause the current one, if any.
+        if self.sop_state is not None:
+            self.sop_state.suspension_reason = "paused"
+            self.sop_state.suspended_at = _now_iso()
+            self._suspended_sops.insert(0, self.sop_state)
+        self.sop_state = state
+        if state.yolo_mode:
+            self.yolo_mode = True
+        if request:
+            self._pending_followup = request
+            return f"Entered SOP '{name}'. Starting on: {request}"
+        return f"Entered SOP '{name}'."
+
+    @command("pause_sop", description="Pause the active SOP for a short ad-hoc diversion",
+             requires_active_sop=True)
+    async def _cmd_pause_sop(self) -> str:
+        s = self.sop_state
+        s.suspension_reason = "paused"
+        s.suspended_at = _now_iso()
+        self._suspended_sops.insert(0, s)
+        self.sop_state = None
+        return (
+            f"SOP '{s.sop_name}' paused at {s.sop_status}. "
+            f"I'll remind you to resume."
+        )
+
+    @command("exit_sop", description="Exit the active SOP (resumable later)",
              requires_active_sop=True)
     async def _cmd_exit_sop(self) -> str:
-        sop_name = self.sop_state.sop_name if self.sop_state else "unknown"
+        s = self.sop_state
+        s.suspension_reason = "exited"
+        s.suspended_at = _now_iso()
+        self._suspended_sops.insert(0, s)
         self.sop_state = None
-        return f"Exited SOP: {sop_name}."
+        return (
+            f"Exited SOP '{s.sop_name}' ({s.sop_status}). "
+            f"Resume anytime with /resume_sop {s.sop_name}."
+        )
+
+    @command("resume_sop",
+             description=(
+                 "Resume a paused or exited SOP (optionally by name), optionally "
+                 "with a request to continue on. Usage: /resume_sop [name] [request...]"
+             ),
+             requires_args=True)
+    async def _cmd_resume_sop(self, args: str = "") -> str:
+        if not self._suspended_sops:
+            return "No suspended SOPs to resume."
+        tokens = args.split()
+        # Extract a request ONLY when the first token unambiguously names a
+        # suspended SOP — then the remainder is the free-text request to continue
+        # on. Otherwise preserve the original contract: the whole arg is the
+        # target name (so a mistyped/unknown name still yields a clear error
+        # rather than silently resuming the most-recent SOP).
+        target = ""
+        request = ""
+        if tokens and any(s.sop_name == tokens[0] for s in self._suspended_sops):
+            target = tokens[0]
+            request = " ".join(tokens[1:]).strip()
+        else:
+            target = args.strip()
+        if target:
+            match = next(
+                (s for s in self._suspended_sops if s.sop_name == target), None
+            )
+            if match is None:
+                avail = ", ".join(s.sop_name for s in self._suspended_sops)
+                return f"No suspended SOP named '{target}'. In-progress: {avail}"
+        else:
+            match = self._suspended_sops[0]  # most recent
+        # Auto-pause the active SOP, if any.
+        if self.sop_state is not None:
+            self.sop_state.suspension_reason = "paused"
+            self.sop_state.suspended_at = _now_iso()
+            self._suspended_sops.insert(0, self.sop_state)
+        self._suspended_sops.remove(match)
+        match.suspension_reason = ""
+        match.suspended_at = ""
+        self._reload_sop_definition(match)  # no-op if .sop already attached
+        self.sop_state = match
+        if request:
+            self._pending_followup = request
+            return (
+                f"Resumed SOP '{match.sop_name}' at {match.sop_status}. "
+                f"Continuing on: {request}"
+            )
+        return f"Resumed SOP '{match.sop_name}' at {match.sop_status}."
+
+    def _enter_sop(self, name: str, *, yolo: bool = False):
+        """Build an SOPState for ``name`` via the shared loader.
+
+        Returns ``(SOPState, None)`` or ``(None, error_message)``.
+        """
+        from agent_foundation.resources.tools.sop.executor import build_sop_state
+
+        return build_sop_state(
+            name, yolo=yolo, extra_sop_dirs=self._extra_sop_dirs or None
+        )
+
+    def _reload_sop_definition(self, state) -> None:
+        """Reattach the SOP definition object after deserialization.
+
+        Safe no-op when the definition is already attached (e.g. an in-memory
+        suspended SOP being resumed in the same process).
+        """
+        if state.sop_name and state.sop is None:
+            from agent_foundation.resources.sops.registry import load_sop
+
+            state.sop = load_sop(state.sop_name).sop
+
+    def _format_suspended_sops(self) -> tuple[str, str]:
+        """Render the (paused_sop nudge, inprogress_sops list) prompt strings.
+
+        Rendering-only: the most-recent paused SOP becomes the singular active
+        reminder; every other suspended SOP (older paused + all exited) is
+        listed passively. ``suspension_reason`` is never mutated here, so the
+        user's true pause/exit intent is preserved in state.
+        """
+        if not self._suspended_sops:
+            return "", ""
+        most_recent_paused = next(
+            (s for s in self._suspended_sops if s.suspension_reason == "paused"),
+            None,
+        )
+        paused_sop = (
+            f"{most_recent_paused.sop_name} ({most_recent_paused.sop_status})"
+            if most_recent_paused is not None
+            else ""
+        )
+        others = [s for s in self._suspended_sops if s is not most_recent_paused]
+        inprogress_sops = "\n".join(
+            f"- **{s.sop_name}** ({s.sop_status})" for s in others
+        )
+        return paused_sop, inprogress_sops
 
     @command("model", description="Change the LLM model",
              aliases=("set_model",), requires_args=True)
@@ -929,7 +1174,8 @@ class ConversationalInferencer(InferencerBase):
 
         Called after _execute_tool_call() applies context_updates.
         Three detection strategies:
-          1. Tool-mapped: tool from tool_phase_map completed
+          1. All-must-tools: ALL tools declared in ``Tools[__must__]`` for
+             this phase have been executed (not just any single one).
           2. User input: user_input_gate_passed + DIRECTIVE_REQUIRES_USER_INPUT
           3. All-outputs-present: every declared output in phase_outputs
         """
@@ -964,7 +1210,11 @@ class ConversationalInferencer(InferencerBase):
         detected = False
 
         if tool_name and s.tool_phase_map.get(tool_name) == current:
-            detected = True
+            executed = s.phase_executed_tools.setdefault(current, set())
+            executed.add(tool_name)
+            required = s.phase_required_tools.get(current, set())
+            if not required or required <= executed:
+                detected = True
 
         if not detected and s.user_input_gate_passed:
             if DIRECTIVE_REQUIRES_USER_INPUT in " ".join(getattr(phase, "directives", [])):
@@ -1127,8 +1377,37 @@ class ConversationalInferencer(InferencerBase):
             except Exception as e:
                 logger.warning("SOP evaluation failed: %s", e)
 
+        # When no SOP is active, show the list of available SOPs so the LLM
+        # can discover and suggest them to the user. Use the host-provided
+        # extra dirs so server/OpenTeam SOPs are discoverable too.
+        available_sops = ""
+        if self.sop_state is None:
+            try:
+                from agent_foundation.resources.sops.registry import (
+                    load_all_sops,
+                    format_all_sops,
+                )
+                sops = load_all_sops(extra_dirs=self._extra_sop_dirs or None)
+                if sops:
+                    available_sops = format_all_sops(sops)
+            except ImportError:
+                pass
+
+        # Suspended-SOP prompt sections (driven from CI state, replacing the
+        # never-populated WorkflowManager-fed `active_sops`).
+        paused_sop, inprogress_sops = self._format_suspended_sops()
+
         # Build feed using build_feed — merges dicts + FeedBase objects
         from rich_python_utils.common_objects.feed_base import build_feed
+
+        # CurrentTurn role tells the model who is driving this round: a genuine
+        # user message (_USER_ROLE) vs. the model continuing its own work after
+        # tool results (_AGENT_ROLE — content is the _CONTINUE_AFTER_TOOLS
+        # nudge). Surfaced to the template (also as user_role/agent_role below)
+        # to drive the 1a/1b split in the Decision Procedure.
+        current_turn_role = (
+            _AGENT_ROLE if current_message == _CONTINUE_AFTER_TOOLS else _USER_ROLE
+        )
 
         feed = build_feed(
             template_vars,
@@ -1137,11 +1416,25 @@ class ConversationalInferencer(InferencerBase):
             {
                 "session_root_path": getattr(self.base_inferencer, "effective_cwd", ""),
                 "sop_nextstep_guidance": nextstep_guidance,
+                "available_sops": available_sops,
+                "paused_sop": paused_sop,
+                "inprogress_sops": inprogress_sops,
+                # Explicit "is an SOP currently active?" flag for the template's
+                # Decision Procedure branch. Robust signal (the active SOP object
+                # itself), unlike sop_description (empty when the SOP has no
+                # description) or inprogress_sops (those are SUSPENDED, not active).
+                "sop_active": sop is not None,
                 "action_tools": available_tools,
                 "completed_actions": all_actions,
                 "conversation_history": messages,
-                "current_turn": {"role": "user", "content": current_message},
+                "current_turn": {"role": current_turn_role, "content": current_message},
                 "conversation_tools": conversation_tools_text,
+                # Soft self-governance threshold surfaced to the template. None
+                # when unset -> the template's instruction block is skipped.
+                "soft_max_iterations": self.soft_max_iterations,
+                # Role labels for the 1a (user) / 1b (self-continuation) split.
+                "user_role": _USER_ROLE,
+                "agent_role": _AGENT_ROLE,
             },
         )
 
@@ -1194,6 +1487,12 @@ class ConversationalInferencer(InferencerBase):
                 canonical, tool_call.arguments or {},
             )
             self._check_phase_completion(tool_name=canonical)
+            # A command (e.g. /sop, /resume_sop) may seed an initial request for
+            # the just-entered SOP. Surface it as a user turn so the loop's next
+            # self-continuation acts on the concrete goal, not just the SOP guidance.
+            followup = self._consume_pending_followup()
+            if followup:
+                self.add_message("user", followup)
             return result
 
         if self.tool_executor is None:
@@ -1466,6 +1765,107 @@ class ConversationalInferencer(InferencerBase):
         # Builtin fallback
         return {"mode": "fixed", "value": "Follow your best judgment."}
 
+    def _resolve_proposals_source(self, tool: ConversationTool) -> "Optional[dict]":
+        """Resolve proposal data for a ``proposal_selection`` tool.
+
+        Priority:
+          1. ``tool.metadata["proposals"]`` already present (dict) — use as-is.
+          2. ``tool.metadata["proposals_path"]`` → AF ``parse_proposal_file``.
+             This is the AF-native path: the SOP body passes proposals_path
+             (typically via Jinja ``{{ workspace_path__research_propose }}``).
+          3. A host-registered :class:`ProposalParser` (e.g. RankEvolve), fed a
+             workspace discovered from ``prior_context``.
+
+        Returns a plain ``ProposalIndex.to_dict()``-shaped dict, or ``None``.
+        """
+        meta = tool.metadata or {}
+        existing = meta.get("proposals")
+        if isinstance(existing, dict) and existing:
+            return existing
+
+        path = meta.get("proposals_path")
+        if path:
+            try:
+                from pathlib import Path as _P
+
+                from agent_foundation.common.data_models.proposal.parser import (
+                    parse_proposal_file,
+                )
+
+                index = parse_proposal_file(_P(str(path)))
+                if index is not None:
+                    return index.to_dict()
+                logger.warning(
+                    "[proposal_selection] proposals_path did not parse: %s", path
+                )
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+                logger.warning(
+                    "[proposal_selection] failed to parse proposals_path %s: %s",
+                    path, exc,
+                )
+
+        # Host-provided parser fallback (e.g. RankEvolve registers parse_proposals).
+        try:
+            from agent_foundation.common.data_models.proposal.parsers import (
+                get_proposal_parser,
+            )
+
+            parser = get_proposal_parser()
+            if parser is not None:
+                workspace = (
+                    meta.get("workspace")
+                    or self.prior_context.get("workspace_path__research_propose")
+                    or self.prior_context.get("workspace_path")
+                )
+                if workspace:
+                    data = parser.parse(str(workspace))
+                    if data is not None:
+                        return data.to_dict() if hasattr(data, "to_dict") else data
+        except Exception as exc:  # noqa: BLE001
+            logger.info("[proposal_selection] registered parser failed: %s", exc)
+
+        return None
+
+    def _enrich_proposal_selection(self, tool: ConversationTool) -> None:
+        """Populate proposals + choices + output var for a proposal_selection tool.
+
+        Attaches the resolved proposal payload to ``tool.metadata["proposals"]``
+        for the rich widget, derives one selectable choice per proposal id (so
+        selection flows through AF's multiple-choice machinery, including yolo
+        ``select_all``), and defaults the output variable to
+        ``selected_proposal_ids`` when the SOP author omitted it.
+        """
+        proposals = self._resolve_proposals_source(tool)
+        if not proposals:
+            return
+        if tool.metadata is None:
+            tool.metadata = {}
+        tool.metadata["proposals"] = proposals
+
+        if not tool.choices:
+            choices: list[ChoiceItem] = []
+            for group in proposals.get("groups", []):
+                for p in group.get("proposals", []):
+                    pid = str(p.get("id", "")).strip()
+                    if not pid:
+                        continue
+                    title = p.get("title", "") or pid
+                    bits = [b for b in (p.get("impact"), p.get("complexity")) if b]
+                    suffix = f" ({', '.join(bits)})" if bits else ""
+                    choices.append(
+                        ChoiceItem(
+                            label=f"{pid}: {title}{suffix}",
+                            value=pid,
+                            description=p.get("summary", "") or "",
+                        )
+                    )
+            tool.choices = choices
+            tool.metadata.setdefault("proposals_count", len(choices))
+
+        tool.show_select_all = True
+        if not tool.output_vars:
+            tool.output_vars = ["selected_proposal_ids"]
+
     async def _handle_conversation_tool(
         self,
         tool: ConversationTool,
@@ -1558,6 +1958,31 @@ class ConversationalInferencer(InferencerBase):
 
         # Process structured widget response (dict with choice_index)
         if isinstance(response, dict):
+            # Multi-select capture for proposal_selection: collect the list of
+            # selected proposal ids and persist it as a comma-joined string
+            # under the output variable(s) — e.g. selected_proposal_ids, which
+            # Phase 4 consumes as `task --proposal-ids P1,P3`. Scoped strictly to
+            # PROPOSAL_SELECTION so no other tool's decode path is affected.
+            selected_list = None
+            if tool.tool_type == ConversationToolType.PROPOSAL_SELECTION:
+                if isinstance(response.get("selected_proposals"), list):
+                    selected_list = response["selected_proposals"]
+                elif isinstance(response.get("selected"), list):
+                    selected_list = response["selected"]
+                elif isinstance(response.get("choice_indices"), list) and tool.choices:
+                    selected_list = [
+                        tool.choices[i].value
+                        for i in response["choice_indices"]
+                        if isinstance(i, int) and 0 <= i < len(tool.choices)
+                    ]
+            if selected_list is not None:
+                joined = ",".join(str(s) for s in selected_list)
+                if tool.output_vars:
+                    self.set_session_variables(
+                        {var: joined for var in tool.output_vars}
+                    )
+                return joined
+
             # Handle confirmation widget response with param_overrides
             if "choice" in response:
                 choice_value = response["choice"]
@@ -1849,6 +2274,32 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
             prompt=tool.prompt,
             show_select_all=tool.show_select_all,
             select_all_text=tool.select_all_text,
+        )
+
+    if tool.tool_type == ConversationToolType.PROPOSAL_SELECTION:
+        # Selection flows through the multiple-choice machinery (one option per
+        # proposal id), while the full proposal payload rides in metadata for
+        # the rich React ProposalSelectionWidget. Hosts without that widget
+        # registered degrade to a plain multi-select over the same options.
+        options = [
+            ChoiceOption(
+                label=c.label,
+                value=c.value,
+                description=getattr(c, "description", "") or "",
+            )
+            for c in tool.choices
+        ]
+        ps_metadata: dict[str, Any] = {"widget_type": "proposal_selection"}
+        if tool.metadata:
+            ps_metadata.update(tool.metadata)
+        return InputModeConfig(
+            mode=InputMode.MULTIPLE_CHOICE,
+            prompt=tool.prompt,
+            options=options,
+            allow_custom=False,
+            metadata=ps_metadata,
+            show_select_all=tool.show_select_all,
+            select_all_text=tool.select_all_text or "All proposals",
         )
 
     if tool.tool_type == ConversationToolType.CONFIRMATION:
