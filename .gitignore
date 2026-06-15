@@ -110,11 +110,8 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Development directories (tracked on dev branch, ignored on main)
-_dev/
-_archive/
-_docs/
-_plan/
+# Development directories — tracked here on dev, ignored on main
+# (main's .gitignore lists _dev/ _archive/ _docs/ _plan/)
 
 # ============================================
 # Sensitive Configuration Files - DO NOT COMMIT
