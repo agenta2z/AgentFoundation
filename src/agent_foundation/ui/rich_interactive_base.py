@@ -59,11 +59,15 @@ class RichInteractiveBase(InteractiveBase):
         response: Union[Any, List, Tuple],
         flag: InteractionFlags = InteractionFlags.TurnCompleted,
         input_mode=None,
+        **kwargs,
     ) -> None:
         """Override to support input_mode parameter.
 
         Stores input_mode as instance state so transport subclasses can access
         self._current_input_mode in their _send_response() implementation.
+
+        Any additional keyword arguments (e.g. forwarded prompt_data) are
+        accepted and ignored for backward compatibility.
         """
         self._current_input_mode = input_mode
         super().send_response(response, flag=flag)

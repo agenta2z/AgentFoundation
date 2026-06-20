@@ -15,59 +15,108 @@
  *   mode "single_choice"   → SingleChoiceWidget
  *   mode "multiple_choices" → MultipleChoiceWidget
  *   mode "free_text" (default) → TextInputWidget (clarification)
- *   mode "free_text" + metadata.compound true → CompoundWidget (multiple tools)
+ *   metadata.compound true (+ metadata.tools) → CompoundWidget (one tab per tool,
+ *       all panels mounted; child submits collected locally; "Submit All" commits the
+ *       direct-map JSON payload). The compound path always uses CompoundWidget and does
+ *       not honor metadata.widget_type (e.g. "multi_input").
  */
 
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Button, Tab, Tabs } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { getWidget } from './WidgetRegistry';
 import { parseResponseTags, stripSessionContext, stripAnsi, stripAcliNoise, stripToolsToInvoke } from '../chat/ThinkingFold';
 
 /**
- * Compound widget: renders multiple sub-tools sequentially in one widget.
- * Collects all responses and submits as a JSON-encoded dict.
+ * Compound widget: renders multiple sub-tools as parallel tabs in one widget.
+ *
+ * Each tool is a tab; ALL tab panels stay mounted (inactive ones CSS-hidden via
+ * display:none) so each leaf widget keeps its local draft state across tab switches.
+ *
+ * Lossless collection contract (unchanged): a child tab's submit saves the raw child
+ * response into responses[output_var] LOCALLY ONLY — no network send. A single
+ * "Submit All" button (enabled once every required tab is complete) emits the
+ * existing direct-map payload onSubmit(JSON.stringify(responses)).
+ *
+ * A single-tool compound renders without the tab bar (no regression).
  */
-function CompoundWidget({ tools, preamble, onSubmit, onView, onViewFolder }) {
-  const [step, setStep] = React.useState(0);
+function CompoundWidget({ tools, onSubmit, onView, onViewFolder, pathAutocompleteProvider }) {
+  const [activeTab, setActiveTab] = React.useState(0);
   const [responses, setResponses] = React.useState({});
+  // Track per-tool completion by output_var so tab labels + Submit All can reflect it.
+  const [completed, setCompleted] = React.useState({});
 
-  const currentTool = tools[step];
-  const isLast = step === tools.length - 1;
+  const outputVarFor = (tool, index) => tool.output_var || `step_${index}`;
 
-  const handleStepSubmit = (value) => {
-    const outputVar = currentTool.output_var || `step_${step}`;
-    const newResponses = { ...responses, [outputVar]: value };
-    setResponses(newResponses);
-
-    if (isLast) {
-      // All steps done — submit combined response
-      onSubmit(JSON.stringify(newResponses));
-    } else {
-      setStep(step + 1);
-    }
+  // Child submit saves locally only — no onSubmit/network until "Submit All".
+  const handleChildSubmit = (tool, index) => (rawChildResponse) => {
+    const outputVar = outputVarFor(tool, index);
+    setResponses((prev) => ({ ...prev, [outputVar]: rawChildResponse }));
+    setCompleted((prev) => ({ ...prev, [outputVar]: true }));
   };
+
+  const allComplete = tools.every((tool, index) => completed[outputVarFor(tool, index)]);
+
+  const handleSubmitAll = () => {
+    if (!allComplete) return;
+    onSubmit(JSON.stringify(responses));
+  };
+
+  const multiTab = tools.length > 1;
 
   return (
     <Box>
-      {preamble && (
-        <Box sx={{ mb: 1.5, '& p': { m: 0 } }}>
-          <MarkdownRenderer content={preamble} />
+      {multiTab && (
+        <Tabs
+          value={activeTab}
+          onChange={(_e, next) => setActiveTab(next)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ mb: 1.5, minHeight: 0 }}
+        >
+          {tools.map((tool, index) => {
+            const done = completed[outputVarFor(tool, index)];
+            const label = tool.title || tool.prompt || outputVarFor(tool, index);
+            return (
+              <Tab
+                key={outputVarFor(tool, index)}
+                label={done ? `✓ ${label}` : label}
+                sx={{ textTransform: 'none', minHeight: 0 }}
+              />
+            );
+          })}
+        </Tabs>
+      )}
+
+      {/* All panels mounted; inactive ones CSS-hidden so leaf draft state survives. */}
+      {tools.map((tool, index) => (
+        <Box
+          key={outputVarFor(tool, index)}
+          role="tabpanel"
+          hidden={multiTab && activeTab !== index}
+          sx={{ display: multiTab && activeTab !== index ? 'none' : 'block' }}
+        >
+          <StepWidget
+            tool={tool}
+            onSubmit={handleChildSubmit(tool, index)}
+            onView={onView}
+            onViewFolder={onViewFolder}
+            pathAutocompleteProvider={pathAutocompleteProvider}
+          />
         </Box>
-      )}
-      {tools.length > 1 && (
-        <Typography variant="caption" sx={{ color: 'text.disabled', mb: 1, display: 'block' }}>
-          Step {step + 1} of {tools.length}
-        </Typography>
-      )}
-      <StepWidget tool={currentTool} onSubmit={handleStepSubmit} onView={onView} onViewFolder={onViewFolder} />
+      ))}
+
+      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="contained" disabled={!allComplete} onClick={handleSubmitAll}>
+          Submit All
+        </Button>
+      </Box>
     </Box>
   );
 }
 
-function StepWidget({ tool, onSubmit, onView, onViewFolder }) {
-  const config = { input_mode: tool.input_mode || {}, prompt: tool.prompt };
+function StepWidget({ tool, onSubmit, onView, onViewFolder, pathAutocompleteProvider }) {
+  const config = { input_mode: tool.input_mode || {}, prompt: tool.prompt, pathAutocompleteProvider };
   const mode = tool.input_mode?.mode || 'free_text';
   const widgetType = tool.input_mode?.metadata?.widget_type
     || (tool.tool_type === 'confirmation' ? 'confirmation' : null)
@@ -79,7 +128,7 @@ function StepWidget({ tool, onSubmit, onView, onViewFolder }) {
 /**
  * Main dispatcher — maps pendingInput.inputMode to the correct widget.
  */
-export default function ConversationToolWidget({ pendingInput, onSubmit, onView, onViewFolder }) {
+export default function ConversationToolWidget({ pendingInput, onSubmit, onView, onViewFolder, pathAutocompleteProvider }) {
   const theme = useTheme();
 
   if (!pendingInput) return null;
@@ -101,22 +150,26 @@ export default function ConversationToolWidget({ pendingInput, onSubmit, onView,
 
   console.debug('[ConversationToolWidget] mode:', mode, '| widget_type:', metadata.widget_type, '| displayContent len:', displayContent.length);
 
-  // Build the config object that each sub-widget expects
-  const config = { input_mode: inputMode, prompt: inputMode.prompt || displayContent };
+  // Build the config object that each sub-widget expects. The host-injected path
+  // autocomplete provider is threaded through config so leaf widgets stay filesystem-free.
+  const config = { input_mode: inputMode, prompt: inputMode.prompt || displayContent, pathAutocompleteProvider };
 
   // Determine which widget to render
   let preamble = null;
 
   if (metadata.compound && metadata.tools?.length > 0) {
-    // Multiple conversation tools in one message — compound widget handles sequencing
+    // Multiple conversation tools in one message — the compound path ALWAYS uses
+    // CompoundWidget (tabbed). metadata.widget_type (e.g. "multi_input") is NOT honored
+    // here: the round's preamble is its own committed bubble, so we do not pass/render
+    // preamble text inside the widget.
     return (
       <WidgetContainer>
         <CompoundWidget
           tools={metadata.tools}
-          preamble={displayContent}
           onSubmit={onSubmit}
           onView={onView}
           onViewFolder={onViewFolder}
+          pathAutocompleteProvider={pathAutocompleteProvider}
         />
       </WidgetContainer>
     );

@@ -101,6 +101,11 @@ class ToolDefinition:
     tool_type: str = "Action"  # "Action" | "Conversation"
     category: str = "utility"  # "workflow" | "knowledge" | "session" | "utility" | "conversation"
     aliases: list[str] = field(default_factory=list)
+    # Optional LLM-facing display name. When set, the tool is rendered to the
+    # LLM under this name (e.g. "enter_sop" instead of "sop") while the executor
+    # stays registered under `name`. Resolved back to `name` at dispatch. Only
+    # affects agent_enabled tools (those rendered into the prompt).
+    preferred_prompt_alias: str = ""
     is_bridge: bool = False
     asynchronous: bool = False  # Fire-and-forget: tool runs in background, turn completes immediately
     concurrency: str = "blocking"  # "blocking" | "async_background" | "async_awaitable"
@@ -130,6 +135,8 @@ class ToolDefinition:
             d["description"] = self.description
         if self.aliases:
             d["aliases"] = self.aliases
+        if self.preferred_prompt_alias:
+            d["preferred_prompt_alias"] = self.preferred_prompt_alias
         if self.is_bridge:
             d["is_bridge"] = True
         if self.asynchronous:
@@ -164,6 +171,7 @@ class ToolDefinition:
             tool_type=data.get("tool_type", "Action"),
             category=data.get("category", "utility"),
             aliases=data.get("aliases", []),
+            preferred_prompt_alias=data.get("preferred_prompt_alias", ""),
             is_bridge=data.get("is_bridge", False),
             asynchronous=data.get("asynchronous", False),
             concurrency=data.get("concurrency", "async_background" if data.get("asynchronous") else "blocking"),

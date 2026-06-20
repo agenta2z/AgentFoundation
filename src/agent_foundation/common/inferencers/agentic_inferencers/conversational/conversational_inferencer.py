@@ -32,12 +32,21 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.cont
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
     ConversationResponse,
+    display_text,
     parse_conversation_response,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
     ChoiceItem,
     ConversationTool,
     ConversationToolType,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
+    GroupValidationError,
+    decode_compound_bindings,
+    decode_tool_bindings,
+    finalize_input_value,
+    group_and_validate,
+    render_templated_fields,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.tool_call_parser import (
     ParsedToolCall,
@@ -165,6 +174,46 @@ class ConversationalInferencer(InferencerBase):
     # the same SOPs the executor does. Init kwarg: ``extra_sop_dirs``.
     _extra_sop_dirs: list = attrib(factory=list, kw_only=True)
 
+    # ─── SOP discovery filters (YAML-configurable) ───────────────────
+    #
+    # These two lists work together to control which SOPs the LLM sees in
+    # the rendered "Available SOPs" prompt section. They are purely a
+    # presentation filter — SOPs hidden here remain loadable via
+    # ``/sop <name>`` explicitly. The bare (no leading underscore) attrib
+    # names make them YAML-configurable via ``default.yaml`` directly, in
+    # addition to constructor kwargs and the factory passthrough.
+    #
+    # Precedence (matches iptables / AWS IAM / k8s NetworkPolicy):
+    #   1. If ``allowed_sops`` is non-empty, ONLY those names pass the
+    #      whitelist (everything else is hidden).
+    #   2. ``disallowed_sops`` then filters the survivors of step 1.
+    #
+    # **CRITICAL SEMANTIC — empty list = UNCONSTRAINED (not "deny all"):**
+    #   * ``allowed_sops = []``      → filter is SKIPPED; every SOP passes
+    #                                  the whitelist step. This is NOT a
+    #                                  "deny all" allow-list — empty means
+    #                                  "no whitelist restriction at all".
+    #   * ``disallowed_sops = []``   → filter is SKIPPED; nothing dropped
+    #                                  by the denylist step.
+    #   * Both empty (the defaults)  → ALL discovered SOPs are visible.
+    #
+    # This matches the conventional semantic for AWS IAM (no allow rule =
+    # all allowed when no deny rule applies), Kubernetes NetworkPolicy
+    # (empty selector = "no restriction"), iptables (empty chain passes
+    # everything), and AF's own ``allowed_tools`` attrib on
+    # ``claude_code_*_inferencer``. The alternative — empty list = deny
+    # all — would be a footgun: the default state (empty) would silently
+    # hide every SOP. ``test_sop_discovery_filters.py`` locks this in.
+    #
+    # Naming mirrors the existing AF convention used by
+    # ``claude_code_*_inferencer.allowed_tools`` (verified) — single verb
+    # root ("allow") with prefix variation for the antonym, rather than
+    # mixing different verbs (allow/exclude).
+    #
+    # Defaults: both empty → no filtering → backward-compatible behavior.
+    allowed_sops: list = attrib(factory=list, kw_only=True)
+    disallowed_sops: list = attrib(factory=list, kw_only=True)
+
     # --- Internal state (init=False) ---
     _dynamic_context: AgenticDynamicContext = attrib(
         factory=AgenticDynamicContext, init=False
@@ -229,6 +278,8 @@ class ConversationalInferencer(InferencerBase):
         on_new_turn: Optional[Any] = None,
         on_prompt_rendered: Optional[Any] = None,
         on_turn_complete: Optional[Any] = None,
+        on_round_start: Optional[Any] = None,
+        on_round_complete: Optional[Any] = None,
     ) -> AgenticResult:
         """Main entry point. Replaces ConversationRouter._agentic_loop().
 
@@ -319,6 +370,61 @@ class ConversationalInferencer(InferencerBase):
                     logger.warning("[agentic_loop] on_new_turn error: %s", _e)
             return turn_num
 
+        async def _fire_round_start(iter_idx: int, turn_num: int) -> None:
+            """Fire the per-round-START hook (every LLM call, incl. action-tool
+            continuations). The hook is generic: it returns an opaque round
+            context dict; if that dict carries ``cache_folder`` the inferencer
+            points its cache there (so streaming files land in the round dir),
+            and if the active interactive exposes ``set_round_context`` the
+            context is handed to it so WS events can carry the round identity.
+            Identity/persistence semantics live entirely server-side."""
+            if not on_round_start:
+                return
+            try:
+                ctx = await on_round_start(iter_idx, turn_num)
+            except Exception as _e:
+                logger.warning("[agentic_loop] on_round_start error: %s", _e)
+                return
+            if not ctx:
+                return
+            try:
+                cache_folder = ctx.get("cache_folder") if isinstance(ctx, dict) else None
+                if cache_folder:
+                    self.cache_folder = cache_folder
+                if effective_interactive is not None and hasattr(
+                    effective_interactive, "set_round_context"
+                ):
+                    effective_interactive.set_round_context(ctx)
+            except Exception as _e:
+                logger.warning("[agentic_loop] set_round_context error: %s", _e)
+
+        async def _fire_round_complete(
+            iter_idx: int,
+            turn_num: int,
+            raw_resp: str,
+            clean_resp: str,
+            conv_resp: ConversationResponse,
+        ) -> None:
+            """Fire the per-round-COMPLETE hook AFTER the response is parsed but
+            BEFORE any tool/widget dispatch, so a round's user-facing preamble is
+            persisted + closed before a widget's ``pending_input``. Passes the
+            display-clean text (tool/markup stripped) plus the raw + clean
+            response and the parsed conversation response; the server decides
+            whether to commit a bubble (only when display text is non-empty)."""
+            if not on_round_complete:
+                return
+            try:
+                dtext = display_text(clean_resp)
+            except Exception as _e:
+                logger.warning("[agentic_loop] display_text error: %s", _e)
+                dtext = ""
+            try:
+                await on_round_complete(
+                    self, iter_idx, turn_num, raw_resp, clean_resp, dtext, conv_resp
+                )
+            except Exception as _e:
+                logger.warning("[agentic_loop] on_round_complete error: %s", _e)
+
         # Initialize first turn BEFORE the loop so cache_folder is set
         # before the first LLM call (streaming files land in turn_001/).
         if start_iteration == 0:
@@ -355,6 +461,12 @@ class ConversationalInferencer(InferencerBase):
                         cache_folder=getattr(self, "cache_folder", ""),
                     )
                     last_boundary_turn = turn_number
+
+            # 0. Per-round START hook (every LLM call incl. continuations).
+            # Mints the round's identity server-side and points cache_folder at
+            # this round's dir BEFORE rendering/streaming, so per-round bubbles
+            # and artifacts are correct. Generic + duck-typed (no-op if unwired).
+            await _fire_round_start(iteration, turn_number)
 
             # 1. Compress dynamic context if needed
             await self._compress_context_if_needed()
@@ -445,6 +557,15 @@ class ConversationalInferencer(InferencerBase):
             )
             conv_response = parse_conversation_response(clean_response)
 
+            # Per-round COMPLETE hook — fires for EVERY round (incl. action-tool
+            # continuations) AFTER parse and BEFORE any tool/widget dispatch, so a
+            # round's preamble bubble is committed + message_end'd before a widget's
+            # pending_input. The server commits a bubble only when display text is
+            # non-empty (empty/pure-tool rounds → no bubble, balanced terminal).
+            await _fire_round_complete(
+                iteration, turn_number, raw_response, clean_response, conv_response
+            )
+
             if conv_response.has_conversation_tool:
                 logger.info(
                     "[ConversationalInferencer] conversation tool: type=%s prompt=%.80s metadata=%s",
@@ -466,6 +587,30 @@ class ConversationalInferencer(InferencerBase):
                 for _ps_tool in conv_response.conversation_tools:
                     if _ps_tool.tool_type == ConversationToolType.PROPOSAL_SELECTION:
                         self._enrich_proposal_selection(_ps_tool)
+                # Validate parallel_group grouping ONCE here — the single shared
+                # pre-branch point both the yolo and interactive paths funnel
+                # through — so neither can bypass the guardrails. Fail CLOSED via a
+                # controlled self-continuation (NOT an uncaught raise that aborts
+                # the turn): inject feedback as a tool-result-style message and keep
+                # content == _CONTINUE_AFTER_TOOLS so the next round is classified as
+                # a self-continuation (not user input), telling the model to emit
+                # dependent groups in later rounds.
+                try:
+                    group_and_validate(conv_response.conversation_tools)
+                except GroupValidationError as _gve:
+                    logger.info(
+                        "[agentic_loop] parallel_group validation failed: %s", _gve
+                    )
+                    self.add_message(
+                        "user",
+                        f"{_TOOL_RESULTS_PREFIX}\n[parallel_group validation] {_gve} "
+                        "Re-emit the conversation tools fixing this — put independent "
+                        "questions in the SAME parallel_group, and ask any dependent "
+                        "question in a LATER assistant round.",
+                    )
+                    content = _CONTINUE_AFTER_TOOLS
+                    await _fire_turn_complete(iteration + 1)
+                    continue
                 if self.yolo_mode:
                     collected = self._synthesize_yolo_collected(
                         conv_response.conversation_tools,
@@ -735,6 +880,22 @@ class ConversationalInferencer(InferencerBase):
                 if vm and hasattr(vm, "set"):
                     vm.set(name, value)
 
+    def _session_root(self) -> str:
+        """Best-effort session root for path re-join (used by the finalizer)."""
+        root = self.prior_context.get("session_root_path", "") if self.prior_context else ""
+        return root or getattr(self.base_inferencer, "effective_cwd", "") or ""
+
+    def _make_field_renderer(self):
+        """Return a ``str -> str`` renderer bound to the live session context, or
+        ``None`` if no renderer is available. Used to resolve a templated tool
+        ``prefix`` (e.g. an echoed ``{{ session_root_path }}``) after parsing."""
+        pr = self.prompt_renderer
+        if pr is None or not hasattr(pr, "render_string"):
+            return None
+        ctx: dict[str, Any] = dict(getattr(self, "_last_template_feed", {}) or {})
+        ctx.update(self.prior_context or {})
+        return lambda s: pr.render_string(s, ctx)
+
     def set_messages(self, messages: list) -> None:
         """Set conversation messages for prompt rendering.
 
@@ -874,9 +1035,10 @@ class ConversationalInferencer(InferencerBase):
         return "Conversation history cleared."
 
     @command("sop",
+             aliases=("enter_sop",),
              description=(
                  "Enter an SOP, optionally with an initial request to start on. "
-                 "Usage: /sop <name> [--yolo] [--fresh] [request...]"
+                 "Usage: /enter_sop <name> [--yolo] [--fresh] [request...]"
              ),
              requires_args=True)
     async def _cmd_sop(self, args: str = "") -> str:
@@ -1388,6 +1550,21 @@ class ConversationalInferencer(InferencerBase):
                     format_all_sops,
                 )
                 sops = load_all_sops(extra_dirs=self._extra_sop_dirs or None)
+                # Apply allow-then-deny discovery filters (precedence: same
+                # as iptables / AWS IAM / k8s NetworkPolicy).
+                #
+                # Step 1: if a non-empty whitelist is set, keep ONLY those.
+                # Step 2: drop anything in the denylist from the survivors.
+                #
+                # Purely cosmetic — hidden SOPs remain loadable via
+                # /sop <name> explicitly; this only controls what the LLM
+                # surfaces unprompted in the "Available SOPs" section.
+                if sops and self.allowed_sops:
+                    whitelist = set(self.allowed_sops)
+                    sops = {n: i for n, i in sops.items() if n in whitelist}
+                if sops and self.disallowed_sops:
+                    denylist = set(self.disallowed_sops)
+                    sops = {n: i for n, i in sops.items() if n not in denylist}
                 if sops:
                     available_sops = format_all_sops(sops)
             except ImportError:
@@ -1463,7 +1640,47 @@ class ConversationalInferencer(InferencerBase):
         self._last_template_config = getattr(
             self.prompt_renderer, "template_config", {}
         ) or {}
-        return self.prompt_renderer.render(feed)
+        rendered = self.prompt_renderer.render(feed)
+
+        # ── Non-empty rendered-prompt postcondition ──────────────────────
+        # A non-empty rendered prompt is a hard invariant of this method:
+        # downstream LLM backends (including the rovodev CLI inferencer)
+        # will silently hang if handed an empty prompt and there is no
+        # other layer in the stack that distinguishes "intentional empty"
+        # from "broken template lookup". We fail loudly here with full
+        # diagnostic context so the bug surfaces at the producer rather
+        # than as a 120-second backend watchdog timeout downstream.
+        #
+        # Reference incident: OpenStartup production session
+        # ``server_20260615_194631_8e0863a8`` turn_002 — a misconfigured
+        # ``TemplateManager(templates=...)`` returned ``""`` for
+        # ``conversation/main/initial``, which then propagated all the way
+        # to rovodev as an empty argv and hung for 120s with zero error
+        # output. Fixed at the factory layer (registering AF templates as
+        # a fallback root); this guard prevents the same class of silent
+        # regression from recurring with any other future renderer
+        # misconfiguration.
+        if not (rendered and rendered.strip()):
+            raise RuntimeError(
+                f"ConversationalInferencer._render_prompt: "
+                f"prompt_renderer.render(feed) returned empty output. "
+                f"renderer={type(self.prompt_renderer).__name__}, "
+                f"template_source={self._last_template_source!r}, "
+                f"template_key={getattr(self.prompt_renderer, 'template_key', None)!r}. "
+                f"This usually means the configured templates directory "
+                f"does not contain the requested template file (e.g. "
+                f"``conversation/main/<template_key>.jinja2``). "
+                f"Check ``TemplateManager(templates=...)`` configuration "
+                f"in the caller that constructed this renderer; if it "
+                f"points at a partial templates root, add a fallback "
+                f"root via ``templates=[primary, fallback, ...]`` or "
+                f"``add_template_root(...)``. Setting "
+                f"``TemplateManager(strict_lookup=True)`` on the "
+                f"underlying manager will surface the same problem one "
+                f"layer deeper with the exact failed lookup key."
+            )
+
+        return rendered
 
     # =========================================================================
     # Tool Execution
@@ -1557,28 +1774,40 @@ class ConversationalInferencer(InferencerBase):
             return f"Error executing {canonical}: {e}"
 
     def _resolve_tool_name(self, name: str) -> str:
-        """Resolve a tool name or alias to the canonical tool name."""
+        """Resolve a tool name or alias to the canonical tool name.
+
+        Strips a leading ``/`` first — the LLM sometimes emits an action
+        name like ``/sop`` copying the prompt's slash-command prose, and
+        command/registry keys are never slash-prefixed. Then matches
+        against each tool's ``name``, ``aliases``, and ``preferred_prompt_alias``.
+        """
+        if name.startswith("/"):
+            name = name[1:]
         if name in self.tool_registry:
             return name
+        normalized = name.replace("-", "_")
         for tool in self.tool_registry.values():
             if (
                 name in getattr(tool, "aliases", [])
-                or name.replace("-", "_") == tool.name
+                or normalized == tool.name
+                or normalized == getattr(tool, "preferred_prompt_alias", "")
             ):
                 return tool.name
-        normalized = name.replace("-", "_")
         if normalized in self.tool_registry:
             return normalized
         return name
 
     @property
     def _valid_tool_names(self) -> set[str]:
-        """Set of valid tool names including aliases."""
+        """Set of valid tool names including aliases and preferred prompt aliases."""
         names: set[str] = set()
         for tool in self.tool_registry.values():
             names.add(tool.name)
             for alias in getattr(tool, "aliases", []):
                 names.add(alias)
+            preferred = getattr(tool, "preferred_prompt_alias", "")
+            if preferred:
+                names.add(preferred)
         return names
 
     # =========================================================================
@@ -1693,14 +1922,50 @@ class ConversationalInferencer(InferencerBase):
         if not tools:
             return None
 
-        if len(tools) == 1:
-            return self._synthesize_single_yolo(tools[0])
-
+        # Synthesize each tool into a UI-shaped response, then route it through
+        # the SAME decode/finalize/publish path as a real user response. This
+        # keys bindings by the declared output_vars (NOT tool_type), produces
+        # composite mode+nested bindings, finalizes paths, and persists — exactly
+        # like interactive mode (one source of truth).
         collected: dict[str, str] = {}
         for tool in tools:
-            var_name = getattr(tool, "output_variable", None) or tool.tool_type
-            collected[var_name] = self._synthesize_single_yolo(tool)
+            response = self._synthesize_yolo_response(tool)
+            collected.update(
+                decode_tool_bindings(
+                    tool, response, session_root=self._session_root()
+                )
+            )
+        if collected:
+            self.set_session_variables(collected)
         return collected
+
+    def _synthesize_yolo_response(self, tool):
+        """Build a UI-shaped response for a tool under yolo, from its yolo spec.
+
+        Path inputs never fabricate prose as a path — they default to the
+        resolved session root (a valid, autonomous "investigate everything"
+        target) rather than the generic free-text default.
+        """
+        spec = self._resolve_yolo_spec(tool)
+        mode = spec.get("mode", "fixed")
+        choices = getattr(tool, "choices", []) or []
+        if mode == "first_choice" and choices:
+            return {"choice_index": 0}
+        if mode == "select_all" and choices:
+            if tool.tool_type == ConversationToolType.PROPOSAL_SELECTION:
+                return {"selected_proposals": [getattr(c, "value", "") for c in choices]}
+            return {"content": ",".join(getattr(c, "value", "") or "" for c in choices)}
+        if mode == "confirm":
+            return {"choice": "yes"}
+        if mode == "decline":
+            return {"choice": "no"}
+        # fixed / none / fallback → a free-text value.
+        value = spec.get("value", "Follow your best judgment.")
+        if tool.expected_input_type == "path":
+            # A path input cannot meaningfully be a prose sentence under yolo;
+            # default to the resolved session root.
+            value = self._session_root() or value
+        return {"content": value}
 
     def _synthesize_single_yolo(self, tool) -> str:
         """Synthesize a single conversation tool response for yolo mode."""
@@ -1882,6 +2147,13 @@ class ConversationalInferencer(InferencerBase):
         if active_interactive is None:
             return None
 
+        # Nested (composite-choice) bindings captured this call, so the caller
+        # can include them in the collected dict — not only session variables.
+        self._last_conv_nested_bindings = {}
+
+        # Resolve any templated prefix (e.g. echoed "{{ session_root_path }}")
+        # before building the UI config / finalising values.
+        render_templated_fields(tool, self._make_field_renderer())
         input_mode = _build_input_mode(tool)
 
         # Enrich with variable content for UI display (editable text block)
@@ -2014,9 +2286,48 @@ class ConversationalInferencer(InferencerBase):
                     {var: choice_value for var in tool.output_vars}
                 )
 
+            # Composite choice: bind the selected choice's embedded input value
+            # to its own variable (distinct from the mode var bound above).
+            if (
+                choice_idx is not None
+                and tool.choices
+                and 0 <= choice_idx < len(tool.choices)
+                and tool.choices[choice_idx].has_input
+            ):
+                spec = tool.choices[choice_idx].input
+                inputs = response.get("inputs")
+                raw = None
+                if isinstance(inputs, dict):
+                    raw = inputs.get(spec.name, next(iter(inputs.values()), None))
+                elif "content" in response:
+                    raw = response.get("content")
+                nested_val = finalize_input_value(
+                    raw,
+                    expected_input_type=spec.expected_input_type,
+                    prefix=spec.prefix,
+                    allow_multiple_input=spec.allow_multiple_input,
+                    serialization=spec.serialization,
+                    session_root=self._session_root(),
+                )
+                if spec.name:
+                    self.set_session_variables({spec.name: nested_val})
+                    self._last_conv_nested_bindings = {spec.name: nested_val}
+
             return choice_value
 
-        return str(response)
+        # Clarification / typed free-text (incl. path): finalize (path re-join +
+        # serialise) then persist to the declared output variable(s).
+        final = finalize_input_value(
+            response,
+            expected_input_type=tool.expected_input_type,
+            prefix=tool.prefix,
+            allow_multiple_input=tool.allow_multiple_input,
+            serialization=tool.serialization,
+            session_root=self._session_root(),
+        )
+        if tool.output_vars and final:
+            self.set_session_variables({v: final for v in tool.output_vars})
+        return final
 
     async def _handle_conversation_tools(
         self,
@@ -2092,11 +2403,19 @@ class ConversationalInferencer(InferencerBase):
                 if self.sop_state:
                     self.sop_state.user_input_gate_passed = True
             var_name = tools[0].output_vars[0] if tools[0].output_vars else "input"
-            return {var_name: result}
+            collected = {var_name: result}
+            # Include any composite-choice nested binding so the synthesized user
+            # message and __var__ action-arg substitution see the entered value,
+            # matching the compound/yolo paths (one source of truth).
+            collected.update(getattr(self, "_last_conv_nested_bindings", {}) or {})
+            return collected
 
         # Multiple tools: send ALL as a compound widget in one pending_input
+        _field_renderer = self._make_field_renderer()
         tool_configs = []
         for tool in tools:
+            # Resolve any templated prefix before building UI config.
+            render_templated_fields(tool, _field_renderer)
             mode = _build_input_mode(tool)
 
             # Enrich with variable content for UI display (editable text block)
@@ -2189,23 +2508,20 @@ class ConversationalInferencer(InferencerBase):
             ):
                 values = values["values"]
             if isinstance(values, dict):
-                # Extract variable_override if present
+                # Decode each child payload (read by the tool's primary output
+                # key) into distinct bindings — a composite choice yields BOTH
+                # its mode var and its nested input var; multi-value publishes
+                # via the declared serialization (never str(list)).
+                bindings = decode_compound_bindings(
+                    tools, values, session_root=self._session_root()
+                )
+                # Rich-choice editable content override wins, if present.
                 variable_override = values.get("variable_override")
-                for tool in tools:
-                    var = tool.output_vars[0] if tool.output_vars else tool.tool_type
-                    raw_value = values.get(var, "")
-                    collected[var] = str(raw_value)
-
-                    if (
-                        variable_override
-                        and isinstance(variable_override, dict)
-                        and var in variable_override
-                    ):
-                        self.set_session_variables({var: variable_override[var]})
-                    elif tool.output_vars and raw_value:
-                        self.set_session_variables(
-                            {v: str(raw_value) for v in tool.output_vars}
-                        )
+                if isinstance(variable_override, dict):
+                    bindings.update(variable_override)
+                collected.update(bindings)
+                if bindings:
+                    self.set_session_variables(bindings)
             else:
                 # Fallback: single value
                 collected["input"] = str(values)
@@ -2254,12 +2570,24 @@ class ConversationalInferencer(InferencerBase):
             yield str(result) if not isinstance(result, str) else result
 
 
+def _choice_option_from(c: ChoiceItem) -> ChoiceOption:
+    """Build a UI ChoiceOption from a ChoiceItem, preserving the description and
+    any embedded typed ``input`` spec (serialised) so composite choices and rich
+    descriptions survive into ``InputModeConfig.to_dict()``."""
+    return ChoiceOption(
+        label=c.label,
+        value=c.value,
+        description=getattr(c, "description", "") or "",
+        input=c.input.to_dict() if getattr(c, "has_input", False) and c.input is not None else None,
+    )
+
+
 def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
     """Build an InputModeConfig from a ConversationTool."""
     logger.info("[_build_input_mode] input: tool_type=%s metadata=%s prompt=%.60s",
                 tool.tool_type, tool.metadata, tool.prompt)
     if tool.tool_type == ConversationToolType.SINGLE_CHOICE:
-        options = [ChoiceOption(label=c.label, value=c.value) for c in tool.choices]
+        options = [_choice_option_from(c) for c in tool.choices]
         return single_choice(
             options,
             allow_custom=tool.allow_custom,
@@ -2267,7 +2595,7 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
         )
 
     if tool.tool_type == ConversationToolType.MULTIPLE_CHOICE:
-        options = [ChoiceOption(label=c.label, value=c.value) for c in tool.choices]
+        options = [_choice_option_from(c) for c in tool.choices]
         return multiple_choices(
             options,
             allow_custom=tool.allow_custom,
@@ -2320,17 +2648,26 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
             metadata=metadata,
         )
 
-    # CLARIFICATION and fallback: free text
+    # CLARIFICATION and fallback: free text (optionally a typed path input).
     config = InputModeConfig(
         mode=InputMode.FREE_TEXT,
         prompt=tool.prompt,
+        expected_input_type=tool.expected_input_type,
+        prefix=tool.prefix,
+        allow_multiple_input=tool.allow_multiple_input,
     )
-    # Pass expected_input_type and prefix to frontend for path autocomplete
+    # Route path inputs to the dedicated widget; mirror typed fields into legacy
+    # metadata for one migration window (the new UI reads first-class fields).
     if tool.expected_input_type and tool.expected_input_type != "free_text":
-        config.metadata = {
+        metadata: dict[str, Any] = {
             "expected_input_type": tool.expected_input_type,
             "prefix": tool.prefix,
         }
+        if tool.allow_multiple_input:
+            metadata["allow_multiple_input"] = True
+        if tool.expected_input_type == "path":
+            metadata["widget_type"] = "path_input"
+        config.metadata = metadata
     logger.info("[_build_input_mode] output (fallback): mode=%s metadata=%s",
                 config.mode, config.metadata)
     return config

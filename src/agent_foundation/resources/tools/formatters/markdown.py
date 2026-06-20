@@ -62,10 +62,16 @@ class ToolMarkdownFormatter:
         """Format a single ToolDefinition into API-doc markdown."""
         lines: list[str] = []
 
-        # Header
-        header = f"### {tool.name}"
-        if tool.aliases:
-            header += f" (aliases: {', '.join(tool.aliases)})"
+        # Header — present under preferred_prompt_alias when set (the executor
+        # stays registered under tool.name; canonical name is kept discoverable
+        # in the aliases parenthetical).
+        display_name = getattr(tool, "preferred_prompt_alias", "") or tool.name
+        alias_list = list(tool.aliases)
+        if display_name != tool.name and tool.name not in alias_list:
+            alias_list = [tool.name, *alias_list]
+        header = f"### {display_name}"
+        if alias_list:
+            header += f" (aliases: {', '.join(alias_list)})"
         lines.append(header)
         if tool.description:
             lines.append(tool.description)

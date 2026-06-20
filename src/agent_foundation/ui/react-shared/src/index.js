@@ -42,6 +42,9 @@ export { default as ConfirmationWidget } from './inputs/ConfirmationWidget';
 export { default as ToolArgumentFormWidget } from './inputs/ToolArgumentFormWidget';
 export { default as MultiInputWidget } from './inputs/MultiInputWidget';
 export { default as GroupedWidget } from './inputs/GroupedWidget';
+export { default as PathAutocompleteInput } from './inputs/PathAutocompleteInput';
+export { default as MultiValueInput } from './inputs/MultiValueInput';
+export { default as PathInputWidget } from './inputs/PathInputWidget';
 export { default as DefaultWidget } from './inputs/DefaultWidget';
 
 // Chat
@@ -59,6 +62,9 @@ export { default as ThinkingFold, parseResponseTags, stripSessionContext, stripA
 // Layout
 export { default as AppHeader } from './layout/AppHeader';
 export { default as FileViewer } from './layout/FileViewer';
+
+// Hooks
+export { default as usePathComplete } from './hooks/usePathComplete';
 
 // Progress
 export { default as ProgressSection } from './progress/ProgressSection';

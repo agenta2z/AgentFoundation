@@ -6,6 +6,11 @@
  *   config.input_mode.prompt - string (question text)
  *   config.placeholder       - string (optional)
  *   onSubmit({content})      - called with the user's typed text
+ *
+ * Compatibility fallback: if the input mode declares expected_input_type === "path"
+ * without a widget_type routing it to PathInputWidget, this widget delegates to the
+ * same path widget (see conditional_path_inputs_plan.md §D2). Free-text behavior is
+ * otherwise byte-identical to before.
  */
 
 import React, { useState } from 'react';
@@ -13,9 +18,16 @@ import { Box, Button, TextField, Typography } from '@mui/material';
 import { Send as SendIcon } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
+import PathInputWidget from './PathInputWidget';
 
 export default function TextInputWidget({ config, onSubmit }) {
   const theme = useTheme();
+
+  // Compatibility fallback: typed path input that did not get a widget_type.
+  if (config?.input_mode?.expected_input_type === 'path') {
+    return <PathInputWidget config={config} onSubmit={onSubmit} />;
+  }
+
   const prompt = config?.input_mode?.prompt || config?.prompt || '';
   const placeholder = config?.placeholder || 'Type your response...';
   const [text, setText] = useState('');

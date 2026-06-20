@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from agent_foundation.common.workspace.path_completion import (
+    complete_path,
+    PathContainmentError,
+    PrefixNotADirectory,
+)
 from rankevolve.src.common.workspace.layout import (  # TODO: migrate from rankevolve.src.common.workspace.layout
     ANALYSIS_DIR,
     get_request_text,
@@ -134,57 +139,15 @@ async def path_complete(
     """List subdirectories/files for path autocomplete.
 
     Joins prefix + partial to find the deepest valid directory, then lists
-    its children that match the remaining partial name fragment.
+    its children that match the remaining partial name fragment. Delegates to
+    the shared :func:`complete_path` helper, which hardens containment with
+    ``Path.resolve().relative_to(...)``.
     """
-    base = Path(prefix)
-    if not base.is_dir():
+    try:
+        return complete_path(prefix, partial, dirs_only=dirs_only, limit=limit)
+    except PrefixNotADirectory:
         raise HTTPException(status_code=404, detail=f"Prefix directory not found: {prefix}")
-
-    # Split partial into directory part + name fragment
-    partial_path = Path(partial) if partial else Path(".")
-    full_path = base / partial_path
-
-    if full_path.is_dir():
-        search_dir = full_path
-        fragment = ""
-    else:
-        search_dir = full_path.parent
-        fragment = full_path.name
-
-    # Validate search_dir is under prefix (prevent traversal)
-    try:
-        search_dir = search_dir.resolve()
-        base_resolved = base.resolve()
-        if not str(search_dir).startswith(str(base_resolved)):
-            raise HTTPException(status_code=403, detail="Path traversal blocked")
-    except (OSError, ValueError):
+    except PathContainmentError:
+        raise HTTPException(status_code=403, detail="Path traversal blocked")
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid path")
-
-    if not search_dir.is_dir():
-        return {"suggestions": [], "prefix": prefix, "partial": partial}
-
-    suggestions: list[dict[str, Any]] = []
-    try:
-        for child in sorted(search_dir.iterdir()):
-            if child.name.startswith("."):
-                continue
-            if dirs_only and not child.is_dir():
-                continue
-            if fragment and not child.name.lower().startswith(fragment.lower()):
-                continue
-
-            rel = child.relative_to(base_resolved)
-            display_name = child.name + ("/" if child.is_dir() else "")
-
-            suggestions.append({
-                "name": display_name,
-                "path": str(rel) + ("/" if child.is_dir() else ""),
-                "is_dir": child.is_dir(),
-            })
-
-            if len(suggestions) >= limit:
-                break
-    except PermissionError:
-        pass
-
-    return {"suggestions": suggestions, "prefix": prefix, "partial": partial}

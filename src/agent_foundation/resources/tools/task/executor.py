@@ -212,8 +212,14 @@ def _parse_overrides(items) -> dict:
 
 def _resolve_proposal_plan(
     proposal_path: str, proposal_ids_str: Optional[str],
+    top_k: Optional[int] = None,
 ) -> Optional[str]:
-    """Load proposals, filter by IDs, format as plan file, return temp file path."""
+    """Load proposals, filter by IDs, format as plan file, return temp file path.
+
+    Selection precedence: explicit ``proposal_ids_str`` wins; otherwise, if
+    ``top_k`` is a positive int, take the top-K by rank (``all_proposals()`` is
+    sorted rank-ascending); otherwise take all proposals.
+    """
     from agent_foundation.common.data_models.proposal.parser import (
         parse_proposal_file,
     )
@@ -231,6 +237,8 @@ def _resolve_proposal_plan(
         except KeyError as exc:
             _logger.error("%s", exc)
             return None
+    elif top_k is not None and top_k > 0:
+        selected = idx.all_proposals()[:top_k]
     else:
         selected = idx.all_proposals()
 
@@ -941,10 +949,19 @@ async def execute(arguments: dict, session_context: dict):
 
     use_proposal = arguments.get("use_proposal")
     proposal_ids_str = arguments.get("proposal_ids")
+    top_k_raw = arguments.get("top_k")
+    top_k_val: Optional[int] = None
+    if top_k_raw is not None and str(top_k_raw).strip():
+        try:
+            top_k_val = int(str(top_k_raw).strip())
+        except ValueError:
+            return _error(f"--top-k must be an integer, got: {top_k_raw!r}")
     if use_proposal:
         if init_plan_path:
             return _error("--use-proposal and --use-plan are mutually exclusive.")
-        init_plan_path = _resolve_proposal_plan(use_proposal, proposal_ids_str)
+        init_plan_path = _resolve_proposal_plan(
+            use_proposal, proposal_ids_str, top_k=top_k_val
+        )
         if init_plan_path is None:
             return _error(f"Failed to resolve proposals from: {use_proposal}")
 

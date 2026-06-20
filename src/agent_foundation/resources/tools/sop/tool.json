@@ -1,5 +1,6 @@
 {
   "name": "sop",
+  "aliases": ["enter_sop"],
   "description": "Execute a Standard Operating Procedure end-to-end. Can run in yolo mode (auto-confirm all gates) or interactive mode.",
   "tool_type": "Action",
   "category": "workflow",

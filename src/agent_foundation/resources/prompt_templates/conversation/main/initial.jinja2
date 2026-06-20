@@ -7,7 +7,9 @@
 {% if available_sops is defined and available_sops %}
 ## Available SOPs (Standard Operating Procedures)
 
-You can enter an SOP via `/sop <name>` (interactive) or `/sop <name> --yolo` (autonomous).
+When user intends to enter an SOP, directly use the `/enter_sop <sop name>` command. 
+- SOP will gather necessary inputs (target path, options, strategy) through its initial phases. There is no need to gather these info before entering the SOP.
+- Add `--yolo` only when the user explicitly asked to run it autonomously without supervision. 
 
 {{ available_sops }}
 {% endif %}
@@ -91,18 +93,18 @@ For **1a (new user input)**, classify the message and act:
 An SOP is active (see `## Active SOP Context`):
 - **Conversational** (greeting, chitchat, no-tool conceptual question) → answer in natural language only; DO NOT invoke tools.
 - **Active-SOP-related request** (continuing or advancing the active SOP, or asking/discussing it) → diff `<SOPStatus>` against `<SOPNextStepGuidance>`; execute only the remaining sub-steps. If the current guidance is complete, say so and ask whether to proceed to the next phase. If the whole SOP is complete, summarize what was accomplished and ask what's next — do not re-execute completed steps.
-- **Other-SOP-related request** (entering, resuming, asking about, or operating on a *different* SOP than the active one) → use the corresponding SOP command, passing the user's request so the SOP starts on it (`/sop <name> "<request>"` to enter, `/resume_sop <name> "<request>"` to resume; omit the request to just enter/resume). Entering another SOP suspends the current one (it moves to `## In-Progress SOPs`); if reasonable, remind the user the current SOP can be resumed later.
+- **Other-SOP-related request** (entering, resuming, asking about, or operating on a *different* SOP than the active one) → enter it, passing the user's request so the SOP starts on it (`/enter_sop <name> "<request>"` to enter, `/resume_sop <name> "<request>"` to resume; omit the request to just enter/resume). Enter **interactively** and do NOT pre-collect the SOP's parameters yourself — the SOP gathers its own inputs through its initial phases; add `--yolo` only if the user explicitly asked to run it autonomously. Entering another SOP suspends the current one (it moves to `## In-Progress SOPs`); if reasonable, remind the user the current SOP can be resumed later.
 - **Ad-hoc request, not related to any SOP** (ask a question, do some planning, use a tool/skill, or perform a task — e.g. "search for X", "help quickly plan Y") → fulfill it, then remind the user where the active SOP left off so they can resume. If there is a `## Paused SOP`, offer `/resume_sop` at a natural break (never resume without the user's go-ahead).
 {% else %}
 No SOP is active:
 - **Conversational** (greeting, chitchat, no-tool conceptual question) → answer in natural language only; DO NOT invoke tools.
-- **SOP-related request** (start a new SOP, resume an in-progress one, or ask about available SOPs) → use the corresponding SOP command, passing the user's request so the SOP starts on it (`/sop <name> "<request>"` to start, `/resume_sop <name> "<request>"` to resume; omit the request to just start/resume); see `## Available SOPs` and `## In-Progress SOPs`.
+- **SOP-related request** (start a new SOP, resume an in-progress one, or ask about available SOPs) → enter the SOP, passing the user's request so it starts on it (`/enter_sop <name> "<request>"` to start, `/resume_sop <name> "<request>"` to resume; omit the request to just start/resume); see `## Available SOPs` and `## In-Progress SOPs`. Enter **interactively** and do NOT pre-collect the SOP's parameters (target path, strategy, goal, etc.) with your own conversation tools — every SOP gathers its own inputs through its initial phases (with better UX: path auto-completion, structured choices). Add `--yolo` only if the user explicitly asked to run it autonomously without supervision.
 - **Ad-hoc request, not related to any SOP** (ask a question, do some planning, use a tool/skill, or perform a task) → fulfill it.
 {% endif %}
 
 In any branch:
 - **If a tool call fails or returns an error**, report it clearly, suggest a fix or workaround, and do not silently retry more than once.
-- **If the user asks to start an SOP that already appears under `## In-Progress SOPs`**, first ask whether to resume it (`/resume_sop <name>`) or start fresh (`/sop <name> --fresh`) before entering.
+- **If the user asks to start an SOP that already appears under `## In-Progress SOPs`**, first ask whether to resume it (`/resume_sop <name>`) or start fresh (`/enter_sop <name> --fresh`) before entering.
 
 
 ## Response Format

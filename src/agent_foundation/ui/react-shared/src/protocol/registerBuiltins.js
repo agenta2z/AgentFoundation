@@ -14,6 +14,7 @@ import ToolArgumentFormWidget from '../inputs/ToolArgumentFormWidget';
 import MultiInputWidget from '../inputs/MultiInputWidget';
 import GroupedWidget from '../inputs/GroupedWidget';
 import ProposalSelectionWidget from '../inputs/ProposalSelectionWidget';
+import PathInputWidget from '../inputs/PathInputWidget';
 import DefaultWidget from '../inputs/DefaultWidget';
 
 registerWidget('text_input', TextInputWidget);
@@ -29,4 +30,5 @@ registerWidget('tool_argument_form', ToolArgumentFormWidget);
 registerWidget('multi_input', MultiInputWidget);
 registerWidget('grouped', GroupedWidget);
 registerWidget('proposal_selection', ProposalSelectionWidget);
+registerWidget('path_input', PathInputWidget);
 registerWidget('default', DefaultWidget);
