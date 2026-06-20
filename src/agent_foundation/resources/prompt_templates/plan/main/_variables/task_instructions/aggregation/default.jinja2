@@ -6,7 +6,7 @@ You are aggregating/integrating the above-provided upstream outcomes into consol
 ## Depth Preservation (Critical)
 
 Consolidation **SHOULD reduce redundancy and noise**, but **SHOULD NOT reduce valid information**.
-- **Integrate overlapping content** into the strongest version, combining the best parts from each input.
+- **Integrate overlapping content** into the strongest version, merging the best parts from each input.
 - **Preserve unique information**: valid and helpful decision/design/execution details that appear in only one input SHOULD NOT be summarized away just because they come from a single source.
 - **Preserve meaningful specifics**: concrete values such as numbers, file paths, API signatures, configuration values, schema definitions, and retry/concurrency parameters are load-bearing for execution. "Retry with backoff" is not a substitute for "tenacity stop_after_attempt(4), wait_exponential(min=2, max=60)."
 - **Preserve rationale**: why a design was chosen, how a business decision was made, etc., not just what it is — especially when the reasoning is non-obvious. Future readers need the "why" to avoid accidentally reversing decisions.

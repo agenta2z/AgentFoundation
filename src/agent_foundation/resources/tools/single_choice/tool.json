@@ -14,7 +14,7 @@
       "name": "choices",
       "type": "string",
       "required": true,
-      "description": "Array of {label, value, description} objects."
+      "description": "Array of {label, value, description} objects. A choice MAY also carry an `input` object {name, expected_input_type, prefix, allow_multiple_input, required, serialization} — selecting that choice reveals a typed input (e.g. a path picker), and the entered value is bound to `input.name` (distinct from the tool-level `output`, which records the selected choice value)."
     },
     {
       "name": "allow_custom",
@@ -23,9 +23,10 @@
       "description": "Allow user to provide custom input."
     }
   ],
-  "usage_guidance": "Use when there are distinct alternatives to choose from.",
+  "usage_guidance": "Use when there are distinct alternatives to choose from. For an 'Auto OR provide-your-own' pattern, give one plain choice plus a second choice carrying an `input` spec; the tool-level `output` records the mode (which choice), the choice's `input.name` records the entered value.",
   "examples": [
-    "{\"tool_type\": \"single_choice\", \"prompt\": \"Which optimization strategy?\", \"choices\": [{\"label\": \"Memory\", \"value\": \"memory\", \"description\": \"Reduce memory footprint\"}, {\"label\": \"Latency\", \"value\": \"latency\", \"description\": \"Reduce inference time\"}], \"allow_custom\": true}"
+    "{\"tool_type\": \"single_choice\", \"prompt\": \"Which optimization strategy?\", \"choices\": [{\"label\": \"Memory\", \"value\": \"memory\", \"description\": \"Reduce memory footprint\"}, {\"label\": \"Latency\", \"value\": \"latency\", \"description\": \"Reduce inference time\"}], \"allow_custom\": true}",
+    "{\"tool_type\": \"single_choice\", \"prompt\": \"Where are the modeling artifacts?\", \"choices\": [{\"label\": \"Auto discover\", \"value\": \"auto_discover\", \"description\": \"Infer from the target repo\"}, {\"label\": \"Specify paths\", \"value\": \"manual_paths\", \"input\": {\"name\": \"workflow_modeling_artifacts_path\", \"expected_input_type\": \"path\", \"allow_multiple_input\": true, \"prefix\": \"{{ session_root_path }}\", \"required\": true}}], \"allow_custom\": false}"
   ],
   "yolo_default": {
     "mode": "first_choice"

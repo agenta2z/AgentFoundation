@@ -22,6 +22,12 @@ from typing import Any
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
     ChoiceItem,
     ConversationTool,
+    canonicalize_tool_data,
+    coerce_parallel_group,
+    normalize_tool_type,
+)
+from agent_foundation.common.response_parsers.delimiter_parser import (
+    extract_delimited,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,48 @@ _TOOLS_TO_INVOKE_RE = re.compile(
     r"```json\s+ToolsToInvoke\s*\n(.*?)\n\s*```",
     re.DOTALL,
 )
+
+# Legacy tool blocks that are never shown to the user. These mirror the
+# delimiters in tool_call_parser.py (<tool_call>, <ActionTools>, <Tools>) plus
+# the conversation-tool blocks above. display_text() strips them so what the
+# user sees is only the prose.
+_DISPLAY_STRIP_RES = (
+    _TOOLS_TO_INVOKE_RE,
+    _CONV_TOOLS_RE,
+    re.compile(r"<tool_call>\s*.*?\s*</tool_call>", re.DOTALL),
+    re.compile(r"<ActionTools>\s*```json\s*\n?.*?\n?\s*```\s*</ActionTools>", re.DOTALL),
+    re.compile(r"<Tools>\s*```json\s*\n?.*?\n?\s*```\s*</Tools>", re.DOTALL),
+)
+
+# Inline reasoning the user must never see.
+_THINKING_RE = re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE)
+
+
+def display_text(raw: str) -> str:
+    """Return the USER-FACING prose from a raw LLM response.
+
+    Pure / no side effects. The pipeline is:
+
+    1. Unwrap ``<Response>…</Response>`` via
+       :func:`delimiter_parser.extract_delimited` (most-recent clean match wins;
+       passthrough when no tags; treats an all-echo response as empty).
+    2. Strip the machine-only tool blocks — ToolsToInvoke, legacy
+       ``<ConversationTools>``, ``<tool_call>``, ``<ActionTools>``, ``<Tools>``.
+    3. Strip ``<thinking>…</thinking>`` reasoning blocks.
+
+    Returns ``""`` when nothing displayable remains.
+    """
+    if not raw:
+        return ""
+    # Unwrap <Response> first so we strip blocks from the user-facing content.
+    unwrapped = extract_delimited(raw)
+    if unwrapped is None:  # matches existed but were all prompt-template echoes
+        return ""
+    text = unwrapped
+    for pattern in _DISPLAY_STRIP_RES:
+        text = pattern.sub("", text)
+    text = _THINKING_RE.sub("", text)
+    return text.strip()
 
 
 @dataclass
@@ -76,6 +124,9 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         choices = data["arguments"]["choices"]
         output_vars = data["output"]
     """
+    # Collapse SOP-author dialect (hyphenated keys, string `output`, nested
+    # choices[].input) into the canonical schema before reading any field.
+    data = canonicalize_tool_data(data)
     args = data.get("arguments", {})
     choices_raw = args.get("choices", [])
     choices = [
@@ -113,14 +164,10 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
             if _v is not None and _v != "":
                 metadata[_k] = _v
 
-    # Normalize plural/singular tool type variants.
-    # LLM/SOP uses "multiple_choices" but ConversationToolType uses "multiple_choice".
+    # Normalize tool-type variants (hyphen/space/plural → canonical underscore).
+    # e.g. "single-choice", "single choice", "multiple_choices" → canonical form.
     _name = data.get("name", "clarification")
-    _TOOL_TYPE_ALIASES = {
-        "multiple_choices": "multiple_choice",
-        "single_choices": "single_choice",
-    }
-    _tool_type = _TOOL_TYPE_ALIASES.get(_name, _name)
+    _tool_type = normalize_tool_type(_name)
 
     # Auto-upgrade: clarification with "view" is semantically a confirmation-with-review.
     # The LLM sometimes uses "clarification" when it means "confirmation with view".
@@ -133,6 +180,21 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
     if _tool_type != _name:
         logger.info("[parser] tool type normalized: %s → %s", _name, _tool_type)
 
+    # Lenient parallel_group read (never raises): accept at the top level of the
+    # tool object or inside `arguments` (top-level wins). A bad/str/float/bool
+    # value collapses to None and is recorded in metadata for diagnosis.
+    parallel_group = None
+    if "parallel_group" in data:
+        _raw_pg = data["parallel_group"]
+    elif "parallel_group" in args:
+        _raw_pg = args["parallel_group"]
+    else:
+        _raw_pg = None
+    if _raw_pg is not None:
+        parallel_group = coerce_parallel_group(_raw_pg)
+        if parallel_group is None:
+            metadata["parallel_group_invalid"] = _raw_pg
+
     return ConversationTool(
         tool_type=_tool_type,
         prompt=args.get("prompt", ""),
@@ -140,8 +202,11 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         allow_custom=args.get("allow_custom", True),
         expected_input_type=args.get("expected_input_type", "free_text"),
         prefix=args.get("prefix", ""),
-        output_vars=data.get("output", []),
+        allow_multiple_input=bool(args.get("allow_multiple_input", False)),
+        serialization=args.get("serialization", "auto"),
+        output_vars=data.get("output_vars", data.get("output", [])),
         metadata=metadata,
+        parallel_group=parallel_group,
     )
 
 

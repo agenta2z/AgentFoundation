@@ -24,6 +24,7 @@ class ChoiceOption:
     description: str = ''  # Short description shown in dropdown menus / rich selectors
     follow_up_prompt: str = ''  # If non-empty, prompt for additional input after selection
     needs_user_copilot: bool = False  # If True, user interacted with browser; discard stale action_results
+    input: Optional[Dict[str, Any]] = None  # Embedded typed input spec (serialized InputFieldSpec); revealed when this choice is selected
 
 
 @dataclass
@@ -38,6 +39,11 @@ class InputModeConfig:
     # Multiple-choice "Select All" control
     show_select_all: bool = True       # show "All of above" toggle (default: True)
     select_all_text: str = "All of above"  # customisable label for the select-all toggle
+    # Typed-input fields (path autocomplete / multi-value). Defaults preserve
+    # existing free-text widget behaviour; the UI reads these first-class.
+    expected_input_type: str = 'free_text'  # 'free_text' | 'path' | 'url'
+    prefix: str = ''
+    allow_multiple_input: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {'mode': self.mode.value}
@@ -45,6 +51,12 @@ class InputModeConfig:
             d['prompt'] = self.prompt
         if self.metadata:
             d['metadata'] = self.metadata
+        if self.expected_input_type and self.expected_input_type != 'free_text':
+            d['expected_input_type'] = self.expected_input_type
+        if self.prefix:
+            d['prefix'] = self.prefix
+        if self.allow_multiple_input:
+            d['allow_multiple_input'] = True
         if self.mode == InputMode.EXACT_STRING:
             d['expected_string'] = self.expected_string
             d['case_sensitive'] = self.case_sensitive
@@ -53,7 +65,8 @@ class InputModeConfig:
                 {'label': o.label, 'value': o.value,
                  **(({'description': o.description} if o.description else {})),
                  **(({'follow_up_prompt': o.follow_up_prompt} if o.follow_up_prompt else {})),
-                 **(({'needs_user_copilot': True} if o.needs_user_copilot else {}))}
+                 **(({'needs_user_copilot': True} if o.needs_user_copilot else {})),
+                 **(({'input': o.input} if o.input else {}))}
                 for o in self.options
             ]
             d['allow_custom'] = self.allow_custom
@@ -86,7 +99,8 @@ class InputModeConfig:
                 ChoiceOption(label=o['label'], value=o['value'],
                              description=o.get('description', ''),
                              follow_up_prompt=o.get('follow_up_prompt', ''),
-                             needs_user_copilot=o.get('needs_user_copilot', False))
+                             needs_user_copilot=o.get('needs_user_copilot', False),
+                             input=o.get('input'))
                 for o in d.get('options', [])
             ]
             config.allow_custom = d.get('allow_custom', True)
@@ -94,6 +108,9 @@ class InputModeConfig:
                 config.show_select_all = d.get('show_select_all', True)
                 config.select_all_text = d.get('select_all_text', "All of above")
         config.metadata = d.get('metadata', {})
+        config.expected_input_type = d.get('expected_input_type', 'free_text')
+        config.prefix = d.get('prefix', '')
+        config.allow_multiple_input = d.get('allow_multiple_input', False)
         return config
 
 

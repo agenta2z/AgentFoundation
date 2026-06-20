@@ -1,5 +1,5 @@
 {%- for tool in tools %}
-### {{ tool.name }}{% if tool.aliases %} (aliases: {{ tool.aliases | join(', ') }}){% endif %}
+{%- set _pref = tool.preferred_prompt_alias | default('') %}{% set _al = tool.aliases | default([]) %}{% set _aliases = ([tool.name] + _al) if (_pref and tool.name not in _al) else _al %}### {{ _pref or tool.name }}{% if _aliases %} (aliases: {{ _aliases | join(', ') }}){% endif %}
 
 {% if tool.description %}{{ tool.description }}{% endif %}
 {% if tool.parameters and not tool.subcommands %}

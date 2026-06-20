@@ -180,8 +180,8 @@ def main():
         help="Query to send",
     )
     parser.add_argument(
-        "--working-dir",
-        help="Working directory for the agent (default: temp dir)",
+        "--target-path",
+        help="Target path / working directory for the agent (default: temp dir)",
     )
     args = parser.parse_args()
 

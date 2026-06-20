@@ -331,6 +331,21 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         else:
             parts = [acli, ACLI_SUBCOMMAND, shlex.quote(prompt)]
 
+        # Visibility hook: the rendered prompt is the single most important
+        # artefact for debugging silent rovodev hangs (e.g. empty output-file
+        # within 120s). We emit it at DEBUG so production INFO-only logs are
+        # unchanged but ``--debug`` runs and tests get full visibility. The
+        # prompt is logged BEFORE the subprocess is spawned so even hung /
+        # killed runs leave a clear trail.
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[RovoDevCliInferencer] rendered prompt to rovodev "
+                "(len=%d chars, mode=%s):\n%s",
+                len(prompt),
+                "legacy" if self.enable_legacy else "non-legacy",
+                prompt,
+            )
+
         # --- Common flags (both modes) ---
         if self.yolo:
             parts.append("--yolo")

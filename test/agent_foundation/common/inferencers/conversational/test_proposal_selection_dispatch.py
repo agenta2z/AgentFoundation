@@ -70,11 +70,14 @@ class _Resolver:
 class _DecodeCI:
     _handle_conversation_tool = ConversationalInferencer._handle_conversation_tool
     set_session_variables = ConversationalInferencer.set_session_variables
+    _make_field_renderer = ConversationalInferencer._make_field_renderer
+    _session_root = ConversationalInferencer._session_root
 
     def __init__(self):
         self.prior_context = {}
         self.prompt_renderer = None
         self.interactive = None
+        self.base_inferencer = None
 
 
 class _FakeInteractive:

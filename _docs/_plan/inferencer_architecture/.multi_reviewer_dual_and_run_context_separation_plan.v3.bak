@@ -1,0 +1,238 @@
+# Multi-Reviewer DualInferencer + Definition/State Separation (two-tier RunContext) — Integrated Plan
+
+> **Status:** Draft **v3** (2026-06-19) — reconciled with peer plan; two-tier RunContext (workspace stays on instance)
+> **Author:** Tony Chen (synthesized with Rovo Dev, grounded in live-source verification)
+> **Home:** `_docs/_plan/inferencer_architecture/` — next chapter after the `inferencer_axes_INTEGRATED_v*` lineage; depends on / relates to `mfdual_bug_fixes/*`
+> **Scope:** TWO sequenced initiatives — (1) a **multi-reviewer** capability for `DualInferencer`/`MFDual` (ship first, feature), and (2) an **orchestration-state separation** via a `ContextVar`-backed **two-tier `RunContext`** (`call_state` + `attempt_state`), with **workspace, session, and role-instance resolution deliberately left on the instance** (foundational, second). The feature is designed to *benefit from* but **not depend on** the refactor.
+>
+> **⚠️ v3 RECONCILIATION (2026-06-19):** This plan went through three audit passes. **v1** proposed "move everything (incl. workspace) into a ContextVar + index-based roles + immutable definition" — a first audit rejected it (breaks AF2/AF3). **v2** over-corrected to "keep ALL per-run state on the instance" — but a second, deeper pass (reconciling against the peer plan *swift-launching-backus*, re-verified live) found v2 **missed the two-tier retry invariant (AF4)** and was needlessly conservative about *orchestration* state (AF1 reads are all in-call). **v3 is the verified middle:** move ONLY in-memory orchestration state into a **two-tier ContextVar RunContext**; keep workspace (143 reads, AF2), session (AF2/C-2), and role-instance resolution (AF3, via an accessor seam + live reference). See §2.0.
+
+---
+
+## 🚨 Reviewer banner — read first
+
+This plan answers two distinct user asks:
+
+1. **Feature:** "Our DualInferencer should support **multiple reviewers**, and the fixer takes in all reviews to fix." Plus the two trigger forms the user proposed: (a) `review_inferencer = list[...]` → auto-build a review-BTA; (b) `review_inferencer = single + num_reviewers + review_aggregator`; (c) "just hand a custom BTA as the reviewer."
+2. **Refactor (the user's deeper instinct):** "the current inferencer design mixes **definition and state** — is there a proper, elegant way to separate them?" — with the specific sub-question: *"when you initialize a BTA, how do you create, manage, trace, and correctly assign states for child inferencers during inference?"*
+
+**The honest through-line:** the `num_reviewers`-with-a-bare-instance dilemma (can you safely reuse one inferencer N times?) is itself a **symptom** of the definition/state conflation. So the two asks are related — but they are **different sizes and risk profiles**, and this plan **sequences** them rather than entangling them.
+
+**Every load-bearing source claim below was verified live** (file:line cited). Where a claim is a design proposal rather than current code, it is marked **[DESIGN]**.
+
+---
+
+## §0 — Quick-start (TL;DR for the implementer)
+
+- **Initiative A (feature, ship first):** Add multi-reviewer support to `DualInferencer` with **three trigger forms**, all backward-compatible (singular path = N=1 special case):
+  - **Form 1 — `review_inferencer: list[...]`** → DualInferencer auto-builds a **review-BTA** with the list as workers.
+  - **Form 2 — `review_inferencer: single` + `num_reviewers: N` + `review_aggregator: <inf|None>`** → auto-build a review-BTA repeating the reviewer N times (via factory); `review_aggregator` set → real BTA aggregator; unset → **rule-based deterministic merge**.
+  - **Form 3 — `review_inferencer: <a user-built BTA>`** → just works (no new code), as long as it emits the review JSON schema.
+  - **Merge default = rule-based union** (never drops a blocking issue → existing `_default_check_consensus` stays correct for free); **LLM aggregator = opt-in**.
+  - **MFDual add-on:** `reviewer_match_all_non_winners` (panel mode) — turn the otherwise-idle losing flows into the reviewer panel; winner stays fixer.
+  - **Make-or-break wiring:** the proposal under review must reach each review worker. BTA workers receive **only their `sub_query`**, not the BTA's `inference_input`/`extra_feed` — so add a **gated `forward_extra_feed_to_workers`** flag and feed the proposal (already built into Dual's `_review_extra_feed`) to each worker via per-call `extra_feed`.
+- **Initiative B (orchestration-state separation, second):** Introduce a `ContextVar`-backed **`RunContext`** with **two buckets** — `call_state` (whole top-level `ainfer`) and `attempt_state[node_path]` (reset per retry) — and move ONLY in-memory orchestration state into it (`_cached_sub_queries`, `_graph_topology_emitted`, `_latest_per_flow`/`_all_judgments`, dispatch `_last_*`, resolved role instances). **Workspace stays on the instance** (143 reads, AF2); **session stays on the instance** (AF2/C-2); **roles are resolved via an accessor seam** (`_get_review_inferencer`/`_get_fixer_inferencer`) reading a live reference in `call_state` (AF3 — no index indirection). The **two-tier lifetime is mandatory** to preserve the winner-survives-malformed-retry invariant (AF4). Concurrency isolation = ContextVar copy-per-task + per-node `enter_node_scope`, with the fresh-instance factory (F5) still producing the instances.
+
+---
+
+## §1 — Context (what the user observed, verified)
+
+Three asks emerged from understanding MFDual's propose→(review→fix) loop:
+
+- **Today's MFDual review dispatch (verified):** exactly **one** reviewer = the **runner-up flow** (`ranking[1]`); the **winner** flow's agent becomes the **fixer**; the 3rd-place flow is **discarded**. Review→fix loops 1–`consensus_max_iterations` rounds by that **single** reviewer, early-exit on approval. (Source: `multi_flow_dual_inferencer.py:505-624`; empirically confirmed across 6 workers in run `task_20260609_212629_caee3a33`.)
+- **Ask 1 (feature):** support **multiple reviewers**; fixer consumes all (merged) reviews.
+- **Ask 2 (refactor):** the inferencer design **mixes definition and per-run state**; separate them elegantly. The `num_reviewers`-reuse dilemma is the trigger that exposed it.
+
+### §1.1 — Verified source facts (the design must respect these)
+
+| # | Fact | Source:line |
+|---|---|---|
+| F1 | DualInferencer contract is **one review in**: `review_inferencer.ainfer()` → `review_parser` → `consensus_checker(parsed_review, threshold)` → `_build_followup_feed(proposal, parsed_review)`. A list/tuple of reviews does **not** fit without change. | `dual_inferencer.py` (review step + `_default_check_consensus`) |
+| F2 | DualInferencer accepts **any `InferencerBase`** as `review_inferencer` — so a BTA drops in. | `dual_inferencer.py` role wiring |
+| F3 | **BTA string `predefined_sub_queries` auto-repeats N times** (N = `max_breakdown` or `max_concurrency` or 1); **list form** passes N distinct sub-queries. So "N identical" and "N different (lens)" reviewers are **already supported, zero new code**. | `breakdown_then_aggregate_inferencer.py:993-1009` |
+| F4 | **BTA workers receive only their `sub_query`**, NOT the BTA's `inference_input`/`extra_feed` (`_make_worker_fn` calls `w.ainfer(q, ...)`). ⇒ the proposal under review does **not** auto-reach review workers. **This is the make-or-break wiring blocker.** | BTA `_make_worker_fn` (~`:1714`) |
+| F5 | BTA workers are created **fresh per call** via `worker_factory()` (must be `LazyConfigFactory`/callable to avoid shared instances). | BTA `:1608-1657` |
+| F6 | BTA per-worker workspace is assigned by **mutating** `worker._workspace = self._workspace.child(name)`; the `_workspace` **property setter** cascades `_configure_for_workspace` + `_propagate_workspace_to_children`. | BTA `:1660-1677`; `inferencer_base.py:269-281` |
+| F7 | **`worker_isolation_check`** exists — a runtime detector that warns when two workers share an `id()` (the smoking gun for the conflation). | BTA `:1281-1312` |
+| F8 | **MFDual mutates shared config mid-call**: `self.review_inferencer = …` / `self.fixer_inferencer = …` at 5 sites; plus identity-guard snapshots (`_fixer_inferencer_original`) and `_reassign_role_workspace`. | `multi_flow_dual_inferencer.py:363,378,567,574,598; 269-272,424-464` |
+| F9 | **`ContextVar` already used** for per-call isolation — but for **exactly one** thing: `_current_fallback_state` (module-level, `:23`; set/reset per task at `:2096-2111`). The pattern exists; it was never generalized. | `inferencer_base.py:23, 2096-2111` |
+| F10 | **`workspace` (declarative attrib) vs `_workspace` (runtime property)** is an existing **definition/state split** — synced once in `__attrs_post_init__` (`self._workspace = self.workspace`). The seed of the refactor is already in the tree. | `inferencer_base.py:262-281, 659` |
+| F11 | Per-call reset methods already exist and are scattered: `_reset_cross_flow_state` (`multi_flow_inferencer.py:895-907`), `_reset_dispatch_state_for_call` (`:910-917`), `_cached_sub_queries=None`, `_graph_topology_emitted=False`. | as cited |
+
+---
+
+## §2 — HONEST RECOMMENDATION on Definition/State separation (the user's explicit ask)
+
+> *"When you initialize a BTA, how do you create, manage, trace, and correctly assign states for child inferencers during inference? Is there a proper, elegant way to separate state from definition?"*
+
+**Verdict (v3, reconciled — see §2.0): yes, separating definition from per-run state is worth doing, and the elegant answer is a `ContextVar`-backed `RunContext` — but ONLY for in-memory ORCHESTRATION state, with a TWO-TIER lifetime (`call_state` + `attempt_state`), and with THREE things deliberately left on the instance: (1) `workspace`/`_workspace` (AF2 — 143 reads, construction+post-call lifetime), (2) `session` (post-call + cross-round), and (3) role-instance resolution (AF3 — routed via an accessor seam, the resolved instance kept as a live reference in `call_state`). This is NOT the v1 "move everything incl. workspace + index roles" design (which breaks logic), NOR the v2 "keep everything on the instance" design (which misses the two-tier retry invariant AF4). It is the verified middle.**
+
+### §2.0 — DEEP-AUDIT FINDINGS (two audit passes; v3 reconciles them) ⚠️
+
+This section records **two** audit passes and their reconciliation. The v1 draft proposed "move ALL per-run state (incl. workspace) into a ContextVar + index-based roles + immutable definition." A first audit (v2) rejected that. A **second, deeper pass — reconciling against a peer plan ("swift-launching-backus") and re-verified live (subagents, 2026-06-19)** — found v2 had **over-corrected** and **missed a real invariant**. v3 is the reconciled, correct design.
+
+| Finding | Status after reconciliation (verified) | Consequence for the design |
+|---|---|---|
+| **AF2 — workspace must STAY on the instance** | ✅ **CONFIRMED** (both passes agree). `_workspace` has construction-time (logger `inferencer_base.py:975`), mid-call mutation (BTA `:1678`, PTI `:2692`), and post-call (`pti:1562`) lifetimes; **~450 `_workspace` occurrences / "143 reads across 6 files."** Moving it is a NO-GO. | **Workspace is NOT moved.** Per-run sibling isolation is already provided by child-naming (`worker_0` vs `worker_1`) — we don't need to relocate workspace to get it. |
+| **AF3 — role dispatch needs the INSTANCE, not an index** | ✅ **CONFIRMED.** Base loop reads `self.review_inferencer`/`self.fixer_inferencer` at **~14 sites** (`dual_inferencer.py:276,326,448,550,1084,1088,1114,1126,1191,1199,1263,1291,1294,1310,1321`); identity guard `if inferencer is original` (`multi_flow_dual_inferencer.py:449`). | **No index-based roles.** Instead: an **accessor seam** (`_get_review_inferencer()`/`_get_fixer_inferencer()`) routes all reads; Part 2 stores the *resolved instance* as a **live reference** in call-scoped state (transient, never serialized → identity guard stays valid). |
+| **AF1 — dispatch state (`_last_winner_idx`/`_last_ranking`) post-call read** | ⚠️ **CORRECTED — my v2 OVER-CLAIMED.** Re-verification (subagent) shows **all production reads occur WITHIN the same outermost `ainfer` call** (MFDual's `_select_reviewer_and_fixer` runs inside MFDual's own `ainfer`, `multi_flow_dual_inferencer.py:713`); the **tests manually set `_last_winner_idx` then call the method directly — they never read after a real `ainfer` returns** (`test_multi_flow_dual_inferencer.py:933-948,1015,1235`). | **Dispatch state CAN safely move to a call-scoped ContextVar** (reset in `finally` at the OUTERMOST `ainfer`). My v2's "keep everything on the instance" was unnecessarily conservative for *orchestration* state. |
+| **AF4 — TWO-TIER lifetime (the invariant my v2 MISSED)** | 🔴 **NEW, verified.** `_reset_cross_flow_state` runs **per attempt** (`multi_flow_inferencer.py:894-907`, clears `_latest_per_flow`/`_all_judgments`); `_reset_dispatch_state_for_call` runs **once per call** (`:909-918`) **so a winner parsed in an early attempt survives a malformed retry** — documented invariant at `:901-902`; retry loop `inferencer_base.py:1496-1509`. | **RunContext MUST hold TWO buckets:** `call_state` (whole `ainfer`: dispatch winner/ranking) and `attempt_state` (reset each retry: cross-flow outputs, cached sub-queries). A single-bucket consolidation (my v2) would **silently break the winner-survives-retry invariant.** |
+
+**Honest reconciliation:** my v2 was *right* that workspace/roles can't move (AF2/AF3) but *wrong* to conclude "therefore keep ALL state on the instance" — it conflated workspace (genuinely instance-lifetime) with orchestration state (genuinely call-scoped), and it **missed the two-tier retry invariant (AF4)** entirely. The peer plan caught both. v3 adopts the correct middle: **move only in-memory orchestration state into a two-tier ContextVar RunContext; leave workspace, session, and role-instance-resolution where they are (behind an accessor seam).**
+
+### §2.1 — RECONCILED answer to the four verbs for BTA (v3)
+
+| Verb | v3 recommendation | Why it's safe / verified |
+|---|---|---|
+| **CREATE** | At the **outermost** `ainfer`, mint a `RunContext` with **two buckets** — `call_state` (whole call) and `attempt_state[node_path]` (reset per retry) — stored in a **`ContextVar`** (precedent: `_current_fallback_state`, `inferencer_base.py:24`). A nested inferencer **inherits** the ancestor context (never auto-roots mid-tree). | All orchestration-state reads are within the call (AF1 corrected); ContextVar copy-per-task gives concurrency isolation for free. |
+| **MANAGE (two-tier!)** | `call_state` holds dispatch winner/ranking/resolved-roles (survives malformed retries — **AF4 invariant**). `attempt_state` holds cross-flow outputs + cached sub-queries (wiped per attempt). Re-point the EXISTING `_reset_cross_flow_state` (→ clear attempt bucket) and `_reset_dispatch_state_for_call` (→ clear call bucket) **before deleting them**, gated by an explicit retry test. | Preserves the documented winner-survives-retry invariant (`multi_flow_inferencer.py:901-902`) that a single bucket would silently break. |
+| **CONCURRENCY** | Each WorkGraph worker closure enters its **own node scope** as its first line (`async with run.enter_node_scope(node_path)`), because WorkGraph `gather`s at a RunContext-unaware site. ContextVar copy-per-task + per-node scope ⇒ no cross-worker bleed. The factory idiom (F5) still produces fresh **instances**; RunContext isolates the **in-memory state**. | Verified: WorkGraph copies context at its gather site; the scope CM asserts the parent is the expected ancestor (debug-fails on a missed scope). |
+| **TRACE** | `attempt_state` is keyed by **node-path** (the `worker_N` child-name path) ⇒ a provenance tree for free; `parent_run_id`/`run_id` on the context. Replaces the `_role_history` mutable-list hack. | Additive metadata; node-path is the existing addressing layer. |
+| **ASSIGN role (MFDual)** | Route ALL reviewer/fixer reads through an **accessor seam** `_get_review_inferencer()`/`_get_fixer_inferencer()` (today they just return the attribute — zero behavior change). Part 2 then has `_select_reviewer_and_fixer` **write the resolved instance into `call_state`** (a **live reference** — transient, never serialized, so the `is original` identity guard at `:449` stays valid) and the accessors read from `call_state`. | **No index-based dispatch** (AF3). The instance is still what gets `.ainfer()`'d; we relocate *where the resolved instance is stored*, not *what it is*. |
+
+### §2.2 — Why this v3 design is the elegant, non-breaking fit
+
+1. **Workspace stays put (AF2).** The 143-read / construction+post-call surface is untouched; sibling isolation already comes from child-naming. This is the single biggest de-risking vs v1.
+2. **The two-tier lifetime is honored (AF4).** `call_state` vs `attempt_state` mirrors the existing `_reset_dispatch_state_for_call` vs `_reset_cross_flow_state` split, so the winner-survives-malformed-retry invariant is preserved by construction.
+3. **Roles move value, not contract (AF3).** The accessor seam + live-reference-in-`call_state` eliminates the `self.review_inferencer = …` mutation smell **without** an index indirection or a base redesign.
+4. **It generalizes existing patterns, not invents** — `_current_fallback_state` ContextVar (F9) + node-path addressing are already in the tree; RunContext applies them uniformly to orchestration state.
+5. **Strict gate ordering:** re-point each old reset to clear the matching bucket and prove green BEFORE deleting it; land the MultiFlow step only after the retry/two-tier test passes.
+
+### §2.3 — The honest caveats (where it's genuinely tricky — the user was right to flag it)
+
+- **C-1: `workspace` stays on the instance (AF2).** This is the load-bearing scope decision: the `workspace` attrib / `_workspace` backing split already works and is the node-addressing layer; sibling isolation comes from child-naming, not workspace relocation. RunContext holds **no workspace object**.
+- **C-2: `session` stays on the instance for this plan.** It carries conversation history the Dual **review→fix loop mutates across rounds** and is read post-call. Only an `active_session_id` *string* (if needed for resume) would ever go into the persisted bucket — the live session handle never does. Relocating the live session is explicitly **dropped from scope** (marginal win, high risk of live-handle leaks).
+- **C-3: two-tier lifetime is mandatory (AF4), and gate-ordered.** `call_state` (survives malformed retries) vs `attempt_state` (reset per attempt). Re-point the existing resets to clear the matching bucket and prove green **before** deleting them; land the MultiFlow step only after an explicit retry/two-tier test passes — otherwise the winner-survives-retry bug returns **silently**.
+- **C-4: closure-scope discipline must be enforced-by-construction.** Because WorkGraph `gather`s at a RunContext-unaware site, each worker/aggregator closure must enter its node scope as its first line via `run.enter_node_scope(node_path)` (which asserts the parent is the expected ancestor). A concurrency test is the backstop.
+- **C-5: don't block the feature on the refactor.** Part 1 (multi-reviewer) ships today with the `worker_factory` idiom; Part 2 (RunContext) is sequenced after and does not change Part 1's behavior. The factory remains the supported isolation idiom even after Part 2.
+
+### §2.4 — What I would NOT do (rejected alternatives, honestly)
+
+- ❌ **Move `workspace` into RunContext** (the v1 idea) — 143 reads / construction+post-call lifetime ⇒ NO-GO (AF2).
+- ❌ **Keep ALL per-run state on the instance** (my v2 over-correction) — misses the two-tier retry invariant (AF4) and leaves the orchestration-state leakage the scattered resets exist to patch.
+- ❌ **Index-based role dispatch** replacing `self.review_inferencer = instance` — breaks the base-loop contract + identity guard (AF3). Use the accessor seam + live reference in `call_state` instead.
+- ❌ **Single-bucket RunContext** — would clobber an early-attempt winner on a malformed retry (AF4).
+- ❌ **Reuse one bare instance N times** for `num_reviewers` — trips `worker_isolation_check` (F7). **Require a factory** for N>1 (permanent supported idiom).
+- ❌ **Feed N raw review transcripts to the fixer** — redundancy/contradictions/bloat. **Merge first** (rule-based union default).
+- ❌ **Make multi-reviewer default-on** — N× cost & slower convergence; opt-in, default single.
+- ❌ **Relocate leaf `active_session_id`/`cache_folder`** — marginal win, high live-handle-leak risk; dropped.
+
+---
+
+## PART I — EXECUTION
+
+### §E1 — Initiative A: Multi-Reviewer (ship first)
+
+**Commit A1 — BTA `forward_extra_feed_to_workers` flag (the wiring foundation; F4 fix).**
+- Add a **gated** attrib `forward_extra_feed_to_workers: bool = attrib(default=False, kw_only=True)` to BTA. In `_build_subgraph_spec` (~`:1533`) pull `worker_extra_feed` out of `kwargs["_inference_args"]` when the flag is set; thread it into `_make_worker_fn` (add `extra_feed=None` param) so each worker call becomes `w.ainfer(q, extra_feed=worker_extra_feed, …)` (both async+sync branches; wire at node construction ~`:1796`). Default off ⇒ **zero behavior change**.
+- **Critical kwarg-name detail (verified):** Dual must pass the proposal feed through a kwarg named **`worker_extra_feed`**, NOT `extra_feed` — because `extra_feed` is popped by `_infer_single` (`inferencer_base.py:1293`) and a BTA's no-op `_render_prompt` drops it. `worker_extra_feed` survives into BTA `_ainfer` `**kwargs` → `_inference_args` → `_build_subgraph_spec`. The proposal already lives in Dual's review feed (`_build_review_feed`, `dual_inferencer.py:1575-1615`, under `placeholder_proposal`/`main_response`).
+- Tests: (a) off → workers get only `sub_query` (unchanged); (b) on → a `TemplatedInferencerBase` review worker **renders the proposal text** from `worker_extra_feed` into its review prompt (guards the silent-drop risk).
+
+**Commit A2 — `merge_reviews()` deterministic union (rule-based default).**
+- New pure function in `flow_parsers.py`: `merge_reviews(parsed_reviews: list[dict]) -> dict`. Union all reviewers' issues; **cluster/dedup** by normalized issue key; **never downgrade severity** (max across reviewers); tag each issue with **`agreement_count`** (how many reviewers raised it). Emit in the **existing review JSON schema** so `review_parser`/`consensus_checker` work unchanged.
+- Tests: union preserves a lone CRITICAL; dedup collapses duplicates; agreement_count correct; output validates against review schema.
+
+**Commit A3 — DualInferencer trigger forms (sugar; backward-compatible).**
+- In DualInferencer base (so MFDual inherits): in `__attrs_post_init__`/role-resolution, normalize `review_inferencer`:
+  - `list` → build a **review-BTA** with the list as `worker_factory` outputs + `forward_extra_feed_to_workers=True` + (aggregator if `review_aggregator` set, else rule-merge via A2).
+  - `single` + `num_reviewers>1` → build review-BTA repeating the reviewer **via factory** (fresh instances; never bare reuse — see §2.4).
+  - `single` + no `num_reviewers` → **unchanged** (today's path).
+  - already a BTA → pass through (Form 3).
+- The review step consumes **one** merged review either way (BTA aggregator output, or A2 applied to the tuple via `_coerce_review_result`). `consensus_checker`/`_build_followup_feed` **unchanged**.
+- **Accessor seam (also forward-compat for Part 2):** add `_get_review_inferencer()`/`_get_fixer_inferencer()` and route **every** reviewer/fixer read through them (verified sites: `_step_review_impl` ~`:1084,1088,1114,1191,1199`; `_step_fix_impl` ~`:1291,1294,1310,1370,1378`; MFDual `_step_propose_impl` `:706-707`). Today they just return the attribute → **zero behavior change**; Part 2 later points them at `call_state`.
+- **Lifecycle:** `_iter_child_inferencers` (`:1954`) must also yield the pre-built review workers (stash as `review_bta._static_review_workers`) so `aconnect`/`adisconnect` reach them.
+- **Guard:** raise `ValueError` if multi-reviewer is combined with an incompatible existing option; require a **factory** (not a bare instance) for the `num_reviewers` repeat form (else it trips `worker_isolation_check`).
+- Tests: each form produces a single merged review; N=1 path byte-identical to today.
+
+**Commit A4 — MFDual `reviewer_match_all_non_winners` panel mode.**
+- New flag: when set, the reviewer panel = **all non-winner flows' agents** (not just runner-up); winner stays fixer. Wire via the A3 list form (panel members as the review-BTA workers).
+- Tests: 3-flow run → 2 non-winner flows become panel; winner is fixer; merged review drives one consensus check.
+
+**Commit A5 — Review-merge aggregator prompt (LLM opt-in).**
+- A `review_aggregator` template whose **output obeys the review JSON schema** (not free prose): cluster issues, **never downgrade CRITICAL/MAJOR**, emit `agreement_count`. (Guards the §A-risk: default aggregator template summarizes away severities.)
+- Tests: feed N reviews with one CRITICAL raised once → survives; output parses with `review_parser`.
+
+### §E2 — Initiative B: orchestration-state separation via two-tier RunContext (second, sequenced)
+
+> **Scope (verified):** move ONLY in-memory **orchestration** state into a `ContextVar`-backed `RunContext` with **two buckets**. **Workspace, session, and the graph-reporter callback stay on the instance.** Each step is independently testable; **the full existing inferencer suite is the regression gate after every step** (realistic precisely because the 143-read workspace surface does NOT move).
+
+**Shapes & API (B-shapes).**
+- `RunContext` (one per top-level `ainfer`; `ContextVar`-backed — precedent `_current_fallback_state` `inferencer_base.py:24`): `run_id`, `attempt_id`, `call_state: dict`, `attempt_state: dict[NodePath, dict]` (lazy, keyed by workspace child-name path). **No workspace object inside.**
+- `run.call` / `run.attempt(node_path)` accessors; `ainfer` signature unchanged; **auto-creates a root context only when none is set** (nested inferencer inherits the ancestor — never auto-roots mid-tree, or path composition breaks).
+- `run.enter_node_scope(node_path)` — the single CM for descending into a node: pushes the path, **asserts** the parent scope is the expected ancestor (debug-fail on mismatch), yields, restores. All node descents go through it (enforced-by-construction, not test-only).
+- **WorkGraph seam (verified):** WorkGraph builds coroutines then `asyncio.gather`s them, copying context **at its own (RunContext-unaware) gather site**. So the per-node scope must be entered as the **first line inside each closure** — `async_worker_fn` (BTA `:1745`) and the aggregator closure (`_make_agg_fn` `:1952-2006`).
+
+**Commit B1 — Container (pure plumbing).** Add `RunContext` (two buckets) + ContextVar + `run.call`/`run.attempt`/`enter_node_scope` to `inferencer_base.py`; fold in the existing `_fallback_state` ContextVar; finalize the `_get_review_inferencer()`/`_get_fixer_inferencer()` hook (call sites added in Part 1 A3). **No fields moved.** Test: a leaf wrapped in a Dual can read/write `call_state`, and descent composes the expected node-path.
+
+**Commit B2 — InferencerBase.** Move `_output_finalized` into `call_state`; replace its ad-hoc reset with context lifecycle. **No-context fallback:** a leaf invoked outside any `ainfer` tree reads the instance attr when `run is None`. Test: leaf-standalone still finalizes; nested leaf uses `call_state`.
+
+**Commit B3 — BTA (lowest risk, highest payoff).** Move `_cached_sub_queries`/`_graph_topology_emitted`/`_last_aggregation_guidance` into `attempt_state`; re-point the top-of-`_infer`/`_ainfer` resets (`:1339-1349,1412`) to clear the bucket. Replace `_inject_aggregator_extra_feed`'s `template_extra_feed` mutation (`:696-748`) with the aggregator's per-call feed via Part 1's `worker_extra_feed` channel. **Leave workspace assignment exactly as-is.** Test: BTA behavior byte-identical; cache still hit within an attempt; sequential runs don't leak.
+
+**Commit B4 — MultiFlow (gated by the two-tier retry test — AF4).** Move `_latest_per_flow`/`_all_judgments` into `attempt_state`; dispatch `_last_*` into `call_state`; re-point `_reset_cross_flow_state` (attempt bucket) and `_reset_dispatch_state_for_call` (call bucket), **preserving the winner-survives-malformed-retry invariant** (`:901-903`). Replace `_apply_runtime_input_propagation`'s mutation of `flow_configs[i]["input"]` (`:1192-1217`) with a per-call value in `call_state` read at worker-build. **Do not delete the old resets until the replacement is green.** Test: the **retry/two-tier test** (attempt 1 parses winner, attempt 2 malformed → winner survives AND cross-flow state reset), run before+after re-pointing.
+
+**Commit B5 — MFDual.** Store the runtime-resolved reviewer/fixer + `_role_history` in `call_state` as **live references** (transient, never serialized → the `is original` identity guard stays valid). Rewrite **both sides together**: (a) `_select_reviewer_and_fixer` (`:505-624`) and `reviewer_match_all_non_winners` **write** the resolved role into `call_state` instead of `self.review_inferencer`/`self.fixer_inferencer`; (b) all reads go through the Part-1 accessors. Test: a retry loop never diverges `call_state` from the prior `self.*` behavior on the recorded run `task_20260609_212629_caee3a33`.
+
+**Resume contract.** Buckets split **persisted** (JSON-serializable: cached sub-queries, dispatch results, `output_finalized`, any `active_session_id` *string*) from **transient** (live handles/reporters/lambdas — never pickled). Workspace is **not** in RunContext, so excluded from serialization. On resume, reconstruct buckets by node-path (new instances, same names); transient state re-established by `ainfer` as today.
+
+**Dropped from scope (honest):** relocating leaf `active_session_id`/`cache_folder` and bare-instance `num_reviewers` — marginal win, high live-handle-leak risk. The **factory stays the supported isolation idiom.**
+
+### §E3 — Pre-flight checks (run before coding)
+- **P1:** Confirm exact BTA `_make_worker_fn` signature + where `extra_feed` would thread (A1). *(Verified ~`:1714`.)*
+- **P2:** Confirm the **review JSON schema** + `review_parser`/`consensus_checker` field names (A2/A5 must emit them).
+- **P3:** Enumerate every reader of the dispatch fields/getters to confirm they route through `call_state` after B4 (the public getters keep their signatures, reading `call_state`). *(Found: `multi_flow_inferencer.py:999-1037`, `multi_flow_dual_inferencer.py:535,544,554,570,609`; tests at `:934…` set fields then call directly — within-call, AF1-safe.)*
+- **P4:** Confirm `_default_check_consensus` treats any blocking issue as blocking (so rule-merge union is correct for free).
+- **P5:** Re-confirm the MFDual `self.*_inferencer =` mutation sites (F8: `:363,378,567,574,598`) so **B5** re-points them to `call_state` writes behind the accessor seam (rewrite both sides together; do not delete logic).
+- **P6:** Confirm the WorkGraph gather site copies context per task (so per-node `enter_node_scope` is the isolation mechanism) and audit any sync `parallel_infer` thread sites use `contextvars.copy_context().run(...)`.
+- **P7:** Capture the **retry/two-tier baseline** on current code (attempt-1 winner survives attempt-2 malformed) before B4 re-points the resets (AF4 gate).
+
+---
+
+## PART II — DESIGN & ARCHITECTURE
+
+### §D1 — Why BTA-as-reviewer (composition) over a native reviewer-list+merge loop
+Reusing `review_inferencer = BTA{N workers}` gives parallel fan-out, `max_concurrency`, workspace isolation, checkpoint/resume, and graph reporting **for free**, and DualInferencer already accepts any `InferencerBase` (F2). "Compose proven infra, write no orchestration." The native deterministic merge (A2) is kept as the **default merger and the fallback** if LLM-merge drops issues.
+
+### §D2 — Aggregate-or-not: ENABLE aggregation (decisive)
+DualInferencer's contract is **one review in** (F1). BTA-with-aggregation returns **one** consolidated review → drops into the existing single-review path with **zero** DualInferencer changes. BTA-without-aggregation returns **N** reviews → forces `review_parser`/`consensus_checker`/feed to handle N → reintroduces exactly the machinery the composition was meant to avoid. **So aggregation ON is what makes the idea clean.** Default merger = rule-based union (A2); LLM aggregator = opt-in (A5).
+
+### §D3 — Diversity beats count
+N identical workers (string-repeat, F3) reduce sampling variance but **share blind spots**. Prefer the **list-of-lenses** form (correctness / completeness / risk / internal-consistency), natively supported by BTA's list form (F3). Different models per worker is even better. The **`agreement_count`** lever (A2/A5) turns the panel into an adversarial filter: lone-reviewer issues = low-confidence (precision ↑, convergence ↑); ≥K-agreement issues = fix-first.
+
+### §D4 — The two failure modes to actively guard
+1. **Aggregator silently softens severities** → consensus mis-fires. Mitigate: structured review schema + "never downgrade CRITICAL/MAJOR" (A5) and rule-merge default (A2) which is immune.
+2. **Identical-repeat illusion** of robustness while sharing blind spots. Mitigate: lens diversity (§D3).
+
+### §D5 — Two-tier `RunContext` architecture (v3 detail of §2)
+- **Definition (conceptually immutable; not physically frozen):** model_id, max_retry, fallback_inferencer, output_path, template_key, role wiring (`review_inferencer`, `fixer_inferencer`, `flow_configs`). (Classified from `inferencer_base.py:80-310`.)
+- **MOVED into `RunContext` (ContextVar-backed), two buckets:**
+  - `call_state` (whole top-level `ainfer`): dispatch `_last_winner_idx`/`_last_ranking`, **resolved reviewer/fixer live references**, `_output_finalized`. *Survives malformed retries (AF4).*
+  - `attempt_state[node_path]` (reset per retry): `_latest_per_flow`/`_all_judgments`, `_cached_sub_queries`, `_graph_topology_emitted`, `_last_aggregation_guidance`, per-call propagated `flow_configs[i]["input"]`. *Wiped each attempt (AF4).*
+- **NOT moved (left on instance, by audit):** `_workspace`/`workspace` (143 reads, construction+post-call, AF2), `session` (post-call + cross-round mutation, AF2/C-2), the graph-reporter callback (transient). Roles are **resolved via accessor seam** reading `call_state` — the *attribute* stays as the construction default and fallback.
+- **Carrier:** module-level `ContextVar[RunContext]` (generalizes `_current_fallback_state`, F9); root minted at outermost `ainfer`, inherited by nested inferencers; per-node descent via `enter_node_scope(node_path)` (asserts expected ancestor). Concurrency isolation = ContextVar copy-per-task + per-node scope; the fresh-instance factory (F5) still makes the instances.
+- **Provenance:** `attempt_state` keyed by node-path replaces the `_role_history` mutable-list hack.
+- **Resume:** buckets split persisted (JSON-able) vs transient (live handles/lambdas never pickled); workspace excluded (not in RunContext).
+
+---
+
+## APPENDIX
+
+### §A1 — Sequencing & risk
+- **Ship A first** (feature, low surgery, immediate value). **B second** (foundational, cross-cutting). A uses the existing factory idiom so it does **not** depend on B; after B lands, `num_reviewers` with a bare instance becomes safe and factories become optional.
+- **Risk (A):** LLM-merge dropping issues → mitigated by rule-merge default + "never downgrade." Proposal-propagation (F4) → mitigated by gated A1 + a real wiring test (P1).
+- **Risk (B):** MEDIUM, contained. Workspace/session/roles untouched (AF2/AF3) → the 143-read surface doesn't move, so the **existing inferencer suite is a realistic regression gate after every step**. The two real risks: (1) **AF4 two-tier** — mitigated by gate-ordering (re-point resets, prove the retry test green, only then delete) and P7 baseline; (2) **WorkGraph closure scope** — mitigated by entering `enter_node_scope` as the first line of each closure (enforced-by-construction) + P6 + a concurrency test.
+
+### §A2 — Verification log
+All F1–F11 verified live this session (subagent traces + direct reads): `inferencer_base.py:23,80-310,262-281,659,2096-2111`; BTA `breakdown_then_aggregate_inferencer.py:993-1009,1281-1312,1608-1677,~1714`; `multi_flow_dual_inferencer.py:269-272,363,378,424-464,505-624,567,574,598`; `multi_flow_inferencer.py:895-917`. Run evidence: `task_20260609_212629_caee3a33` (6 MFDual workers; dispatch logged once each; reviewer=ranking[1], fixer=ranking[0]).
+
+### §A3 — Open questions (each with a default if unanswered)
+- **Q1:** Agreement threshold **K** value? *Default:* K=1 for v1 (union), expose K as a consensus knob in a follow-up.
+- **Q2:** Should panel reviewers get **distinct lens templates** in MFDual (vs same template)? *Default:* same template v1 (the flows already differ by draw); add lens assignment as a fast-follow (§D3).
+- **Q3:** Physical `frozen=True` definitions ever? *Default:* **no** — out of scope; RunContext already gives the separation without freezing the definition attribs. A debug-mode write-guard is an optional fast-follow.
+- **Q4:** Pursue run-scoped **session** (relocate the live handle) later? *Default:* **no** — keep session on the instance; only an `active_session_id` *string* may enter the persisted bucket if resume needs it (live-handle relocation = high leak risk, marginal win).
+- **Q5:** Keep `worker_isolation_check` (F7)? *Default:* **keep it** as a debug guard — it stays valid (RunContext isolates in-memory state; the factory still produces fresh instances).
+
+### §A4 — Changelog
+- **v3 (2026-06-19):** **Reconciliation with peer plan (*swift-launching-backus*), re-verified live.** Found v2 had **over-corrected** (kept ALL state on the instance) and **missed the two-tier retry invariant (AF4)**, and that my AF1 "post-call read break" claim was **wrong** (all orchestration-state reads are in-call). **Initiative B rewritten** to a `ContextVar`-backed **two-tier `RunContext`** (`call_state`/`attempt_state`) moving ONLY orchestration state; **workspace + session + role-instance-resolution stay on the instance** (AF2/AF3, accessor seam + live reference, not index). Added AF4 + corrected AF1 in §2.0; rewrote §2.1–§2.4, §E2 (6-step B1–B5 + resume contract + WorkGraph closure-scope), §D5; added the verified `worker_extra_feed` kwarg detail and accessor seam to §E1 (A1/A3); added P5–P7. Regression gate = full existing inferencer suite after each step + AF4 retry test.
+- **v2 (2026-06-19):** Deep-audit correction (AF1–AF3) → proposed instance-held `RunState` consolidation. *(Superseded by v3: too conservative; missed AF4.)*
+- **v1 (2026-06-19):** Initial integrated plan; honest def/state recommendation up front; two-initiative sequencing; F1–F11 verified live. *(Superseded.)*
+

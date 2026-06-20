@@ -148,7 +148,12 @@
     {
       "name": "--proposal-ids",
       "type": "string",
-      "description": "Comma-separated proposal IDs to pick (e.g., 'P1,P3'). Used with --use-proposal. Omit to pick all."
+      "description": "Comma-separated proposal IDs to pick (e.g., 'P1,P3'). Used with --use-proposal. Omit to pick all (or use --top-k for the top-ranked subset)."
+    },
+    {
+      "name": "--top-k",
+      "type": "string",
+      "description": "With --use-proposal and no --proposal-ids, implement the top-K proposals by rank (rank ascending). Ignored when --proposal-ids is set. Omit to pick all."
     },
     {
       "name": "--tool-name",

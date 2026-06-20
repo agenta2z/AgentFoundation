@@ -35,3 +35,17 @@ max_iterations: -1
 soft_max_iterations: 30
 compression_threshold: 8000
 
+# ─── SOP discovery filters (optional, both empty = no filtering) ────
+#
+# Control which SOPs the LLM sees in the rendered "Available SOPs" prompt
+# section. Purely cosmetic — hidden SOPs remain loadable via /sop <name>.
+#
+# Precedence: allowed_sops (whitelist) is applied first; disallowed_sops
+# then filters the survivors. Empty lists mean "no filtering at this layer".
+#
+# Examples:
+#   allowed_sops: [code_optimization, model_optimization]   # show ONLY these
+#   disallowed_sops: [sop_creation]                         # hide this one
+allowed_sops: []
+disallowed_sops: []
+

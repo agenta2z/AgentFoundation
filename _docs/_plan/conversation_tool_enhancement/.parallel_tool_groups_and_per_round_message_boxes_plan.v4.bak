@@ -1,0 +1,379 @@
+# Parallel Conversation-Tool Groups (Tabbed UI) + Per-Round Assistant Message Boxes — Plan
+
+| | |
+|---|---|
+| **Author** | Rovo Dev |
+| **Date** | 2026-06-19 |
+| **Status** | v4 (uncommitted) — supersedes v1, v2, v3 |
+| **Branch** | `dev_xinli_2601` |
+| **Motivating session** | `OpenStartup/.../server_20260619_033151_b83b9f85/.../turn_002` (Model Optimization SOP Phase 0a) |
+| **Sibling plans** | `typed_input_and_composite_choice_plan.md`, `codex/conditional_path_inputs_plan.md`, `codex/parallel_groups_assistant_rounds_turn_artifacts_plan.md` |
+| **v1 backup** | `.parallel_tool_groups_and_per_round_message_boxes_plan.v1.bak` (267 lines) |
+
+## 🚨🚨🚨 REVIEWER BANNER — v3 → v4 (4 corrections, all re-verified live this round)
+
+A fourth cross-plan round (Claude's integrated plan, updated after my v3, + a re-verification of all load-bearing facts against live source) found **four issues in my v3 — two of them correctness-fatal.** Every claim below was re-checked against live code this round:
+
+* **🔴 SEAM (correctness-fatal, my v3 + original Claude both had it): round identity must NOT hang on the turn seam.** My v3 minted `message_id` at `send_turn_boundary` (`conversational_inferencer.py:397`), which is **gated on `turn_number != last_boundary_turn` (`:395,:402`)**. But Problem C makes `turn_number` advance once per *user message* — so after C lands, the boundary **stops firing between rounds**, and **action-tool continuation rounds (`5a:647-684`, `5b:686-740`) never touch `turn_number` at all** → the overwrite bug returns. **Fix:** add a **dedicated generic round-start hook** at `~:408` (immediately before `_render_prompt` `:409`, fires once per LLM call incl. continuations) and **reuse the existing `_fire_turn_complete(iteration+1)`** (fires at every terminal branch `:540,633,644,672,683,689,729,740,746` — verified) as round-complete. Turn (per message) and round (per iteration) become independent.
+* **🔴 PROBLEM A (my v3 was WRONG): retab `CompoundWidget` in place — do NOT touch `MultiInputWidget`.** Verified: `CompoundWidget` (`ConversationToolWidget.js:32-50`) **already preserves each child's RAW response losslessly** (`{...responses,[outputVar]:value}` → `JSON.stringify`) and **is the wired dispatch target** (`:117`); its only defect is the **"Step N of M" stepper** presentation. `MultiInputWidget` is **registered-but-dead** (`multi_input` constant defined at `widget_protocol.py:26` but **never assigned** to any pending input) **and lossy** (`:62-63,:93`). My v3's "rewire to MultiInputWidget + de-lossify" was wrong on both counts. **Fix:** swap only the stepper for MUI `Tabs`; keep the lossless collection untouched.
+* **🔴 MINT LOCATION (my v3 would NameError): mint in OpenStartup, not AF.** Verified: `uuid` is **NOT imported** in AF `conversational_inferencer.py` (only in OpenStartup `manager_websocket_routes.py:27`). My v3 said "uuid already imported in the inferencer" — false. **Fix:** AF round hooks stay **generic/opaque** (carry an opaque `round_index`, no message-id logic); OpenStartup's `WebSocketInteractive` mints `{message_id, round_index}` (a typed `RoundContext`, not a loose dict that implicitly mutates `self.cache_folder`).
+* **🔴 NEW BUG — widget card lost on reload (my v3 + original B missed it; Codex/X had it).** Verified: the `pending_input_response` handler (`manager_websocket_routes.py:594-609`) only `target_q.put(parsed_content)` — **never `append_message`**; `session_init` replays only persisted `messages` (`:559-563`). So the user's submitted widget choice **vanishes on reload.** **Fix:** persist a `widget_response` message in the submit handler (dedupe vs the UI optimistic insert; skip the dev-tool/task-queue path).
+* **✅ DIRECT-MAP PAYLOAD confirmed canonical (validates "keep CompoundWidget"):** inferencer accepts the direct map (`:2400` final fallback `user_input` itself) → `decode_compound_bindings` reads `values[primary_output_key]` and preserves composite nested `inputs` (`conversation_tool_runtime.py:279-305`). My v3's `{outputs}` shape would have been silently dropped; X's `{values}` mandate is merely cosmetic.
+
+Everything correct in v3 survives (transport `/ws/manager`; the `message_id` half-wired diagnosis; C-1 anchor/granularity; C-2 index `_update_index` on **both** `append_message` AND `update_session`; the int-`parallel_group` contract; B-first ordering; 3-tier structure + risk register). Full trail in §A4 v4 changelog; §A4.1 re-answers "pick one". v3 backed up at `.parallel_…_plan.v3.bak`.
+
+## REVIEWER BANNER — v2 → v3 (DECISIVE wrong-transport correction)
+
+A third cross-plan round (Claude's integrated `update-…-goose.md`, updated *after* my v2, with 3 fresh parallel source traces) surfaced a **load-bearing error in my v1 AND v2 that would have made the Problem-B fix edit dead code.** Re-verified against live source this round:
+
+* **🔴 DECISIVE — Problem B targeted the WRONG SERVER.** My v1/v2 Commit 1 cited `agent_service_bridge.py` + `agent_websocket_routes.py` (the `/ws/agent` AF-webui transport). **OpenStartup chat does NOT use that transport.** The UI connects to **`/ws/manager`** (`useManagerChat.js:40`; `setupProxy.js:24` "Proxy ONLY /ws/manager"). The real emit sites are **`manager_websocket_routes.py`** + **`websocket_interactive.py`** + **`conversation_service.py`**. My v2's facts B-F2/F3/F4 (citing `agent_service_bridge.py`) are **wrong for the live chat** and are corrected below.
+* **🔴 Problem B is HALF-wired, not absent.** `message_end` **already sends `message_id`** (`manager_websocket_routes.py:512-514`); the UI **already reads** `data.message_id` (`useManagerChat.js:384`) and the `pending_input` handler **already commits** the prior round's bubble (`:266`). What's missing: `token`/`pending_input`/`message_start` (in `websocket_interactive.py:201,214,314`) don't carry `message_id`, and the id isn't minted **per round**. Fix = finish the wiring + dedupe, NOT build from zero.
+* **🟢 Reuse the existing round seam.** `conversational_inferencer.py:397` already fires `send_turn_boundary(...)` at iteration boundaries, and the UI has a `turn_boundary` handler (`useManagerChat.js:410`). Mint `{message_id, round_index}` at THIS seam — don't invent a new one.
+* **🟢 Per-round View-Prompt gap closed (from Codex/X).** A single per-turn `turn.json` can't show round 2's prompt. Adopt **per-round artifacts** `turn_NNN/round_MMM/turn.json` + a `round` param on `get_turn_data`/REST/`ManagerChatView`. Resume is **message-based** (`session_routes.py:148`) so it's unaffected.
+
+All Problem-A and Problem-C-1/C-2 findings from v2 survive (C already correctly targeted `conversation_service.py`/`session_store.py`). The transport correction only affects Problem B's commits + the §A1-B facts + §5 files. Full trail in §A4 v3 changelog; §A4.1 re-answers "pick one".
+
+## REVIEWER BANNER — v1 → v2 (cross-plan integration; 3 corrections, 1 NEW sub-problem)
+
+A peer-plan audit (Claude's `update-…-goose.md` — now on-topic and the strongest of the three; Codex's `codex/parallel_groups_assistant_rounds_turn_artifacts_plan.md` — conceptually good but **zero file:line citations**) surfaced findings my v1 got wrong or missed. All re-verified against live source:
+
+* **CORRECTION (Problem A) — a tabbed widget ALREADY EXISTS; v1 was wrong to "build a new one".** `MultiInputWidget.js` (in `react-shared/src/inputs/`) is a tabbed compound widget that already exists — but it is **unreachable** (the dispatcher never routes to it) **and lossy** (it flattens `{choice_index, inputs}` to a scalar at `MultiInputWidget.js:59-69` and emits `{values}` at `:93`, dropping the typed-input plan's composite nested payload). The real blocker is `ConversationToolWidget.js:117` — a **hardcoded `if (metadata.compound) → CompoundWidget`** (the sequential "Step N of M" stepper at `:61`) that intercepts BEFORE the `widget_type` registry lookup at `:134`. **Fix = rewire the compound branch to a de-lossified `MultiInputWidget` (preserving raw child payloads), NOT build a new `CompoundTabbedInput`.** (Verified: ConversationToolWidget.js:61,117,134; MultiInputWidget.js:4,54-69,93.)
+* **NEW SUB-PROBLEM C-2 (both my v1 AND Codex missed it).** The assistant response is **never persisted as its own message**, and the session index goes stale: `data_svc.append_message` (used by the WS route at `manager_websocket_routes.py:374`) → `session_store.append_message:334-345` calls `_persist_session` but **NOT `_update_index()`** → `sessions_index.message_count` stays `1` (this is the "1 msgs" you saw) while the header counted 3. Also `run_conversation_turn` blocks for the whole loop and appends **once** with `final_content` (`manager_websocket_routes.py:423,429`) — intermediate rounds never become their own messages. (Verified: session_store.py:334-345; data_service.py:670-671; manager_websocket_routes.py:374,423,429.)
+* **MODEL UPGRADE — adopt the turn/round hierarchy.** v1's Problem-C fix was "remove the +1 anchor". The cleaner, more elegant model (from Claude's plan, verified compatible) is: **Turn = one user message + its complete response = one `turn_NNN/`; Round = one LLM iteration within a turn = `turn_NNN/round_MMM/`.** The AF `on_new_turn` callback is really a **round boundary**; OpenStartup must reinterpret it as "new round within the current user turn", not "new top-level turn". This single seam unifies B (per-round bubble), C-1 (no dir split), and C-2 (persist each round) — see §D7 (rewritten).
+
+Everything in v1 that was correct (Problem B's "no `message_id`" diagnosis; the `parallel_group` int-not-bool contract; fix order B+C before A) survives. Full trail in §A4 v2 changelog; §A4.1 answers "pick one plan".
+
+---
+
+## §0 Quick-start (TL;DR for a reviewer)
+
+Two **independent** UI problems observed in one human-test turn, each with a **source-verified root cause**:
+
+- **Problem A — "tools render one-by-one, not as tabs."** When the LLM emits multiple conversation tools, we want them shown together in a **tabbed** widget. The server *already* builds a `compound` widget for tools emitted in a single round, but **(1)** no React component renders `compound` as tabs, and **(2)** there is no `parallel_group` field, so the LLM cannot express which tools may be shown together vs. must run sequentially.
+- **Problem B — "the second assistant response overwrites the first."** Within one turn the LLM produced two assistant rounds; the second replaced the first on screen. **Root cause:** there is **no per-round message identity** end-to-end — the server emits `message_start`/`token`/`message_end`/`pending_input` with **no `message_id`**, so the UI cannot keep two rounds as two distinct bubbles.
+
+This plan fixes **B first** (it's a correctness bug and a prerequisite — without per-round boxes, tabbed groups still can't coexist with preceding text), then **A** (the `parallel_group` feature).
+
+- **Problem C — "one user request shows as two turns."** A single user message produced **two** `turn_NNN/` directories: `turn_001/` holds the user input + (empty) prompt scaffolding but **no response rounds**, and `turn_002/` holds the assistant's response rounds but **no user input**. **Root cause:** the cache-folder rotation advances the turn directory **per agentic-loop iteration**, not **per user turn** — and uses a different anchor (`new_turn + 1`) than `save_turn_data` (`new_turn`), so the user input and its own response are split across two directories. The UI counts `turn_` directories, so it reports "2 turns" for 1 exchange. **Same root family as B** (loop-iteration boundary conflated with conversational-turn boundary). Fixed in §E1.8–§E1.9.
+
+---
+
+# PART I — EXECUTION
+
+> Order: **Commit 0 (preflight) → Commits 1–3 (Problem B) → Commits 8–9 (Problem C) → Commits 4–7 (Problem A)**. B+C are correctness bugs and share a root family (turn/round boundary confusion); A is the new feature built on top. B and C can proceed in parallel (different files: B = emit/UI, C = conversation_service); A depends on both.
+
+## §E1 Commits
+
+### §E1.0 Commit 0 — Preflight source locks (~0 LoC, verification only)
+
+Before editing, confirm the live line anchors (they drift) on the **manager transport**: `websocket_interactive.py` emit sites `token`(:201,214), `pending_input`(:314), `message_start`(:380); `manager_websocket_routes.py` `message_end`(:512-514); `useManagerChat.js` cases `token`, `message_start`, `pending_input`(:266), `message_end`(:384), `turn_boundary`(:410); `conversational_inferencer.py` round seam `send_turn_boundary`(:397), compound build, single-tool emit. **Do NOT edit `agent_service_bridge.py`/`agent_websocket_routes.py` — that `/ws/agent` transport is unused by OpenStartup chat.** Record actual line numbers in the PR description.
+
+### §E1.1 Commit 1 — Round identity via a DEDICATED round hook; mint in OpenStartup (Problem B) **[v4 REWRITE — correct seam + correct mint location]**
+
+**🚨 v4:** (a) round identity comes from a **new per-round hook**, NOT the turn seam (`send_turn_boundary` is turn-gated and misses action-tool continuation rounds `5a:647-684`/`5b:686-740`); (b) the id is minted in **OpenStartup** (`uuid` is NOT imported in AF). Transport stays `/ws/manager`.
+
+**Files:**
+1. `AgentFoundation/.../conversational/conversational_inferencer.py` — **add a generic round-start hook** at `~:408` (immediately before `_render_prompt` `:409`; fires once per LLM call, incl. continuations) + a `set_round_context(ctx)` passthrough to the active interactive. **Reuse the existing `_fire_turn_complete(iteration+1)`** (terminal branches `:540,633,644,672,683,689,729,740,746`) as **round-complete**. AF stays **opaque**: it carries an `round_index` and reads only `ctx.cache_folder`; **no `uuid`, no message-id logic in AF**. Demote `send_turn_boundary`/`_fire_new_turn` to turn/compat only.
+2. `OpenStartup/.../server/services/websocket_interactive.py` — on each **round-start**, mint `message_id = uuid4().hex[:12]`, bump `round_index`, build a **typed** `RoundContext{message_id, round_index, turn_number, cache_folder=turn_NNN/round_MMM/, turn_dir, round_dir, parent_user_message_id}`; reset `self._clean_output=None` per round (`:38`). Thread `message_id` (+`round_index`) into `token` (`:201,214`), `stream_correction` (`:160-176`), `pending_input` (`:314`), per-round `message_start`.
+3. `OpenStartup/.../server/routes/manager_websocket_routes.py` — emit `message_start` **per round** (off the route-level once-per-request site `:380`; keep a route-level one only for the mock path); `message_end` (`:512`) uses the **round's** id (not the fresh `msg-…` at `:459`).
+
+**Tests:** `test_round_identity.py` — a `[text round → action tool → continuation round]` turn yields **2** distinct `message_id`s (the exact case the old turn-seam missed); a single-round turn yields 1; first round has a non-null id.
+
+**Risk:** Medium — new hook touches the loop. R1: ensure the hook fires before streaming starts so the first token already carries the id. No change to `agent_service_bridge.py`; no `uuid` in AF.
+
+### §E1.2 Commit 2 — UI: key streaming bubbles by `message_id` (Problem B)
+
+**File:** `OpenStartup/.../ui/src/hooks/useManagerChat.js`
+
+**Changes (note: half-wired already — `message_end` carries id `:384`, `pending_input` already commits `:266`):**
+1. Track `currentMessageIdRef`. On `message_start`/`token`/`turn_boundary` with a **new** `message_id`: **commit the in-progress streaming bubble first** (preserve round 1), then open a fresh buffer for the new id.
+2. `token`: append to the buffer for `data.message_id` (fallback: current).
+3. `message_end` / `pending_input`: finalize the bubble for `data.message_id` (id already used at `:384`).
+4. **Dedupe guard (R2):** key every commit path (`pending_input` `:266` AND `message_end`/boundary) by `message_id` so a round commits **at most once** (the `pending_input` handler already commits — must not double-commit at boundary).
+
+**Tests (RTL):** `useManagerChat.bubbles.test.js` — `message_start(A)`→tokens→`message_end(A)`, then `message_start(B)`→tokens→`pending_input(B)`. Assert **two** bubbles (A, B); assert no double-commit when both `pending_input(B)` and a boundary fire.
+
+### §E1.3 Commit 3 — E2E regression for Problem B
+
+Reproduce the turn_002 scenario (text round then tools round) in an integration test; assert the committed message list has both the preamble text bubble and the tools bubble. Lock the fix.
+
+### §E1.4 Commit 4 — Parser + model: `parallel_group` field (Problem A)
+
+**Files:**
+1. `…/conversational/conversation_response_parser.py` — read optional `parallel_group: int` from each tool object; default `None`. Preserve on the parsed tool.
+2. `…/conversational/conversation_tools.py` — add `parallel_group: int | None = None` to `ConversationTool` (+ `from_dict`/`to_dict`).
+
+**Tests:** parse a 2-tool block with explicit `parallel_group: 0` on both → both carry group 0; omitted → `None` (implicit-coalesce handled in Commit 5).
+
+### §E1.5 Commit 5 — Server: group tools + signal tabbed widget (Problem A)
+
+**File:** `…/conversational/conversational_inferencer.py` (the `_handle_conversation_tools` build, :2310-2390).
+
+**Changes:**
+1. Partition emitted tools into ordered groups: explicit `parallel_group` values define groups; tools with `None` coalesce with adjacent `None` tools (§D3 default).
+2. For each group in order: emit one round (its own `message_id` from Commit 1). If the group has >1 tool, build the existing `compound` metadata **plus** `metadata["widget_type"] = "compound_tabbed"`. Single-tool group → existing single widget.
+3. Sequential groups: resolve group N's `pending_input` before emitting group N+1 (the loop already awaits interaction; iterate groups).
+
+**Tests:** `test_tool_grouping.py` — (a) two tools same group → one compound_tabbed round; (b) two tools different groups → two sequential rounds; (c) omitted groups → one coalesced round; (d) every group's `output_vars` get bound via the compound collector.
+
+### §E1.6 Commit 6 — UI: retab `CompoundWidget` IN PLACE (Problem A) **[v4 REWRITE — correct widget]**
+
+**🚨 v4 CORRECTION (reverses v2).** Source proved the opposite of v2: **`CompoundWidget` is the right widget** — it **already preserves each child's RAW response losslessly** (`ConversationToolWidget.js:34` `{...responses,[outputVar]:value}` → `:39` `JSON.stringify`) and **is the wired dispatch target** (`:117`); its ONLY defect is the **"Step N of M" stepper** (`:61`). `MultiInputWidget` is **registered-but-dead** (`multi_input` defined at `widget_protocol.py:26`, **never assigned**) **and lossy** (`:62-63,:93`). The direct-map payload is **canonical + test-covered** server-side (`conversational_inferencer.py:2400` → `decode_compound_bindings` `conversation_tool_runtime.py:279-305`). So: **retab CompoundWidget in place; do NOT touch MultiInputWidget; do NOT change the payload shape.**
+
+**Files:**
+1. `…/react-shared/src/protocol/ConversationToolWidget.js` — in `CompoundWidget` (`:32-50`), replace the `Step {step+1} of {tools.length}` stepper (`:61`) + single `StepWidget` with **MUI `Tabs`/`TabPanel`**, one tab per tool, each embedding that tool's existing widget. **Keep the collection logic unchanged** (`responses[output_var] = rawChildResponse`; submit `JSON.stringify(responses)`). "Submit All" gated on required tabs; tab state preserved across switches; a single-tool group renders without tabs (no regression).
+
+**No registry change, no new component, no MultiInputWidget edit, no payload change.**
+
+**Tests (RTL):** renders N tabs (not "Step N of M"); switching tabs preserves per-tab input; a composite single_choice tab still submits its full `{choice_index, inputs}` inside the direct map (regression guard — guaranteed since collection is untouched); "Submit All" gating; a 1-tool group renders without tabs.
+
+### §E1.7 Commit 7 — Response-Format guidance + Phase 0a SOP example (Problem A)
+
+**Files:**
+1. The conversation Response-Format template (`conversation/main/initial.jinja2` or the ResponseSchema doc block) — document `parallel_group` with one example (the Phase 0a path + artifacts pair as group 0).
+2. `model_optimization/SOP.md` Phase 0a — annotate the two tools with `parallel_group: 0` so they render tabbed (optional; the implicit-coalesce default already groups them, but the explicit example is instructive).
+
+### §E1.8 Commit 8 — Server: turn/round hierarchy (Problem C-1) **[v2 REWRITE — foundation]**
+
+**File:** `OpenStartup/.../server/services/conversation_service.py` (+ entrypoint in `manager_websocket_routes.py`).
+
+**Changes (per §D7 model):**
+1. **C-1a anchor:** stop rotating `cache_folder` to `turn_{new_turn + 1}` (line 624). The **turn** dir is stable for the whole user message; rounds rotate within it.
+2. **C-1b granularity:** increment the **turn** number **once per user message** at the `run_conversation_turn` entrypoint. Reinterpret the per-iteration `_on_new_turn` as a **round** boundary: rotate `cache_folder` to `turn_{turn}/round_{round_index:03d}/`, not a new top-level turn.
+3. Nest round artifacts under `turn_NNN/round_MMM/`. Keep `turn_NNN/turn.json` (user input + final assembled response) at the turn level.
+4. Reconcile `initial_turn` counting (line 506) so a fresh session's first user message yields exactly one `turn_001/`.
+
+**Tests:** `test_turn_round_hierarchy.py` — a single user message triggering a widget handoff (≥2 rounds) creates exactly **one** `turn_001/` containing `turn.json` AND nested `round_001/`, `round_002/`; UI turn-count (dir count, C-F3) == 1.
+
+**Per-round artifacts + View-Prompt (from Codex/X):** a single per-turn `turn.json` cannot show round 2's prompt. So: `save_turn_data`/`get_turn_data` (`session_store.py`) accept a `round` param and read/write `turn_{n}/round_{m}/turn.json`; each persisted assistant message is tagged `round_index` (and optionally `parent_user_message_id`); extend the REST endpoint (`session_routes.py:148`) with `?round=m` (or `/rounds/{m}`); `ManagerChatView`/`useManagerChat` pass `roundNumber` on View-Prompt; JsonLogger group naming → `turn_{n}/round_{m}`. Keep flat `turn_{n}/turn.json` readable as a fallback (backward-compat).
+
+**Risk:** Medium — `get_turn_data` (session_routes.py:148) + View-Prompt resolve `turn_NNN/`. Assert `GET /{sid}/turns/1` still returns the turn; `GET …/turns/1/rounds/2` returns round 2's prompt; resume is message-based (`session_routes.py:148`) so unaffected.
+
+### §E1.9 Commit 9 — E2E regression for Problem C-1
+
+Replay the scenario (one message → SOP-enter round → Phase 0a widget round). Assert: exactly one `turn_001/` with `turn.json` + nested `round_*`; UI turn count == 1. Lock the fix.
+
+### §E1.10 Commit 10 — Server: persist each round as a message + fix the index count (Problem C-2) **[NEW in v2]**
+
+**Files:**
+1. `OpenStartup/.../server/services/session_store.py` — `append_message` (`:334-345`) **AND `update_session` (`:347-360`)** must call `_update_index()` (`:681`) after persisting so `sessions_index.message_count` stays correct (C-2b). (v4: both writers, not just `append_message` — only `create_session :287` refreshes today.)
+2. `OpenStartup/.../server/routes/manager_websocket_routes.py` — at **round-complete** (`_fire_turn_complete`, Commit 1) AND finally, append the round's assistant text as its **own** message tagged `{turn_number, round_index, message_id, parent_user_message_id}` (C-2a). **Suppress the existing post-loop `final_content` append (`:429,:469,:513`) on the agentic path** (rounds are already persisted); keep it ONLY for the mock/non-agentic path.
+3. Ensure round-persistence and the WS `message_end`/`message_start` framing (Commit 1) fire from the **same** round seam so persisted messages and UI bubbles stay 1:1.
+
+**Tests:** `test_round_persistence_and_count.py` — a 2-round turn persists **2** assistant messages (distinct `message_id`/`round_index`); `sessions_index.message_count` equals the true count (regression for the stale "1 msgs", C2-F3); no double-persist (round-complete + post-loop suppressed).
+
+**Risk:** Medium — guard against double-persist (round committed at its boundary must not be re-appended at loop end). Mirrors the UI double-commit guard (R2).
+
+### §E1.11 Commit 11 — Server: persist the user's widget-response card (Problem C-3) **[NEW in v4]**
+
+**🚨 v4 NEW BUG (verified).** The user's submitted widget choice is **lost on reload**: `pending_input_response` handler (`manager_websocket_routes.py:594-609`) only `target_q.put(parsed_content)` — never `append_message`; `session_init` replays only persisted `messages` (`:559-563`). The UI inserts the card client-side only (`useManagerChat.js:574-585`).
+
+**Files:**
+1. `OpenStartup/.../server/routes/manager_websocket_routes.py` — in the `pending_input_response` handler, after `target_q.put(...)`, `append_message` a `widget_response` message mirroring the UI card fields (role `widget_response`, `prompt`, `response`, `inputMode`, `viewPath/viewLabel/viewType`); **dedupe** vs the UI optimistic insert by id; **guard** so only genuine conversation submits persist (skip the dev-tool/task-queue `task_id` path).
+2. `OpenStartup/.../ui/.../useManagerChat.js` — on `session_init`, render the persisted `widget_response` once (no duplicate vs the optimistic insert).
+
+**Tests:** `test_widget_response_persisted.py` + RTL — a conversation widget submit persists exactly one `widget_response` message that survives `session_init`; a dev-tool/task submit does NOT persist; no duplicate card after reload.
+
+**Risk:** Low/Medium — dedupe correctness against the optimistic insert.
+
+## §E2 Validation
+
+- Unit: Commits 1,2,4,5,6 tests above.
+- E2E: Commit 3 (Problem B regression) + a Problem A E2E (two same-group tools → tabbed widget, both vars bound).
+- Manual: re-run the Model Optimization SOP; confirm (B) the SOP-enter text and the Phase 0a tools appear as **two** assistant boxes, and (A) the two Phase 0a tools appear as **tabs** within the second box.
+
+## §E3 Execution checklist
+
+* [ ] **Commit 0** — relock all line anchors; record in PR.
+* [ ] **Commit 1 (v4 rewrite)** — AF dedicated **round-start hook** (`~:408`) + reuse `_fire_turn_complete` as round-complete; mint `{message_id, round_index}` in **OpenStartup** `WebSocketInteractive` (typed `RoundContext`); thread id into token/stream_correction/pending_input/per-round message_start + test (incl. action-tool continuation → 2 ids).
+* [ ] **Commit 2** — UI bubble keying by `message_id` + buffer reset on new id + dedupe + RTL test.
+* [ ] **Commit 3** — Problem B E2E regression.
+* [ ] **Commit 4** — parser + model `parallel_group` + test.
+* [ ] **Commit 5** — server grouping + tabbed signal (keep `CompoundWidget` dispatch; do NOT route to `multi_input`) + tests.
+* [ ] **Commit 6 (v4 rewrite)** — **retab `CompoundWidget` IN PLACE** (stepper → MUI Tabs; keep lossless direct-map collection); no MultiInputWidget edit, no payload change + RTL tests.
+* [ ] **Commit 7** — Response-Format guidance + Phase 0a example.
+* [ ] **Commit 8 (Problem C-1, v2)** — turn allocated once per user message; delete `+1` sibling rotation; `_on_new_turn`/round-start → `turn_NNN/round_MMM/` + test.
+* [ ] **Commit 9 (Problem C-1)** — E2E regression (one message → one turn_001 with nested rounds; turn-count == 1).
+* [ ] **Commit 10 (Problem C-2)** — persist each round as its own message + suppress post-loop `final_content` append on agentic path + `_update_index()` on **both** `append_message` AND `update_session` + test.
+* [ ] **Commit 11 (Problem C-3, NEW v4)** — persist the user's `widget_response` card in the submit handler (dedupe vs optimistic insert; skip dev-tool path) + test (survives reload).
+* [ ] **Pre-flight before coding:**
+  - [ ] P1 (v4): confirm `uuid` is **NOT** imported in AF `conversational_inferencer.py` → mint in OpenStartup (Commit 1).
+  - [ ] P2: confirm the per-round boundary site (where `message_start` originates) so `message_id` is minted exactly once per round.
+  - [ ] P3: confirm the compound submit payload shape the UI sends today (`{outputs:{...}}` vs other) so Commit 5's collector reads the right keys (ties to typed-input plan R-D7).
+
+---
+
+# PART II — DESIGN & RATIONALE
+
+## §D1 Problem B — per-round message identity (the model)
+
+**Decision:** the *round* (one assistant streaming turn between user/tool interactions) is the unit of a UI bubble. Each round gets a server-minted `message_id` (uuid4 hex, short). This id is the single source of truth for "which bubble does this content belong to".
+
+**Why server-minted, not UI-derived:** only the server knows where a round begins (it controls the agentic loop and the `message_start` emit). A UI heuristic ("new bubble when content resets") is fragile — it already failed here (B-F5). The server emitting the boundary id is the correct, deterministic design.
+
+**Lifecycle:**
+```
+round begins  → server: message_start {message_id}
+streaming     → server: token {message_id, content}
+round ends:
+  • normal    → server: message_end {message_id, final_content, turn_number}
+  • needs input → server: pending_input {message_id, input_mode, ...}
+```
+The UI keeps a `currentMessageId`. On `message_start` it opens a new streaming bubble keyed by that id. `token` appends to the bubble with the matching id. `message_end`/`pending_input` commit/finalize that id's bubble. A subsequent `message_start` with a **new** id opens a **new** bubble — round 1's bubble is already committed and untouched.
+
+## §D2 Problem B — why this also unblocks Problem A
+
+A tabbed group (Problem A) is attached to a `pending_input` round. If that round shares a buffer with the preceding text round (today's bug), the text round's content is lost when the tabbed widget arrives. **Per-round identity (B) is therefore a prerequisite for A** — only once each round is its own bubble can "preamble text bubble" + "tabbed-tools bubble" coexist. This is why the plan does B first.
+
+## §D3 Problem A — `parallel_group` semantics (the contract)
+
+A new optional integer field on each emitted tool: `parallel_group`.
+
+- **Same `parallel_group` value** ⇒ those tools may be shown **together** (one tabbed compound widget) and are answered in one submit.
+- **Different values** ⇒ tools run **in sequence** (group 0 fully resolved before group 1 is shown), each as its own round.
+- **Omitted `parallel_group`** ⇒ **consecutive tools coalesce** into one implicit group (the friendly default — improves existing SOPs without edits). The moment a tool declares an explicit group, the explicit grouping takes over for that response.
+
+This is purely *expressive*: it lets the SOP author say "ask these two questions side-by-side" vs "ask Q1, then based on the answer, ask Q2".
+
+**Why integer, not bool:** a bool ("parallel: true") can't express *more than one* sequential group in a single response (e.g. group 0 = [path, artifacts], then group 1 = [confirm]). An ordered integer can.
+
+## §D4 Problem A — rendering (the widget) **[v2 REWRITE]**
+
+**v2 correction:** a tabbed widget already exists (`MultiInputWidget.js`) but is unreachable + lossy (banner). So the fix is **rewire + de-lossify**, not build new.
+
+- The blocker is `ConversationToolWidget.js:117` — a hardcoded `if (metadata.compound) → CompoundWidget` (the "Step N of M" stepper at `:61`) that runs **before** the `widget_type` registry lookup (`:134`). Change this branch so a parallel/tabbed group (>1 tool) routes to `MultiInputWidget` (tabs).
+- **De-lossify `MultiInputWidget`** (`:59-69`, `:93`): preserve each child widget's **raw** response under its `output_var` (do NOT scalarize `{choice_index, inputs}`), and emit `{outputs: {<var>: <raw>}}` — compatible with the server compound collector + `finalize_input_value`. This is what lets composite single_choice (the typed-input plan's nested-input) survive through a tab.
+- Each tab embeds the *existing* per-tool widget (clarification → TextInput/PathAutocomplete; single_choice → SingleChoiceWidget). `MultiInputWidget` is a *container*. A single-tool group renders without tabs.
+- Server: when a group has >1 tool, keep emitting `metadata.compound = true` (already done) and additionally set a clear tabbed signal the rewired branch reads (e.g. `metadata.layout = "tabbed"`); sequential groups (distinct `parallel_group`s) are simply separate rounds, so the stepper can be retired.
+
+**Reuse, not reinvent:** composes cleanly with the typed-input plan's `PathAutocompleteInput`/`MultiValueInput` (those render inside each tab).
+
+## §D5 Problem A — submission & binding
+
+The compound submit returns `{ outputs: { <output_var>: <value>, ... } }` covering every tab. The server's existing compound collection (`_handle_conversation_tools`, the 2205-2323 block) already iterates tools and binds `output_vars`; it routes each value through `finalize_input_value` (from the typed-input plan) — so multi-value/path/composite semantics are handled in one chokepoint (R4). No new binding logic; we extend the existing compound collector to read the per-tab `outputs` map.
+
+## §D6 Verified facts (consolidated)
+
+See §A1. The load-bearing facts: **B** = no `message_id` anywhere in the emit hub (B-F2/F3/F4); **A** = compound metadata exists server-side for same-round multi-tool (A-F1) but no UI renderer (A-F4) and no grouping field (A-F3); **C** = turn dir advances per loop-iteration with a `+1` anchor mismatch (C-F4/F5/F6/F7).
+
+## §D7 Problem C — the turn/round hierarchy (fixes C-1 + C-2, unifies with B)
+
+**The model (the single foundation for B, C-1, C-2):**
+
+- **Turn** = one user message + the assistant's complete response. **One `turn_NNN/` directory.** The turn number increments **once per user message** (at the `run_conversation_turn` entrypoint), never per round.
+- **Round** = one LLM iteration within a turn. A turn has ≥1 rounds, nested as **`turn_NNN/round_MMM/`** (round artifacts + stream cache). The AF `on_new_turn` callback is really a **round boundary**; OpenStartup reinterprets it as "new round within the current user turn", not "new top-level turn".
+- Each round that produces assistant text → **its own UI bubble (B)** AND **its own persisted assistant message (C-2)**, tagged `{turn_number, round_index, message_id}`. A round's `pending_input` belongs to that round.
+- The **round-boundary seam** is the single hook that unifies everything: on each boundary, (i) rotate the cache to the next `round_MMM/`, (ii) persist the just-finished round's assistant text as a message (C-2), (iii) emit a WS frame (`message_end` of the finished round then `message_start` of the next, each with its `message_id`) so the UI commits that round's bubble (B).
+
+**The fixes:**
+
+1. **C-1a (anchor mismatch):** stop rotating `cache_folder` to `turn_{new_turn+1}` (conversation_service.py:624). Rounds rotate within `turn_NNN/round_MMM/`; the **turn** dir is stable for the whole user message.
+2. **C-1b (granularity):** the turn number advances **once per user message** at the `run_conversation_turn` entrypoint, not on the inferencer's per-iteration `_on_new_turn`. `_on_new_turn` becomes a **round** boundary (rotate `round_MMM`, persist round, emit WS frame).
+3. **C-2a (persist each round):** at each round boundary and at loop end, append the round's assistant text as its **own** message (`role:"assistant"`, `turn_number`, `round_index`, `message_id`), instead of only one `final_content` at the very end (manager_websocket_routes.py:469).
+4. **C-2b (fix the count):** make `session_store.append_message` call `_update_index()` (session_store.py:334-345) so `sessions_index.message_count` stays correct.
+
+**Backward-compat:** keep `turn_NNN/` as the path the prompt-viewer/`get_turn_data` (session_routes.py:148) resolves, but its contract tightens to "user turn", with rounds nested beneath. View-Prompt opens the correct `turn_NNN/round_MMM/`.
+
+This is the elegant unification: one user message ⇒ one `turn_NNN/` ⇒ N `round_MMM/` ⇒ N assistant bubbles (B) ⇒ N persisted messages (C-2) ⇒ correct index count (C-2b) ⇒ UI turn-count = 1 (C-F3).
+
+---
+
+# APPENDIX
+
+## §A1 Verified root causes (source-anchored)
+
+### Problem B — second response overwrites first
+
+| # | Fact | Source |
+|---|---|---|
+**🚨 v3: facts corrected to the LIVE transport (`/ws/manager`), not the unused `/ws/agent` AF-webui bridge.**
+
+| B-F1 | The turn produced **two** assistant rounds on disk (SOP-entry text at 203746, Phase-0a-two-tools at 203807). Both exist; only the second shows in the UI. | the turn_002 directory listing |
+| B-F2 (v3) | The live chat transport is **`/ws/manager`** (`useManagerChat.js:40`; `setupProxy.js:24`). The `/ws/agent` AF-webui bridge (`agent_service_bridge.py`) is **NOT used** by OpenStartup chat. | useManagerChat.js:40; setupProxy.js:24 |
+| B-F3 (v3) | On the manager transport, `message_end` **already carries `message_id`** (half-wired). But `token`, `pending_input`, `message_start` do **NOT** — emitted in `websocket_interactive.py` without it. | manager_websocket_routes.py:512-514; websocket_interactive.py:201,214,314,380 |
+| B-F4 | The UI already commits a finished bubble at `message_end` keyed on `data.message_id` (timestamp fallback). The `pending_input` handler **already commits** the prior round's bubble. | useManagerChat.js:384,266 |
+| B-F5 | The `message_id` is **not minted per round** — without a per-round id on `token`/`message_start`, the UI's single streaming buffer is overwritten when round 2 starts. | conversational_inferencer.py (no `_current_message_id`); websocket_interactive.py emit sites |
+| B-F6 (v3) | A round seam **already exists**: `conversational_inferencer.py:397` fires `send_turn_boundary(...)`; the UI has a `turn_boundary` handler at `useManagerChat.js:410`. This is the hook to mint+carry the per-round id. | conversational_inferencer.py:397; useManagerChat.js:410 |
+
+**Conclusion (B), v3:** Problem B is **half-wired on the correct transport**, not absent on a bridge. Fix: mint `{message_id, round_index}` **per round** at the existing `send_turn_boundary` seam (`conversational_inferencer.py:397`); thread `message_id` through `token`/`pending_input`/`message_start` in **`websocket_interactive.py`** (and per-round on `message_end` in `manager_websocket_routes.py`); UI keys each streaming bubble by `message_id`, committing the prior one and de-duping (the `pending_input` path already commits — key by `message_id` so no double-commit). **No edits to `agent_service_bridge.py` (dead code for this app).**
+
+### Problem A — multiple tools not shown as tabs
+
+| # | Fact | Source |
+|---|---|---|
+| A-F1 | When >1 tool is emitted **in one round**, the server already builds a single compound widget: InputModeConfig(mode=FREE_TEXT, metadata={compound: True, tools: tool_configs}). | conversational_inferencer.py:2373-2378 |
+| A-F2 | Each tool_configs[i] carries tool_type, prompt, input_mode, output_var, expected_input_type, prefix. Order preserved (list). | conversational_inferencer.py:2362-2369 |
+| A-F3 | The parser preserves tool order but has **no parallel_group/group field** today. | conversation_response_parser.py (grep parallel_group/group → none) |
+| A-F4 | There is **no React component** that renders metadata.compound===true as tabs (grep compound/Tabs in chat UI → only unrelated MUI Tabs in popovers). | OpenStartup/.../ui/src grep |
+| A-F5 | The widget dispatcher routes by metadata.widget_type or mode (precedent: proposal_selection, confirmation, path_input). A compound/tabbed widget can follow the same widget_type dispatch. | typed-input plan §D6 F10; registerBuiltins.js |
+
+**Conclusion (A):** tabbed rendering is **partially server-ready** (compound metadata exists for same-round multi-tool) but (1) the UI never renders it as tabs, and (2) the LLM cannot *express* grouping intent. Feature needs: a parallel_group field (parser + model), server grouping logic, a widget_type "compound_tabbed" signal, and a React tabbed widget.
+
+### Problem C — one user request becomes two turn directories
+
+| # | Fact | Source |
+|---|---|---|
+| C-F1 | `turn_001/turn.json` holds `user_input: "help improve the model for responsible ai"` but `rendered_prompt: ""` and **no `RovoDevCliInferencer/` rounds**. | turn_001/turn.json |
+| C-F2 | `turn_002/` holds **two** `RovoDevCliInferencer-…` round dirs (203746, 203807) but **no `turn.json`/user_input**. | turn_002 listing |
+| C-F3 | The UI numbers turns by **counting `turn_` directories**: `new_style = sum(1 for p in session_dir.iterdir() if p.name.startswith("turn_") …)`. Two dirs → "2 turns". | conversation_service.py:506-508 |
+| C-F4 | `save_turn_data` writes the user input under **`turn_{new_turn}`** (e.g. turn_001). | conversation_service.py:~610 (step 2) |
+| C-F5 | The streaming `cache_folder` is rotated to **`turn_{new_turn + 1}`** (e.g. turn_002) — a **different anchor** for the same turn. | conversation_service.py:624 (step 4) |
+| C-F6 | `_on_new_turn` (which runs step 2 + step 4) fires **per agentic-loop boundary**, including a **pre-loop** call at `start_iteration==0` and again after **each widget handoff** — NOT once per user message. | conversational_inferencer.py:371 (pre-loop), :568 (post-widget) |
+| C-F7 | The pre-loop `cache_folder` is set to `turn_{initial_turn+1}` (turn_001) at line 633, but the immediately-following pre-loop `_fire_new_turn` (line 371) runs step 4 and **repoints it to turn_002** — so the next iteration of the SAME response streams into turn_002. | conversation_service.py:633; conversational_inferencer.py:371; conversation_service.py:624 |
+
+**Conclusion (C-1):** two compounding bugs. **C-1a (off-by-one anchor):** `save_turn_data(new_turn)` and `cache_folder(new_turn+1)` disagree, so a turn's user input and its response land in different directories. **C-1b (granularity):** the turn directory advances per agentic-loop iteration (incl. the pre-loop init and every widget handoff), not per user message — conflating "loop iteration" with "conversational turn" (the same root family as Problem B). Fix: advance the turn directory **once per user message**, and make the response co-locate with its own user input (same anchor).
+
+### Problem C-2 — assistant response never persisted as a message + stale index (NEW in v2; both v1 and Codex missed it)
+
+| # | Fact | Source |
+|---|---|---|
+| C2-F1 | The WS route appends the assistant message **once** at loop end via `final_content` (built by blocking on `run_conversation_turn`); intermediate rounds are never persisted as messages. | manager_websocket_routes.py:423,429,469 |
+| C2-F2 | `session_store.append_message` (used via `data_svc.append_message`, data_service.py:670-671) calls `_persist_session` but **NOT `_update_index()`** — so `sessions_index.message_count` goes stale. | session_store.py:334-345 (no `_update_index`); session_store.py:681 (where `_update_index` lives) |
+| C2-F3 | Symptom: the session list showed **"1 msgs"** (stale index count) while the chat header showed "3 messages" (welcome + user + assistant) — exactly the staleness predicted by C2-F2. | observed UI + session_state.json |
+
+**Conclusion (C-2):** (a) persist each round's assistant text as its own message at the round boundary (not one `final_content` at the very end), tagged `{turn_number, round_index, message_id}`; (b) make `append_message` call `_update_index()` so the index stays correct. C-2 is why the assistant turn appeared to "not exist" in the session list even though it streamed on screen.
+
+## §A2 Follow-ups (out of scope here)
+
+- **F-consolidate:** dormant handler-registry vs. live inline _build_input_mode split (tracked in typed-input plan §A4.1) — this plan also touches the live inline path; consolidation remains separate.
+- **Concurrent interactive tabs with independent submit:** this plan renders grouped tools in tabs but submits them as one compound payload. True per-tab async submit is deferred.
+
+## §A3 Risks
+
+| # | Risk | Mitigation |
+|---|---|---|
+| R1 | Adding message_id changes the WS contract; an out-of-date UI would ignore it | message_id is additive; UI already falls back to Date.now(). Server stays backward-compatible. |
+| R2 | Per-round bubbles could double-render the final message if both pending_input (commit) and message_end fire for the same id | Key both commit paths by message_id; a bubble with a given message_id is committed at most once (UI reducer guard). |
+| R3 | parallel_group semantics could confuse the LLM | Explicit Response-Format guidance + examples; default (omitted group) = "consecutive tools may be shown together" so existing SOPs improve without edits. |
+| R4 | Tabbed compound submit must still bind every tool's output_var (incl. composite nested inputs from typed-input plan) | Reuse the compound collection + finalize_input_value chokepoint; test that a tabbed group binds all output vars. |
+
+## §A4 Changelog
+
+* **v1 (2026-06-19)** — initial draft. Three problems (A/B/C), source-anchored root causes, fix order B+C→A.
+* **v2 (2026-06-19, this document)** — cross-plan integration (Claude's on-topic plan + Codex's `parallel_groups_assistant_rounds_turn_artifacts_plan.md`). Changes:
+  * **Problem A corrected:** v1 said "build a new `CompoundTabbedInput`". Source proved a tabbed `MultiInputWidget` **already exists** but is unreachable (hardcoded `CompoundWidget` stepper at `ConversationToolWidget.js:117`, before the registry) and **lossy** (scalarizes `{choice_index,inputs}` at `MultiInputWidget.js:59-69`, emits `{values}` at `:93`). Commit 6 rewritten to **rewire + de-lossify**, not rebuild. (§D4, §E1.6.)
+  * **Problem C-2 ADDED (both v1 and Codex missed it):** assistant response never persisted as its own message; `append_message` (`session_store.py:334-345`) skips `_update_index()` → stale `message_count` (the "1 msgs" symptom). New Commit 10. (§A1 C-2 table, §E1.10.)
+  * **Model upgraded to turn/round hierarchy** (`turn_NNN/round_MMM/`): `_on_new_turn` reinterpreted as a round boundary; one user message ⇒ one turn ⇒ N rounds ⇒ N bubbles (B) ⇒ N persisted messages (C-2). Commit 8 rewritten. (§D7.)
+  * Now **10 commits** (was 9). v1 backed up at `.parallel_tool_groups_and_per_round_message_boxes_plan.v1.bak`.
+  * Surviving-correct-from-v1: Problem B's "no `message_id`" diagnosis; `parallel_group` int-not-bool; fix order B+C→A.
+
+* **v3 (2026-06-19, this document)** — DECISIVE wrong-transport correction after Claude's updated integrated plan (3 fresh source traces). Changes:
+  * **Problem B retargeted to the LIVE `/ws/manager` transport** (`manager_websocket_routes.py` + `websocket_interactive.py` + `conversational_inferencer.py` round seam). My v1/v2 wrongly targeted the **unused** `/ws/agent` AF-webui bridge (`agent_service_bridge.py`) — that fix would have edited dead code. Facts B-F2…B-F6 corrected; Commits 1+2 + §E1.0 preflight rewritten; verified `useManagerChat.js:40` → `/ws/manager`, `setupProxy.js:24`. (§A1-B, §E1.1, §E1.2.)
+  * **Problem B is half-wired, not absent:** `message_end` already carries `message_id` (`manager_websocket_routes.py:512-514`); UI already reads it (`:384`) and `pending_input` already commits (`:266`). Fix = mint per-round id at the existing `send_turn_boundary` seam (`conversational_inferencer.py:397`) + dedupe; reuse the `turn_boundary` UI handler (`:410`).
+  * **Per-round View-Prompt artifacts adopted (Codex/X):** `turn_NNN/round_MMM/turn.json` + `round` param on `get_turn_data`/REST/`ManagerChatView` (a single per-turn `turn.json` can't show round 2's prompt). (§E1.8.)
+  * v2 backed up at `.parallel_…_plan.v2.bak`. Problem A + C-1 + C-2 from v2 unchanged (already correct transport).
+
+* **v4 (2026-06-19, this document)** — 4th cross-plan round; 4 corrections re-verified live. (1) **Round identity moved off the turn seam** to a dedicated round-start hook + reuse of `_fire_turn_complete` (the turn seam misses action-tool continuation rounds `5a/5b`). (2) **Problem A reversed**: retab `CompoundWidget` in place (it's lossless+wired); MultiInputWidget is dead+lossy — do not touch. (3) **Mint in OpenStartup** (`uuid` not imported in AF). (4) **NEW Commit 11**: persist the user's `widget_response` card (lost on reload). Direct-map payload confirmed canonical. Now **12 commits** (added 11). v3 backed up at `.parallel_…_plan.v3.bak`.
+
+### §A4.1 If forced to pick ONE plan among the 3 (v4 — answer)
+
+**Honest answer: Claude's `update-…-goose.md` (its latest version) is the best independent analysis; THIS v4 is the best document to execute from.** I keep pointing at Claude's plan for the *analysis* crown because, across the last two rounds, it twice caught load-bearing errors in my own plan — and I verified every one against live source:
+
+* **Round 3:** it alone had the right **transport** (`/ws/manager`, not the `/ws/agent` `agent_service_bridge` my v1/v2 targeted — dead code).
+* **Round 4 (this round):** it caught **three more** real issues in my v3 — (a) the **round-seam** error (minting id at the turn-gated `send_turn_boundary`, which misses action-tool continuation rounds `5a/5b` and stops firing once Problem C makes turn advance per-message); (b) **Problem A inverted** (CompoundWidget is the lossless, wired one — my "rewire dead+lossy MultiInputWidget" was backwards); (c) **mint-in-AF would NameError** (`uuid` not imported in AF). It also surfaced a genuinely new bug both my plan and the original Claude plan missed: **widget card lost on reload** (now Commit 11).
+
+**Why execute from v4 (this file) anyway:** v4 absorbs *all* of Claude's verified corrections **and** improves on them with the things my document does better — (i) reuse the **existing** `_fire_turn_complete` per-iteration signal as round-complete (Claude/X add a redundant new hook), (ii) a **typed `RoundContext`** rather than a loose dict that implicitly mutates `cache_folder` (the implicit coupling that caused the original turn-split), (iii) the **verified direct-map** payload (my finding — X over-mandates cosmetic `{values}`), plus my 3-tier structure, 12-commit checklist, risk register, and anchor preflight.
+
+* **Codex/X** contributed the right *ideas first* (dedicated round lifecycle, widget-card persistence, buffer reset, index staleness) and deserves real credit for the round-lifecycle insight — but remains the lightest on file:line anchors / execution detail.
+
+**Net:** for the **single best reasoning artifact**, Claude's plan earned it (it caught my mistakes twice). For the **single doc to hand an implementer**, use **v4** — it is now fact-aligned with Claude's plan and richer in execution scaffolding. The three plans have **converged**: same model, same transport, same seam, same widget, same payload.

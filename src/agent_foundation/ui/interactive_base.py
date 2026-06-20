@@ -152,7 +152,7 @@ class InteractiveBase(Debuggable):
         """
         pass
 
-    def send_response(self, response: Union[Any, List, Tuple], flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def send_response(self, response: Union[Any, List, Tuple], flag: InteractionFlags = InteractionFlags.TurnCompleted, **kwargs) -> None:
         """
         Sends one or more responses to the user and resets the input state for the next interaction.
 

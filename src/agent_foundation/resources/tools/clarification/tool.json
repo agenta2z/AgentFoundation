@@ -19,9 +19,21 @@
       "name": "prefix",
       "type": "string",
       "description": "For path inputs: the base directory prefix. The user types relative to this prefix. Example: '/data/users/zgchen/fbsource260306/fbcode'."
+    },
+    {
+      "name": "allow_multiple_input",
+      "type": "flag",
+      "default": false,
+      "description": "Collect one-or-more values (e.g. several paths). The values are published to the output variable as a JSON array string by default (set 'serialization' to 'comma' for a comma-separated string)."
+    },
+    {
+      "name": "serialization",
+      "type": "string",
+      "default": "auto",
+      "description": "How a collected value is published: 'auto' (scalar when single, JSON array when multiple), 'json', 'comma', or 'scalar'."
     }
   ],
-  "usage_guidance": "Use when the user's request is ambiguous or needs more detail. For path inputs, set expected_input_type to 'path' and prefix to the base directory.",
+  "usage_guidance": "Use when the user's request is ambiguous or needs more detail. For path inputs, set expected_input_type to 'path' and prefix to the base directory; under --yolo a path input defaults to the session root rather than fabricating prose.",
   "yolo_default": {
     "mode": "fixed",
     "value": "Follow your best judgment."

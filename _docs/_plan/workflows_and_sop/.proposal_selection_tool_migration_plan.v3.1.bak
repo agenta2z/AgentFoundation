@@ -1,0 +1,818 @@
+# Proposal Selection Migration + `proposals.json` Pipeline Fix + SOP Phase 3b/4 Wiring — Integrated Plan v3.1
+
+> **⚠ Reviewers: this file is `v3.1` (latest as of 2026-06-07 17:30). If you are reading from a copy with an older version in the header, you are reading a stale snapshot. Check §13 Changelog for the most recent delta — v3.1 closed three real wiring gaps (R11 resolution, Item 7 handler-input priority, Item 3 CLI path) and three cosmetic-correctness items. The architectural core (§3, §6, §11) is unchanged from v3.**
+
+**Author:** Rovo Dev (drafted in conversation with Tony Chen)
+**Date:** 2026-06-07 v3.1 (supersedes v3 of same day)
+**Status:** Draft v3.1 — ready for review
+**Branch:** `dev_xinli_2601`
+**Supersedes:**
+- v1 of this same file — scoped only the conversation-tool migration; missed both `proposals.json` blockers and Phase 4 wiring.
+- v2 (earlier today) — added D1 BTA fallback, D2 constraint tolerance, D3 migration, F4 Phase 4 wiring. **Two corrections needed:**
+  - D2 alias map was too narrow. **Verified against real LLM output** (in `_runtime/tasks/research_propose/.../aggregator/.../output.md`), the actual dialect is `{"type":"requires","from":"P5","to":"P1","note":"..."}` and `{"type":"recommends","from":"P3","to":"P1","reason":"..."}` — with **scalar OR list `to` values** (`"to":"P1"` and `"to":["P1","P3"]` both occur in the same file). v2's alias map only covered `type→kind` and `rule→reason`; missed `from→proposal_ids`, `to→requires_ids`, `note→reason`, and the scalar↔list normalisation. v3 fixes this in §3.2 / §4.2.
+  - Reconfirmed v2's `resources/tools/proposal_selection/tool.json` decision: an alternative integrated draft argued the file is unnecessary, but **all 4 other conversation tools (`clarification`, `confirmation`, `single_choice`, `multiple_choice`) DO have a `tool.json`** (verified by `ls`). v3 keeps the file — see §4.4 for the canonical shape.
+
+**Companion to:**
+- `sop_runtime_enablement_plan.md`
+- `conversational_workflows_and_sop_framework_INTEGRATED_v7.2_plan.md`
+
+---
+
+## §0. Why this plan exists (the actual user problem, fully scoped)
+
+The user is trying to make `src/agent_foundation/resources/sops/model_optimization/SOP.md` run end-to-end. Investigation has uncovered **three connected defects** that together break the research → selection → implementation pipeline. Fixing only one of them is insufficient; fixing all three is also tractable. Plan v3.1 covers all three in dependency order across **seven** commits (six in AF + one in rankevolve).
+
+| # | Defect | Layer | Severity | Detection |
+|---|---|---|---|---|
+| **D1** | `proposals.json` is silently never written when the LLM response is truncated at the token limit | Flow inferencer | **Blocker** — silent failure | Verified by subagent: file `breakdown_then_aggregate_inferencer.py` lines 1118–1149 reads only `str(response)`, never the aggregator output file |
+| **D2** | `ProposalConstraint.from_dict()` crashes with `KeyError` on LLM-shaped constraint dicts (`{"type":"ordering","rule":"…"}`); `ProposalIndex.from_dict()` propagates the crash, so the whole index parse dies | Data model | **Blocker** — hard crash | Verified by subagent: `model.py` lines 132–141 use direct `d["id"]`/`d["kind"]`; `ProposalIndex.from_dict()` lines 195–198 wraps constraints in a non-tolerant list comprehension |
+| **D3** | No `proposal_selection` conversation tool exists in AgentFoundation. `model_optimization/SOP.md` Phase 3b currently has a workaround that downgrades to `confirmation`. `code_optimization/SOP.md` line 90 already names `proposal_selection`. RankEvolve has a full, well-factored implementation ready to upstream | Conversation tool + UI + SOP | **Major** — feature gap | Verified by subagents (see §1.2) |
+
+Plus one **SOP-authoring** fix that is independent of all three but completes the chain:
+
+| # | Fix | Layer |
+|---|---|---|
+| **F4** | `model_optimization/SOP.md` Phase 4 body must actually invoke `task --use-proposal <proposals.json> --proposal-ids <selection>`. Today it just says "Plan and implement the proposed changes…", with no instruction to thread Phase 3b's selection through. The `task` tool already supports both flags fully — no tool work needed. | SOP body |
+
+Once D1+D2+D3+F4 are landed, the full path is:
+
+```
+research-propose
+  → emits outputs/proposals.json (D1+D2 ensure it actually appears)
+  → Phase 3b: proposal_selection widget (D3 enables this)
+  → selected IDs threaded into Phase 4
+  → task --use-proposal …/outputs/proposals.json --proposal-ids "P1,P3" (F4 enables this)
+  → task plans and implements
+```
+
+This is the correct, elegant, end-to-end solution. No hacks.
+
+---
+
+## §1. Empirical baseline — every claim verified 2026-06-07
+
+### §1.1 D1 verified — `_try_extract_proposal_index` reads truncated response only
+
+**File:** `src/agent_foundation/common/inferencers/agentic_inferencers/flow_inferencers/breakdown_then_aggregate_inferencer.py`
+
+| Evidence | Line(s) |
+|---|---|
+| Function definition `_try_extract_proposal_index(self, response) -> None` | 1118 |
+| `text = str(response) if response is not None else ""` — sole input source | 1127 |
+| Call site `_finalize_output()` | 1098 |
+| Aggregator workspace IS accessible via `self._workspace.child("aggregator")` | 1954–1957 |
+| Aggregator inferencer exposes `_workspace`, `output_path`, `deliverable_path` (used by the proposed fix) | confirmed |
+| **No fallback logic** exists for truncated responses | (absence verified) |
+
+**Manifestation:** LLM proposer produces a 78 KB aggregator output file containing a 36 KB `proposal_index` fence. The response object surfaced to the inferencer is ~10 KB (token-limit truncation). The fence is therefore present on disk but absent from `text`, and the function silently returns without writing `outputs/proposals.json`.
+
+### §1.2 D2 verified — `ProposalConstraint.from_dict()` crashes on LLM-shaped dicts
+
+**File:** `src/agent_foundation/common/data_models/proposal/model.py`
+
+| Evidence | Line(s) |
+|---|---|
+| `ProposalConstraint.from_dict()` uses `d["id"]` and `d["kind"]` (direct dict access — raises `KeyError`) | 134–135 |
+| `ProposalIndex.from_dict()` builds `constraints` via a list comprehension with no try/except | 195–198 |
+| Parser `parse_proposal_file()` catches outer exceptions and returns `None` (so one bad constraint kills the whole index) | parser.py 59–69 |
+| Parser `_strategy_b()` (fence extraction) likewise returns `None` on any parse failure | parser.py 107–119 |
+| Existing tests cover only the canonical schema; no malformed-constraint coverage | confirmed |
+
+**Manifestation (verified against real LLM output in `_runtime/`):** LLMs emit constraints in at least two dialects, neither of which is the canonical `{"id":"C1","kind":"requires","proposal_ids":[...]}`:
+
+- **Dialect α (free-form `rule`):** `{"type": "ordering", "rule": "P10 must precede every other proposal."}`
+- **Dialect β (graph-edge with `from`/`to`):** `{"type": "requires", "from": "P5", "to": "P1", "note": "ORPO benefits most when stacked on Reason-first base."}` — and `to` may be **scalar OR list**: `{"type": "requires", "from": "P4", "to": ["P1","P3"]}` and `{"type":"requires","from":"P5","to":"P1"}` both occur in the same real file.
+- **Aliased fields seen in production:** `type→kind`, `rule→reason`, `note→reason`, `from→proposal_ids`, `to→requires_ids`.
+
+`from_dict()` raises `KeyError: 'id'` on any of them. `ProposalIndex.from_dict()` dies. `parse_proposal_file()` returns `None`. `task --use-proposal` fails with *"Failed to resolve proposals from: …"*.
+
+### §1.3 D3 verified — `proposal_selection` exists in RankEvolve, missing in AF
+
+| Layer | RankEvolve path (present) | AgentFoundation status |
+|---|---|---|
+| Enum value | `rankevolve/.../conversational/conversation_tools.py` → `ConversationToolType.PROPOSAL_SELECTION = "proposal_selection"` | **Missing** (AF has 5 values: `clarification`, `single_choice`, `multiple_choice`, `confirmation`, `tool_argument_form`) |
+| Handler | `rankevolve/.../conversational/handlers/proposal_selection.py` (280 LoC, framework-grade) | **Missing** |
+| Handler registration | `rankevolve/.../conversational/handlers/__init__.py` `default_registry()` (one line) | **Missing** registration line |
+| Capability Protocol | `rankevolve/.../conversational/protocols.py` `HubAwareToolExecutor` (`@runtime_checkable Protocol`, no rankevolve imports) | **Missing** (AF protocols.py has `ToolExecutorCallable`, `ContextCompressorCallable`, `PromptRenderer` only) |
+| React widget | `rankevolve/src/webui/react/src/components/widgets/ProposalSelectionWidget.js` (1132 LoC) | **Missing** in AF `react-shared/src/inputs/` |
+| Widget registry entry | `rankevolve/.../widgets/WidgetRegistry.js` (`'proposal_selection': ProposalSelectionWidget`) | **Missing** in AF `registerBuiltins.js` |
+| Generic `Proposal` data model | AF already has `agent_foundation/common/data_models/proposal/model.py` (docstring: *"Inspired by RankEvolve's StructuredProposal/ProposalSelectionData but trimmed to framework-level generics"*) | **Already present** — perfect substrate |
+| Effects (`ApplyContextUpdates` etc.) | AF already has them | **Already present** |
+| Proposal parser hook | `rankevolve/.../ui/proposal_parser.py` `parse_proposals()` | **Missing** in AF (needs a tiny pluggable registry — see §3.2 I2) |
+| SOP-layer expectation | `code_optimization/SOP.md` line 90 already names `proposal_selection` as first-choice | (waiting for the implementation) |
+
+### §1.4 F4 verified — `task` already supports `--use-proposal` / `--proposal-ids` fully
+
+**Files & evidence:**
+
+| Layer | File | Line(s) | Status |
+|---|---|---|---|
+| Declared in `tool.json` | `resources/tools/task/tool.json` | params index #20–21 of 27 | `--use-proposal <path>` and `--proposal-ids <csv>` both declared |
+| Implemented in executor | `resources/tools/task/executor.py` | 142–215 (`_resolve_proposal_plan`) | Parses index, filters by IDs, inlines full detail, writes audit trail `_picked_proposals.json` |
+| Dispatch wired | `resources/tools/task/executor.py` | 680–687 | `--use-proposal` mutually-exclusive with `--initial-plan`, error-checked |
+| Producer-consumer path | `_runtime/tasks/research_propose/research_propose_20260603_070411_53790258/outputs/proposals.json` | (real artifact) | Validates against `ProposalIndex.from_dict()` |
+| Parser fallback strategy | `common/data_models/proposal/parser.py` | 95–104 | 3-tier: (A) `outputs/proposals.json` (B) markdown fence (C) priority table — handles both fast path and degradation |
+
+**Conclusion for F4:** No task-tool work needed. The fix is purely an SOP body update telling the CI to invoke `task` with the two flags, threading Phase 3b's selection.
+
+### §1.5 What this collectively means
+
+- D1+D2 are root-cause **production bugs** that, once fixed, allow `proposals.json` to actually exist. They are **prerequisites** for both D3 and F4 to provide user value — without D1+D2, the proposal_selection widget would have nothing to display, and `task --use-proposal` would always error.
+- D3 is a **clean upstreaming** exercise (~90% of the rankevolve handler is framework-grade; three small dependency inversions named in §3.2).
+- F4 is a **one-edit SOP fix** (~10 LoC of Markdown) leveraging the existing task tool capability.
+
+All four together form one coherent, end-to-end change. The integrated plan lands them in dependency order across **seven** commits (six in AF + one follow-up in rankevolve).
+
+---
+
+## §2. Goals & non-goals
+
+### §2.1 Goals
+1. **End-to-end pipeline restored:** `research-propose → outputs/proposals.json → Phase 3b proposal_selection → task --use-proposal` runs without silent failures or crashes.
+2. AgentFoundation gains a working `proposal_selection` conversation tool — usable by **any** SOP, not just rankevolve's experiment flows.
+3. `model_optimization/SOP.md` Phases 3b and 4 run end-to-end through the SOP runtime without falling back to `confirmation` and without losing the Phase 3b selection on the way to Phase 4.
+4. RankEvolve continues to work unchanged (or with a minimal one-import switch) — no regression.
+5. The migration is **side-by-side reviewable**: each commit is independently revertable, each layer testable in isolation.
+6. All fixes degrade cleanly when used outside their happy path (truncated response → file fallback; malformed constraint → skip with warning; no Hub-aware executor → "Selected N proposals"; no parser registered → no enrichment; no overrides endpoint → empty overrides UI).
+
+### §2.2 Non-goals
+1. Designing a new conversation-tool base class. We extend the existing one.
+2. Replacing `multiple_choice` / `confirmation`. `proposal_selection` is **additive** — proposals are a richer payload (batch/phase structure, deprioritisation overrides, applied-change history) than a flat option list.
+3. Migrating rankevolve's full experiment Hub. The Hub-aware execution path is **opt-in** via the `HubAwareToolExecutor` Protocol — AF apps without a Hub simply don't satisfy the Protocol; the handler degrades.
+4. Migrating rankevolve's `/api/sessions/{id}/proposal_overrides` endpoint. AF stays unaware of overrides; the widget uses a no-op default unless a host app provides a React context override.
+5. Enriching the `task` tool with new flags. It already supports `--use-proposal` + `--proposal-ids` fully (§1.4).
+6. Fixing the LLM prompt to emit canonical-schema constraints. Defence-in-depth at the parser level (D2 fix) is correct regardless; LLMs will always produce noisy schemas.
+
+### §2.3 Out of scope (deferred to other plans)
+- The other 7 `model_optimization/SOP.md` audit gaps (user-input gates on Phases 1/2, Phase 4 `__branch__` cardinality choice, Phase 4b directive, Jira-or-no-Jira decision, etc.). Tracked separately — see §10.
+- The `tool_to_phase_map` one-tool-one-phase limitation. Pre-existing limitation, not caused by this migration.
+- The four `error: refs/ai-working-log/diffs/...lock: badRefContent` lock files surfaced by `git fsck`. Unrelated; clean-up follow-up.
+
+---
+
+## §3. Architecture decisions — proper vs. ad-hoc paths considered
+
+### §3.1 D1 (truncated response) — fix shape options
+
+| Option | Description | Verdict |
+|---|---|---|
+| A. Raise the response token cap | Bigger model output cap | ❌ Doesn't fix the class of bug; will recur on bigger proposals |
+| B. Stream the response and reassemble | Streamed accumulation in the inferencer | ❌ Out-of-scope and incompatible with current aggregator API |
+| C. Re-prompt the LLM on truncation | Detect missing fence → ask LLM to re-emit | ❌ Adds an extra LLM round trip and a new failure mode |
+| **D (chosen). File fallback** | After failing to find `proposal_index` in `text`, read aggregator's output file from `_workspace.output_path(...)` and re-attempt | ✅ Minimal, addresses root cause. Fast path (response) preserved. Falls back to the source-of-truth file that already exists on disk. Used by other AF inferencers for the same reason. |
+
+### §3.2 D2 (constraint parse crash) — fix shape options
+
+| Option | Description | Verdict |
+|---|---|---|
+| A. Tighten the LLM prompt to force canonical schema | Better prompt examples | ❌ LLMs will always drift; this is the wrong layer |
+| B. Pydantic-validate constraints, raise on any drift | Strict | ❌ Loses the entire `ProposalIndex` over one bad constraint — opposite of the user's "proper, elegant, end-to-end" requirement |
+| C. Drop the whole constraints field if any parse fails | Coarse-grained tolerance | ❌ Discards valid constraints alongside the malformed ones |
+| **D (chosen). Per-constraint tolerance** | `from_dict()` uses `d.get()` with sensible defaults + alias map (`type→kind`, `rule→reason`); `ProposalIndex.from_dict()` wraps each constraint in try/except and logs a warning, keeping the rest | ✅ Minimal. Per-item granularity. Preserves backward compat (canonical-schema dicts unchanged). Aligns with how AF's other parsers handle LLM-noisy input. |
+
+### §3.3 D3 (proposal_selection migration) — fix shape options
+
+| Option | Description | Verdict |
+|---|---|---|
+| A. Keep `confirmation` workaround in `model_optimization/SOP.md` | Don't migrate, just patch the SOP | ❌ `code_optimization/SOP.md` already references `proposal_selection`; perpetuates documented "if available" branch forever. Confirmation has no concept of multi-item selection over a structured proposal list. |
+| B. Copy-paste the handler verbatim into AF | Take rankevolve's file as-is | ❌ Drags `HubAwareToolExecutor`, `parse_proposals`, and rankevolve-specific phase_output keys as hard deps. AF would import-cycle or grow rankevolve coupling. |
+| C. Reimplement from scratch in AF | Fresh `proposal_selection` | ❌ Wastes ~1100 LoC of working, debugged UI; risks behaviour drift; rankevolve also has to migrate. |
+| **D (chosen). Upstream with three dependency inversions** | Move handler to AF; replace 3 named couplings with pluggable hooks; rankevolve switches to importing from AF and registers its parser + Hub-aware executor at startup | ✅ Clean. Symmetric to how `effects.py` and generic `Proposal` model were already upstreamed. Zero behaviour change for rankevolve; instant unlock for AF SOPs. |
+
+### §3.4 The three dependency inversions (D3-option-D)
+
+| # | RankEvolve coupling today | AF inversion |
+|---|---|---|
+| **I1** | `from rankevolve...protocols import HubAwareToolExecutor` | Copy Protocol verbatim into `agent_foundation/.../conversational/protocols.py`; re-export from rankevolve for back-compat. The Protocol uses only `typing.Protocol` + `runtime_checkable`. |
+| **I2** | `from rankevolve...ui.proposal_parser import parse_proposals` (inside handler's `enrich_before_send`) | New registry in AF: `agent_foundation/common/data_models/proposal/parsers.py` with `register_proposal_parser(parser)` + `get_proposal_parser() -> ProposalParser | None`. Handler calls `get_proposal_parser()`; if `None`, skips enrichment. RankEvolve registers its parser at startup. |
+| **I3** | `useProposalOverrides` hook hard-coded to `/api/sessions/{id}/proposal_overrides` | New React context `ProposalOverridesEndpointContext` with default returning `{ rankings: [], deprioritize: [], applied_changes_log: [] }`. RankEvolve provides a context value pointing to its endpoint. |
+
+### §3.5 F4 (Phase 4 wiring) — fix shape options
+
+| Option | Description | Verdict |
+|---|---|---|
+| A. Hard-code `proposals.json` path in `model_optimization/SOP.md` | Path string baked into SOP | ❌ Tight coupling; breaks if `research_propose` workspace path scheme changes |
+| B. Add a new SOP-level variable substitution mechanism | `${phase_outputs.Phase 3.proposals_path}` | ❌ Out-of-scope; would change SOP runtime semantics |
+| **C (chosen). SOP body instructs CI to read phase_outputs and pass them as flags** | "Invoke `task` with `--use-proposal <Phase 3 proposals path from phase_outputs> --proposal-ids <Phase 3b selection from phase_outputs>`" | ✅ Uses the existing CI capability; no SOP runtime change. Mirrors how `code_optimization/SOP.md` Phase 4 instructs Jira issue creation by reading `phase_outputs[Phase 3b]`. |
+
+All decisions are minimal, named, reviewable. None requires AF to learn about rankevolve.
+
+---
+
+## §4. Migration plan — file-by-file, seven commits in dependency order (six in AF + one in rankevolve)
+
+Each commit is independently reviewable and revertable.
+
+### §4.1 Commit 1 — D1 fix: BTA file-fallback for truncated responses
+
+**Why first:** Without `proposals.json` actually appearing on disk, no downstream change provides user value.
+
+**Files modified:**
+
+1. `src/agent_foundation/common/inferencers/agentic_inferencers/flow_inferencers/breakdown_then_aggregate_inferencer.py`
+   - **(a) Text source fallback** — function `_try_extract_proposal_index(self, response)` (line ~1118): after the existing `text = str(response) if response is not None else ""` line, add: if `"proposal_index"` is not in `text` AND `self.aggregator_inferencer` exists AND its `_workspace` is set, read the aggregator's output file (try `agg_ws.output_path(agg_inf.output_path or "output.md")` first, then `agg_ws.deliverable_path(...)` as second candidate). On hit, replace `text` with the file contents and continue the existing extraction logic. Wrap file read in `try/except (OSError, UnicodeError)`; log warning on failure.
+   - **(b) Phase-output exposure (resolves R11)** — at line ~1144, after `write_proposal_index(sidecar, idx)` succeeds, **also write the path into `phase_outputs`** so downstream phases (Phase 3b, Phase 4) can discover it:
+     ```python
+     # After successful sidecar write — surface the path so downstream phases
+     # (proposal_selection, task --use-proposal) can find it without filesystem
+     # guessing. Key name aligns with `task --use-proposal <path>` semantics.
+     try:
+         self._update_phase_output("proposals_path", str(sidecar))
+         self._update_phase_output("proposals_count", idx.total_count)
+     except AttributeError:
+         # _update_phase_output is on the base inferencer; if absent in this
+         # subclass tree, fall back to a direct phase_outputs dict mutation.
+         po = getattr(self, "phase_outputs", None)
+         if isinstance(po, dict):
+             po["proposals_path"] = str(sidecar)
+             po["proposals_count"] = idx.total_count
+     ```
+     This is the **single source of truth** for `proposals.json`'s path. Both Phase 3b (`proposal_selection` handler) and Phase 4 (`task --use-proposal`) read it from `phase_outputs["proposals_path"]` rather than reconstructing the path from convention. If the BTA workspace layout ever changes, only this one line needs updating.
+   - **(c) Stable-location guarantee (resolves item 2)** — add a code comment immediately above the sidecar-write block stating: *"INVARIANT: proposals.json lives at `<workspace>/outputs/proposals.json`. The BTA `_finalize_output` early-returns when aggregator is present (line 1101) and the base class's `outputs→final_deliverables` move never runs for this file. Any future refactor of `_finalize_output` that moves this file MUST also update Phase 3b/Phase 4 SOP wiring and the `phase_outputs['proposals_path']` write above."*. The comment is the contract; the `phase_outputs` write in (b) is the implementation that makes the location discoverable regardless of any future change.
+
+**Tests added (or extended):**
+- `test/.../flow_inferencers/test_breakdown_then_aggregate_inferencer.py`
+  - **New test**: "fence found in response (fast path)" — existing behaviour, regression guard.
+  - **New test**: "response truncated, fence found in aggregator output file" — feed a fake response without the fence and a tmp aggregator workspace with the fence on disk; assert `proposals.json` is written.
+  - **New test**: "response truncated AND aggregator file missing" — assert function returns cleanly (no crash, no `proposals.json`).
+- `test/.../proposal/test_parser.py`
+  - **New test**: "parser tolerates 78KB markdown with 36KB proposal_index fence" — fixture file (~80 KB) copied from a real `_runtime/tasks/research_propose/.../outputs/output.md` (anonymized).
+
+**Risk:** low. Fix is additive — fast path unchanged. **LoC:** ~40 production + ~120 tests.
+
+### §4.2 Commit 2 — D2 fix: tolerant constraint parsing
+
+**Why second:** Even with D1 fixed, a single malformed constraint in the LLM output crashes the whole `ProposalIndex` parse and prevents `proposals.json` from being written.
+
+**Files modified:**
+
+1. `src/agent_foundation/common/data_models/proposal/model.py`
+   - `ProposalConstraint.from_dict()` (lines 132–141): replace direct `d["id"]` / `d["kind"]` access with `d.get()` calls + alias map + scalar-or-list normalisation. **Verified against real LLM output, all aliases listed below are required, not speculative:**
+
+     ```python
+     def _as_list(x):
+         """Normalise scalar OR list into list (LLM dialect β emits both for `to`)."""
+         if x is None: return []
+         if isinstance(x, list): return list(x)
+         return [x]
+
+     @classmethod
+     def from_dict(cls, d: dict[str, Any]) -> ProposalConstraint:
+         return cls(
+             id=d.get("id", ""),
+             kind=d.get("kind", d.get("type", "unknown")),
+             proposal_ids=_as_list(d.get("proposal_ids", d.get("from"))),
+             requires_ids=_as_list(d.get("requires_ids", d.get("to"))),
+             label=d.get("label", ""),
+             reason=d.get("reason", d.get("rule", d.get("note", ""))),
+             severity=d.get("severity", "error"),
+         )
+     ```
+
+     **Alias map rationale (every entry observed in production output):**
+     | Canonical field | Alias(es) | Source |
+     |---|---|---|
+     | `kind` | `type` | dialect α and β |
+     | `proposal_ids` | `from` (scalar→list) | dialect β |
+     | `requires_ids` | `to` (scalar→list) | dialect β |
+     | `reason` | `rule` | dialect α |
+     | `reason` | `note` | dialect β |
+
+   - `ProposalIndex.from_dict()` (lines 188–200): wrap constraint construction in a per-item try/except. Log a `warning` with the offending dict and skip. Keep all valid constraints. **Never** lose the whole index over one bad constraint.
+
+2. `src/agent_foundation/common/data_models/proposal/parser.py`
+   - Add a `logger.warning(...)` when `parse_proposal_file()` returns `None` because of a parse exception (not just file-missing), so silent failures become loud.
+
+**Tests added (every test below uses a real LLM-output fixture, not synthetic data):**
+- `test/.../proposal/test_model.py`
+  - **Canonical schema round-trip** (regression guard): `{"id":"C1","kind":"requires","proposal_ids":["P2"],"requires_ids":["P1"]}` round-trips identically.
+  - **Dialect α (free-form):** `{"type":"ordering","rule":"P10 must precede every other proposal."}` parses with `kind="ordering"`, `reason="P10 must…"`, `id=""`, `proposal_ids=[]`, `requires_ids=[]`.
+  - **Dialect β (scalar `to`):** `{"type":"requires","from":"P5","to":"P1","note":"ORPO benefits most…"}` parses with `kind="requires"`, `proposal_ids=["P5"]`, `requires_ids=["P1"]`, `reason="ORPO benefits most…"`.
+  - **Dialect β (list `to`):** `{"type":"requires","from":"P4","to":["P1","P3"]}` parses with `requires_ids=["P1","P3"]`.
+  - **Dialect β with `reason` not `note`:** `{"type":"recommends","from":"P3","to":"P1","reason":"..."}` parses with `reason="..."`.
+  - **Completely empty `{}`:** parses to all defaults (`id=""`, `kind="unknown"`, lists empty, strings empty) without crashing.
+  - **`ProposalIndex.from_dict()` partial-failure tolerance:** input with 3 constraints (2 valid + 1 deliberately malformed nested-type) keeps the 2 valid; emits a `warning` for the 1 malformed.
+
+**Risk:** low. Backward compatible (canonical dicts produce identical output). **LoC:** ~50 production + ~120 tests.
+
+### §4.3 Commit 3 — D3 framework primitives (enum + Protocol + parser hook)
+
+**Why third:** With D1+D2 fixed, `proposals.json` exists. Now we add the substrate the conversation tool will plug into.
+
+**Files added / modified in AF:**
+
+1. `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/conversation_tools.py`
+   - Add `PROPOSAL_SELECTION = "proposal_selection"` to `ConversationToolType`.
+   - Update any factory/serialiser that switches on the enum (likely just adds a passthrough case).
+
+2. `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/protocols.py`
+   - Add `HubAwareToolExecutor` Protocol verbatim from rankevolve. `@runtime_checkable`, `typing`-only imports.
+
+3. `src/agent_foundation/common/data_models/proposal/parsers.py` (**NEW**)
+   - `ProposalParser` Protocol: `def parse(workspace: str) -> Proposal | None`.
+   - Module-level `_default_parser: ProposalParser | None = None`.
+   - `register_proposal_parser(parser)` setter.
+   - `get_proposal_parser()` getter — returns `None` if unregistered.
+   - Single-parser registry is sufficient for v1 (rankevolve is the only producer). Extensible to multi-parser dispatch later without touching the handler.
+
+4. `src/agent_foundation/common/data_models/proposal/__init__.py`
+   - Re-export `ProposalParser`, `register_proposal_parser`, `get_proposal_parser`.
+
+**Tests added:**
+- `test/.../conversational/test_protocols.py` — `HubAwareToolExecutor` is recognised by `isinstance` on a stub that satisfies the Protocol; rejected on one that doesn't.
+- `test/.../data_models/proposal/test_parsers.py` — registration round-trip, `None` when unregistered, replacement semantics, thread-safety of the module-level variable (single set+get test is sufficient).
+
+**Risk:** trivial. **LoC:** ~120.
+
+### §4.4 Commit 4 — D3 handler migration
+
+**Files added / modified in AF:**
+
+1. `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/handlers/proposal_selection.py` (**NEW**)
+   - Port the 280 LoC handler from rankevolve. **Four** localised edits (3 dependency inversions + 1 input-source priority change):
+     - **I1 / I2 / I3** (dependency inversions):
+       - Replace `from rankevolve...` imports with `from agent_foundation...` imports.
+       - Replace the inline `from rankevolve...proposal_parser import parse_proposals` (currently inside `enrich_before_send`) with `from agent_foundation.common.data_models.proposal.parsers import get_proposal_parser; parser = get_proposal_parser(); if parser is None: return original_message`.
+       - Keep the `isinstance(executor, HubAwareToolExecutor)` narrowing untouched — Protocol now lives in AF.
+     - **I4 — `proposals_path` priority chain (resolves feedback item 7):** Make `enrich_before_send` aware that the SOP author can pass `proposals_path` as a `tool_args` value (declared in `tool.json` per §4.4). Today the rankevolve handler only reads from `phase_outputs["research_proposals_data"]` / `["research_proposals"]` / `["unified_plan_path"]`. After this change the resolution order is:
+       1. **Highest priority:** `tool_args["proposals_path"]` (explicit SOP-author intent, e.g. `proposal_selection --proposals_path={phase_outputs[Phase 3][proposals_path]}`).
+       2. **Fallback A:** `phase_outputs["proposals_path"]` — populated by Commit 1 step (b) above. This is what makes the SOP work without any explicit author wiring.
+       3. **Fallback B (rankevolve back-compat):** `phase_outputs.get("research_proposals_data")` and the existing rankevolve discovery chain (`research_proposals`, `unified_plan_path`).
+       4. **Last resort:** registered parser via `get_proposal_parser()` (rankevolve-only path).
+     - Implementation: a small private helper `_resolve_proposals_source(self, ctx, tool_args) -> str | dict | None` encapsulates the chain so each layer can be tested independently. **No behaviour change for rankevolve** (its existing keys remain in the chain at the same priority). New behaviour for AF: out-of-the-box discovery via the BTA-populated `proposals_path`.
+   - Keep module-level helpers (`format_hub_announcement`, `create_hub`, `_group_selected_by_batch`) — framework-grade. If used elsewhere in rankevolve, they continue to work via the re-export from rankevolve's `protocols.py` (see §4.7).
+
+2. `src/agent_foundation/.../conversational/handlers/__init__.py`
+   - `from .proposal_selection import ProposalSelectionHandler`.
+   - Add one line to `default_registry()`:
+     ```python
+     registry.register(ConversationToolType.PROPOSAL_SELECTION, ProposalSelectionHandler())
+     ```
+
+3. `src/agent_foundation/resources/tools/proposal_selection/tool.json` (**NEW**) — required because all 4 other conversation tools (`clarification`, `confirmation`, `single_choice`, `multiple_choice`) ship one. **Verified by `ls`**, not assumed. Canonical shape (modelled on `multiple_choice/tool.json`):
+
+   ```json
+   {
+     "name": "proposal_selection",
+     "tool_type": "Conversation",
+     "category": "conversation",
+     "description": "Present a structured set of proposals (with batch/phase grouping, dependencies, impact/complexity) and let the user select which to advance.",
+     "parameters": [
+       {"name": "prompt", "type": "string", "required": true,
+        "description": "The selection prompt to show the user."},
+       {"name": "proposals_path", "type": "string", "required": true,
+        "description": "Path to proposals.json produced by research-propose (or any source compatible with parse_proposal_file)."},
+       {"name": "preselected_ids", "type": "string", "required": false,
+        "description": "Comma-separated proposal IDs pre-checked when the widget renders."},
+       {"name": "allow_zero", "type": "flag", "default": false,
+        "description": "Allow the user to submit zero selections (otherwise the widget requires at least one)."}
+     ],
+     "usage_guidance": "Use after research-propose to let the user review and select which proposals to implement. Pairs with `task --use-proposal` for downstream execution.",
+     "examples": [
+       "{\"tool_type\": \"proposal_selection\", \"prompt\": \"Which proposals to implement?\", \"proposals_path\": \"<ws>/outputs/proposals.json\"}"
+     ],
+     "yolo_default": {"mode": "select_all"}
+   }
+   ```
+
+**Tests added:**
+- `test/.../conversational/handlers/test_proposal_selection_handler.py` — port from rankevolve (its `MagicMock(spec=ToolExecutorCallable)` test discipline transfers cleanly).
+- **New**: "handler runs cleanly without a registered parser" — `enrich_before_send` no-ops gracefully.
+- **New**: "handler runs cleanly without `HubAwareToolExecutor`" — returns `"Selected N proposals"` synthetic; doesn't crash.
+- **New**: `default_registry()` count test — asserts exactly 6 handlers (defends against accidental removal).
+
+**Risk:** low. Existing rankevolve tests lock in the contract. **LoC:** ~350.
+
+### §4.5 Commit 5 — D3 UI migration (React)
+
+**Files added / modified in AF:**
+
+1. `src/agent_foundation/ui/react-shared/src/inputs/ProposalSelectionWidget.js` (**NEW**) — port 1132 LoC widget verbatim from rankevolve. Replace `useProposalOverrides` import with a context-aware version (see next file).
+2. `src/agent_foundation/ui/react-shared/src/hooks/useProposalOverrides.js` (**NEW**) — reads the overrides endpoint from `useContext(ProposalOverridesEndpointContext)`. Default (no provider): returns static `{ rankings: [], deprioritize: [], applied_changes_log: [] }`. Keeps the existing window `'proposal_overrides_applied'` event listener (browser-global, safe).
+3. `src/agent_foundation/ui/react-shared/src/contexts/ProposalOverridesEndpointContext.js` (**NEW**) — `React.createContext({ endpoint: null, fetcher: defaultNoOpFetcher })`.
+4. `src/agent_foundation/ui/react-shared/src/protocol/registerBuiltins.js` — one-line registration:
+   ```javascript
+   import ProposalSelectionWidget from '../inputs/ProposalSelectionWidget';
+   registerWidget('proposal_selection', ProposalSelectionWidget);
+   ```
+
+**Tests added:**
+- Jest snapshot for the widget with a representative `ProposalSelectionData` payload (port from rankevolve).
+- Jest test that the no-op `useProposalOverrides` fetcher returns the expected empty shape.
+
+**Risk:** medium — large UI port. Mitigations: style stack (`styled-components`, `framer-motion`, `lucide-react`) verified consistent with AF's other widgets (`ConfirmationWidget`, `MultipleChoiceWidget`); widget is registry-mounted, so any unregistered dependency surfaces as a clean fallback, not a crash. **LoC:** ~1250.
+
+**Note for CLI-first deployments:** Plan B suggested a "simplified for CLI" widget. The AF approach is **richer-and-graceful** rather than simplified: ship the full widget, but the no-op overrides context means CLI use never touches the rankevolve endpoint. CLI rendering goes through AF's existing text-mode widget shim (same pattern as `MultipleChoiceWidget`) — no separate CLI variant needed.
+
+### §4.6 Commit 6 — SOP author fixes (D3 wiring + F4 wiring)
+
+**Files modified in AF:**
+
+1. `src/agent_foundation/resources/sops/model_optimization/SOP.md`
+   - **Phase 3b — revert the `confirmation` workaround**, align with `code_optimization/SOP.md` line 90:
+     ```markdown
+     ### Phase 3b -- Proposal Review & Selection
+     [__depends on__ Phase 3]
+
+     [__requires user input__] After the research & proposal phase completes,
+     present the unified proposals to the user for review and selection. Use a
+     `proposal_selection` conversation tool (or `confirmation` if
+     proposal_selection is unavailable). The user selects which proposal IDs to
+     advance to Phase 4 and stores them in `phase_outputs[Phase 3b][selected_proposal_ids]`.
+
+     **Tools**[__must__]:
+     - proposal_selection
+     ```
+   - **Phase 4 — wire `--use-proposal` + `--proposal-ids`** (F4):
+     ```markdown
+     ## Phase 4 -- Implementation, Experiment & Analysis
+     [__depends on__ Phase 3b; __branch__]
+
+     For each selected proposal from Phase 3b, plan and implement the proposed
+     changes by invoking the `task` tool with:
+       --use-proposal  = `phase_outputs[Phase 3][proposals_path]`
+                         (typically `<research-propose workspace>/outputs/proposals.json`)
+       --proposal-ids  = `phase_outputs[Phase 3b][selected_proposal_ids]` joined by ','
+     The task tool plans + implements, runs experiments to validate, and
+     records results.
+
+     **Tools**[__must__]:
+     - task
+     ```
+   - Keep the previous typo fix ("advance to Phase 4" not "Phase 3").
+   - Optional but recommended (out-of-scope per §2.3 but mentioned for the future-author-context): the `__branch__` cardinality (one task per ID vs. one task with all IDs) is intentionally left to the CI's discretion until the broader audit fix plan addresses it.
+
+2. (Optional, no behaviour change) `src/agent_foundation/resources/sops/code_optimization/SOP.md`
+   - The line *"or `confirmation` if proposal_selection is unavailable"* stays as documentation of the graceful-degradation path. No edit required; cross-reference in commit message.
+
+**Tests added:**
+- `test/.../resources/sops/test_all_sops_lint_clean.py` (**NEW**) — defensive: iterates every SOP under `resources/sops/`, asserts the SOP linter passes. After Commits 1–5 + 6, `Tools[__must__]: proposal_selection` resolves cleanly via the `tool_to_phase_map`.
+
+**Risk:** none — documentation. **LoC:** ~10 SOP + ~30 test.
+
+### §4.7 Commit 7 — RankEvolve adoption (separate repo, follow-up PR)
+
+**Files modified in RankEvolve:**
+
+1. `rankevolve/.../conversational/conversation_tools.py` — delete local `PROPOSAL_SELECTION` enum value (now from AF).
+2. `rankevolve/.../conversational/protocols.py` — replace local `HubAwareToolExecutor` with `from agent_foundation.../protocols import HubAwareToolExecutor`; re-export for back-compat.
+3. `rankevolve/.../conversational/handlers/proposal_selection.py` — **delete** (now in AF).
+4. `rankevolve/.../conversational/handlers/__init__.py` — remove local registration; AF's `default_registry()` already registers it.
+5. RankEvolve app init — call `register_proposal_parser(parse_proposals)` once.
+6. RankEvolve React root — wrap relevant tree in `<ProposalOverridesEndpointContext.Provider value={{ endpoint: '/api/sessions/${id}/proposal_overrides', fetcher: rankevolveFetcher }}>`.
+7. RankEvolve local `ProposalSelectionWidget.js` + `useProposalOverrides.js` — **delete**; consume from AF.
+8. RankEvolve `WidgetRegistry.js` — remove local registration; AF's `registerBuiltins.js` covers it.
+
+**Risk:** mechanical; rankevolve tests should pass unchanged (handler/widget contracts unchanged). **LoC delta:** ~−1500 net.
+
+---
+
+## §5. Runtime data flow — full end-to-end view (after all fixes)
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Phase 3: research-propose                                           │
+│  ─────────────────────────                                           │
+│  CI runs:  research-propose <goal> --docs <ref>                      │
+│  Flow:     BTA (breakdown_then_aggregate) inferencer                 │
+│  Aggregator writes:  <ws>/aggregator/outputs/output.md  (~78 KB,     │
+│                       contains 36 KB `proposal_index` JSON fence)    │
+│                                                                       │
+│  _finalize_output() calls _try_extract_proposal_index(response):     │
+│    1. text = str(response)                  ← may be truncated       │
+│    2. NEW (Commit 1a): if "proposal_index" not in text:              │
+│         text = read(<ws>/aggregator/outputs/output.md)               │
+│    3. extract JSON fence → ProposalIndex.from_dict(...)              │
+│         ← Commit 2 makes this tolerant of LLM constraint drift       │
+│    4. write <ws>/outputs/proposals.json                              │
+│       (INVARIANT — see Commit 1c comment; NOT moved to               │
+│        final_deliverables because BTA._finalize_output               │
+│        early-returns when aggregator is present)                     │
+│    5. NEW (Commit 1b): self._update_phase_output(                    │
+│           "proposals_path", "<ws>/outputs/proposals.json")           │
+│       This is the ONLY producer of phase_outputs["proposals_path"].  │
+│                                                                       │
+│  phase_outputs[Phase 3]:                                             │
+│    proposals_path  = "<ws>/outputs/proposals.json"  ← populated by   │
+│                                                       Commit 1b      │
+│    proposals_count = 40                                              │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Phase 3b: proposal_selection (NEW)                                  │
+│  ──────────────────────────────────                                  │
+│  SOP runtime sees Tools[__must__]: proposal_selection                │
+│  ConversationalInferencer dispatches to PROPOSAL_SELECTION           │
+│  HandlerRegistry → ProposalSelectionHandler.enrich_before_send()     │
+│    ├── parser = get_proposal_parser()                                │
+│    │     if registered:  enrichment via parser.parse(workspace)      │
+│    │     else:           skip (graceful no-op)                       │
+│    └── if isinstance(executor, HubAwareToolExecutor):                │
+│            emit hub announcement                                     │
+│        else:                                                          │
+│            skip (graceful no-op)                                     │
+│                                                                       │
+│  Widget rendered: ProposalSelectionWidget (Commit 5)                 │
+│    ├── useProposalOverrides() → empty defaults (no-op context)       │
+│    │   OR rankevolve overrides (if rankevolve context provider)      │
+│    └── User selects N proposals (e.g. "P1, P3")                      │
+│                                                                       │
+│  Handler.handle_response() → packages selection                      │
+│  ApplyContextUpdates effect writes selection → phase_outputs         │
+│                                                                       │
+│  phase_outputs[Phase 3b]:                                            │
+│    selected_proposal_ids = ["P1", "P3"]                              │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Phase 4: Implementation, Experiment & Analysis                      │
+│  ─────────────────────────────────────────────                       │
+│  SOP runtime invokes task:                                           │
+│    task \                                                            │
+│      --use-proposal  <ws>/outputs/proposals.json \                   │
+│      --proposal-ids  P1,P3                                           │
+│                                                                       │
+│  task.executor._resolve_proposal_plan():                             │
+│    1. parse_proposal_file(<ws>/outputs/proposals.json)               │
+│    2. idx.get_proposals_by_ids(["P1","P3"])                          │
+│    3. inline full proposal detail into _proposal_plan.md (tempfile)  │
+│    4. write _picked_proposals.json audit trail                       │
+│    5. return tempfile path → fed as --initial-plan                   │
+│                                                                       │
+│  task planning + implementation phases consume the inline plan.      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+The six runtime branches introduced (`if "proposal_index" not in text` for D1, `try…except` per-constraint for D2, `if parser is None` for I2, `isinstance(executor, HubAwareToolExecutor)` for I1, the `tool_args["proposals_path"]` priority chain for I4, and the no-op overrides default for I3) are the ONLY runtime checks. Every one has an explicit no-op or fallback. No surprise behaviour.
+
+---
+
+## §6. Risks & mitigations
+
+| # | Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+| R1 | D1 fix reads a partially-written aggregator file mid-write | Low | Low | Try/except on file I/O + the fence-presence check; if invalid, function returns cleanly (same as current behaviour). Aggregator writes atomically (`.tmp` + rename) — verify and document in commit message. |
+| R2 | D2 alias map drifts as LLM schemas evolve | Medium | Low | v3's alias map (`type→kind`, `from→proposal_ids` with scalar→list normalisation, `to→requires_ids` with scalar→list normalisation, `rule→reason`, `note→reason`) is **derived from real production output**, not speculation — covers both observed dialects α and β at land time. Per-item try/except keeps the rest of the index intact when a new dialect γ appears; warning logs surface the new shape for the next iteration. Alias map is a Python expression — trivially extensible. |
+| R3 | Widget styling drifts from AF UI conventions during port | Low | Medium | Style stack parity verified before porting. If drift appears, refactor at end of Commit 5 — no API change. |
+| R4 | `proposal_overrides` API only exists in rankevolve | Certain | Low (by design) | Context default returns empty shape; widget renders proposals normally without overrides UI. |
+| R5 | `HubAwareToolExecutor` ties handler to experiment orchestration | Low | Low | `isinstance` narrowed; falls back to `"Selected N proposals"` synthetic. |
+| R6 | Rankevolve's parser produces a slightly different `ProposalSelectionData` shape than AF's `Proposal` | Possible | Medium | Commit 3 keeps `ProposalSelectionData` as the parser-return contract (re-exported from AF generic `Proposal` as a type alias). RankEvolve's parser unchanged. |
+| R7 | Two SOPs reference `proposal_selection` and we want different presentation per SOP | Possible later | Low | Handler accepts `presentation_hints` from `tool_args` in the SOP. Defer concrete hints to a follow-up. |
+| R8 | Tests in AF need fixture data living in rankevolve | Possible | Low | Inline a minimal fixture in `test/.../handlers/test_proposal_selection_handler.py` (~30 lines of JSON). |
+| R9 | Previously-pushed `confirmation` workaround in `model_optimization/SOP.md` may have collected unrelated edits | Low | Low | Revert is localised to Phase 3b only; `git diff` review before commit. |
+| R10 | RankEvolve adoption (Commit 7) ships in a different repo at a different time, causing a window where rankevolve still has its own copies | Low | Low | Plan keeps rankevolve working at every step (local copies coexist with AF's; `register_proposal_parser` is the only "switch-over" step). |
+| R11 | F4 instruction depends on `phase_outputs[Phase 3][proposals_path]` being populated — but Phase 3's BTA inferencer doesn't currently expose that key | Medium | High | Verify in Commit 1 prep step: confirm BTA writes `proposals_path` into phase_outputs (or adjust Commit 1 to do so as a one-line addition). If missing, this is a 5-line fix bundled into Commit 1. |
+| R12 | Selected `--proposal-ids` may include IDs not present in `proposals.json` (e.g. user edited Phase 3b list manually) | Low | Low | `task` executor already calls `idx.get_proposals_by_ids(ids)` which raises `KeyError`; executor catches and returns `_error(...)`. The SOP runtime should surface this error. No change needed. |
+
+---
+
+## §7. Validation
+
+### §7.1 Per-commit gates
+
+| Commit | Validation |
+|---|---|
+| 1 (D1) | New tests green; manual: run `pytest -k "extract_proposal_index"`; smoke: feed real anonymized 78KB aggregator output to a unit-tested helper, assert `proposals.json` appears |
+| 2 (D2) | New tests green; manual: feed the real LLM constraint dict `{"type":"ordering","rule":"..."}`; assert it parses; assert `ProposalIndex.from_dict()` with 1 valid + 1 malformed constraint keeps 1 |
+| 3 (D3 primitives) | `test_protocols.py` + `test_parsers.py` green; lint clean |
+| 4 (D3 handler) | Handler tests green; `default_registry()` count test green; pytest of `conversational/` package green |
+| 5 (D3 UI) | `npm test` in `react-shared` green; snapshot for widget matches; Storybook story renders if configured |
+| 6 (SOP fixes) | `test_all_sops_lint_clean.py` green; manual: run SOP linter on `model_optimization/SOP.md`; confirm `proposal_selection` resolves in `tool_to_phase_map`; smoke: run SOP runtime with stub LLM returning canned proposals → confirm Phase 3b widget appears and selection propagates to Phase 4 |
+| 7 (RankEvolve) | RankEvolve full test suite green; manual smoke: launch rankevolve session, complete proposal selection, confirm overrides API still wired |
+
+### §7.2 End-to-end smoke (after Commits 1–6 in AF)
+
+```bash
+# NOTE — the SOP CLI lives at agent_foundation.resources.tools.sop
+# (verified: src/agent_foundation/resources/tools/sop/__main__.py and cli.py).
+# An earlier draft of this plan used "agent_foundation.cli.sop_tool" which
+# does not exist; the correct module path is below.
+
+# 1. Trigger research-propose end-to-end
+python -m agent_foundation.resources.tools.sop model_optimization \
+    "<your research goal>" \
+    --until "Phase 3"
+# → produces <ws>/outputs/proposals.json (D1+D2 prove themselves here)
+# → phase_outputs["proposals_path"] populated by Commit 1b
+
+# 2. Pause at Phase 3b (proposal_selection widget)
+python -m agent_foundation.resources.tools.sop --resume <session-id> \
+    --until "Phase 3b"
+# → handler resolves proposals via the I4 priority chain (Commit 4):
+#     tool_args["proposals_path"]
+#       OR phase_outputs["proposals_path"]  ← this is the AF default path
+#       OR rankevolve back-compat keys
+# → widget renders with the 40 proposals; user selects "P1,P3"
+
+# 3. Run Phase 4 (consumes the selection)
+python -m agent_foundation.resources.tools.sop --resume <session-id> \
+    --until "Phase 4"
+# → SOP body reads phase_outputs[Phase 3][proposals_path]
+#                   phase_outputs[Phase 3b][selected_proposal_ids]
+# → task --use-proposal <ws>/outputs/proposals.json --proposal-ids P1,P3
+# → _proposal_plan.md inlines P1 + P3
+# → _picked_proposals.json audit written
+
+# Acceptance:
+#   <ws>/outputs/proposals.json exists                              (D1+D2)
+#   phase_outputs[Phase 3][proposals_path] == <ws>/outputs/...      (D1b)
+#   phase_outputs[Phase 3b][selected_proposal_ids] == ["P1","P3"]   (D3)
+#   task workspace contains _picked_proposals.json                  (F4)
+#   task plan inlines only P1 and P3 (not all 40)                   (F4 integration)
+```
+
+**Yolo-mode equivalent** (single command, no `--resume`):
+```bash
+python -m agent_foundation.resources.tools.sop model_optimization \
+    "<your research goal>" --yolo
+```
+Yolo mode auto-applies the `tool.json` `yolo_default` for `proposal_selection` (`mode: select_all`) so the smoke test runs end-to-end without manual selection — useful for CI.
+
+### §7.3 Regression net (permanent)
+
+- `test_all_sops_lint_clean.py` — defends every SOP author from now on.
+- `test_conversation_tool_registry_size` — asserts exactly 6 handlers (intentional code edit required to change).
+- `test_proposal_constraint_aliases` — locks in the `type→kind` / `rule→reason` aliases so they don't silently regress.
+- `test_bta_file_fallback` — locks in the truncated-response file-fallback path.
+
+---
+
+## §8. Effort estimate
+
+| Commit | Hours | Files touched | LoC delta (AF) |
+|---|---|---|---|
+| 1 — D1 BTA fallback | 0.5–1 | 2 | +160 |
+| 2 — D2 constraint tolerance (v3 richer alias map) | 0.5–1 | 3 | +170 |
+| 3 — D3 primitives | 0.5–1 | 4 | +120 |
+| 4 — D3 handler | 1–2 | 4 | +350 |
+| 5 — D3 UI | 2–3 | 5 | +1250 |
+| 6 — SOP fixes | 0.25 | 3 | +40 |
+| 7 — RankEvolve adoption (separate repo) | 1 | ~8 | −1500 (rankevolve) |
+| **Total in AF** | **~5–8 h** | 21 | **+2030** |
+
+Higher than v1's ~5 h because v1 missed D1+D2. Still half-a-day to a-day of focused work; high confidence; no ad-hoc paths required.
+
+---
+
+## §9. Open questions (need user decision before / during execution)
+
+| # | Question | Default if not answered |
+|---|---|---|
+| Q1 | Should `proposal_selection` be SOP-level *first-party tool* (`/proposal_selection` prefix) or *conversational tool* invoked only by handler dispatch? | **Conversational** — matches `confirmation`, `multiple_choice`. SOPs name it via `Tools[__must__]: proposal_selection`. |
+| Q2 | Should the no-op `ProposalOverridesEndpointContext` log `console.info(...)` to help diagnose missing rankevolve wiring? | Stay silent. AF apps that don't need overrides shouldn't see noise. |
+| Q3 | Multi-phase `tool_to_phase_map` enhancement? | Defer; not blocking. |
+| Q4 | Migrate `_group_selected_by_batch` / `format_hub_announcement` as public AF API? | Private to handler module; re-export from `agent_foundation.common.experiments.hub` if/when AF grows an experiment Hub. |
+| Q5 | Keep `ProposalSelectionData` typename or rename to AF's generic `ProposalSelection`? | Keep for rankevolve binary-compat; add `ProposalSelection = ProposalSelectionData` alias. |
+| Q6 | Should `model_optimization/SOP.md` also get a Jira-style human-gate (like code_optimization Phase 4) between selection and implementation? | Defer to model_optimization audit plan (§10). |
+| Q7 | Phase 4 `__branch__` cardinality: one task per ID, or one task with all IDs? | Defer to model_optimization audit plan; both work with current `--proposal-ids` syntax (`"P1"` vs `"P1,P3"`). |
+| Q8 | Where exactly should `phase_outputs[Phase 3][proposals_path]` be populated? Existing BTA may not set it. | Verify in Commit 1 prep; add as one-line addition to D1 fix if missing. |
+
+---
+
+## §10. Related follow-ups (not in this plan, tracked here for visibility)
+
+The earlier audit of `model_optimization/SOP.md` identified **8 other gaps** besides Phase 3b/4. They are out of scope here, tracked in a separate `model_optimization_sop_audit_fix_plan.md`:
+
+1. Phase 1 missing `[__requires user input__]` + `confirmation` gate before `understand-codebase`.
+2. Phase 2 missing `[__requires user input__]` + `confirmation` gate before `understand-data`.
+3. Phase 4 `__branch__` cardinality choice (one-per-ID vs. batched).
+4. Phase 4b missing explicit `[__requires user input__]` directive.
+5. No Jira integration — deliberate or gap? Needs product decision.
+6. Phase 3 user-input ambiguous — text says "Break down the research goal" without instructing CI to compose+present the goal.
+7. Tool syntax inconsistency: `research-propose <goal>` (no `/`) vs `/understand-codebase <path>` (with `/`).
+8. `__afterwards__` in Phase 4b — parsed but unnecessary; align with `code_optimization`'s plain `__goto__ ... __if__ ...`.
+
+Plus newly discovered in v2 of this plan:
+
+9. The four `error: refs/ai-working-log/diffs/...lock: badRefContent` git lock files surfaced by `git fsck` during the `_docs/` recovery — cleanup follow-up.
+
+---
+
+## §11. Concrete execution checklist (when this plan is approved)
+
+```
+[ ] Create branch:    git checkout -b feat/proposal_selection_e2e_pipeline
+
+Commit 1 — D1 BTA file fallback
+[ ] Edit  breakdown_then_aggregate_inferencer.py _try_extract_proposal_index
+[ ] Verify R11: ensure BTA writes phase_outputs[Phase 3][proposals_path]
+[ ] NEW   test_breakdown_then_aggregate_inferencer.py (3 new tests)
+[ ] NEW   test_parser.py (78KB fixture test)
+[ ] Tests + lint  → commit "fix(BTA): file-fallback for truncated proposal_index responses"
+
+Commit 2 — D2 constraint tolerance
+[ ] Edit  proposal/model.py — ProposalConstraint.from_dict + ProposalIndex.from_dict
+[ ] Edit  proposal/parser.py — add warning log on parse exception
+[ ] Edit  test_model.py — 7 new constraint-tolerance tests (canonical, dialect α, dialect β scalar `to`, dialect β list `to`, dialect β `reason` not `note`, empty `{}`, ProposalIndex partial-failure)
+[ ] Tests + lint  → commit "fix(proposal): tolerant constraint parsing with LLM-shape aliases"
+
+Commit 3 — D3 primitives
+[ ] Edit  conversation_tools.py — add PROPOSAL_SELECTION enum value
+[ ] Edit  protocols.py — add HubAwareToolExecutor
+[ ] NEW   data_models/proposal/parsers.py — Protocol + registry
+[ ] Edit  data_models/proposal/__init__.py — re-exports
+[ ] NEW   test_protocols.py, test_parsers.py
+[ ] Tests + lint  → commit "feat(conversational): proposal_selection enum + Protocol + parser hook"
+
+Commit 4 — D3 handler
+[ ] NEW   handlers/proposal_selection.py (ported, 3 localised edits)
+[ ] Edit  handlers/__init__.py — register handler
+[ ] NEW   resources/tools/proposal_selection/tool.json
+[ ] NEW   test_proposal_selection_handler.py (port + 3 new tests)
+[ ] Tests + lint  → commit "feat(conversational): ProposalSelectionHandler"
+
+Commit 5 — D3 UI
+[ ] NEW   inputs/ProposalSelectionWidget.js
+[ ] NEW   hooks/useProposalOverrides.js
+[ ] NEW   contexts/ProposalOverridesEndpointContext.js
+[ ] Edit  registerBuiltins.js
+[ ] Tests (jest snapshot + no-op fetcher)  → commit "feat(ui): ProposalSelectionWidget + overrides context"
+
+Commit 6 — SOP fixes
+[ ] Edit  sops/model_optimization/SOP.md — Phase 3b (revert workaround) + Phase 4 (--use-proposal wiring)
+[ ] NEW   test_all_sops_lint_clean.py
+[ ] Tests + manual smoke (end-to-end §7.2)  → commit "fix(sop): model_optimization Phase 3b/4 wiring"
+
+[ ] git push origin feat/proposal_selection_e2e_pipeline
+[ ] Open PR; reference this plan in PR description
+
+Commit 7 (separate rankevolve PR) — adoption
+[ ] Switch enum + Protocol imports to AF
+[ ] Delete local handler + widget + hook
+[ ] register_proposal_parser(parse_proposals) at startup
+[ ] Wrap React tree in ProposalOverridesEndpointContext.Provider
+[ ] rankevolve test suite green
+[ ] git push; open PR; reference this plan
+```
+
+---
+
+## §12. Appendix — file inventory diff (at-a-glance)
+
+```
+AgentFoundation (after this plan)
+└── src/agent_foundation
+    ├── common
+    │   ├── data_models/proposal
+    │   │   ├── model.py                              ✎ D2 fix (Commit 2)
+    │   │   ├── parser.py                             ✎ warning logs (Commit 2)
+    │   │   ├── parsers.py                            ★ NEW (Commit 3)
+    │   │   └── __init__.py                           ✎ re-exports
+    │   └── inferencers
+    │       ├── agentic_inferencers/flow_inferencers
+    │       │   └── breakdown_then_aggregate_inferencer.py  ✎ D1 fix (Commit 1)
+    │       └── agentic_inferencers/conversational
+    │           ├── conversation_tools.py             ✎ +1 enum (Commit 3)
+    │           ├── protocols.py                      ✎ +HubAwareToolExecutor (Commit 3)
+    │           ├── effects.py                        (unchanged)
+    │           ├── handler_registry.py               (unchanged)
+    │           └── handlers
+    │               ├── __init__.py                   ✎ +1 line (Commit 4)
+    │               └── proposal_selection.py         ★ NEW (Commit 4)
+    ├── ui/react-shared/src
+    │   ├── inputs/ProposalSelectionWidget.js         ★ NEW (Commit 5)
+    │   ├── hooks/useProposalOverrides.js             ★ NEW (Commit 5)
+    │   ├── contexts/ProposalOverridesEndpointContext.js  ★ NEW (Commit 5)
+    │   └── protocol/registerBuiltins.js              ✎ +1 line (Commit 5)
+    └── resources
+        ├── tools/proposal_selection/tool.json        ★ NEW (Commit 4)
+        └── sops/model_optimization/SOP.md            ✎ Phase 3b + 4 (Commit 6)
+
+test/agent_foundation
+├── common
+│   ├── data_models/proposal
+│   │   ├── test_model.py                                                       ✎ +4 tests (Commit 2)
+│   │   ├── test_parser.py                                                      ✎ +1 fixture test (Commit 1)
+│   │   └── test_parsers.py                                                     ★ NEW (Commit 3)
+│   └── inferencers
+│       ├── agentic_inferencers/flow_inferencers
+│       │   └── test_breakdown_then_aggregate_inferencer.py                     ✎ +3 tests (Commit 1)
+│       └── agentic_inferencers/conversational
+│           ├── test_protocols.py                                               ★ NEW (Commit 3)
+│           └── handlers/test_proposal_selection_handler.py                     ★ NEW (Commit 4)
+└── resources/sops/test_all_sops_lint_clean.py                                  ★ NEW (Commit 6)
+```
+
+---
+
+**End of plan v3.1.** Ready for review.
+
+---
+
+## §13. Changelog
+
+- **v3.1 (2026-06-07 17:30):** Closed seven verified gaps surfaced by a second-pass review (all verified against direct source-code evidence before applying):
+  - **§4.1 Commit 1 grew from 1 sub-step to 3 (a/b/c):** (a) text fallback unchanged; **(b) NEW — `_update_phase_output("proposals_path", str(sidecar))`** after successful write — resolves the R11 wiring gap (downstream Phase 3b/Phase 4 can now discover `proposals.json`'s path without filesystem guessing); (c) NEW invariant comment documenting that `proposals.json` survives `_finalize_output`'s early-return when aggregator is present (verified at lines 1094–1101).
+  - **§4.4 Commit 4 grew from 3 to 4 localised edits:** added **I4 — `proposals_path` priority chain** in the handler, encapsulated in a `_resolve_proposals_source()` helper. Resolution order: `tool_args["proposals_path"]` → `phase_outputs["proposals_path"]` → rankevolve back-compat keys → registered parser. Zero behaviour change for rankevolve; clean discovery for AF-only consumers.
+  - **§5 data-flow diagram updated** to show Commit 1b producer + Commit 4 I4 consumer chain explicitly. Notes the INVARIANT from Commit 1c.
+  - **§7.2 smoke-test commands fixed** — replaced non-existent `agent_foundation.cli.sop_tool` with the real entrypoint `agent_foundation.resources.tools.sop` (verified at `src/.../sop/__main__.py` + `cli.py`). Added a yolo-mode variant for CI.
+  - **§0 cosmetic:** "Plan v2 covers all three" → "Plan v3.1 covers all three … across **seven** commits".
+  - **§1.5 cosmetic:** "five commits" → "**seven** commits (six in AF + one follow-up in rankevolve)".
+  - **§11 cosmetic:** Commit 2 checklist "4 new constraint-tolerance tests" → "7 new constraint-tolerance tests (canonical, dialect α, dialect β scalar `to`, dialect β list `to`, dialect β `reason` not `note`, empty `{}`, ProposalIndex partial-failure)" — matches the §4.2 body.
+  - **Reviewer banner** refreshed to point at v3.1 and to enumerate which sections moved.
+- **v3 (2026-06-07 17:00):** D2 alias map enriched to cover real LLM dialect β (`from→proposal_ids`, `to→requires_ids`, `note→reason`, scalar↔list normalisation), all verified against `_runtime/tasks/research_propose/.../aggregator/.../output.md`. §4.4 Commit 4 now spells out the canonical `proposal_selection/tool.json` shape modelled on `multiple_choice/tool.json` (verified by `ls` against all 4 existing conversation tools). R2 risk language updated. §8 effort for Commit 2 bumped from +110 to +170 LoC.
+- **v2 (2026-06-07 16:26):** Added D1 (BTA file fallback), D2 (constraint tolerance), F4 (Phase 4 `--use-proposal` wiring), `tool.json`. Reorganised v1's 5 commits into 7 (D1 → D2 → primitives → handler → UI → SOP → rankevolve).
+- **v1 (2026-06-07 15:34):** Initial draft. Scoped only D3 (conversation-tool migration). Missed D1, D2, F4.
+

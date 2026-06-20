@@ -1,0 +1,493 @@
+# Typed Input + Composite Single-Choice for Conversation Tools — Integrated Plan
+
+| | |
+|---|---|
+| **Author** | Rovo Dev |
+| **Date** | 2026-06-16 |
+| **Status** | v1 draft (uncommitted) |
+| **Branch** | `dev_xinli_2601` |
+| **Motivating SOP** | `src/agent_foundation/resources/sops/model_optimization/SOP.md` Phase 0a |
+| **Sibling plans** | `proposal_selection_tool_migration_plan.md`, `interactive_widget_for_agent_dispatched_tools_plan.md` |
+
+---
+
+## ⚠️ READER NOTE — Plan structure (3 tiers)
+
+This plan follows the standard 3-tier convention used by the proposal_selection and interactive-widget plans in this repo:
+
+* **PART I — EXECUTION** (§E0–§E3) — *executable instructions only*. Commit-by-commit edits, exact files, exact line numbers, exact tests. Skip the appendix if you just want to ship the change.
+* **PART II — DESIGN REFERENCE** (§D1–§D5) — *normative design decisions*. Why we chose this architecture, what we rejected, the risk register, open questions.
+* **APPENDIX** (§A1–§A4) — *audit trail*. Empirical baseline (every claim line-numbered), naming-convention rationale, follow-ups, changelog.
+
+---
+
+## §0 Quick-start (TL;DR)
+
+**Problem.** `model_optimization/SOP.md` Phase 0a asks the LLM to use `clarification` with `expected-input-type=path` + `prefix=<session_root>` to collect a path from the user with autocomplete, and `single-choice` with a composite "Auto discover OR input-textbox-with-typed-metadata" pattern for the modeling-artifacts path. **Neither pattern works end-to-end today.**
+
+**Evidence (verified at exact line numbers in §A1).** Server-side, `ConversationTool` accepts `expected_input_type` and `prefix` on deserialisation but its `to_dict` **does NOT serialise** them (the LLM-emitted block round-trips with these fields stripped before reaching the handler). `ClarificationHandler` *does* forward them into `InputModeConfig.metadata`, but the React `TextInputWidget` reads **only** `config.input_mode.prompt` and `config.placeholder` — `metadata.expected_input_type` / `metadata.prefix` are silently dropped. There's no path-picker component anywhere in `react-shared`. `allow_multiple_input` doesn't exist in the schema. `ChoiceItem` carries only `{label, value, description}` — choices cannot embed a nested input field. `SimpleChoiceSelector.allowCustom` renders only a single free-text input with no typed metadata. And the SOP uses `single-choice` (hyphen) but the enum is `single_choice` (underscore) — silent parse failure.
+
+**Fix (7 commits, 4 layers, ~1 day).** Add `allow_multiple_input` to the schema; make `to_dict` actually serialise `expected_input_type` / `prefix` / `allow_multiple_input`; promote `ChoiceItem` to a discriminated union so a choice can BE an input field (composite single-choice); teach `TextInputWidget` to honor type-and-prefix metadata via a new `PathInputWidget` (per-type rendering by composition, not by branching in `TextInputWidget`); accept hyphen-form tool names in the parser; ship a regression test that loads Phase 0a verbatim and asserts every parameter reaches the widget.
+
+**No ad-hoc patches.** The 4 layers are: (1) schema (data model), (2) parser (LLM-text → schema), (3) handler (schema → `InputModeConfig`), (4) widget (renders `InputModeConfig`). Each layer change is independently testable and reversible.
+
+---
+
+# PART I — EXECUTION
+
+## §E1 Migration plan — 7 commits
+
+### §E1.1 Commit 1 — Schema: add `allow_multiple_input` + alias map
+
+**Goal.** Add the missing field to `ConversationTool`, and accept SOP-author dialect (hyphenated keys and hyphenated tool names).
+
+**File.** `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/conversation_tools.py`
+
+**Changes (additive only; no breaking change to existing parsers):**
+
+1. Add `allow_multiple_input: bool = False` to the `ConversationTool` dataclass (default `False` keeps backward-compat).
+2. Add a private `_HYPHEN_KEY_ALIASES` mapping at module scope:
+   ```python
+   _HYPHEN_KEY_ALIASES = {
+       "expected-input-type": "expected_input_type",
+       "allow-multiple-input": "allow_multiple_input",
+       "output": "output_vars",  # already handled, lock in
+       "tool-name": "tool_name",
+   }
+   ```
+3. Add a `_canonicalise_keys(data: dict) -> dict` helper that copies the dict and renames each aliased hyphen-key to its underscore form (only if the underscore form is not already present — caller's explicit underscore wins).
+4. In `from_dict`, call `data = _canonicalise_keys(data)` as the FIRST line. This is the single point where author dialect collapses into the canonical internal schema.
+5. In `to_dict`, serialise `expected_input_type` and `prefix` when they're non-default, and `allow_multiple_input` when it's `True`. Same gating idiom as the existing `show_select_all` block (only emit non-defaults — keeps round-trip JSON compact).
+6. Add a `ConversationToolType._missing_(cls, value)` classmethod that accepts hyphenated tool names (`"single-choice"` → `SINGLE_CHOICE`) by normalising before lookup. This is the second single-point alias surface — for tool-type names, not field names.
+
+**Tests (new file `test/.../conversational/test_conversation_tool_aliases.py`):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T1 | `test_hyphenated_field_keys_canonicalised` | `from_dict({"tool_type": "clarification", "expected-input-type": "path", "prefix": "/x", "allow-multiple-input": True})` returns the tool with all three fields set correctly |
+| T2 | `test_underscore_wins_over_hyphen_when_both_present` | Explicit underscore-form takes precedence; hyphen variant is ignored |
+| T3 | `test_hyphenated_tool_type_accepted` | `ConversationToolType("single-choice") == ConversationToolType.SINGLE_CHOICE`; same for `multiple-choice` |
+| T4 | `test_to_dict_round_trips_typed_fields` | `from_dict(to_dict(tool))` is byte-identical when `expected_input_type`, `prefix`, `allow_multiple_input` are non-default |
+| T5 | `test_default_fields_omitted_from_to_dict` | `to_dict` of a tool with default `expected_input_type="free_text"`, `prefix=""`, `allow_multiple_input=False` does NOT include those keys (compact JSON) |
+
+**Risk:** None — purely additive. Defaults match the current behavior exactly.
+
+### §E1.2 Commit 2 — Schema: composite `ChoiceItem` (choice = label OR input field)
+
+**Goal.** Enable single-choice to present choices where ONE choice is a nested input field with its own typed metadata (`expected_input_type`, `prefix`, `allow_multiple_input`).
+
+**Why a discriminated union, not a parallel "extra input" field.** The SOP Phase 0a body says the second choice IS the input textbox (not "a choice followed by an input box"). The cleanest typed expression is a discriminated union: a choice is either `{kind: "label", label, value, description?}` OR `{kind: "input", label, input: InputSpec}`. This matches the SOP author's mental model 1:1 and avoids a "two truths" problem where a choice carries both an unused label and an active input box.
+
+**File.** `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/conversation_tools.py`
+
+**Changes:**
+
+1. New dataclass `InputSpec`:
+   ```python
+   @dataclass
+   class InputSpec:
+       """Inline input field embedded in a single_choice or multiple_choice option."""
+       expected_input_type: str = "free_text"   # "free_text" | "path" | "url"
+       prefix: str = ""
+       allow_multiple_input: bool = False
+       placeholder: str = ""
+       output_vars: list[str] = field(default_factory=list)
+
+       def to_dict(self) -> dict[str, Any]: ...
+       @classmethod
+       def from_dict(cls, data: dict[str, Any]) -> InputSpec: ...
+   ```
+2. Extend `ChoiceItem` (backward-compat: existing JSON `{label, value, description?}` still parses):
+   ```python
+   @dataclass
+   class ChoiceItem:
+       label: str = ""
+       value: str = ""
+       description: str = ""
+       input: Optional[InputSpec] = None   # ← NEW. When set, this choice IS the input field.
+
+       @property
+       def kind(self) -> Literal["label", "input"]:
+           return "input" if self.input is not None else "label"
+   ```
+3. `ChoiceItem.from_dict` canonicalises the hyphen keys for the embedded `input` spec the same way (step 4 of Commit 1 reused).
+4. `ChoiceItem.to_dict` serialises `"input"` only when present (compact JSON for the common label-only case).
+
+**Tests (extend the same test file):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T6 | `test_choice_item_label_only_round_trip` | Existing `{label, value, description}` JSON parses and serialises unchanged (backward-compat) |
+| T7 | `test_choice_item_input_kind_round_trip` | `{label: "Custom path", input: {expected-input-type: path, prefix: /a, allow-multiple-input: true}}` parses, `.kind == "input"`, hyphen keys canonicalised, round-trips byte-identical |
+| T8 | `test_mixed_choices_in_single_choice_tool` | `from_dict({tool_type: single_choice, choices: [{label: "Auto"}, {label: "Manual", input: {...}}]})` parses cleanly; first choice `.kind == "label"`, second `.kind == "input"` |
+
+**Risk:** Minimal — backward-compat is enforced by `T6`. Storage cost is one `Optional[InputSpec]` per choice, default `None` (no allocation).
+
+### §E1.3 Commit 3 — Handler: forward typed fields + composite to `InputModeConfig`
+
+**Goal.** Make `ClarificationHandler` and `SingleChoiceHandler` produce a widget-config that carries the typed fields end-to-end.
+
+**Files:**
+
+1. `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/handlers/clarification.py`
+2. `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/handlers/single_choice.py`
+3. `src/agent_foundation/common/ui/input_modes.py` (extend `InputModeConfig` if needed; see step 4)
+
+**Changes:**
+
+1. **`clarification.py`** — promote typed fields out of `metadata` into first-class `InputModeConfig` fields. Current code (clarification.py:30–37):
+   ```python
+   config = InputModeConfig(mode=InputMode.FREE_TEXT, prompt=tool.prompt)
+   if tool.expected_input_type and tool.expected_input_type != "free_text":
+       config.metadata = {
+           "expected_input_type": tool.expected_input_type,
+           "prefix": tool.prefix,
+       }
+   ```
+   becomes:
+   ```python
+   mode = (
+       InputMode.PATH if tool.expected_input_type == "path"
+       else InputMode.URL if tool.expected_input_type == "url"
+       else InputMode.FREE_TEXT
+   )
+   config = InputModeConfig(
+       mode=mode,
+       prompt=tool.prompt,
+       expected_input_type=tool.expected_input_type,
+       prefix=tool.prefix,
+       allow_multiple_input=tool.allow_multiple_input,
+   )
+   ```
+2. **`single_choice.py`** — when building the InputModeConfig, serialise each `ChoiceItem` via `c.to_dict()` (so the embedded `InputSpec` reaches the UI verbatim). Add an explicit pass-through for `allow_multiple_input` and the composite-choice list.
+3. **`input_modes.py`** — extend `InputMode` enum with `PATH` and `URL` values (the UI can fall back to FREE_TEXT for unknown values for forward-compat). Extend `InputModeConfig` with three new fields: `expected_input_type: str = "free_text"`, `prefix: str = ""`, `allow_multiple_input: bool = False`. All defaults preserve existing widget behavior.
+4. Drop the `config.metadata = {...}` write in `clarification.py`. `metadata` becomes available again for genuinely opaque key-value extensions (which is its original purpose) without colliding with typed fields.
+
+**Tests (new file `test/.../conversational/test_typed_input_handlers.py`):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T9 | `test_clarification_path_mode_config` | `ClarificationHandler.build_input_mode(tool with expected_input_type="path", prefix="/x")` produces `InputModeConfig(mode=PATH, expected_input_type="path", prefix="/x")` |
+| T10 | `test_clarification_free_text_default` | Default `expected_input_type="free_text"` yields `mode=FREE_TEXT`, no typed metadata leak |
+| T11 | `test_single_choice_composite_serialisation` | A tool with one label-choice and one input-choice produces `InputModeConfig.options=[{label: ...}, {label: ..., input: {expected_input_type: ..., prefix: ..., allow_multiple_input: ...}}]` |
+
+**Risk:** Low. Removing the `metadata` shim is technically a wire-format change — but no UI consumer reads from `metadata` for these fields today (verified: `grep -rE "metadata.*expected_input_type|metadata.*prefix" react-shared` returns zero hits). Documented as such in §D4 R3.
+
+### §E1.4 Commit 4 — UI: New `PathInputWidget` + registry mapping
+
+**Goal.** Render path inputs with auto-completion (using the prefix) and optional multi-input. Keep `TextInputWidget` simple.
+
+**Files:**
+
+1. `src/agent_foundation/ui/react-shared/src/inputs/PathInputWidget.js` (new ~120 LoC)
+2. `src/agent_foundation/ui/react-shared/src/protocol/registerBuiltins.js` (mapping)
+3. `src/agent_foundation/ui/react-shared/src/inputs/TextInputWidget.js` (unchanged — explicit non-goal: don't bloat the free-text widget)
+
+**`PathInputWidget` design:**
+
+* Built on MUI `Autocomplete` (a real autocomplete component already in the dep tree via the registry's existing MUI usage in `SingleChoiceWidget`).
+* Reads:
+  ```
+  config.input_mode.prefix
+  config.input_mode.expected_input_type          // "path" | "url"
+  config.input_mode.allow_multiple_input
+  config.input_mode.placeholder
+  ```
+* Auto-completion source: a `usePathSuggestions(prefix)` hook (new) that hits a small server endpoint `/api/paths?prefix=<>` returning candidate completions (directories + files; depth-1 by default). The endpoint is in scope of this commit because path-autocomplete is the explicit UI promise of Phase 0a. Without the endpoint, the widget degrades gracefully to a plain TextField with the prefix shown as static helper text.
+* Multi-input mode: when `allow_multiple_input=true`, render `Autocomplete` with `multiple` and `freeSolo`; submit returns `{ paths: [...] }`. When `false`, return `{ content: "<single path>" }`.
+* Validation: when `expected_input_type="path"`, validate that the entered path STARTS with `prefix` (when prefix is non-empty). Surface a non-blocking warning otherwise (don't prevent submit — user may want a sibling path). When `"url"`, validate URL format via a simple regex.
+
+**Server endpoint** (`src/agent_foundation/.../server/.../paths.py` or wherever the WS host lives):
+
+* `GET /api/paths?prefix=<abs-path>` — returns `{candidates: [{path, kind: "dir" | "file"}], truncated: bool}`.
+* Safety: refuse to traverse outside the session root (compare `Path(prefix).resolve()` against the session-root sentinel). Document in §D5 Q3.
+* Pagination: cap at 200 entries; UI can request more by submitting a longer prefix.
+
+**`registerBuiltins.js` change:**
+
+```js
+registry.register('path_input', PathInputWidget);
+// Map mode='path' OR mode='url' (currently rendered by TextInputWidget) to PathInputWidget.
+// We do this by widget-type mapping at the registry layer rather than by branching
+// inside TextInputWidget — keeps widgets single-purpose (cleaner separation of concerns).
+```
+
+To route a `mode=PATH` `InputModeConfig` to `path_input`, the registry's `chooseWidgetType(config)` function (already exists per the WidgetRegistry pattern) needs a `mode → widget_type` entry: `{ PATH: 'path_input', URL: 'path_input', FREE_TEXT: 'text_input', ... }`.
+
+**Tests (new file `react-shared/test/inputs/PathInputWidget.test.jsx`):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T12 | `renders_with_prefix_as_helper_text` | Widget shows the prefix as helper text below the input |
+| T13 | `allow_multiple_input_submits_array` | When `allow_multiple_input=true`, `onSubmit` receives `{ paths: ["/a/x", "/a/y"] }` |
+| T14 | `submits_single_string_when_not_multiple` | When `false`, `onSubmit` receives `{ content: "/a/x" }` |
+| T15 | `warns_on_path_outside_prefix` | Non-blocking warning surfaces; submit still allowed |
+| T16 | `autocomplete_calls_endpoint_with_typed_prefix` | Typing `/a/b` fires a fetch to `/api/paths?prefix=/a/b` (mocked) |
+
+**Risk:** New server endpoint introduces a small surface that needs auth alignment with existing WS auth. Documented in §D4 R4.
+
+### §E1.5 Commit 5 — UI: composite single-choice (choice with embedded input)
+
+**Goal.** When `SingleChoiceWidget` sees a choice whose `input` field is set, render that choice's row as an embedded `PathInputWidget` (or `TextInputWidget` per the input's `expected_input_type`).
+
+**File.** `src/agent_foundation/ui/react-shared/src/inputs/SingleChoiceWidget.js`
+
+**Changes:**
+
+1. In `RichChoiceSelector` and `SimpleChoiceSelector`, when iterating options, check `option.kind === 'input'` (or equivalently `option.input != null`). For input-kind options:
+   * Render the option row with the `option.label` as the heading
+   * Below it, render a nested widget: `<PathInputWidget config={{input_mode: option.input, ...inheritedConfig}} onSubmit={(payload) => onSubmit({choice_index, ...payload})} />`
+   * The `onSubmit` payload combines `choice_index` (so server knows WHICH option was chosen) with the nested widget's typed payload (`{paths: [...]}` or `{content: "..."}`).
+2. Existing `allowCustom` flow stays — the new composite path is orthogonal and triggered by per-option `input` field, not by `allowCustom`.
+
+**Tests (extend `SingleChoiceWidget.test.jsx`):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T17 | `label_only_choices_render_unchanged` | Backward-compat: existing `[{label, value, description}]` flow byte-identical to v0 |
+| T18 | `input_kind_choice_renders_nested_widget` | A choice with `input: {expected_input_type: "path", prefix: "/x"}` renders a nested `PathInputWidget` |
+| T19 | `composite_submit_carries_choice_index_and_typed_payload` | Submitting from the nested widget delivers `{choice_index: 1, paths: ["/x/a", "/x/b"]}` to `onSubmit` |
+
+**Risk:** Minimal — purely additive UI branch keyed on per-option `input` presence.
+
+### §E1.6 Commit 6 — Handler response: parse composite-choice payload
+
+**Goal.** When `SingleChoiceHandler` receives `{choice_index, paths}` or `{choice_index, content}` from the composite-choice widget, capture both: the selected choice AND the typed input value into the named `output_vars`.
+
+**File.** `src/agent_foundation/common/inferencers/agentic_inferencers/conversational/handlers/single_choice.py`
+
+**Changes:**
+
+1. In `handle_response`, after determining `choice_index`, look up the chosen `ChoiceItem`. If its `kind == "input"`:
+   * Take the typed payload (`response.get("paths")` or `response.get("content")`) and bind it to the `output_vars` declared on the nested `InputSpec`.
+   * The selected `choice_index` (or its `value`) goes to the tool-level `output_vars` declared on the `ConversationTool` itself (existing behavior).
+2. Validate the typed payload matches the declared `expected_input_type`. Surface a clear `HandlerResult.error` if not (e.g. multi-input received but `allow_multiple_input=false`).
+
+**Tests (extend `test_typed_input_handlers.py`):**
+
+| # | Test | Asserts |
+|---|---|---|
+| T20 | `composite_response_binds_both_outputs` | Response `{choice_index: 1, paths: ["/x/a"]}` binds `selected_choice="manual"` AND `workflow_modeling_artifacts_path=["/x/a"]` to their respective `output_vars` |
+| T21 | `composite_response_validates_input_type` | Response `{choice_index: 1, paths: ["/x/a", "/x/b"]}` for an input with `allow_multiple_input=false` produces a clear error message |
+| T22 | `composite_response_routes_to_label_choice_unchanged` | Response `{choice_index: 0}` for an "Auto discover" label-only choice produces the same result as v0 (no typed-payload extraction) |
+
+**Risk:** Low — only fires when the chosen option is an input-kind, so non-composite SOPs are unaffected.
+
+### §E1.7 Commit 7 — E2E integration test + Phase 0a SOP smoke
+
+**Goal.** Lock the entire chain end-to-end against the real Phase 0a SOP text. If anyone breaks the wire format in any of the 4 layers, this test fails.
+
+**File (new).** `test/agent_foundation/common/inferencers/conversational/test_phase0a_e2e.py`
+
+**Test plan (5 named tests):**
+
+| # | Test | What it asserts |
+|---|---|---|
+| T23 | `test_phase0a_clarification_parses` | Synthetic LLM emission of the Phase 0a `clarification` tool call (verbatim JSON from the SOP) parses to a `ConversationTool` with `expected_input_type="path"`, `prefix="/session_root_abc"`, `output_vars=["workflow_target_path"]` |
+| T24 | `test_phase0a_single_choice_composite_parses` | Synthetic emission of the Phase 0a `single-choice` (hyphen!) tool with composite "Auto discover" + input-textbox parses; first choice `.kind == "label"`, second `.kind == "input"` with `input.allow_multiple_input=True`, `input.expected_input_type="path"`, `input.prefix="/session_root_abc"`, `input.output_vars=["workflow_modeling_artifacts_path"]` |
+| T25 | `test_phase0a_clarification_handler_produces_path_input_config` | Running `ClarificationHandler.build_input_mode` on T23's tool produces `InputModeConfig(mode=PATH, prefix=..., expected_input_type="path")` (the exact shape `PathInputWidget` expects) |
+| T26 | `test_phase0a_single_choice_handler_produces_composite_config` | Running `SingleChoiceHandler.build_input_mode` on T24's tool produces an InputModeConfig whose `options[1]` carries the embedded input spec verbatim |
+| T27 | `test_phase0a_composite_response_round_trip` | Simulated UI response `{choice_index: 1, paths: ["/session_root_abc/data", "/session_root_abc/experiments"]}` invokes `SingleChoiceHandler.handle_response` and produces `HandlerResult` with `workflow_modeling_artifacts_path=["/session_root_abc/data", "/session_root_abc/experiments"]` bound |
+
+**Risk:** None — this is the safety net for all the prior commits. Failure means we shipped something broken.
+
+---
+
+## §E2 Validation (per-commit gate + post-merge smoke)
+
+| Stage | Command | Pass criteria |
+|---|---|---|
+| After each commit | `pytest test/.../conversational/test_conversation_tool_aliases.py test/.../conversational/test_typed_input_handlers.py test/.../conversational/test_phase0a_e2e.py -v` | All tests in scope for the commit pass; no prior tests regress |
+| After Commit 4 | `npm test -- inputs/PathInputWidget.test.jsx` in `react-shared/` | T12–T16 pass |
+| After Commit 5 | `npm test -- inputs/SingleChoiceWidget.test.jsx` in `react-shared/` | T17–T19 pass; existing tests unchanged |
+| Post-merge smoke (manual) | Boot the server with `model_optimization` SOP; enter `/sop model_optimization`; observe Phase 0a UI | (a) First widget shows a path input with autocomplete + prefix as helper text; (b) typing `/<session_root>/foo` shows real candidates; (c) second widget shows "Auto discover" + a sub-textbox; (d) submitting the textbox with multiple paths binds them to `workflow_modeling_artifacts_path`; (e) the SOP transitions to Phase 0b |
+
+---
+
+## §E3 Execution checklist (granular)
+
+* [ ] **Commit 1** — schema additions in `conversation_tools.py`:
+  - [ ] Add `allow_multiple_input: bool = False` field to `ConversationTool`
+  - [ ] Add `_HYPHEN_KEY_ALIASES` constant
+  - [ ] Add `_canonicalise_keys` helper
+  - [ ] Update `from_dict` to call `_canonicalise_keys` first
+  - [ ] Update `to_dict` to serialise non-default typed fields
+  - [ ] Add `ConversationToolType._missing_` for hyphenated tool names
+  - [ ] Add tests T1–T5
+* [ ] **Commit 2** — composite `ChoiceItem`:
+  - [ ] Add `InputSpec` dataclass with `to_dict`/`from_dict`
+  - [ ] Extend `ChoiceItem` with `input: Optional[InputSpec]` + `.kind` property
+  - [ ] Update `ChoiceItem.from_dict` / `to_dict` for composite case
+  - [ ] Add tests T6–T8
+* [ ] **Commit 3** — handler typed forwarding:
+  - [ ] Extend `InputMode` enum with `PATH`, `URL`
+  - [ ] Extend `InputModeConfig` with `expected_input_type`, `prefix`, `allow_multiple_input`
+  - [ ] Rewrite `ClarificationHandler.build_input_mode` (drop `metadata` shim)
+  - [ ] Update `SingleChoiceHandler.build_input_mode` for composite choices
+  - [ ] Add tests T9–T11
+* [ ] **Commit 4** — `PathInputWidget` + registry:
+  - [ ] New `PathInputWidget.js` (MUI Autocomplete-based)
+  - [ ] New `usePathSuggestions` hook
+  - [ ] New server endpoint `/api/paths?prefix=`
+  - [ ] Registry mapping (`mode=PATH | URL → path_input`)
+  - [ ] Add tests T12–T16
+* [ ] **Commit 5** — composite single-choice rendering:
+  - [ ] Update `RichChoiceSelector` + `SimpleChoiceSelector` to render input-kind options
+  - [ ] Add tests T17–T19
+* [ ] **Commit 6** — handler composite response parsing:
+  - [ ] Update `SingleChoiceHandler.handle_response` for composite payloads
+  - [ ] Add tests T20–T22
+* [ ] **Commit 7** — E2E lock:
+  - [ ] Add `test_phase0a_e2e.py` with T23–T27
+* [ ] **Pre-flight** (before any code lands):
+  - [ ] R-D1: confirm `_missing_` hook works with `StrEnum` mixin (test against the current enum's MRO)
+  - [ ] R-D2: confirm MUI `Autocomplete` already imported elsewhere in `react-shared` (no new dep)
+  - [ ] R-D3: confirm WS auth covers `/api/paths` (or wire it in Commit 4)
+
+---
+
+# PART II — DESIGN REFERENCE
+
+## §D1 Goals, non-goals, out-of-scope
+
+**Goals.**
+
+* G1 Make `model_optimization/SOP.md` Phase 0a render correctly end-to-end without the SOP author having to modify it.
+* G2 Make `expected_input_type`, `prefix`, `allow_multiple_input` first-class fields on `ConversationTool` (round-trippable in JSON, parsed from hyphen-form keys, forwarded by handlers, honored by widgets).
+* G3 Enable composite single-choice (a choice can BE an input field) for any SOP that wants the "Auto OR Manual + typed input" UX pattern.
+* G4 Provide path auto-completion in the UI (not just static text help).
+* G5 Lock the entire pipeline with one end-to-end test that parses Phase 0a verbatim and asserts every parameter survives all 4 layers.
+
+**Non-goals.**
+
+* N1 Implementing a generic "embedded widget in choice" framework beyond input-kind. We only need text + path + url today; broader recursion (e.g. "choice containing a single-choice") is YAGNI.
+* N2 Migrating other SOPs' clarification calls. Their existing free-text behavior is unchanged.
+* N3 Implementing `multiple_choice` composite — same pattern would apply but no current SOP needs it; defer.
+* N4 Server-side path validation beyond `startswith(prefix)` and session-root containment. Heavy validation (existence, glob expansion) belongs in the SOP author's hands or a separate tool.
+
+**Out-of-scope (explicit park).**
+
+* O1 Replacing the entire WidgetRegistry abstraction. The current `mode → widget_type` map is fine for our needs.
+
+## §D2 Architecture decision — 4-layer separation
+
+**Chosen design.** Keep the existing 4 layers (schema → parser/canonicaliser → handler → widget). Add typed fields and a composite-choice union, but NEVER let typed semantics leak across layer boundaries.
+
+**Rejected alternatives:**
+
+| Option | Why rejected |
+|---|---|
+| **A. Re-use `metadata` dict for everything new** | The current bug is exactly that `metadata` is opaque so the UI can't reliably consume it. Doubling down on `metadata` would re-create the bug. |
+| **B. Make `TextInputWidget` branch on `expected_input_type`** | Bloats the widget; conflates free-text and path semantics; harder to test; violates single-responsibility. |
+| **C. Inline path autocomplete inside `SingleChoiceWidget`** | Composite-choice would then know about path semantics directly. Wrong layer. |
+| **D. Add a generic `extra_payload: dict` to `ChoiceItem`** | Untyped escape hatch; would re-create the `metadata` problem at the choice level. |
+
+**Why composition over branching.** `PathInputWidget` is its own widget mapped via the registry; `SingleChoiceWidget` renders the composite case by INVOKING `PathInputWidget`, not by inlining its logic. This means a future `DropdownInputWidget` for URLs would slot in automatically without touching either widget.
+
+## §D3 Data flow diagram
+
+```
+LLM emits ```json ToolsToInvoke {tool_type: "single-choice", choices: [...], ...}
+        │
+        ▼
+parse_response(text)                              ─── Layer 1: PARSE
+        │
+        ▼
+ConversationTool.from_dict(data)                  ─── Layer 2: CANONICALISE
+   (hyphen → underscore via _HYPHEN_KEY_ALIASES;
+    "single-choice" → SINGLE_CHOICE via _missing_)
+        │
+        ▼
+SingleChoiceHandler.build_input_mode(tool)        ─── Layer 3: HANDLE (server-side)
+   Produces InputModeConfig with first-class:
+     mode = SINGLE_CHOICE
+     options = [{label: "Auto"}, {label: "Manual", input: {expected_input_type: PATH, prefix: ...}}]
+   (No more metadata shim; everything is typed.)
+        │
+        ▼ via WS payload                          ─── Layer 4: RENDER (UI)
+SingleChoiceWidget(config)
+   if option.input → renders <PathInputWidget config={input_mode: option.input}/>
+        │
+        ▼ user submits
+{choice_index: 1, paths: ["/x/a", "/x/b"]}
+        │
+        ▼ via WS response
+SingleChoiceHandler.handle_response               ─── Layer 3 (return path)
+   Validates payload against InputSpec; binds:
+     workflow_modeling_artifacts_path = ["/x/a", "/x/b"]
+        │
+        ▼
+session_variables updated; phase advances
+```
+
+## §D4 Risk register
+
+| ID | Risk | Mitigation | Severity |
+|---|---|---|---|
+| R1 | `_canonicalise_keys` could shadow a legitimate hyphen-keyed metadata field if it happens to collide with an alias | Aliases only fire when the underscore form is ABSENT; existing data with explicit underscore keys wins (Commit 1 step 3, locked by T2) | Low |
+| R2 | Composite-choice JSON could be emitted by older code that doesn't know about `input` | `ChoiceItem.from_dict` treats missing `input` as `None` (the new field is `Optional`); old code never sets it, so old code never breaks | Low |
+| R3 | Removing the `metadata` shim is technically a wire-format change | Verified no UI consumer reads `metadata.expected_input_type` / `metadata.prefix` today (zero grep hits); §A1 R-3 documents the verification | Low |
+| R4 | New `/api/paths` endpoint introduces a security surface | Bound to session-root via `Path(prefix).resolve()` containment check; uses existing WS auth; capped at 200 entries; refuses traversal outside session root (§E1.4 step 3) | Medium |
+| R5 | MUI `Autocomplete` not yet imported in `react-shared` | Pre-flight R-D2 confirms it's already a transitive dep via `SingleChoiceWidget`; if not, fall back to a plain TextField + a "Suggestions:" helper list | Low |
+| R6 | `ConversationToolType._missing_` not invoked for `StrEnum` subclasses on all Python versions | Pre-flight R-D1; fallback is a thin `_normalise_tool_type_name` wrapper called by `from_dict` (same single-point pattern as `_canonicalise_keys`) | Low |
+| R7 | Phase 0a is one of many places the SOP could be syntactically wrong; future SOPs might invent new hyphen variants | All canonicalisation is in ONE function (`_canonicalise_keys`) with explicit alias table — adding an alias is a 1-line change | Low |
+
+## §D5 Open questions
+
+| ID | Question | Default if unanswered |
+|---|---|---|
+| Q1 | Should `expected_input_type` accept arbitrary strings (forward-compat) or be a closed enum? | **Open string** with a small enum of well-known values (`free_text`, `path`, `url`); unknown values fall back to `FREE_TEXT` in the widget |
+| Q2 | Should the path-suggestion endpoint serve files AND directories, or directories only? | **Both**, with `kind` discriminator in the response (allows SOP author to specialise later) |
+| Q3 | Should we ENFORCE session-root containment, or just warn? | **Enforce on submit**: reject paths that resolve outside the session root with a clear error message. Warn on type but allow submit (user may have typed `..`). |
+| Q4 | Where should the new server endpoint live (REST? WS message type?) | **WS message** (`{type: "path_suggestions", prefix: "..."}` → `{type: "path_suggestions_response", candidates: [...]}`). Avoids a parallel HTTP server; reuses WS auth. |
+| Q5 | Should `SingleChoiceHandler.handle_response` allow `choice_index` for an input-kind option to submit WITHOUT the typed input (i.e. user picked it but didn't type)? | **No** — require the typed payload; show a UI validation error before submit |
+
+## §D6 Verified facts (source-anchored)
+
+| ID | Fact | Source |
+|---|---|---|
+| F1 | `ConversationTool.to_dict` does NOT serialise `expected_input_type` or `prefix` today | `conversation_tools.py:67-89` (the `to_dict` body has no mention of either) |
+| F2 | `ConversationTool.from_dict` DOES read both fields (defaults `"free_text"` and `""`) | `conversation_tools.py:95-114` |
+| F3 | `allow_multiple_input` field does NOT exist on `ConversationTool` | grep returned 0 hits for `allow_multiple` across the file |
+| F4 | `ClarificationHandler` forwards `expected_input_type` + `prefix` into `InputModeConfig.metadata` (NOT into first-class fields) | `clarification.py:30-37` |
+| F5 | `TextInputWidget` reads only `config.input_mode.prompt` and `config.placeholder`; ignores all `metadata.*` | grep on `TextInputWidget.js` returned 0 hits for `prefix`, `expected_input_type`, `metadata`, `allow_multiple` |
+| F6 | `SimpleChoiceSelector.allowCustom` renders a single free-text input — no `prefix`, no `expected_input_type`, no `allow_multiple_input` | `SingleChoiceWidget.js:131-180` |
+| F7 | `ChoiceItem` has only `{label, value, description}` | `conversation_tools.py:30-50` |
+| F8 | `ConversationToolType` enum value is `single_choice` (underscore); SOP uses `single-choice` (hyphen) | `conversation_tools.py:17-26` vs `model_optimization/SOP.md` line ~25 |
+| F9 | No path-autocomplete / file-picker component exists anywhere in `react-shared` | `find react-shared -type f` + grep for `Autocomplete|FilePicker|PathInput|PathPicker` returned zero relevant hits |
+| F10 | `WidgetRegistry` maps `single_choice → SingleChoiceWidget`, `text_input` / `free_text → TextInputWidget` | `react-shared/src/protocol/registerBuiltins.js:18-31` |
+
+---
+
+# APPENDIX
+
+## §A1 Empirical baseline (verified 2026-06-16)
+
+| Symptom in SOP Phase 0a | Defect ID | Severity | What actually happens today |
+|---|---|---|---|
+| `single-choice` tool name unrecognised | D6 | **Critical** | `ConversationToolType("single-choice")` raises `ValueError` (silent parse failure); the tool call is dropped before reaching any handler |
+| `expected-input-type: "path"` ignored | D1 (round-trip) + D2 (widget) | **Critical** | Field is parsed on input but stripped on `to_dict` re-serialisation; even when present, `TextInputWidget` ignores it |
+| `prefix: "{{ session_root_path }}"` ignored | D1 + D2 | **Critical** | Same as above |
+| `allow-multiple-input: true` ignored | D3 | **Critical** | Field doesn't exist on the schema; parser drops it silently |
+| Composite "Auto discover OR input-textbox" | D5 | **Critical** | `ChoiceItem` cannot carry a nested input field; SOP authors have no way to express this |
+| `output: "workflow_target_path"` | (already handled) | OK | `from_dict` reads `output` as alias for `output_vars` (existing fallback at conversation_tools.py:108) |
+| Path autocomplete UX promise | D4 | **Critical** | No component exists; even if every other layer worked, the widget would just show a plain TextField |
+
+## §A2 Naming convention rationale
+
+* **Why hyphen-aliasing (instead of asking SOP authors to switch to underscores)?** The hyphenated form is more readable in human-authored Markdown SOPs and is already the convention in CLI-style argument syntax. Forcing underscores burdens every SOP author. A single `_HYPHEN_KEY_ALIASES` map at the parser layer absorbs the friction in one place.
+* **Why `expected_input_type` (string) instead of an enum?** SOP authors invent new types over time (e.g. `email`, `regex`, `sql`). An open string with a small "well-known" set is forward-compatible; the widget gracefully falls back to FREE_TEXT for unknown values.
+* **Why `InputSpec` (new dataclass) instead of inlining the fields into `ChoiceItem`?** Three reasons: (1) keeps `ChoiceItem` small for the common case (label-only); (2) makes the `.kind` discriminant explicit and type-checkable; (3) the same `InputSpec` shape is reused by Multi-choice and any future widget that nests inputs — DRY.
+* **Why `allow_multiple_input` (verb) instead of `multiple` (adjective)?** Mirrors the existing AF naming convention (`allow_custom` already used in the same dataclass; `allowed_tools` in `claude_code_*_inferencer`). Single verb root for the family.
+
+## §A3 Follow-ups (deferred but tracked)
+
+* **F1.** `multiple_choice` composite — same pattern but no current SOP needs it.
+* **F2.** Async path suggestions with virtualised dropdown (only matters for huge directories; not needed for typical session roots).
+* **F3.** SOP-author lint rule: detect SOPs that use `expected-input-type: "path"` but forget to set `prefix` — surface as a SOP-load-time warning (the existing SOP linter is the natural home for this).
+* **F4.** YAML-configurable allow-list of `expected_input_type` values per deployment (e.g. one deployment disables `url`).
+* **F5.** Telemetry on which `expected_input_type` values SOP authors actually use in the wild — informs whether to promote any to a closed enum later.
+
+## §A4 Changelog
+
+* **v1 (2026-06-16, this document)** — initial draft. 7 commits, 4 layers, 27 named tests, source-anchored §A1 baseline against `conversation_tools.py`, `clarification.py`, `single_choice.py`, `TextInputWidget.js`, `SingleChoiceWidget.js`, `registerBuiltins.js`, and the verbatim `model_optimization/SOP.md` Phase 0a text.

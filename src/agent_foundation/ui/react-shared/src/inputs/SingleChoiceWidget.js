@@ -2,14 +2,22 @@
  * SingleChoiceWidget — single selection widget.
  * Adapted from AgentFoundation/ui/webui/react/src/components/widgets/SingleChoiceWidget.js
  *
- * Simple choices (no descriptions) → clickable button cards.
- * Rich choices (with descriptions) → MUI Select dropdown + detail area.
+ * Simple choices (no descriptions / inputs) → clickable button cards.
+ * Rich choices (with descriptions or a nested `input` spec) → MUI Select dropdown + detail area.
+ *
+ * Composite choices: an option may carry a nested `input` spec
+ *   { name, expected_input_type, prefix, allow_multiple_input, required, placeholder, serialization }.
+ * The nested input is revealed only when that option is selected; on submit the widget emits
+ *   { choice_index, inputs: { [option.input.name]: <value> } }
+ * where <value> is a string (single) or array of strings (multi). Plain options still emit
+ * { choice_index } with no inputs. See conditional_path_inputs_plan.md Scenario B.
  *
  * Props:
- *   config.input_mode.prompt      - string
- *   config.input_mode.options     - [{label, value, description?}]
- *   config.input_mode.allow_custom - bool
- *   onSubmit({choice_index}) | onSubmit({custom_text})
+ *   config.input_mode.prompt              - string
+ *   config.input_mode.options             - [{label, value, description?, input?}]
+ *   config.input_mode.allow_custom        - bool
+ *   config.pathAutocompleteProvider       - host-injected path provider (threaded down)
+ *   onSubmit({choice_index}) | onSubmit({choice_index, inputs}) | onSubmit({custom_text})
  */
 
 import React, { useState } from 'react';
@@ -20,14 +28,55 @@ import {
 import { Send as SendIcon } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
+import PathAutocompleteInput from './PathAutocompleteInput';
+import MultiValueInput from './MultiValueInput';
+
+/**
+ * Renders the nested input for a composite choice option. Returns null for plain options.
+ * Currently supports path inputs; falls through to a plain text field for other types.
+ */
+function NestedOptionInput({ spec, value, onChange, provider }) {
+  if (!spec) return null;
+  const placeholder = spec.placeholder || (spec.expected_input_type === 'path' ? 'relative/path' : 'Enter a value...');
+
+  if (spec.allow_multiple_input) {
+    const values = Array.isArray(value) ? value : [];
+    return (
+      <MultiValueInput
+        values={values}
+        onChange={onChange}
+        addLabel="Add"
+        renderInput={({ value: draft, onChange: setDraft }) => (
+          <PathAutocompleteInput
+            value={draft}
+            onChange={setDraft}
+            prefix={spec.prefix || ''}
+            provider={provider}
+            placeholder={placeholder}
+          />
+        )}
+      />
+    );
+  }
+  return (
+    <PathAutocompleteInput
+      value={typeof value === 'string' ? value : ''}
+      onChange={onChange}
+      prefix={spec.prefix || ''}
+      provider={provider}
+      placeholder={placeholder}
+    />
+  );
+}
 
 export default function SingleChoiceWidget({ config, onSubmit }) {
   const options = config?.input_mode?.options || config?.options || [];
   const allowCustom = config?.input_mode?.allow_custom ?? true;
   const prompt = config?.input_mode?.prompt || config?.prompt || '';
   const hasDescriptions = options.some(opt => opt.description);
+  const hasInputs = options.some(opt => opt.input);
 
-  if (hasDescriptions) {
+  if (hasDescriptions || hasInputs) {
     return <RichChoiceSelector options={options} prompt={prompt} allowCustom={allowCustom} onSubmit={onSubmit} config={config} />;
   }
   return <SimpleChoiceSelector options={options} prompt={prompt} allowCustom={allowCustom} onSubmit={onSubmit} />;
@@ -39,8 +88,14 @@ function RichChoiceSelector({ options, prompt, allowCustom, onSubmit, config }) 
   const [submitted, setSubmitted] = useState(false);
   const variableContent = config?.input_mode?.metadata?.variable_content;
   const variableName = config?.input_mode?.metadata?.variable_name;
+  const provider = config?.pathAutocompleteProvider;
   const getContent = (idx) => variableContent?.[options[idx]?.value] || options[idx]?.description || '';
   const [editedContent, setEditedContent] = useState(() => getContent(0));
+  // Per-option nested input values, keyed by option index. Only the selected
+  // option's value is ever submitted, so stale values for other options are ignored.
+  const [optionInputs, setOptionInputs] = useState({});
+
+  const selectedSpec = options[selectedIndex]?.input || null;
 
   const handleSubmit = () => {
     if (submitted) return; // double-submit guard
@@ -49,6 +104,12 @@ function RichChoiceSelector({ options, prompt, allowCustom, onSubmit, config }) 
     const orig = getContent(selectedIndex);
     if (variableName && editedContent !== orig) {
       payload.variable_override = { [variableName]: editedContent };
+    }
+    // Composite choice: bind ONLY the selected option's nested input.
+    if (selectedSpec?.name) {
+      const raw = optionInputs[selectedIndex];
+      const value = selectedSpec.allow_multiple_input ? (Array.isArray(raw) ? raw : []) : (raw || '');
+      payload.inputs = { [selectedSpec.name]: value };
     }
     onSubmit(payload);
   };
@@ -62,6 +123,13 @@ function RichChoiceSelector({ options, prompt, allowCustom, onSubmit, config }) 
   }
 
   const selectedOption = options[selectedIndex] || null;
+
+  // A required nested input must be non-empty before submission is allowed.
+  const inputSatisfied = (() => {
+    if (!selectedSpec?.required) return true;
+    const raw = optionInputs[selectedIndex];
+    return selectedSpec.allow_multiple_input ? (Array.isArray(raw) && raw.length > 0) : !!(raw && String(raw).trim());
+  })();
 
   return (
     <Box>
@@ -119,8 +187,25 @@ function RichChoiceSelector({ options, prompt, allowCustom, onSubmit, config }) 
         )
       )}
 
+      {/* Nested input — revealed only for the selected option that declares one. */}
+      {selectedSpec && (
+        <Box sx={{ mb: 2 }}>
+          {(selectedSpec.label || selectedSpec.name) && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', mb: 0.5, display: 'block' }}>
+              {selectedSpec.label || selectedSpec.name}{selectedSpec.required ? ' *' : ''}
+            </Typography>
+          )}
+          <NestedOptionInput
+            spec={selectedSpec}
+            value={optionInputs[selectedIndex]}
+            onChange={(val) => setOptionInputs(prev => ({ ...prev, [selectedIndex]: val }))}
+            provider={provider}
+          />
+        </Box>
+      )}
+
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button variant="contained" size="small" onClick={handleSubmit} disabled={selectedIndex === null} endIcon={<SendIcon sx={{ fontSize: 16 }} />} sx={{ textTransform: 'none', px: 2 }}>
+        <Button variant="contained" size="small" onClick={handleSubmit} disabled={selectedIndex === null || !inputSatisfied} endIcon={<SendIcon sx={{ fontSize: 16 }} />} sx={{ textTransform: 'none', px: 2 }}>
           Confirm Selection
         </Button>
       </Box>

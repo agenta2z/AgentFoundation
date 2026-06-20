@@ -40,6 +40,8 @@ def build_ci_from_config(
     prompt_renderer: Any = None,
     base_inferencer: Any = None,
     extra_sop_dirs: Optional[list] = None,
+    allowed_sops: Optional[list] = None,
+    disallowed_sops: Optional[list] = None,
 ) -> Any:
     """Instantiate a ConversationalInferencer from ``config_path`` and wire it.
 
@@ -110,6 +112,10 @@ def build_ci_from_config(
             ctor_kwargs["prompt_renderer"] = prompt_renderer
         if extra_sop_dirs is not None:
             ctor_kwargs["extra_sop_dirs"] = list(extra_sop_dirs)
+        if allowed_sops is not None:
+            ctor_kwargs["allowed_sops"] = list(allowed_sops)
+        if disallowed_sops is not None:
+            ctor_kwargs["disallowed_sops"] = list(disallowed_sops)
         ci_partial = instantiate(OmegaConf.create(cfg))
         ci = ci_partial(**ctor_kwargs)
     else:
@@ -137,6 +143,10 @@ def build_ci_from_config(
         ci.prompt_renderer = prompt_renderer
     if extra_sop_dirs is not None and not inject_base:
         ci._extra_sop_dirs = list(extra_sop_dirs)
+    if allowed_sops is not None and not inject_base:
+        ci.allowed_sops = list(allowed_sops)
+    if disallowed_sops is not None and not inject_base:
+        ci.disallowed_sops = list(disallowed_sops)
     return ci
 
 
