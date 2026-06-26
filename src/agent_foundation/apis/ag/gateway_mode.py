@@ -26,6 +26,18 @@ DEFAULT_AI_GATEWAY_BASE_URL = "https://ai-gateway.us-east-1.staging.atl-paas.net
 DEFAULT_USE_CASE_ID = "ai-lab-agent"
 DEFAULT_CLOUD_ID = "local"
 
+# SLAuth group(s) the minted token is scoped to. AI Gateway use-case
+# whitelists are keyed on the *group* (the SSAM container), not the raw
+# user principal, so this MUST match a group that the target use-case has
+# been granted. Comma-separated for multiple groups. Overridable via the
+# AI_GATEWAY_SLAUTH_GROUPS env var or an explicit ``groups`` argument.
+#
+# Default is the broad evaluation read group that is granted to the
+# offline-eval use-cases (verified working against staging Bedrock/OpenAI
+# routes). Historically this code hardcoded "atlassian-all", which is NOT
+# whitelisted for those use-cases and caused 400 "not whitelisted" errors.
+DEFAULT_SLAUTH_GROUPS = "ai-gateway-evaluation-dl-all-atlassian-read"
+
 # Cascade order for auto mode
 _CASCADE_ORDER = ("direct", "proximity", "slauth_server")
 
@@ -36,6 +48,7 @@ class GatewayMode(StrEnum):
     DIRECT = "direct"
     PROXIMITY = "proximity"
     SLAUTH_SERVER = "slauth_server"
+    SDK = "sdk"
     AUTO = "auto"
 
 
@@ -189,11 +202,15 @@ def detect_available_mode(
     )
 
 
-def get_direct_slauth_token(env: str = "staging") -> str:
+def get_direct_slauth_token(env: str = "staging", groups: str = None) -> str:
     """Generate a SLAuth token by shelling out to the atlas CLI.
 
     Args:
         env: Environment ("staging" or "prod").
+        groups: Comma-separated SLAuth group(s) to scope the token to. The AI
+            Gateway use-case whitelist is keyed on the group, so this must be a
+            group granted to the target use-case. If None, resolves from the
+            ``AI_GATEWAY_SLAUTH_GROUPS`` env var, then ``DEFAULT_SLAUTH_GROUPS``.
 
     Returns:
         The SLAuth token string.
@@ -201,10 +218,13 @@ def get_direct_slauth_token(env: str = "staging") -> str:
     Raises:
         subprocess.CalledProcessError: If the atlas command fails.
     """
-    if env == "prod":
-        cmd = "atlas slauth token --aud=ai-gateway --env=prod --ttl 60m"
-    else:
-        cmd = "atlas slauth token --aud=ai-gateway --env=staging --groups=atlassian-all --ttl 60m"
+    groups = groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS)
+
+    env_flag = "prod" if env == "prod" else "staging"
+    cmd = (
+        f"atlas slauth token --aud=ai-gateway --env={env_flag} "
+        f"--groups={groups} --force --ttl 60m"
+    )
 
     result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, timeout=30)
     return result.stdout.strip()

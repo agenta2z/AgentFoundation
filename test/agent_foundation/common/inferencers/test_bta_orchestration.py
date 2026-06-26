@@ -7,7 +7,7 @@ Existing coverage (test_breakdown_then_aggregate.py):
   disable_aggregator, parse_numbered_list
 
 Genuine gaps filled here:
-- Heterogeneous worker_factory (dict + task_type_arg_name) (R4)
+- Heterogeneous worker_inferencers (dict + task_type_arg_name) (R4)
 - _parse_json_subtasks parsing variations (R4 / parser correctness)
 - expand_todos_to_workers (R4)
 """
@@ -27,12 +27,12 @@ from test.agent_foundation.common.inferencers._helpers.mock_inferencer import (
 
 
 # ---------------------------------------------------------------------------
-# R4: Heterogeneous worker_factory with task_type_arg_name
+# R4: Heterogeneous worker_inferencers with task_type_arg_name
 # ---------------------------------------------------------------------------
 
 
 class TestHeterogeneousWorkerFactory(unittest.TestCase):
-    """Validates: R4 — dict-based worker_factory dispatches by task_type."""
+    """Validates: R4 — dict-based worker_inferencers dispatches by task_type."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -71,7 +71,7 @@ class TestHeterogeneousWorkerFactory(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory={
+            worker_inferencers={
                 "security": factory_security,
                 "performance": factory_performance,
                 "__default__": factory_default,
@@ -118,7 +118,7 @@ class TestJsonSubtasksParsingVariations(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=aggregator,
             breakdown_format="json_subtasks",
             checkpoint_dir=self.tmpdir,
@@ -185,7 +185,7 @@ class TestExpandTodosToWorkers(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=tracked_factory,
+            worker_inferencers=tracked_factory,
             aggregator_inferencer=aggregator,
             breakdown_format="json_subtasks",
             expand_todos_to_workers=True,

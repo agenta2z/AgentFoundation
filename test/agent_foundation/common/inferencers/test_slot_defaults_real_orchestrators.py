@@ -740,10 +740,10 @@ class TestRealWorldYAMLParity:
         # Refactor 13: keys present with None, template_version drives expansion.
         # Refactor 14: template_root_space=plan inherited from planner_inferencer's
         # subtree-default cascade (`_template_root_space: plan`), through MFDual,
-        # through worker_factory["__default__"]() factory.
+        # through worker_inferencers["__default__"]() factory.
         plan_bta = root.base_inferencer.planner_inferencer.base_inferencer
-        worker_factory = plan_bta.worker_factory["__default__"]
-        sample_mfdual = worker_factory()
+        worker_inferencers = plan_bta.worker_inferencers["__default__"]
+        sample_mfdual = worker_inferencers()
         for i, fc in enumerate(sample_mfdual.flow_configs):
             initial = fc["initial_inferencer"]
             followup = fc["followup_inferencer"]
@@ -772,7 +772,7 @@ class TestRealWorldYAMLParity:
 
     def test_multi_flow_aggregator_full_triplet_defaulted(self, root):
         plan_bta = root.base_inferencer.planner_inferencer.base_inferencer
-        sample_mfdual = plan_bta.worker_factory["__default__"]()
+        sample_mfdual = plan_bta.worker_inferencers["__default__"]()
         agg = sample_mfdual.multi_flow_aggregator_inferencer
         # Triplet defaulted via MFDual.SLOT_DEFAULTS (3 lines removed).
         assert agg.template_version == "aggregation"
@@ -797,11 +797,11 @@ class TestRealWorldYAMLParity:
 
     def test_exec_worker_dual_review_key_defaulted(self, root):
         exec_bta = root.base_inferencer.executor_inferencer
-        sample_dual = exec_bta.worker_factory["__default__"]()
+        sample_dual = exec_bta.worker_inferencers["__default__"]()
         # template_key=review defaulted on the worker review (line removed).
         assert sample_dual.review_inferencer.template_key == "review"
         # Refactor 14: template_root_space=implementation cascades from
-        # executor_inferencer's `_template_root_space` through worker_factory.
+        # executor_inferencer's `_template_root_space` through worker_inferencers.
         assert sample_dual.base_inferencer.template_root_space == "implementation", (
             f"exec worker base_inferencer.template_root_space should cascade to "
             f"'implementation'; got {sample_dual.base_inferencer.template_root_space!r}"
@@ -840,9 +840,9 @@ class TestRealWorldYAMLParity:
         outer = root
         plan_dual = root.base_inferencer.planner_inferencer
         plan_bta = plan_dual.base_inferencer
-        mfdual = plan_bta.worker_factory["__default__"]()
+        mfdual = plan_bta.worker_inferencers["__default__"]()
         exec_bta = root.base_inferencer.executor_inferencer
-        exec_dual = exec_bta.worker_factory["__default__"]()
+        exec_dual = exec_bta.worker_inferencers["__default__"]()
 
         for label, dual in [
             ("outer", outer),
@@ -887,7 +887,7 @@ class TestRealWorldYAMLParity:
         # Verify cascade reaches fixer's exec subtree too.
         fixer_exec_bta = root.fixer_inferencer.executor_inferencer
         assert fixer_exec_bta.aggregator_inferencer.template_root_space == "implementation"
-        fixer_exec_dual = fixer_exec_bta.worker_factory["__default__"]()
+        fixer_exec_dual = fixer_exec_bta.worker_inferencers["__default__"]()
         assert fixer_exec_dual.base_inferencer.template_root_space == "implementation"
         assert fixer_exec_dual.review_inferencer.template_root_space == "implementation"
 
@@ -896,7 +896,7 @@ class TestRealWorldYAMLParity:
         # references resolve to the declared defaults at load time.
         plan_bta = root.base_inferencer.planner_inferencer.base_inferencer
         exec_bta = root.base_inferencer.executor_inferencer
-        sample_mfdual = plan_bta.worker_factory["__default__"]()
+        sample_mfdual = plan_bta.worker_inferencers["__default__"]()
 
         # Default values from `_params:` block in the YAML.
         assert plan_bta.max_breakdown == 2, (
@@ -938,7 +938,7 @@ class TestRealWorldYAMLParity:
 
         plan_bta = obj.base_inferencer.planner_inferencer.base_inferencer
         exec_bta = obj.base_inferencer.executor_inferencer
-        sample_mfdual = plan_bta.worker_factory["__default__"]()
+        sample_mfdual = plan_bta.worker_inferencers["__default__"]()
 
         assert plan_bta.max_breakdown == 7
         assert exec_bta.max_breakdown == 9

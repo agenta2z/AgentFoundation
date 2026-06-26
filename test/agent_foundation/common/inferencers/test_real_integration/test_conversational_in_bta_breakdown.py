@@ -100,7 +100,7 @@ async def test_conversational_breakdown_in_bta(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=adapter,
-        worker_factory=lambda sub_query, index: _make_claude(tmp_workspace),
+        worker_inferencers=lambda sub_query, index: _make_claude(tmp_workspace),
         aggregator_inferencer=None,  # avoid concurrency deadlock
         checkpoint_dir=str(tmp_workspace["checkpoint"]),
     )

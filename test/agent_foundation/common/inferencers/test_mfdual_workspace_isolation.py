@@ -94,6 +94,132 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         self.assertIs(call_kwargs.kwargs["workspace"], role_ws)
         self.assertTrue(call_kwargs.kwargs["output_is_deliverable"])
 
+    def test_role_switch_runs_under_role_child_ctx_not_worker_node(self):
+        """§2.7 regression: the role-switch must run under the role's OWN
+        ``./review`` / ``./fix`` child ctx — matching the dispatch's
+        ``run_context=self._rc_child("review"/"fix")`` — NOT the active worker
+        node.
+
+        Before the fix, ``switch_role`` ran with the worker node active (it is
+        called from ``_step_propose_impl``, a step_fn that pushes no child ctx),
+        so ``_record_role_state`` tagged the worker path with the reviewer
+        (runner-up) leaf's creator and then the fixer (winner) leaf — a DIFFERENT
+        creator — re-tagged the same path, tripping the collision guard on the
+        consensus re-run. Scoping each role-switch to its own child node makes the
+        two distinct-creator leaves land on distinct nodes (no collision).
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            RunStateStore,
+            active_run_context,
+            enter_run,
+            exit_run,
+        )
+
+        captured = {}
+
+        def _capture(new_role=None, **kw):
+            ctx = active_run_context()
+            captured[new_role] = ctx.path if ctx is not None else None
+
+        mfd = _make_mfdual_stub()
+        mfd._workspace = _make_workspace_with_child(_make_role_workspace())
+        # distinct "originals" so the identity guard does NOT skip our candidates
+        mfd._review_inferencer_original = MagicMock(name="orig_reviewer")
+        mfd._fixer_inferencer_original = MagicMock(name="orig_fixer")
+
+        reviewer = MagicMock(name="runner_up_leaf")
+        reviewer.switch_role.side_effect = _capture
+        fixer = MagicMock(name="winner_leaf")
+        fixer.switch_role.side_effect = _capture
+
+        worker = (
+            RunContext.root(store=RunStateStore())
+            .child("propose")
+            .child("plan_bta.worker_0")
+        )
+        token = enter_run(worker)
+        try:
+            mfd._reassign_role_workspace(reviewer, "review_inferencer")
+            mfd._reassign_role_workspace(fixer, "fixer_inferencer")
+        finally:
+            exit_run(token)
+
+        self.assertEqual(
+            captured["review_inferencer"], "/propose/plan_bta.worker_0/review"
+        )
+        self.assertEqual(
+            captured["fixer_inferencer"], "/propose/plan_bta.worker_0/fix"
+        )
+        # the bug was BOTH landing on the bare worker node:
+        self.assertNotEqual(
+            captured["review_inferencer"], "/propose/plan_bta.worker_0"
+        )
+
+    def test_runtime_reviewer_resolvable_under_review_child_ctx(self):
+        """Root-cause regression for the MFDual ``/review`` CollisionError.
+
+        ``_select_reviewer_and_fixer`` writes the runtime-resolved reviewer into
+        the WORKER node's scratch via ``_role_set`` (it runs in
+        ``_step_propose_impl`` under the worker node). But the §2.7 review
+        pre-render reads ``_role_get('review_inferencer')`` while the active ctx is
+        the ``./review`` CHILD node. ``_role_get`` is node-scoped (reads
+        ``active_run_context().node().scratch`` with NO ancestor walk-up), so under
+        ``./review`` it misses the worker-node value and falls back to the STALE
+        construction-time ``self.review_inferencer`` placeholder (``flow_configs[1]``
+        — the runner-up seed). When that placeholder's class differs from the
+        runtime reviewer, the pre-render's ``_effective_role`` claims ``./review``
+        with a DIFFERENT creator than the one ``_reassign_role_workspace`` already
+        claimed it with (the real reviewer) → ``CollisionError``.
+
+        A reviewer selected for the worker MUST therefore remain resolvable when
+        read under the ``./review`` child where the pre-render runs.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            RunStateStore,
+            enter_run,
+            exit_run,
+        )
+
+        mfd = _make_mfdual_stub()
+        mfd._workspace = _make_workspace_with_child(_make_role_workspace())
+        # distinct original → identity guard does NOT skip the runtime reviewer
+        mfd._review_inferencer_original = MagicMock(name="orig_reviewer")
+        # construction-time STALE placeholder (the runner-up seed) — a different
+        # object than the runtime reviewer, mirroring flow_configs[1] != selection.
+        mfd.review_inferencer = MagicMock(name="stale_construction_placeholder")
+
+        runtime_reviewer = MagicMock(name="runtime_selected_reviewer")
+
+        worker = (
+            RunContext.root(store=RunStateStore())
+            .child("propose")
+            .child("plan_bta.worker_0")
+        )
+        tok = enter_run(worker)
+        try:
+            # selection writes the WORKER node (mirrors _select_reviewer_and_fixer)
+            mfd._role_set("review_inferencer", runtime_reviewer, worker)
+            # the propose tail reassigns the role's workspace + session
+            mfd._reassign_role_workspace(runtime_reviewer, "review_inferencer")
+            # the review pre-render reads _role_get UNDER ./review
+            review_ctx = mfd._rc_child("review")
+            rtok = enter_run(review_ctx)
+            try:
+                resolved = mfd._role_get("review_inferencer")
+            finally:
+                exit_run(rtok)
+            self.assertIs(
+                resolved,
+                runtime_reviewer,
+                f"_role_get under ./review resolved {resolved!r} instead of the "
+                "runtime-selected reviewer — the node-scope fallback to the stale "
+                "construction placeholder is the defect that collides at ./review",
+            )
+        finally:
+            exit_run(tok)
+
     def test_calls_reset_session_on_new_inferencer(self):
         """switch_role is called (which internally calls reset_session)."""
         mfd = _make_mfdual_stub()

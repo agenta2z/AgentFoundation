@@ -34,17 +34,46 @@ SUPPORTED_MODEL_ID_TYPES: Iterable[type] = (
 )
 
 
-# Mapping plain Anthropic model identifiers to their AI Gateway equivalents
-CLAUDE_TO_AI_GATEWAY_MODEL_MAP = {
-    ClaudeModels.CLAUDE_45_SONNET: AIGatewayClaudeModels.CLAUDE_45_SONNET,
-    ClaudeModels.CLAUDE_40_SONNET: AIGatewayClaudeModels.CLAUDE_40_SONNET,
-    ClaudeModels.CLAUDE_37_SONNET: AIGatewayClaudeModels.CLAUDE_37_SONNET,
-    ClaudeModels.CLAUDE_46_OPUS: AIGatewayClaudeModels.CLAUDE_46_OPUS,
-    ClaudeModels.CLAUDE_41_OPUS: AIGatewayClaudeModels.CLAUDE_41_OPUS,
-    ClaudeModels.CLAUDE_3_OPUS: AIGatewayClaudeModels.CLAUDE_40_OPUS,
-    ClaudeModels.CLAUDE_35_SONNET: AIGatewayClaudeModels.CLAUDE_35_SONNET_V2,
-    ClaudeModels.CLAUDE_3_HAIKU: AIGatewayClaudeModels.CLAUDE_35_HAIKU,
-}
+# Mapping plain Anthropic ``ClaudeModels`` members to their AI Gateway
+# (Bedrock) equivalents.
+#
+# Built drift-resiliently: the two enums evolve independently (new model
+# generations are added/removed on each side at different times), so a static
+# map referencing members that may not exist would crash this module at import
+# time. We therefore pair members *by enum member name* whenever the same name
+# exists on BOTH enums, then layer on a few explicit cross-name aliases (also
+# guarded). Anything not in the map falls back to value/name parsing in
+# ``_resolve_model_id`` (and ultimately to passing the raw string to the
+# gateway, which validates it).
+def _build_claude_to_gateway_map() -> dict:
+    mapping: dict = {}
+
+    # 1) Auto-pair by identical member name present on both enums.
+    for member in ClaudeModels:
+        gateway_member = getattr(AIGatewayClaudeModels, member.name, None)
+        if gateway_member is not None:
+            mapping[member] = gateway_member
+
+    # 2) Explicit cross-name aliases (only applied if both members exist).
+    #    (anthropic-side name, gateway-side name)
+    _explicit_aliases = [
+        ("CLAUDE_40_SONNET", "CLAUDE_40_SONNET"),
+        ("CLAUDE_37_SONNET", "CLAUDE_37_SONNET"),
+        ("CLAUDE_41_OPUS", "CLAUDE_41_OPUS"),
+        ("CLAUDE_3_OPUS", "CLAUDE_40_OPUS"),
+        ("CLAUDE_35_SONNET", "CLAUDE_35_SONNET_V2"),
+        ("CLAUDE_3_HAIKU", "CLAUDE_35_HAIKU"),
+    ]
+    for anth_name, gw_name in _explicit_aliases:
+        anth_member = getattr(ClaudeModels, anth_name, None)
+        gw_member = getattr(AIGatewayClaudeModels, gw_name, None)
+        if anth_member is not None and gw_member is not None:
+            mapping.setdefault(anth_member, gw_member)
+
+    return mapping
+
+
+CLAUDE_TO_AI_GATEWAY_MODEL_MAP = _build_claude_to_gateway_map()
 
 
 def _resolve_model_id(model_id: Union[str, ClaudeModels, AIGatewayClaudeModels]) -> str:

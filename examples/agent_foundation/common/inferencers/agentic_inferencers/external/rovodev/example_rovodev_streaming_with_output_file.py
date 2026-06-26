@@ -22,8 +22,8 @@ workspace vs tempdir) so we can pin which variable triggers the empty-file bug.
 
 Run:
     python example_rovodev_streaming_with_output_file.py --scenario all
-    python example_rovodev_streaming_with_output_file.py --scenario cache_only
-    python example_rovodev_streaming_with_output_file.py --scenario production_exact
+    python example_rovodev_streaming_with_output_file.py --scenario B_cache_only
+    python example_rovodev_streaming_with_output_file.py --scenario C_production_exact
 
 Honest assessment criteria:
     PASS = output_file is non-empty AND contains the LLM answer (not banner)

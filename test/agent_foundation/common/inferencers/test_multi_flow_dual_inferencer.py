@@ -734,7 +734,7 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=reviewer,
-            fixer_match_winner=True,                 # winner → fixer
+            fixer_strategy="winner",                 # winner → fixer
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -923,7 +923,7 @@ class TestT11DispatchRecomputesPerCall(unittest.TestCase):
             multi_flow_winner_parser=_parse_winner_tag,
             review_default=flow1_inf,                # default = flow1
             review_priority_pool=[flow0_inf],
-            fixer_match_winner=True,
+            fixer_strategy="winner",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1007,7 +1007,7 @@ class TestPostMortemFixes(unittest.TestCase):
             multi_flow_aggregator_inferencer=_Scripted(script=[_aggregator_text("plain")]),
             review_default=review_def,
             review_priority_pool=[priority],
-            fixer_match_winner=True,
+            fixer_strategy="winner",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1023,7 +1023,7 @@ class TestPostMortemFixes(unittest.TestCase):
         # Both warnings fire because both review_default AND fixer_match_winner are set
         warnings_text = "\n".join(cm.output)
         self.assertIn("review_default", warnings_text)
-        self.assertIn("fixer_match_winner", warnings_text)
+        self.assertIn("fixer_strategy", warnings_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1073,7 +1073,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1083,7 +1083,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         mfdi = MultiFlowDualInferencer(
             flow_configs=_make_minimal_flow_configs(2),
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1094,7 +1094,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
             MultiFlowDualInferencer(
                 flow_configs=_make_minimal_flow_configs(1),
                 multi_flow_aggregator_inferencer=_Scripted(script=[]),
-                reviewer_match_second=True,
+                reviewer_strategy="runner_up",
                 consensus_config=ConsensusConfig(max_iterations=1),
             )
         self.assertIn("reviewer_match_second", str(ctx.exception))
@@ -1117,7 +1117,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -1148,7 +1148,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -1176,7 +1176,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -1203,8 +1203,8 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_response_parser=_parse_finalplan,
-            reviewer_match_second=True,
-            fixer_match_winner=True,
+            reviewer_strategy="runner_up",
+            fixer_strategy="winner",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1226,8 +1226,8 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            reviewer_match_second=True,
-            fixer_match_winner=True,
+            reviewer_strategy="runner_up",
+            fixer_strategy="winner",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1257,7 +1257,7 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
                  "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1335,7 +1335,7 @@ class TestFix1ReviewerIdentityGuard(unittest.TestCase):
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             review_inferencer=None,
-            reviewer_match_second=True,
+            reviewer_strategy="runner_up",
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -1403,7 +1403,7 @@ class TestFix8RoleContractInheritance(unittest.TestCase):
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             multi_flow_winner_parser=_parse_winner_tag,
-            fixer_match_winner=True,
+            fixer_strategy="winner",
             review_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -1474,7 +1474,7 @@ class TestFix8RoleContractInheritance(unittest.TestCase):
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             multi_flow_winner_parser=_parse_winner_tag,
-            fixer_match_winner=True,
+            fixer_strategy="winner",
             review_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -1638,6 +1638,79 @@ class TestFix6WorkerNaming(unittest.TestCase):
         self.assertTrue(mfi._is_worker_child_name("flow_99"))
         self.assertFalse(mfi._is_worker_child_name("flow_0_workflow"))
         self.assertFalse(mfi._is_worker_child_name("worker_0"))
+
+
+class TestSharedInstancePurityUnderRealCtx(unittest.TestCase):
+    """Capstone for the shared-instance-reuse goal: run the EXACT
+    ``reviewer_match_second`` scenario from ``test_selects_runner_up_2_flows`` (which under
+    a legacy bare ``infer()`` asserts ``mfdi.review_inferencer is flow1_inf`` — i.e. the
+    runner-up is MUTATED onto the shared instance), but this time under a REAL (non-legacy)
+    ``RunContext``. The full propose→dispatch→role-resolve→review/fix path runs correctly,
+    and NOTHING per-run leaks onto the shared instance: dispatch lands on the propose node,
+    the resolved reviewer lands in ctx scratch, runner fields land in ctx scratch — the
+    instance stays definition-only, so a second concurrent run on the same object can't be
+    clobbered."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_real_ctx_run_resolves_roles_without_mutating_shared_instance(self):
+        from agent_foundation.common.inferencers.run_context import RunContext
+
+        # 3 flows so the RUNTIME winner-based pick differs from the construction seed:
+        # reviewer_match_second seeds review_inferencer = flow_configs[1] (= flow1) at
+        # construction; with winner=0 + ranking [0, 2, 1] the runtime runner-up is flow2
+        # (idx 2) — a DIFFERENT object, so a leak onto the instance would be detectable.
+        flow0, flow1, flow2 = (
+            _Scripted(script=["plan_0"]),
+            _Scripted(script=["plan_1"]),
+            _Scripted(script=["plan_2"]),
+        )
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner_and_ranking("integrated", 0, [0, 2, 1])]
+        )
+        mfdi = MultiFlowDualInferencer(
+            flow_configs=[
+                {"input": f"t{i}", "initial_inferencer": inf,
+                 "followup_inferencer": _Scripted(script=[]),
+                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1}
+                for i, inf in enumerate((flow0, flow1, flow2))
+            ],
+            multi_flow_aggregator_inferencer=agg,
+            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
+            multi_flow_response_parser=_parse_finalplan,
+            reviewer_strategy="runner_up",
+            fixer_inferencer=_Scripted(script=[]),
+            consensus_config=ConsensusConfig(max_iterations=1),
+            checkpoint_dir=self.tmp,
+        )
+        # Construction SEED (rule-based default, not the runtime pick): flow_configs[1].
+        seed = mfdi.review_inferencer
+        self.assertIs(seed, flow1)
+
+        # Run under a REAL, non-legacy RunContext (the shared-instance precondition).
+        root = RunContext.root(workspace=None)
+        result = mfdi.infer("master", run_context=root)
+
+        # (a) the whole stack ran under a real ctx and produced a result.
+        self.assertIsInstance(result, DualInferencerResponse)
+        # (b) PURITY: the runtime winner-based reviewer (runner-up flow2) was resolved
+        # per-run IN THE CONTEXT scratch — it did NOT overwrite the shared instance, which
+        # still holds the construction seed (flow1). Under a LEGACY run this would mutate
+        # mfdi.review_inferencer to flow2; under a real ctx the instance is untouched.
+        self.assertIs(mfdi.review_inferencer, seed)                       # instance unmutated
+        self.assertIs(root.node().scratch.get("review_inferencer"), flow2)  # runtime pick in ctx
+        # (c) MFI dispatch went to the propose node, NOT the instance backing (non-legacy →
+        # no legacy-mint mirror).
+        self.assertIsNone(
+            mfdi.base_inferencer.__dict__.get("_last_winner_idx_backing")
+        )
+        # (d) Dual per-run runtime fields went to ctx scratch, NOT the instance backing.
+        self.assertNotIn("_current_inference_config_backing", mfdi.__dict__)
+        self.assertNotIn("_current_attempt_backing", mfdi.__dict__)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@
 #   Dual                                    review + fix the integrated PLAN
 #   ├── base_inferencer = BTA               decompose the PLANNING task
 #   │   ├── breakdown_inferencer            → N sub-planning subtasks
-#   │   ├── worker_factory = MFDual         each sub-plan explored by N parallel
+#   │   ├── worker_inferencers = MFDual     each sub-plan explored by N parallel
 #   │   │                                   flows with peer visibility + winner
 #   │   │                                   picking + runner-up-as-reviewer
 #   │   └── aggregator_inferencer           integrate sub-plans → ONE coherent
@@ -115,12 +115,12 @@ base_inferencer:
   breakdown_inferencer:
     _target_: ${_params.main_inferencer}
 
-  worker_factory:
-    _factory_: MultiFlowDual
+  worker_inferencers:
+    _target_: MultiFlowDual
     propagate_runtime_input: true
     winner_pick: true
-    reviewer_match_second: true
-    fixer_match_winner: true
+    reviewer_strategy: runner_up
+    fixer_strategy: winner
     visible_flows: all
     max_retry: 3
 

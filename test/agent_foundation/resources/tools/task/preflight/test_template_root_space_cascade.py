@@ -82,7 +82,7 @@ def test_exec_worker_review_has_implementation_space(tmp_path):
     """Exec BTA worker's review leaf inherits 'implementation'."""
     root = _instantiate(tmp_path)
     exec_bta = root.base_inferencer.executor_inferencer
-    sample_worker = exec_bta.worker_factory["__default__"]()
+    sample_worker = exec_bta.worker_inferencers["__default__"]()
     assert getattr(sample_worker.review_inferencer, "template_root_space", None) == "implementation"
 
 

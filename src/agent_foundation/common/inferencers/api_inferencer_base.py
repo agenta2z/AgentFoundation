@@ -74,11 +74,23 @@ class ApiInferencerBase(TemplatedInferencerBase):
             Union[str, Dict, Any]: The parsed inference result from the remote service, which could be
             a string, dictionary, or other types based on the specific service response.
         """
-        response = self._inference_api(
-            inference_input,
+        # §9.2 layer-3 — boundary hygiene at the API chokepoint. Filter the
+        # splatted kwargs to those the wired ``_inference_api`` callable actually
+        # names (the established AF idiom; cf. agent.py / scoring.py), so a stray
+        # kwarg (a typo, a test arg, ``run_context`` if it ever slipped in, a
+        # future internal kwarg) is dropped here instead of erroring inside the
+        # third-party callable. Provider params (temperature/max_new_tokens/...)
+        # are named on ``generate_text`` and survive (the §9.5 invariant).
+        from rich_python_utils.common_utils.function_helper import (
+            get_relevant_named_args,
+        )
+
+        _filtered = get_relevant_named_args(
+            self._inference_api,
             model=self.model_id,
             api_key=self.secret_key,
-            **_inference_args
+            **_inference_args,
         )
+        response = self._inference_api(inference_input, **_filtered)
         logger.debug(f"Response: {response}")
         return self._parse_response(response)

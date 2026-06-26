@@ -45,8 +45,8 @@ class MockInferencer(InferencerBase):
         return self._response
 
 
-def _make_worker_factory(response_fn=None):
-    """Return a worker_factory that creates MockInferencers."""
+def _make_worker_inferencers(response_fn=None):
+    """Return a worker_inferencers that creates MockInferencers."""
     created_workers = []
 
     def factory(sub_query, index):
@@ -82,11 +82,11 @@ class TestBTADiamondPostExpansion(unittest.TestCase):
             return "aggregated"
 
         aggregator = MockInferencer(response=agg_fn)
-        worker_factory = _make_worker_factory()
+        worker_inferencers = _make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
         )
@@ -94,7 +94,7 @@ class TestBTADiamondPostExpansion(unittest.TestCase):
         result = bta.infer("original question")
 
         # 3 workers should have been created
-        self.assertEqual(len(worker_factory.created_workers), 3)
+        self.assertEqual(len(worker_inferencers.created_workers), 3)
         # Aggregator should have been called
         self.assertEqual(aggregator._call_count, 1)
         # Aggregator input should contain all 3 worker results
@@ -108,35 +108,35 @@ class TestBTADiamondPostExpansion(unittest.TestCase):
         """Single sub-query → single worker → aggregator."""
         breakdown = MockInferencer(response="1. Only question")
         aggregator = MockInferencer(response="single aggregated")
-        worker_factory = _make_worker_factory()
+        worker_inferencers = _make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
         )
 
         result = bta.infer("question")
 
-        self.assertEqual(len(worker_factory.created_workers), 1)
+        self.assertEqual(len(worker_inferencers.created_workers), 1)
         self.assertEqual(result, "single aggregated")
 
     def test_no_aggregator_returns_worker_results(self):
         """Without aggregator, BTA returns concatenated worker results."""
         breakdown = MockInferencer(response="1. Q1\n2. Q2")
-        worker_factory = _make_worker_factory()
+        worker_inferencers = _make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
 
         result = bta.infer("question")
 
-        self.assertEqual(len(worker_factory.created_workers), 2)
+        self.assertEqual(len(worker_inferencers.created_workers), 2)
         self.assertIn("result_for_Q1", result)
         self.assertIn("result_for_Q2", result)
 
@@ -153,11 +153,11 @@ class TestBTAResumePostExpansion(unittest.TestCase):
     def test_bta_with_resume_enabled(self):
         """BTA with resume_with_saved_results=True completes successfully."""
         breakdown = MockInferencer(response="1. Q1\n2. Q2\n3. Q3")
-        worker_factory = _make_worker_factory()
+        worker_inferencers = _make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=MockInferencer(response="aggregated"),
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
@@ -166,16 +166,16 @@ class TestBTAResumePostExpansion(unittest.TestCase):
         result = bta.infer("question")
 
         self.assertEqual(result, "aggregated")
-        self.assertEqual(len(worker_factory.created_workers), 3)
+        self.assertEqual(len(worker_inferencers.created_workers), 3)
 
     def test_bta_second_run_with_saved_results(self):
         """Second BTA run with same checkpoint_dir uses saved results."""
         breakdown = MockInferencer(response="1. Q1\n2. Q2")
-        worker_factory1 = _make_worker_factory()
+        worker_inferencers1 = _make_worker_inferencers()
 
         bta1 = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory1,
+            worker_inferencers=worker_inferencers1,
             aggregator_inferencer=MockInferencer(response="aggregated_1"),
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
@@ -185,11 +185,11 @@ class TestBTAResumePostExpansion(unittest.TestCase):
         self.assertEqual(result1, "aggregated_1")
 
         # Second run with same checkpoint dir — should use saved results
-        worker_factory2 = _make_worker_factory()
+        worker_inferencers2 = _make_worker_inferencers()
 
         bta2 = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory2,
+            worker_inferencers=worker_inferencers2,
             aggregator_inferencer=MockInferencer(response="aggregated_2"),
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,

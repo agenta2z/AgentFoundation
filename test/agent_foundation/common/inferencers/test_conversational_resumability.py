@@ -311,3 +311,24 @@ class TestAtomicWrite(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_serialize_pause_state_sanitizes_non_json_prior_context():
+    """§2.8/J7: a stray non-JSON value in the loosely-typed prior_context (e.g. a
+    callable) is DROPPED on serialize (with a warning), so the pause blob always
+    round-trips through Tier-1 to_json; JSON-safe values survive untouched."""
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
+        ConversationalInferencer,
+    )
+    import json
+
+    ci = ConversationalInferencer.__new__(ConversationalInferencer)
+    ci.__dict__["prior_context"] = {
+        "model_name": "claude",        # JSON-safe -> kept
+        "count": 7,                    # JSON-safe -> kept
+        "callback": lambda x: x,       # NOT JSON -> dropped
+        "handle": object(),            # NOT JSON -> dropped
+    }
+    safe = ci._json_safe_prior_context()
+    assert safe == {"model_name": "claude", "count": 7}
+    json.dumps(safe)  # must not raise

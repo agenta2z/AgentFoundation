@@ -4,7 +4,7 @@ Validates Requirements 18, 19, 22, and 24 from the integration test spec.
 All tests invoke real ``claude`` CLI subprocesses and are marked ``@pytest.mark.integration``.
 
 BTA is configured with a breakdown_inferencer that produces a numbered list of
-sub-queries, a worker_factory that creates ClaudeCodeCliInferencers (or
+sub-queries, a worker_inferencers that creates ClaudeCodeCliInferencers (or
 DualInferencers) per sub-query, and optionally an aggregator_inferencer.
 """
 
@@ -69,8 +69,8 @@ def _make_claude(tmp_workspace, **overrides):
     return ClaudeCodeCliInferencer(**kwargs)
 
 
-def _make_worker_factory(tmp_workspace):
-    """Return a worker_factory callable: (sub_query, index) → ClaudeCodeCliInferencer."""
+def _make_worker_inferencers(tmp_workspace):
+    """Return a worker_inferencers callable: (sub_query, index) → ClaudeCodeCliInferencer."""
 
     def factory(sub_query, index):
         return _make_claude(tmp_workspace)
@@ -78,8 +78,8 @@ def _make_worker_factory(tmp_workspace):
     return factory
 
 
-def _make_dual_worker_factory(tmp_workspace):
-    """Return a worker_factory callable: (sub_query, index) → DualInferencer with claude children."""
+def _make_dual_worker_inferencers(tmp_workspace):
+    """Return a worker_inferencers callable: (sub_query, index) → DualInferencer with claude children."""
 
     def factory(sub_query, index):
         base = _make_claude(tmp_workspace)
@@ -108,7 +108,7 @@ async def test_bta_streaming_workers(tmp_workspace):
     """BTA with breakdown → streaming workers (no aggregator).
 
     Configures BTA with a breakdown_inferencer that produces 2 sub-queries and
-    a worker_factory creating ClaudeCodeCliInferencers. Verifies workers execute
+    a worker_inferencers creating ClaudeCodeCliInferencers. Verifies workers execute
     and produce results.
 
     **Validates: Requirements 18.1, 18.4**
@@ -119,7 +119,7 @@ async def test_bta_streaming_workers(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         max_breakdown=2,
     )
 
@@ -161,7 +161,7 @@ async def test_bta_async_execution(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         max_breakdown=2,
     )
 
@@ -202,7 +202,7 @@ def test_bta_sync_execution(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         max_breakdown=2,
     )
 
@@ -232,7 +232,7 @@ def test_bta_sync_execution(tmp_workspace):
 async def test_bta_dual_inferencer_workers(tmp_workspace):
     """BTA with DualInferencer workers — each worker runs a consensus loop.
 
-    Configures BTA with worker_factory creating DualInferencers (each with
+    Configures BTA with worker_inferencers creating DualInferencers (each with
     ClaudeCodeCliInferencer base + review). Verifies DualInferencer workers
     execute consensus loops and produce results.
 
@@ -244,7 +244,7 @@ async def test_bta_dual_inferencer_workers(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_dual_worker_factory(tmp_workspace),
+        worker_inferencers=_make_dual_worker_inferencers(tmp_workspace),
         max_breakdown=2,
     )
 
@@ -296,7 +296,7 @@ async def test_bta_streaming_aggregator(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         aggregator_inferencer=aggregator,
         max_breakdown=2,
     )
@@ -333,7 +333,7 @@ async def test_bta_max_concurrency_throttling(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         max_concurrency=1,
         max_breakdown=2,
     )

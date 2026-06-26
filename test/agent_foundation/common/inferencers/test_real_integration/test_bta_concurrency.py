@@ -67,7 +67,7 @@ async def test_bta_concurrency_throttling_without_aggregator(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=lambda sub_query, index: _make_claude(tmp_workspace),
+        worker_inferencers=lambda sub_query, index: _make_claude(tmp_workspace),
         aggregator_inferencer=None,  # no aggregator: avoids deadlock
         max_breakdown=4,
         max_concurrency=2,
@@ -109,7 +109,7 @@ async def test_bta_concurrency_with_aggregator_deadlocks(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=lambda sub_query, index: _make_claude(tmp_workspace),
+        worker_inferencers=lambda sub_query, index: _make_claude(tmp_workspace),
         aggregator_inferencer=aggregator,
         max_breakdown=4,
         max_concurrency=2,  # ⚠️ documented as deadlock-prone with aggregator
@@ -144,7 +144,7 @@ async def test_bta_concurrency_workaround_with_aggregator(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=lambda sub_query, index: _make_claude(tmp_workspace),
+        worker_inferencers=lambda sub_query, index: _make_claude(tmp_workspace),
         aggregator_inferencer=aggregator,
         max_breakdown=4,
         max_concurrency=5,  # workaround: N + 1

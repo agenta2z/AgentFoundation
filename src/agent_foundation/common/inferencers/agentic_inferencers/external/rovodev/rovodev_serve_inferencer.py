@@ -86,13 +86,35 @@ startup_timeout: Max seconds to wait for server startup.
     agent_mode: Optional[str] = attrib(default=None)
 
     # ---- Internal state (not user-facing) ----
-    _server_process: Optional[asyncio.subprocess.Process] = attrib(
-        default=None, init=False, repr=False
-    )
-    _base_url: str = attrib(default="", init=False, repr=False)
-    _http_client: Optional[httpx.AsyncClient] = attrib(
-        default=None, init=False, repr=False
-    )
+    # M6 (Tier-3): the live server subprocess + httpx client + base URL are
+    # connection-scoped handles. They are compat-properties (below) backed by
+    # ``_<name>_backing`` and mirrored into ``ctx.handles`` so concurrent fan-out
+    # branches each own their own subprocess/client (V8 isolation), staying
+    # byte-identical without an active context.
+
+    @property
+    def _server_process(self) -> Optional[asyncio.subprocess.Process]:
+        return self._tier3_get("server_process", None)
+
+    @_server_process.setter
+    def _server_process(self, value) -> None:
+        self._tier3_set("server_process", value)
+
+    @property
+    def _base_url(self) -> str:
+        return self._tier3_get("base_url", "")
+
+    @_base_url.setter
+    def _base_url(self, value) -> None:
+        self._tier3_set("base_url", value)
+
+    @property
+    def _http_client(self) -> Optional[httpx.AsyncClient]:
+        return self._tier3_get("http_client", None)
+
+    @_http_client.setter
+    def _http_client(self, value) -> None:
+        self._tier3_set("http_client", value)
 
     def __attrs_post_init__(self) -> None:
         if self.acli_path is None:
@@ -177,26 +199,33 @@ startup_timeout: Max seconds to wait for server startup.
         )
 
     async def adisconnect(self) -> None:
-        """Stop the serve server gracefully."""
-        if self._http_client:
-            await self._http_client.aclose()
-            self._http_client = None
+        """Stop the serve server gracefully — for EVERY connection-scoped branch
+        (each ``ctx.child(slot)`` that started a subprocess during ``_ainfer``) plus
+        the legacy backing. No context is active at this lifecycle boundary, so
+        draining by stored path is what reclaims every subprocess (M6) — otherwise a
+        branch's ``acli rovodev serve`` process is orphaned until instance GC."""
+        for h in self._iter_live_handle_sets():
+            http_client = h.get("http_client")
+            if http_client:
+                await http_client.aclose()
+                h.set("http_client", None)
 
-        if self._server_process and self._server_process.returncode is None:
-            logger.info("Stopping serve process (pid=%s)", self._server_process.pid)
-            try:
-                self._server_process.send_signal(signal.SIGTERM)
+            server_process = h.get("server_process")
+            if server_process is not None and server_process.returncode is None:
+                logger.info("Stopping serve process (pid=%s)", server_process.pid)
                 try:
-                    await asyncio.wait_for(self._server_process.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    logger.warning("SIGTERM timeout, sending SIGKILL")
-                    self._server_process.kill()
-                    await self._server_process.wait()
-            except ProcessLookupError:
-                pass
+                    server_process.send_signal(signal.SIGTERM)
+                    try:
+                        await asyncio.wait_for(server_process.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        logger.warning("SIGTERM timeout, sending SIGKILL")
+                        server_process.kill()
+                        await server_process.wait()
+                except ProcessLookupError:
+                    pass
 
-        self._server_process = None
-        self._base_url = ""
+            h.set("server_process", None)
+            h.set("base_url", "")
 
     @property
     def is_connected(self) -> bool:

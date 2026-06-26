@@ -167,7 +167,14 @@ async def demo_streaming_with_session(inferencer, queries: list) -> None:
         start = time.time()
         total_chars = 0
 
-        async for chunk in inferencer.ainfer_streaming(query):
+        # Thread the conversation id so each turn resumes the SAME conversation.
+        # The public streaming path does not auto-resume the way the sync path
+        # does, so without this each ainfer_streaming() call would open a fresh
+        # conversation. None on turn 1 -> new conversation; the captured id after.
+        conversation_id = inferencer.active_session_id
+        async for chunk in inferencer.ainfer_streaming(
+            query, conversation_id=conversation_id
+        ):
             print(chunk, end="", flush=True)
             total_chars += len(chunk)
 

@@ -96,7 +96,7 @@ class TestBTAWorkerRaiseDoesNotBlock(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
         )

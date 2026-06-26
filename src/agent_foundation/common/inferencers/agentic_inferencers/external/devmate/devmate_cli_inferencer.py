@@ -63,6 +63,9 @@ def _looks_like_tool_use_corruption(error_text: str) -> bool:
     )
 
 
+from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+
+
 @attrs
 class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     """
@@ -883,7 +886,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["resume"] = is_resume and session_id is not None
 
     def infer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs
+        self, inference_input: Any, inference_config: Any = None, *, run_context=None, **kwargs
     ) -> Any:
         """Sync inference with session-mode policy + active-session propagation.
 
@@ -891,9 +894,15 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         ``inferencer(prompt)``) would skip the session-id resolution and
         devmate would never see ``--resume --session-id``, silently
         creating a new session on every call.
+
+        M3/N-I5: ``run_context`` is keyword-only and forwarded to
+        ``super().infer`` (which installs the bridge); session policy is applied
+        before delegation (byte-identical with no context).
         """
         self._apply_session_policy(kwargs)
-        result = super().infer(inference_input, inference_config, **kwargs)
+        result = super().infer(
+            inference_input, inference_config, run_context=run_context, **kwargs
+        )
 
         # Propagate the response's session_id back into ``active_session_id``
         # so chained calls auto-resume. (Async path already does this; the
@@ -909,6 +918,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         return result
 
+    @bridge_entrypoint
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs
     ) -> Dict[str, Any]:

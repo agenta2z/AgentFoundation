@@ -7,7 +7,7 @@
 #   ├── planner_inferencer = Dual                  review + fix the integrated PLAN
 #   │   ├── base_inferencer = BTA                  decompose the PLANNING task
 #   │   │   ├── breakdown_inferencer               → N sub-planning subtasks
-#   │   │   ├── worker_factory = MFDual            each sub-plan explored by N parallel
+#   │   │   ├── worker_inferencers =MFDual            each sub-plan explored by N parallel
 #   │   │   │                                      flows with peer visibility + winner
 #   │   │   │                                      picking + runner-up-as-reviewer
 #   │   │   └── aggregator_inferencer              integrate sub-plans → ONE coherent plan
@@ -16,7 +16,7 @@
 #   └── executor_inferencer = Dual                 review + fix the IMPLEMENTATION
 #       ├── base_inferencer = BTA                  decompose execution per plan, run parallel
 #       │   ├── breakdown_inferencer               read plan → M execution subtasks
-#       │   ├── worker_factory = Dual              each section: write + review + fix
+#       │   ├── worker_inferencers =Dual              each section: write + review + fix
 #       │   └── aggregator_inferencer              combine sections into final deliverable
 #       ├── review_inferencer                      judge implementation quality
 #       └── fixer_inferencer                       targeted fixes (NOT full re-implementation)
@@ -132,7 +132,7 @@ executor_inferencer:
       template_variables:
         task_instructions: implementation
 
-    worker_factory:
+    worker_inferencers:
       _default:
         _target_: Dual
         max_retry: 3

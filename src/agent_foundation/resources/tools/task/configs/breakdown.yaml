@@ -11,7 +11,7 @@
 #   Dual                                    review + fix the integrated PLAN
 #   ├── base_inferencer = BTA               decompose + (optionally) classify
 #   │   ├── breakdown_inferencer            → N subtasks; worker_type in args
-#   │   ├── worker_factory = dict:
+#   │   ├── worker_inferencers =dict:
 #   │   │     leaf:       single agent      ← simple subtask (default)
 #   │   │     breakdown:  nested BTA{leaf}  ← needs further decomposition
 #   │   │     multiflow:  MFDual            ← needs diverse perspectives
@@ -111,7 +111,7 @@ base_inferencer:
   # Heterogeneous worker dispatch (config-only; BTA supports this natively).
   # Each dict-entry with _target_/_factory_ is auto-wrapped as a LazyConfigFactory
   # by the config walker → a FRESH worker instance per subtask (no shared state).
-  worker_factory:
+  worker_inferencers:
     leaf:
       _target_: ${_params.main_inferencer}
       max_retry: 3
@@ -124,7 +124,7 @@ base_inferencer:
         _target_: ${_params.main_inferencer}
       # Depth is bounded by construction: nested workers are leaf-only
       # (no `breakdown`/`multiflow` keys), so recursion stops at depth 2.
-      worker_factory:
+      worker_inferencers:
         _default:
           _target_: ${_params.main_inferencer}
       aggregator_inferencer:
@@ -136,8 +136,8 @@ base_inferencer:
       _target_: MultiFlowDual
       propagate_runtime_input: true
       winner_pick: true
-      reviewer_match_second: true
-      fixer_match_winner: true
+      reviewer_strategy: runner_up
+      fixer_strategy: winner
       visible_flows: all
       max_retry: 3
       flow_configs:

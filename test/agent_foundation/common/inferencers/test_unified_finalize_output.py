@@ -763,5 +763,138 @@ class TestUpstreamOutcomeFormatting(unittest.TestCase):
         self.assertNotIn("See deliverables", text)
 
 
+class TestFinalizeSurfacingUnderRunContext(unittest.TestCase):
+    """M7 regression: orchestrator-side child-workspace reads at finalize must
+    resolve the child's PUBLISHED (ctx-mailbox) workspace, not the bare instance
+    property. Under a parent ctx the bare property misses the child's override and
+    the real deliverable is orphaned while only narration surfaces.
+
+    These exercise the production path the older legacy/no-ctx tests cannot: the
+    workspace lives ONLY in the ctx mailbox (instance backing left None, write-pure).
+    """
+
+    def test_bta_finalize_surfaces_published_override_aggregator(self):
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            enter_run,
+            exit_run,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="bta_ctx_")
+        try:
+            aggregator = _Mock(scripted_response="<Response>narration</Response>")
+            root_ws = InferencerWorkspace(
+                root=tmpdir, use_final_deliverables_folder=True)
+            bta = BreakdownThenAggregateInferencer(
+                breakdown_inferencer=_Mock(scripted_response="subtask_0"),
+                aggregator_inferencer=aggregator,
+                workspace=root_ws,
+                output_path="output.md",
+            )
+
+            # The aggregator's REAL plan, written into its own (canonical) workspace.
+            agg_ws = bta._workspace.child("aggregator")
+            agg_ws.ensure_dirs()
+            with open(agg_ws.output_path("output.md"), "w") as f:
+                f.write("# Real consolidated plan\nmany lines of plan\n")
+            fd = agg_ws.deliverables_dir
+            os.makedirs(fd, exist_ok=True)
+            shutil.copy2(agg_ws.output_path("output.md"),
+                         os.path.join(fd, "output.md"))
+
+            # CRITICAL: leave the instance backing None — the workspace lives ONLY in
+            # the ctx mailbox (write-purity), exactly as production does under a ctx.
+            self.assertIsNone(
+                aggregator.__dict__.get("_InferencerBase__workspace"),
+                "test must leave the aggregator instance backing None")
+
+            root = RunContext.root(workspace=root_ws)
+            tok = enter_run(root)
+            try:
+                # Publish the aggregator workspace into ITS child ctx node (prod: breakdown:2199).
+                bta._publish_workspace_to_ctx(bta._rc_child("aggregator"), agg_ws)
+                # The migrated read resolves it under the parent ctx; the bare property does not.
+                self.assertEqual(
+                    bta._read_child_workspace(aggregator, "aggregator").root,
+                    agg_ws.root)
+                bta._finalize_output("<Response>narration</Response>")
+            finally:
+                exit_run(tok)
+
+            # The REAL plan — not the narration — must surface to the BTA's outputs
+            # AND be promoted into the BTA's final_deliverables/.
+            own = bta._workspace.output_path("output.md")
+            self.assertTrue(os.path.exists(own),
+                            "BTA output.md should surface the aggregator plan")
+            self.assertIn("Real consolidated plan", open(own).read())
+            bta_fd = bta._workspace.deliverables_dir
+            self.assertTrue(
+                os.path.exists(os.path.join(bta_fd, "output.md")),
+                "aggregator deliverable must be promoted to BTA final_deliverables/")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dual_propose_canonical_under_ctx(self):
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            enter_run,
+            exit_run,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="dual_ctx_")
+        try:
+            base = _Mock()
+            # Construct WITHOUT a workspace so the base backing stays None — mirrors a
+            # factory worker dispatched under a ctx (write-purity, no instance mutation).
+            dual = DualInferencer(base_inferencer=base, output_path="output.md")
+            self.assertIsNone(
+                base.__dict__.get("_InferencerBase__workspace"),
+                "base backing must be None (precondition P1)")
+
+            root_ws = InferencerWorkspace(
+                root=tmpdir, use_final_deliverables_folder=True)
+            worker = RunContext.root(workspace=root_ws).child(
+                "worker_0", workspace=root_ws)
+            tok = enter_run(worker)
+            try:
+                # Edit-C canonical computation: the propose child = self._workspace.child("propose").
+                eff_propose = dual._workspace.child("propose")
+                self.assertTrue(
+                    eff_propose.root.replace("\\", "/").endswith("/children/propose"))
+                # The OLD bare base read is WRONG under the ctx: backing is None so it
+                # falls through to ctx.workspace (the worker ROOT), not /propose.
+                self.assertNotEqual(
+                    dual.base_inferencer._workspace.root, eff_propose.root,
+                    "the bare base read resolves the worker root, not /propose (the bug)")
+
+                # Simulate the propose having written its plan under the canonical child.
+                eff_propose.ensure_dirs()
+                with open(eff_propose.output_path("output.md"), "w") as f:
+                    f.write("# Propose plan\n")
+                pfd = eff_propose.deliverables_dir
+                os.makedirs(pfd, exist_ok=True)
+                shutil.copy2(eff_propose.output_path("output.md"),
+                             os.path.join(pfd, "output.md"))
+
+                # Drive the tracker exactly as Edit C does (bare → property → ctx scratch).
+                dual._last_output_child_ws = eff_propose
+                dual._finalize_output("<Response>narration</Response>")
+            finally:
+                exit_run(tok)
+
+            own = root_ws.output_path("output.md")
+            self.assertTrue(os.path.exists(own),
+                            "propose plan should surface under the run ctx")
+            self.assertIn("Propose plan", open(own).read())
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

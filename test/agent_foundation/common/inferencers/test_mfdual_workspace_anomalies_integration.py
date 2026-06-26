@@ -83,17 +83,17 @@ class _TemplatedMockInferencer(TemplatedInferencerBase):
 # ---------------------------------------------------------------------------
 
 class TestLazyConfigFactoryIsolation(unittest.TestCase):
-    """Verify that BTA worker_factory produces workers with no shared
+    """Verify that BTA worker_inferencers produces workers with no shared
     inferencer instances between them.
 
     The anomaly: when a raw ``functools.partial`` was used as
-    ``worker_factory`` without deep-copying, all workers shared the same
+    ``worker_inferencers`` without deep-copying, all workers shared the same
     sub-inferencer instances, causing cross-worker state pollution.
     LazyConfigFactory (Hydra's deferred instantiation) guarantees a fresh
     object graph per call.
     """
 
-    def test_worker_factory_produces_isolated_workers(self):
+    def test_worker_inferencers_produces_isolated_workers(self):
         """Create a MultiFlowInferencer (MFDual's inner engine),
         call its worker factory twice, and verify NO shared instances."""
         inf_a = _MockInferencer(scripted_response="flow A")
@@ -119,7 +119,7 @@ class TestLazyConfigFactoryIsolation(unittest.TestCase):
         )
 
         # Invoke the factory to produce two workers (LWI instances)
-        factory = mfi.worker_factory
+        factory = mfi.worker_inferencers
         worker_0 = factory("query A", 0)
         worker_1 = factory("query B", 1)
 
@@ -185,8 +185,8 @@ class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
                 },
             ],
             visible_flows="all",
-            reviewer_match_second=True,
-            fixer_match_winner=True,
+            reviewer_strategy="runner_up",
+            fixer_strategy="winner",
         )
 
         # Give MFDual a workspace
@@ -252,8 +252,8 @@ class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
                  "followup_inferencer": flow1_inf, "max_dynamic_steps": 1},
             ],
             visible_flows="all",
-            reviewer_match_second=True,
-            fixer_match_winner=True,
+            reviewer_strategy="runner_up",
+            fixer_strategy="winner",
         )
 
         tmpdir = tempfile.mkdtemp(prefix="mfdual_tmpl_")
@@ -617,7 +617,7 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
     """
 
     def test_instantiate_produces_lazy_config_factory(self):
-        """A BTA-like config with worker_factory.__default__._target_ should
+        """A BTA-like config with worker_inferencers.__default__._target_ should
         produce a LazyConfigFactory, not a functools.partial."""
         import functools
         from omegaconf import OmegaConf
@@ -630,7 +630,7 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
 
         config = OmegaConf.create({
             "_target_": "BTA",
-            "worker_factory": {
+            "worker_inferencers": {
                 "__default__": {
                     "_target_": "MultiFlowDual",
                     "flow_configs": [
@@ -658,10 +658,10 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
 
         bta = instantiate(config)
 
-        # The worker_factory should be a dict with __default__ as LazyConfigFactory
-        self.assertIsInstance(bta.worker_factory, dict)
-        factory = bta.worker_factory.get("__default__")
-        self.assertIsNotNone(factory, "worker_factory['__default__'] should exist")
+        # The worker_inferencers should be a dict with __default__ as LazyConfigFactory
+        self.assertIsInstance(bta.worker_inferencers, dict)
+        factory = bta.worker_inferencers.get("__default__")
+        self.assertIsNotNone(factory, "worker_inferencers['__default__'] should exist")
         self.assertIsInstance(factory, LazyConfigFactory,
             f"Expected LazyConfigFactory, got {type(factory).__name__}. "
             f"This means _filter_attrs_keys didn't record the factory config.")
@@ -679,7 +679,7 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
 
         config = OmegaConf.create({
             "_target_": "BTA",
-            "worker_factory": {
+            "worker_inferencers": {
                 "__default__": {
                     "_target_": "MultiFlowDual",
                     "flow_configs": [
@@ -700,7 +700,7 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         })
 
         bta = instantiate(config)
-        factory = bta.worker_factory["__default__"]
+        factory = bta.worker_inferencers["__default__"]
 
         # Create two workers
         worker_0 = factory()
@@ -737,11 +737,11 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
             f"LazyConfigFactory should eliminate ALL sharing.")
 
     def test_nested_topology_dual_wrapping_bta(self):
-        """PRODUCTION TOPOLOGY: Dual { BTA { worker_factory } }.
+        """PRODUCTION TOPOLOGY: Dual { BTA { worker_inferencers } }.
 
         The BTA is NESTED inside Dual's base_inferencer. This tests that
         _apply_lazy_factories_recursive finds the nested BTA and replaces
-        its worker_factory partial with LazyConfigFactory.
+        its worker_inferencers partial with LazyConfigFactory.
 
         This is the test that was MISSING — the previous tests used BTA at
         the top level, which worked because _apply_lazy_factory ran on the
@@ -760,7 +760,7 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
             "_target_": "Dual",
             "base_inferencer": {
                 "_target_": "BTA",
-                "worker_factory": {
+                "worker_inferencers": {
                     "__default__": {
                         "_target_": "MultiFlowDual",
                         "flow_configs": [
@@ -784,11 +784,11 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
 
         # Navigate to nested BTA
         bta = root.base_inferencer
-        factory = bta.worker_factory.get("__default__")
+        factory = bta.worker_inferencers.get("__default__")
 
         self.assertIsNotNone(factory)
         self.assertIsInstance(factory, LazyConfigFactory,
-            f"NESTED BTA's worker_factory should be LazyConfigFactory, "
+            f"NESTED BTA's worker_inferencers should be LazyConfigFactory, "
             f"got {type(factory).__name__}. "
             f"_apply_lazy_factories_recursive must recurse into Dual.base_inferencer.")
         self.assertNotIsInstance(factory, functools.partial)
@@ -832,7 +832,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
         config = OmegaConf.create({
             "_target_": "BTA",
             "_output_path": "output.md",
-            "worker_factory": {
+            "worker_inferencers": {
                 "__default__": {
                     "_target_": "MultiFlowDual",
                     "flow_configs": [
@@ -868,7 +868,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
             "BTA should receive _output_path from root cascade")
 
         # Factory-created worker should ALSO have it
-        factory = bta.worker_factory["__default__"]
+        factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
         self.assertEqual(worker.output_path, "output.md",
@@ -896,7 +896,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
             "_target_": "BTA",
             "_output_path": "custom_output.md",
             "_debug_mode": True,
-            "worker_factory": {
+            "worker_inferencers": {
                 "__default__": {
                     "_target_": "MultiFlowDual",
                     "flow_configs": [
@@ -914,7 +914,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
         })
 
         bta = instantiate(config)
-        factory = bta.worker_factory["__default__"]
+        factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
         self.assertEqual(worker.output_path, "custom_output.md")
@@ -933,7 +933,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
         config = OmegaConf.create({
             "_target_": "BTA",
             "_output_path": "root_output.md",
-            "worker_factory": {
+            "worker_inferencers": {
                 "__default__": {
                     "_target_": "MultiFlowDual",
                     "_output_path": "factory_output.md",
@@ -952,7 +952,7 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
         })
 
         bta = instantiate(config)
-        factory = bta.worker_factory["__default__"]
+        factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
         self.assertEqual(worker.output_path, "factory_output.md",

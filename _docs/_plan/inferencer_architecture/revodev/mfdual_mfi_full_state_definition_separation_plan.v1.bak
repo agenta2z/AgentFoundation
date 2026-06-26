@@ -1,0 +1,333 @@
+# MFDual / MFI Full Definition–State Separation (finishing "AF1")
+
+> **Status:** v1 (2026-06-21) — completes the deferred "AF1" item from
+> `runcontext_explicit_state_separation_plan.md`. Scope: **eliminate ALL runtime
+> mutation of `self` in `MultiFlowInferencer` (MFI) and `MultiFlowDualInferencer`
+> (MFDual)** so that (a) per-run dispatch state (`_last_winner_idx`, `_last_ranking`,
+> `_all_judgments`) lives in a per-run state object, and (b) the effective
+> reviewer/fixer/panel is **resolved dynamically at runtime** from the winner index
+> rather than by mutating `self.review_inferencer` / `self.fixer_inferencer`.
+> Once done, a single MFDual definition is genuinely pure and safe to run
+> concurrently — which is the whole point of the separation.
+
+---
+
+## §0 — Quick-start (TL;DR for the implementer)
+
+The user's complaint is correct and this plan owns it: the prior plan **deferred** the
+hardest, most important case (MFDual/MFI) under the label "AF1", which made the rest of
+the state/definition separation *cosmetic* for the one topology that needed it most.
+
+**What must change (one sentence):** dispatch results move off `self` into a typed
+per-run state object, and the Dual review/fix loop stops reading mutated
+`self.review_inferencer`/`self.fixer_inferencer` and instead calls a **resolver**
+(`_resolve_review_target(state)` / `_resolve_fix_target(state)`) that computes the
+effective role inferencer from the winner index **at the moment of use**.
+
+**Three pillars:**
+1. **State off self** — `MultiFlowState` / `MultiFlowDualState` (typed, via the existing
+   `state_factory` + `InferencerStateBase` infra) hold `winner_idx`, `ranking`,
+   `judgments`, and the *resolved* `review_target` / `fix_target` / `panel`.
+2. **Dynamic resolution, not mutation** — delete every `self.review_inferencer = …` /
+   `self.fixer_inferencer = …`; the Dual base reads role targets through resolver
+   methods that consult the per-run state (default resolver returns the static
+   configured value → byte-identical legacy behavior).
+3. **Post-call readers** — `get_winner_flow_idx()` / `get_winner_inferencer()` /
+   the MFDual audit (`mfi._last_winner_idx`) must read from the **last run's state**,
+   preserved via an explicit, opt-in "last completed run" handle (NOT live mutable
+   `self`), so concurrent runs don't clobber each other.
+
+---
+
+## §1 — Source-verified problem statement (the exact mutation surface)
+
+All line numbers verified against the current `dev_xinli_2601` branch on 2026-06-21.
+
+### 1.1 MFI — dispatch state written to `self`
+| Field | Decl | Reset | Write | Read |
+|---|---|---|---|---|
+| `_all_judgments` | `:303` `attrib(factory=list, init=False)` | `:908 .clear()` | `:373` re-init, append sites | aggregator |
+| `_last_winner_idx` | `:304` `attrib(default=None, init=False)` | `:916` | `:980`, `:1006-1007` | `:1014,1024,1026-1027` getters; MFDual `:541,753` |
+| `_last_ranking` | `:307` `attrib(default=None, init=False)` | `:919` | `:1005` | `:1041,1045-1046`; MFDual `:754` |
+
+### 1.2 MFDual — role inferencers mutated on `self`
+- `self._fixer_inferencer_original = …` / `self._review_inferencer_original = …`
+  (`:279-280`) — snapshot machinery that **only exists because** the live fields get
+  mutated.
+- `_select_reviewer_and_fixer()` (`:522`) mutates `self.review_inferencer`
+  (`:584,592,607,631,637,639`) and `self.fixer_inferencer` (`:655,657`).
+- `_step_propose_impl` (`:728`) saves `prev_reviewer/prev_fixer` (`:731-732`), calls
+  `_select_reviewer_and_fixer()` (`:734`), then `_reassign_role_workspace(...)`
+  (`:739-740`) and panel reassignment (`:743+`).
+- Dual base **consumes** `self.review_inferencer`/`self.fixer_inferencer`/`self.reviewers`
+  at ~20 sites (`dual_inferencer.py:292-293,342-343,464-465,566,1104-1286,1382,1411-1561,2086-2102`).
+
+### 1.3 Why this defeats the separation
+A single shared MFDual run across N concurrent subtasks → `_last_winner_idx` and
+`self.review_inferencer` are clobbered between runs → **silent cross-run corruption**.
+This is precisely why dynamic-N currently *requires* `worker_factory` to mint fresh
+instances. Finishing this plan removes that *correctness* reason (ergonomic factory may
+still remain by choice, but it is no longer a safety crutch).
+
+---
+
+## §2 — Design
+
+### 2.1 Typed per-run state (build on existing infra)
+Reuse the `state_factory` + `InferencerStateBase` mechanism from the RunContext plan
+(precedent: `LinearWorkflowInferencer.initial_state_factory`, verified). Two new typed
+states:
+
+```python
+@attrs.define
+class MultiFlowState(InferencerStateBase):
+    winner_idx: Optional[int] = None
+    ranking: Optional[list[int]] = None
+    judgments: list[tuple[int, int, str]] = attrs.field(factory=list)
+
+@attrs.define
+class MultiFlowDualState(MultiFlowState):     # composition over the MFI state it reads
+    # RESOLVED role targets for THIS run — never written back to self.
+    review_target: Optional[InferencerBase] = None
+    fix_target: Optional[InferencerBase] = None
+    panel: list[InferencerBase] = attrs.field(factory=list)
+```
+
+- `MultiFlowInferencer.state_factory` default → `MultiFlowState`.
+- `MultiFlowDualInferencer.state_factory` default → `MultiFlowDualState`.
+- The per-run state object is created at call entry (Tier-2 of the RunContext model)
+  and reachable as `ctx.node.state`. **Legacy path (`run_context=None`)** mints a
+  transient state object so the *same* code path runs — byte-identical behavior, no
+  `self` writes.
+
+### 2.2 MFI: write dispatch results to state, not self
+- `_extract_dispatch_state(...)` takes/returns the run state; sets
+  `state.winner_idx` / `state.ranking` (was `self._last_winner_idx` `:980`,
+  `self._last_ranking` `:1005`).
+- `_reset_dispatch_state_for_call` is **deleted** — a fresh state object per run *is*
+  the reset (no shared field to clear). `_all_judgments` becomes `state.judgments`.
+- `get_winner_flow_idx()` / `get_winner_inferencer()` / `get_runner_up_*` read from the
+  **last-completed-run state** (see §2.4), not `self`.
+
+### 2.3 MFDual: resolve roles dynamically — DELETE the mutation
+Replace `_select_reviewer_and_fixer()` (which *mutates self*) with **pure resolvers**:
+
+```python
+def _resolve_roles(self, mfi_state) -> tuple[review_target, fix_target, panel]:
+    """PURE: compute effective reviewer/fixer/panel from winner_idx + config.
+    No writes to self. Mirrors the current precedence ladder (:522 docstring)."""
+```
+
+- The Dual review/fix loop is changed so that **every** read of
+  `self.review_inferencer` / `self.fixer_inferencer` / `self.reviewers` in the
+  review/fix step goes through `self._resolve_review_target(state)` /
+  `self._resolve_fix_target(state)` / `self._resolve_panel(state)`.
+- **Resolution seam (key design decision):** bind once per round into locals at the top
+  of the review step and the fix step (the loop is sequential within a round —
+  verified), so the ~20 base reads become reads of a per-round local. Concretely, the
+  Dual base methods that consume the roles accept the resolved target as a parameter
+  (or read `state.review_target` set at round start). Default resolver returns the
+  statically configured `self.review_inferencer` → **byte-identical** when no dispatch
+  flags fire.
+- `_fixer_inferencer_original` / `_review_inferencer_original` snapshots (`:279-280`)
+  and the identity-guard in `_reassign_role_workspace` (`:465`) are **deleted** — with
+  no mutation there is nothing to compare against; workspace isolation for a
+  runtime-assigned role is keyed off `state.review_target`/`fix_target` identity vs the
+  static config instead.
+
+### 2.4 The hard problem: post-call readers (the reason AF1 was deferred)
+`get_winner_flow_idx()`, `get_winner_inferencer()`, and MFDual's audit
+(`mfi._last_winner_idx` `:753-754`, `mfi.get_winner_inferencer()` `:541`) read dispatch
+state **after** the inner MultiFlow call returns. A per-run state cleared on `_exit_run`
+would break them. Resolution — **two complementary mechanisms**:
+
+1. **In-loop (MFDual→MFI handoff):** MFDual already runs the propose step and *then*
+   resolves roles **within the same outer run**. Change the handoff to read
+   `mfi_state` returned by the propose step (thread it through `_step_propose_impl`),
+   NOT `mfi._last_winner_idx`. This eliminates the cross-instance `self` read entirely —
+   the winner is read from the state object the propose step just produced.
+2. **External post-call (public getters):** keep a single, explicitly-scoped
+   `self._last_completed_state` reference set in `_exit_run` (the *result* handle, not
+   live working state). Public getters read it. This is safe for the common
+   single-run-then-inspect pattern and is **explicitly documented as last-run-wins**;
+   for concurrent runs, callers must read the state from the returned result instead
+   (the getters raise/warn if they detect concurrent runs via a run-id stamp).
+
+> Honest note: mechanism (1) is the real fix (removes the coupling). Mechanism (2) is a
+> compatibility shim for existing external getter callers; it does not reintroduce
+> working-state mutation (it stores only the immutable completed result).
+
+### 2.5 What this enables (the payoff the user is asking for)
+With zero `self` mutation, one MFDual instance is safe to run concurrently across N
+ctxs (`ctx.child(parallel_i)` each carrying its own `MultiFlowDualState`). The
+`worker_factory` is then no longer required *for safety* — `[worker] * N` style runtime
+replication (or shared-instance reuse) becomes correct. (Whether to also add that
+ergonomic remains a separate, optional follow-up; this plan makes it *safe*, it does not
+mandate removing the factory.)
+
+---
+
+## §3 — Execution (ordered, atomic commits; each ends green)
+
+- **C1 — Typed states (additive):** add `MultiFlowState` / `MultiFlowDualState` +
+  `state_factory` defaults. No behavior change (nothing reads them yet). Unit test:
+  factory produces independent instances; `to_json` round-trips.
+- **C2 — MFI writes to state:** route `_extract_dispatch_state` + judgments through the
+  run state; getters read last-completed-state (§2.4.2). Delete
+  `_reset_dispatch_state_for_call`. Gate: every MFI test passes; add a test asserting
+  two interleaved runs don't clobber each other's `winner_idx`.
+- **C3 — MFDual pure resolvers:** add `_resolve_roles`/`_resolve_review_target`/
+  `_resolve_fix_target`/`_resolve_panel` (pure). Do NOT yet remove mutation — resolvers
+  computed alongside, asserted equal to the mutated values (a **parity shadow test**).
+- **C4 — Dual base reads via resolver:** thread the resolved target into the review/fix
+  steps (param or per-round `state.*_target`). Default resolver = static config →
+  byte-identical. Gate: full Dual + MFDual suite green.
+- **C5 — Delete the mutation:** remove `self.review_inferencer = …` /
+  `self.fixer_inferencer = …`, the `_original` snapshots, and the identity guard;
+  rewire `_reassign_role_workspace` to key off `state` identity. Gate: parity shadow
+  test from C3 now proves the resolver path == old mutated path on all dispatch-flag
+  combinations (rule-based, reviewer_match_second, fixer_match_winner, panel).
+- **C6 — Concurrency proof:** add a real test running ONE MFDual instance across N
+  concurrent ctxs with distinct inputs; assert no winner/role bleed. This is the
+  acceptance test for "AF1 done".
+- **C7 — Docs/headers:** update MFDual module docstring (`:41-43`, "mutates
+  self.review_inferencer" → "resolves dynamically from per-run state"); update the
+  RunContext plan's AF1 deferral note to "completed by this plan".
+
+---
+
+## §4 — Risks & honest open questions
+
+- **R1 (resolution-seam scope):** the ~20 Dual base reads must ALL go through the
+  resolver; a missed one silently reverts to static config. Mitigation: C5 parity
+  shadow test exercises every dispatch-flag combination; add the AST child-call/role-read
+  lint (from the RunContext plan §9.5) extended to flag direct `self.review_inferencer`
+  reads inside the review/fix loop.
+- **R2 (`_reassign_role_workspace` identity guard):** today it compares against
+  `_original` snapshots. After deletion, workspace isolation must key off
+  "is `state.review_target` a different instance than the static config?". Verify the
+  panel case (`reviewers` list) is covered.
+- **R3 (post-call getter semantics change):** `get_winner_*` becomes last-run-wins with
+  a concurrency guard. Audit all external callers (verified internal: `:541,753-754,1059,1069`);
+  confirm no external repo consumer depends on mid-run reads.
+- **R4 (workers `_repeat_` / round-robin reuse):** once MFDual is pure, the
+  `workers[i % len]` round-robin reuse (`bta:1661`) becomes safe for stateful MFDual —
+  worth a follow-up note, but out of scope here.
+- **Q1:** Should `state_factory` states be serializable for resume? (winner_idx/ranking
+  are trivially serializable; role targets are instances → store as slot names/aliases,
+  re-resolve on resume.) **Default: store aliases, re-resolve.**
+- **Q2:** Keep `worker_factory` or add `[worker]*N` ergonomic now? **Default: keep
+  factory; defer ergonomic** — this plan's job is correctness, not config sugar.
+
+---
+
+## §4.5 — PART 2: end-to-end `worker_inferencers` single-declaration → dynamic-N (gated behind Part 1)
+
+> **This is the concrete user-facing goal of the plan.** Make this YAML work
+> *inside BTA* for `breakdown-multiflow-plan.yaml`:
+>
+> ```yaml
+> worker_inferencers:          # ONE declared worker, replicated to runtime-N
+>   _target_: MultiFlowDual
+>   ...
+>   flow_configs:
+>     - _repeat_: ${_params.num_flows}   # static-K flows inside (unchanged)
+>       ...
+> ```
+>
+> **Hard gate:** Part 2 is UNSAFE without Part 1. A single declared worker reused
+> across N runtime subtasks is exactly the shared-stateful-instance hazard Part 1
+> eliminates. Part 2 commits MUST NOT merge until §5 DoD items 1–4 are green.
+
+### 4.5.1 Field-design decision (honest recommendation)
+Three options for the BTA surface:
+
+| Option | Shape | Verdict |
+|---|---|---|
+| **A. New field `worker_inferencers`** | `worker_inferencers: {single _target_}` → replicate to N | Clear intent, but adds a 3rd worker field (`worker_factory`, `workers`, `worker_inferencers`) → surface bloat + 3-way precedence. |
+| **B. Extend existing `workers`** to accept a **single mapping** (not just a list) meaning "this one worker, replicated to dynamic-N" | `workers: {single _target_}` (mapping) vs `workers: [list]` (static-K) | Reuses the existing field + the existing `:1660-1661` consumption seam. Type-switch (list vs mapping) is the only new logic. |
+| **C. Keep `worker_factory` only** | no new surface | Rejected — it's the factory the user explicitly wants to drop. |
+
+**Recommendation: Option B (extend `workers`).** Rationale: (1) the existing
+`workers` path already round-robins at `:1661` (`workers[i % len(self.workers)]`) —
+after Part 1 makes MFDual pure, reusing one instance across N is *safe*, so a single
+declared worker is just `len==1` round-robin (every subtask → the same pure instance,
+each under its own `ctx.child(parallel_i)`); (2) no new precedence rules — `workers`
+already wins over `worker_factory` (`:1660` checks `self.workers` first); (3) smallest
+diff. The YAML key can still be spelled `worker_inferencers` via a thin alias if the
+user prefers that name, mapping to the `workers` field.
+
+> **Decision needed from user:** keep the *field* as `workers` (recommended) and allow
+> the YAML *key* `worker_inferencers` as an alias? Or introduce a genuinely separate
+> `worker_inferencers` field? Default if unanswered: **extend `workers`, add
+> `worker_inferencers` as a YAML alias.**
+
+### 4.5.2 The two replication semantics (and which to use)
+Once MFDual is pure (Part 1), both become safe; pick per the §2.5 cost/robustness call:
+
+1. **Reuse-one-instance (recommended):** `workers=[the_one_pure_mfdual]`; the loop's
+   round-robin (`:1661`) serves the *same* instance for every subtask, each run isolated
+   by `ctx.child(parallel_{i})` carrying its own `MultiFlowDualState`. Zero extra
+   instances; correctness comes entirely from Part 1's state separation. **This is the
+   payoff that justifies Part 1.**
+2. **Replicate-N (alternative):** deep-copy/re-instantiate the declared worker N times.
+   Safe but redundant once (1) is correct; only needed if any residual non-virtualized
+   instance field is discovered (Part 1's lint/parity tests must prove there is none).
+
+**Recommendation: ship (1).** It is the literal embodiment of "state separated → one
+definition, many runs." Keep (2) unimplemented unless C-tests surface residual impurity.
+
+### 4.5.3 Execution (Part 2 commits — all gated behind Part 1)
+- **C8 — BTA accepts single-worker `workers`:** allow `workers` to be a single
+  `InferencerBase` (or 1-element list); the `:1660-1661` round-robin then serves that one
+  pure instance for all N subtasks. Add the `worker_inferencers` YAML alias → `workers`.
+  **Precondition assert (fail-loud):** if `workers` resolves to a single shared *stateful*
+  inferencer, require Part 1's purity (assert MFDual exposes `state_factory` and has no
+  live dispatch mutation — reuse the §9.5-style lint). Gate: existing `workers`-list tests
+  unchanged (byte-identical).
+- **C9 — wire `breakdown-multiflow-plan.yaml`:** convert the `worker_factory: {_factory_:
+  MultiFlowDual}` block to the single-declaration `worker_inferencers:` form. Acceptance:
+  on a **fixed/mocked breakdown** (N pinned), the single-declaration run produces
+  **byte-identical** deliverables to the current `worker_factory` version. (Same N, same
+  per-subtask inputs, same aggregation.)
+- **C10 — dynamic-N concurrency acceptance:** with a breakdown returning N>1 distinct
+  subtasks, assert the one reused MFDual instance produces **per-subtask-correct** results
+  with **no winner/role/workspace bleed** across subtasks (the real end-to-end proof that
+  Part 1 + Part 2 compose). Include the `use_async=True` parallel path (workers may run
+  concurrently — `:1640 use_async`), which is the strictest test of Part 1's purity.
+
+### 4.5.4 Part 2 risks
+- **R5 (the round-robin was unsafe before):** `workers[i % len]` reuse is exactly why
+  `workers` was reserved for "static-K homogeneous" — Part 1 is what makes single-instance
+  reuse safe. C8's fail-loud precondition prevents anyone enabling it for a still-impure
+  worker.
+- **R6 (`use_async` parallel workers):** if BTA runs the N reused-instance workers
+  *concurrently* (`:1640`), Part 1's ContextVar/`ctx.child` isolation (from the RunContext
+  plan) must hold under `asyncio.gather` — C10 must exercise this explicitly. If the
+  RunContext per-call isolation isn't yet landed for the async-parallel BTA path, C10 gates
+  on it (cross-plan dependency — call it out, don't paper over it).
+- **R7 (workspace isolation per reused run):** each reused-instance run must get a distinct
+  child workspace (`flow_N`/subtask_i) — verify the `:1716+` workspace-assignment block
+  keys off the per-run ctx, not the (now-shared) instance.
+
+---
+
+## §5 — Definition of Done
+1. `grep -n "self\.review_inferencer\s*=\|self\.fixer_inferencer\s*=" multi_flow_dual_inferencer.py` → **zero** (outside `__attrs_post_init__` defaults).
+2. `grep -n "self\._last_winner_idx\s*=\|self\._last_ranking\s*=" multi_flow_inferencer.py` → **zero**.
+3. C3/C5 parity shadow test green across all dispatch-flag combos.
+4. C6 concurrency test: one MFDual, N concurrent distinct inputs, no role/winner bleed.
+5. Full AF inferencer suite green (`git ls-files 'test/**multi_flow*'` + Dual tests).
+6. RunContext plan AF1 deferral note updated to "completed".
+7. **(Part 2)** `breakdown-multiflow-plan.yaml` uses the single `worker_inferencers`
+   declaration (no `worker_factory` for the MFDual worker); C9 byte-identical test green.
+8. **(Part 2)** C10 dynamic-N acceptance green — one reused MFDual instance, N>1 distinct
+   subtasks, `use_async=True`, no winner/role/workspace bleed.
+9. **(Part 2 gate)** C8 fail-loud precondition present: single shared stateful worker is
+   rejected unless Part 1 purity (state_factory + no live dispatch mutation) holds.
+
+> **Sequencing:** Part 1 (C1–C7) lands first and fully. Part 2 (C8–C10) is the
+> user-facing goal but is **safety-gated** on Part 1 — DoD 1–4 must be green before C8.
+
+<!-- session: see get_session_metadata -->
+

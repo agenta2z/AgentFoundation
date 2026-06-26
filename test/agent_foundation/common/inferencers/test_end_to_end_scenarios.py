@@ -166,13 +166,13 @@ class TestParallelDecompositionE2E(unittest.TestCase):
         aggregator = MockInferencer(response=agg_fn)
 
         # Each worker returns a deterministic, distinct result
-        def worker_factory(sub_query, index):
+        def worker_inferencers(sub_query, index):
             return MockInferencer(response=f"WORKER_{index}_RESULT_for_{sub_query}")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             bta = BreakdownThenAggregateInferencer(
                 breakdown_inferencer=breakdown,
-                worker_factory=worker_factory,
+                worker_inferencers=worker_inferencers,
                 aggregator_inferencer=aggregator,
                 checkpoint_dir=tmpdir,
             )

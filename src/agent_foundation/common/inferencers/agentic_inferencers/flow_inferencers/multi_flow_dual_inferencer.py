@@ -35,7 +35,7 @@ Round 7 — dynamic dispatch (rule-based and/or alias-based)::
         # Rule-based: avoid self-review + winner-as-fixer
         review_default=kiro_cli,
         review_priority_pool=[claude_cli],
-        fixer_match_winner=True,
+        fixer_strategy=FixerStrategy.WINNER,
     )
 
 After each propose step (which runs MultiFlow), :meth:`_select_reviewer_and_fixer`
@@ -58,6 +58,7 @@ plan/approval/implement/analysis workflow that is structurally different
 from this propose/review/fix loop.
 """
 
+import enum
 import logging
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
@@ -87,6 +88,21 @@ _logger = logging.getLogger(__name__)
 
 
 @artifact_type(Workflow, type="json", group="workflows")
+class ReviewerStrategy(str, enum.Enum):
+    """Rule-based reviewer-selection strategy (an LLM ``reviewer_alias`` overrides it)."""
+
+    CONFIGURED = "configured"            # review_default + review_priority_pool (avoid self-review)
+    RUNNER_UP = "runner_up"              # runner-up flow's inferencer (ranking pos 1 / first non-winner)
+    ALL_NON_WINNERS = "all_non_winners"  # §3 panel: every non-winner flow becomes a reviewer
+
+
+class FixerStrategy(str, enum.Enum):
+    """Rule-based fixer-selection strategy (an LLM ``fixer_alias`` overrides it)."""
+
+    BASE = "base"                        # keep the configured fixer_inferencer
+    WINNER = "winner"                    # winning flow's inferencer
+
+
 @attrs
 class MultiFlowDualInferencer(DualInferencer):
     """DualInferencer whose ``base_inferencer`` is an auto-constructed MultiFlow.
@@ -123,7 +139,7 @@ class MultiFlowDualInferencer(DualInferencer):
             multi_flow_response_parser=parse_finalplan_tag,
             review_default=kiro_cli,                 # default reviewer
             review_priority_pool=[claude_cli],       # if Kiro wins → swap to Claude
-            fixer_match_winner=True,                 # fixer = winning flow's CLI
+            fixer_strategy=FixerStrategy.WINNER,                 # fixer = winning flow's CLI
             consensus_config=ConsensusConfig(max_iterations=2),
         )
         result = await mfdi.ainfer("Build a secure REST API")
@@ -186,6 +202,16 @@ class MultiFlowDualInferencer(DualInferencer):
     Required when MFDual is used as a PTI planner so PTI's runtime subtask
     description actually reaches the flows. Resume not supported when True."""
 
+    cross_flow_sync: bool = attrib(default=False)
+    """Forward to MultiFlow's ``cross_flow_sync`` (the cross-flow step barrier).
+    When True, each flow's round x+1 waits for ALL still-active flows' round x
+    before reading peer artifacts — closing the "(no output yet)" race. Opt-in;
+    async-only. See INTEGRATED_cross_flow_coordination_plan.md."""
+
+    coordinated_stop: bool = attrib(default=False)
+    """Forward to MultiFlow's ``coordinated_stop`` (alias for ``cross_flow_sync``;
+    the unanimous stop vote is deferred). Kept for config-surface symmetry."""
+
     runtime_input_template: Optional[str] = attrib(default=None)
     """Forward to MultiFlow's ``runtime_input_template``. Optional Jinja
     template wrapping each flow's input with feed
@@ -222,23 +248,35 @@ class MultiFlowDualInferencer(DualInferencer):
     resolved ``review_default`` is the same instance as the MultiFlow winner.
     Self-review avoidance."""
 
-    fixer_match_winner: bool = attrib(default=False)
-    """When True, ``fixer_inferencer`` is mutated to the MultiFlow winner's
-    inferencer after each propose step."""
+    reviewer_strategy: ReviewerStrategy = attrib(
+        default=ReviewerStrategy.CONFIGURED, converter=ReviewerStrategy
+    )
+    """How the per-attempt reviewer is chosen after each propose step (rule-based; an
+    LLM ``reviewer_alias`` always overrides this). Accepts the enum or its string value
+    (e.g. ``runner_up``) from YAML:
+      - ``CONFIGURED`` (default): use ``review_default`` + ``review_priority_pool`` with
+        self-review avoidance against the winner.
+      - ``RUNNER_UP``: the runner-up flow's inferencer — ranking position 1, falling back
+        to the first non-winner in ``flow_configs`` order. Requires ≥2 flows; auto-enables
+        ``winner_pick`` and the aggregator ``include_ranking`` flag. Symmetric with
+        ``FixerStrategy.WINNER`` (winner->fixer, runner-up->reviewer).
+      - ``ALL_NON_WINNERS``: §3 panel — ALL non-winner flows become reviewers
+        (``review_inferencer`` = panelist 0, the rest independent panelists run under
+        ``review/panelist_i`` child ctxs, merged via ``merge_reviews``). Requires ≥2
+        flows; auto-enables ``winner_pick``."""
 
-    reviewer_match_second: bool = attrib(default=False)
-    """When True, auto-assigns the runner-up flow's inferencer as reviewer
-    after each propose step. For 2 flows, the runner-up is the non-winner.
-    For N>2, uses the aggregator's ranking (position 1). Falls back to the
-    first non-winner in flow_configs order if ranking is unavailable.
-
-    Auto-enables ``winner_pick`` (runner-up is relative to a winner).
-    Auto-injects ``include_ranking`` template flag on the aggregator.
-    Symmetric with ``fixer_match_winner``: winner->fixer, runner-up->reviewer."""
+    fixer_strategy: FixerStrategy = attrib(
+        default=FixerStrategy.BASE, converter=FixerStrategy
+    )
+    """How the per-attempt fixer is chosen (an LLM ``fixer_alias`` always overrides).
+    Accepts the enum or its string value from YAML:
+      - ``BASE`` (default): keep the configured ``fixer_inferencer`` as-is.
+      - ``WINNER``: set ``fixer_inferencer`` to the MultiFlow winner's inferencer after
+        each propose step."""
 
     multi_flow_ranking_parser: Optional[Callable] = attrib(default=None)
     """Parser for ranking block in aggregator output. Auto-set to
-    ``parse_ranking_tag`` when ``reviewer_match_second`` is True and no
+    ``parse_ranking_tag`` when ``reviewer_strategy`` is ``RUNNER_UP`` and no
     explicit parser is provided."""
 
     # ─── Optional template overrides for role reassignment via switch_role ───
@@ -257,10 +295,25 @@ class MultiFlowDualInferencer(DualInferencer):
     extracts the index. ``setdefault`` semantics — explicit user values
     in ``template_extra_feed`` win.
 
-    Pair with ``fixer_match_winner=True`` for full Round 7 dispatch
+    Pair with ``fixer_strategy=WINNER`` for full Round 7 dispatch
     (winner identified by aggregator → fixer set to that flow's CLI).
-    Use without ``fixer_match_winner`` for observability — the JSON
+    Use without ``fixer_strategy=WINNER`` for observability — the JSON
     block is emitted and parsed but the parsed index isn't auto-routed."""
+
+    # ─── Legacy dispatch predicates derived from the strategy enums (the canonical
+    # config). Read-only — set ``reviewer_strategy`` / ``fixer_strategy`` to configure;
+    # these keep the validation + ``_select_reviewer_and_fixer`` ladder readable. ───
+    @property
+    def reviewer_match_second(self) -> bool:
+        return self.reviewer_strategy is ReviewerStrategy.RUNNER_UP
+
+    @property
+    def reviewer_match_all_non_winners(self) -> bool:
+        return self.reviewer_strategy is ReviewerStrategy.ALL_NON_WINNERS
+
+    @property
+    def fixer_match_winner(self) -> bool:
+        return self.fixer_strategy is FixerStrategy.WINNER
 
     def __attrs_post_init__(self):
         # Snapshot YAML-configured originals BEFORE any override
@@ -295,6 +348,15 @@ class MultiFlowDualInferencer(DualInferencer):
             if len(self.flow_configs) < 2:
                 raise ValueError(
                     "reviewer_match_second requires at least 2 entries in "
+                    f"flow_configs (got {len(self.flow_configs)})"
+                )
+            self.winner_pick = True
+
+        # §3 reviewer_match_all_non_winners (panel) — same winner-relative dependency.
+        if self.reviewer_match_all_non_winners:
+            if len(self.flow_configs) < 2:
+                raise ValueError(
+                    "reviewer_match_all_non_winners requires at least 2 entries in "
                     f"flow_configs (got {len(self.flow_configs)})"
                 )
             self.winner_pick = True
@@ -351,6 +413,9 @@ class MultiFlowDualInferencer(DualInferencer):
             # Runtime input propagation (opt-in, lets MFDual be used as PTI planner)
             propagate_runtime_input=self.propagate_runtime_input,
             runtime_input_template=self.runtime_input_template,
+            # Cross-flow step coordination (opt-in lock-step visibility barrier)
+            cross_flow_sync=self.cross_flow_sync,
+            coordinated_stop=self.coordinated_stop,
             # Upstream-artifact injection (opt-in, wires {{ upstream_artifacts }}
             # slot in target inferencers' wrapper templates separate from {{ input }})
             inject_upstream_artifacts=self.inject_upstream_artifacts,
@@ -394,7 +459,7 @@ class MultiFlowDualInferencer(DualInferencer):
         if self.review_inferencer is None:
             _logger.warning(
                 "MultiFlowDualInferencer: no reviewer mechanism configured "
-                "(review_inferencer, review_default, or reviewer_match_second "
+                "(review_inferencer, review_default, or reviewer_strategy=runner_up/all_non_winners "
                 "are all unset). The review step will fail at runtime."
             )
 
@@ -461,7 +526,48 @@ class MultiFlowDualInferencer(DualInferencer):
             new_key, new_root = self._resolve_role_template(role_name)
             kwargs["template_key"] = new_key
             kwargs["template_root_space"] = new_root
-        inferencer.switch_role(new_role=role_name, **kwargs)
+        # §2.7 isolation: record the role-switch state (RoleState/session) on the
+        # role's OWN child ctx (``./review`` or ``./fix``) — the SAME node the
+        # review/fix dispatch targets via ``run_context=self._rc_child(slot)``.
+        # This runs inside ``_step_propose_impl`` (a step_fn) where the active ctx
+        # is the worker node, so without this scoping the reviewer (runner-up) and
+        # fixer (winner) leaves — distinct creators — both tag the worker path and
+        # trip the creator-collision guard on the consensus re-run. It also fixes a
+        # latent template-locality bug: the dispatch renders at ``./review``/``./fix``
+        # and (no ancestor walk-up) would otherwise miss the worker-node RoleState.
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        _role_slot = {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
+            role_name, role_name
+        )
+        _rc = self._rc_child(_role_slot)
+        _tok = enter_run(_rc) if _rc is not None else None
+        try:
+            # Publish the runtime-resolved role into the role's OWN child node
+            # scratch (``./review`` | ``./fix``). ``_select_reviewer_and_fixer``
+            # wrote it to the WORKER node (via ``_role_set`` under
+            # ``_step_propose_impl``'s worker ctx), but the review/fix pre-render
+            # AND dispatch call ``_role_get`` while the active ctx is THIS child
+            # node — and ``_role_get`` is node-scoped (reads the active node's
+            # scratch with NO ancestor walk-up). Without this publish the child
+            # read misses the worker-node value and falls back to the STALE
+            # construction-time ``self.<role>`` placeholder (``flow_configs[1]``,
+            # the runner-up seed). When that placeholder's class differs from the
+            # runtime leaf, the pre-render's ``_effective_role`` claims this node
+            # with a DIFFERENT creator than ``switch_role`` (below) just did →
+            # ``CollisionError``. Publishing here keeps the child-scoped read
+            # coherent with the worker-scoped selection. (No-ctx / legacy-mint:
+            # ``_rc`` is None → skipped; the role lives on the instance attribute,
+            # which the legacy ``_role_get`` reads — byte-identical.)
+            if _rc is not None:
+                self._role_set(role_name, inferencer, _rc)
+            inferencer.switch_role(new_role=role_name, **kwargs)
+        finally:
+            if _tok is not None:
+                exit_run(_tok)
 
     # ------------------------------------------------------------------
     # Round 7 — dispatch helpers
@@ -518,10 +624,39 @@ class MultiFlowDualInferencer(DualInferencer):
         When neither path applies, leaves the inferencer at its current value
         (typically the construction-time default).
         """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+            enter_run,
+            exit_run,
+        )
+
         mfi = self.base_inferencer
         if not isinstance(mfi, MultiFlowInferencer):
             return  # nothing to dispatch on
-        winner = mfi.get_winner_inferencer()
+
+        # C5: the ctx whose node owns the per-run resolved roles (MFDual's own node).
+        # Roles are written via _role_set: under a real ctx → ctx.node().scratch (no
+        # self-mutation, so a shared instance is safe across concurrent runs); under
+        # legacy / legacy-mint → the instance attribute (byte-identical).
+        mfdual_ctx = active_run_context()
+
+        # Phase 1: read the inner MultiFlow dispatch under the PROPOSE child node — the
+        # surviving store node MFI actually wrote. Under a real shared-instance ctx, mfi's
+        # own getters (which read the *active* node) resolve MFDual's node or MFI's instance
+        # backing (only populated under legacy); entering the propose child makes them
+        # resolve the MultiFlowState MFI published there.
+        _pc = self._rc_child("propose")
+        _tok = enter_run(_pc) if _pc is not None else None
+        try:
+            winner = mfi.get_winner_inferencer()
+            review_alias = mfi.get_chosen_reviewer_alias()
+            fixer_alias = mfi.get_chosen_fixer_alias()
+            non_winners = mfi.get_non_winner_inferencers()
+            runner_up = mfi.get_runner_up_inferencer()
+            first_non_winner = mfi.get_first_non_winner_inferencer()
+        finally:
+            if _tok is not None:
+                exit_run(_tok)
 
         # Sanity warnings: dispatch was configured but winner was not detected.
         # Caused by missing winner_parser, malformed aggregator output, or the
@@ -532,7 +667,7 @@ class MultiFlowDualInferencer(DualInferencer):
         # reviewer); the fixer warning still fires because fixer dispatch DOES
         # need a winner.
         if winner is None:
-            if self.review_default is not None and not mfi.get_chosen_reviewer_alias():
+            if self.review_default is not None and not review_alias:
                 _logger.warning(
                     "MultiFlowDualInferencer: review_default is configured but "
                     "the winner could not be identified from MultiFlow output. "
@@ -541,40 +676,53 @@ class MultiFlowDualInferencer(DualInferencer):
                     "is configured AND the aggregator's prompt instructs the "
                     "LLM to emit <Winner>flow_X</Winner>."
                 )
-            if self.fixer_match_winner and not mfi.get_chosen_fixer_alias():
+            if self.fixer_match_winner and not fixer_alias:
                 _logger.warning(
-                    "MultiFlowDualInferencer: fixer_match_winner=True but the "
+                    "MultiFlowDualInferencer: fixer_strategy=winner but the "
                     "winner could not be identified. Fixer will keep its "
                     "construction-time value (typically falling through to "
                     "base_inferencer)."
                 )
 
-        # ----- Reviewer -----
-        # 1) LLM-driven alias takes precedence
-        alias = mfi.get_chosen_reviewer_alias()
+        # ----- Reviewer ----- (compute chosen reviewer + optional panel, then store once)
         chosen: Optional[InferencerBase] = None
-        if alias:
+        panel_set = False
+        panel_value = None
+        # 1) LLM-driven alias takes precedence
+        if review_alias:
             try:
-                chosen = self._resolve_id(alias)
+                chosen = self._resolve_id(review_alias)
             except KeyError as exc:
                 _logger.warning(
                     "MultiFlowDual: reviewer_alias %r could not be resolved "
                     "(not in inferencer_pool): %s — falling back to rule-based dispatch",
-                    alias,
+                    review_alias,
                     exc,
                 )
         if chosen is not None:
-            self.review_inferencer = chosen
-        elif self.reviewer_match_second and winner is not None:
-            # 2) Runner-up as reviewer (ranking-based or declaration-order fallback)
-            runner_up = mfi.get_runner_up_inferencer()
-            if runner_up is None:
-                runner_up = mfi.get_first_non_winner_inferencer()
-            if runner_up is not None and runner_up is not winner:
-                self.review_inferencer = runner_up
+            pass
+        elif self.reviewer_match_all_non_winners and winner is not None:
+            # 2) §3 PANEL: every non-winner flow becomes a reviewer. Populate the
+            # inherited Dual ``reviewers`` panel (review_inferencer = panelist 0, the
+            # rest independent panelists); the Dual review step runs them under
+            # ``review/panelist_i`` child ctxs and merges via merge_reviews.
+            if non_winners:
+                chosen = non_winners[0]
+                panel_set = True
+                panel_value = non_winners[1:] if len(non_winners) > 1 else None
             else:
                 _logger.warning(
-                    "MultiFlowDual: reviewer_match_second=True but no valid "
+                    "MultiFlowDual: reviewer_strategy=all_non_winners but no "
+                    "non-winner flows found. Reviewer unchanged."
+                )
+        elif self.reviewer_match_second and winner is not None:
+            # 2) Runner-up as reviewer (ranking-based or declaration-order fallback)
+            ru = runner_up if runner_up is not None else first_non_winner
+            if ru is not None and ru is not winner:
+                chosen = ru
+            else:
+                _logger.warning(
+                    "MultiFlowDual: reviewer_strategy=runner_up but no valid "
                     "runner-up found. Reviewer unchanged."
                 )
         elif self.review_default is not None:
@@ -595,33 +743,37 @@ class MultiFlowDualInferencer(DualInferencer):
                         fallback = cand_inf
                         break
                 if fallback is not None:
-                    self.review_inferencer = fallback
+                    chosen = fallback
                 else:
                     _logger.warning(
                         "MultiFlowDual: review_default is the winner and "
                         "priority_pool exhausted; using default (self-review)."
                     )
-                    self.review_inferencer = default
+                    chosen = default
             else:
-                self.review_inferencer = default
+                chosen = default
+
+        if chosen is not None:
+            self._role_set("review_inferencer", chosen, mfdual_ctx)
+        if panel_set:
+            self._role_set("reviewers", panel_value, mfdual_ctx)
 
         # ----- Fixer -----
-        alias = mfi.get_chosen_fixer_alias()
-        chosen = None
-        if alias:
+        chosen_fix: Optional[InferencerBase] = None
+        if fixer_alias:
             try:
-                chosen = self._resolve_id(alias)
+                chosen_fix = self._resolve_id(fixer_alias)
             except KeyError as exc:
                 _logger.warning(
                     "MultiFlowDual: fixer_alias %r could not be resolved "
                     "(not in inferencer_pool): %s — falling back to rule-based dispatch",
-                    alias,
+                    fixer_alias,
                     exc,
                 )
-        if chosen is not None:
-            self.fixer_inferencer = chosen
-        elif self.fixer_match_winner and winner is not None:
-            self.fixer_inferencer = winner
+        if chosen_fix is None and self.fixer_match_winner and winner is not None:
+            chosen_fix = winner
+        if chosen_fix is not None:
+            self._role_set("fixer_inferencer", chosen_fix, mfdual_ctx)
 
     def _collect_candidate_inferencers(self) -> List[InferencerBase]:
         """Raw collection of every inferencer that could plausibly be
@@ -703,20 +855,43 @@ class MultiFlowDualInferencer(DualInferencer):
         # give them a fresh workspace + session so role artifacts don't mix
         # with propose-phase artifacts in flow_N_initial/. Identity guard inside
         # the helper protects originally-configured instances.
-        self._reassign_role_workspace(self.review_inferencer, "review_inferencer")
-        self._reassign_role_workspace(self.fixer_inferencer, "fixer_inferencer")
+        # C5: resolve the per-run roles via _role_get (ctx scratch under a real ctx,
+        # else the instance attribute) — never read self.review_inferencer directly here,
+        # which under a shared-instance ctx is the static definition, not the selection.
+        self._reassign_role_workspace(self._role_get("review_inferencer"), "review_inferencer")
+        self._reassign_role_workspace(self._role_get("fixer_inferencer"), "fixer_inferencer")
+        # §3 panel: the extra non-winner panelists (reviewers list) must ALSO be
+        # switched into the reviewer role/template — else they would review with
+        # their original flow role. Their per-panelist workspace is the
+        # ``review/panelist_i`` child the Dual review step publishes into the ctx.
+        for _panelist in (self._role_get("reviewers") or []):
+            self._reassign_role_workspace(_panelist, "review_inferencer")
         # NOTE: reset_session is handled by switch_role() inside
         # _reassign_role_workspace — no separate call needed here.
 
         mfi = self.base_inferencer
         if isinstance(mfi, MultiFlowInferencer):
+            from agent_foundation.common.inferencers.run_context import (
+                enter_run,
+                exit_run,
+            )
+
+            # Read dispatch under the propose child node (see _select_reviewer_and_fixer).
+            _pc = self._rc_child("propose")
+            _tok = enter_run(_pc) if _pc is not None else None
+            try:
+                _w_idx = mfi._last_winner_idx
+                _rank = mfi._last_ranking
+            finally:
+                if _tok is not None:
+                    exit_run(_tok)
             dispatch_extra = {"mfdual_dispatch": {
-                "winner_idx": mfi._last_winner_idx,
-                "ranking": mfi._last_ranking,
+                "winner_idx": _w_idx,
+                "ranking": _rank,
             }}
             round_idx = (self._state.get("total_iterations", 0) + 1) if isinstance(getattr(self, "_state", None), dict) else 1
             self._record_round_audit(
-                round_idx, "review_dispatch", self.review_inferencer,
+                round_idx, "review_dispatch", self._role_get("review_inferencer"),
                 extra=dispatch_extra,
             )
 

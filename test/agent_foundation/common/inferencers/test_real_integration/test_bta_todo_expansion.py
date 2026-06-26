@@ -85,7 +85,7 @@ async def test_bta_todo_expansion_with_real_llm_json(tmp_workspace):
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
         breakdown_parser=custom_parser,
-        worker_factory=factory,
+        worker_inferencers=factory,
         aggregator_inferencer=None,  # avoid deadlock
         expand_todos_to_workers=True,
         checkpoint_dir=str(tmp_workspace["checkpoint"]),

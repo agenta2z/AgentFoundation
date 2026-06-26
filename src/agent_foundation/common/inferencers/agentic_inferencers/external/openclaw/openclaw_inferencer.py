@@ -963,6 +963,8 @@ class OpenClawInferencer(StreamingInferencerBase):
         self,
         inference_input: Any,
         inference_config: Any = None,
+        *,
+        run_context=None,
         **kwargs: Any,
     ) -> Any:
         """Async inference with session management and auto-retry.
@@ -970,37 +972,52 @@ class OpenClawInferencer(StreamingInferencerBase):
         Args:
             inference_input: Prompt or structured input.
             inference_config: Ignored.
+            run_context: optional RunContext carrier (M3); installs the bridge so
+                ``active_session_id`` resolves to the connection-scoped handle.
             **kwargs: Supports ``session_id`` and ``new_session`` overrides.
 
         Returns:
             Accumulated response text string.
         """
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
 
-        session_id = kwargs.get(
-            "session_id",
-            self.active_session_id if self.auto_resume else self.session_id,
-        ) or self.session_id
+        _rc_token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
+        try:
+            new_session = kwargs.pop("new_session", False)
+            if new_session:
+                self.active_session_id = None
 
-        prompt = self._extract_prompt(inference_input)
+            session_id = kwargs.get(
+                "session_id",
+                self.active_session_id if self.auto_resume else self.session_id,
+            ) or self.session_id
 
-        # Auto-initialize new sessions when always_initialize_new_session=True
-        await self._maybe_initialize_session(session_id)
+            prompt = self._extract_prompt(inference_input)
 
-        result = await self._ainfer_with_retry(prompt, session_id)
+            # Auto-initialize new sessions when always_initialize_new_session=True
+            await self._maybe_initialize_session(session_id)
 
-        # Update active session
-        result_session = result.get("session_id") or session_id
-        self.active_session_id = result_session
+            result = await self._ainfer_with_retry(prompt, session_id)
 
-        return result.get("output", "")
+            # Update active session
+            result_session = result.get("session_id") or session_id
+            self.active_session_id = result_session
+
+            return result.get("output", "")
+        finally:
+            exit_run(_rc_token)
 
     def infer(
         self,
         inference_input: Any,
         inference_config: Any = None,
+        *,
+        run_context=None,
         **kwargs: Any,
     ) -> Any:
         """Sync inference with session management and auto-retry.
@@ -1008,6 +1025,7 @@ class OpenClawInferencer(StreamingInferencerBase):
         Args:
             inference_input: Prompt or structured input.
             inference_config: Ignored.
+            run_context: optional RunContext carrier (M3) forwarded to ainfer().
             **kwargs: Supports ``session_id`` and ``new_session`` overrides.
 
         Returns:
@@ -1015,7 +1033,9 @@ class OpenClawInferencer(StreamingInferencerBase):
         """
         from rich_python_utils.common_utils.async_function_helper import _run_async
 
-        return _run_async(self.ainfer(inference_input, inference_config, **kwargs))
+        return _run_async(
+            self.ainfer(inference_input, inference_config, run_context=run_context, **kwargs)
+        )
 
     async def ainfer_streaming(  # type: ignore[override]
         self,
@@ -1257,29 +1277,35 @@ class OpenClawInferencer(StreamingInferencerBase):
 
     # ── Convenience session methods ───────────────────────────────────────────
 
-    def new_session(self, inference_input: Any, **kwargs: Any) -> Any:
+    def new_session(self, inference_input: Any, *, run_context=None, **kwargs: Any) -> Any:
         """Start a new session and run inference. Clears session context.
 
         Args:
             inference_input: Prompt for the first message.
+            run_context: optional RunContext carrier (M3) forwarded to infer().
             **kwargs: Forwarded to ``infer()``.
 
         Returns:
             Response text.
         """
-        return self.infer(inference_input, new_session=True, **kwargs)
+        return self.infer(
+            inference_input, new_session=True, run_context=run_context, **kwargs
+        )
 
-    async def anew_session(self, inference_input: Any, **kwargs: Any) -> Any:
+    async def anew_session(self, inference_input: Any, *, run_context=None, **kwargs: Any) -> Any:
         """Async version of ``new_session()``.
 
         Args:
             inference_input: Prompt for the first message.
+            run_context: optional RunContext carrier (M3) forwarded to ainfer().
             **kwargs: Forwarded to ``ainfer()``.
 
         Returns:
             Response text.
         """
-        return await self.ainfer(inference_input, new_session=True, **kwargs)
+        return await self.ainfer(
+            inference_input, new_session=True, run_context=run_context, **kwargs
+        )
 
     # =========================================================================
     # InferencerBase abstract method implementations

@@ -1212,14 +1212,10 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
         Disconnects, optionally calls reset_session(), then reconnects.
         """
-        seen_ids: set = set()
-        for inf in (
-            self.planner_inferencer,
-            self.executor_inferencer,
-            self.analyzer_inferencer,
-        ):
-            if inf is not None and id(inf) not in seen_ids:
-                seen_ids.add(id(inf))
+        # §9.3/N-R2: route through the slot-aware iterator + per-child ctx bind so a
+        # reset_session targets each child's OWN Tier-3 handle (no-op without a ctx).
+        for slot, inf in self._iter_child_slots():
+            with self._with_child_ctx(slot):
                 await inf.adisconnect()
                 reset_fn = getattr(inf, "reset_session", None)
                 if reset_fn is not None and callable(reset_fn):
@@ -2039,6 +2035,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         result = await self.planner_inferencer.ainfer(
             state["current_input"],
             inference_config=plan_ic,
+            run_context=self._rc_child("planner"),
             **_inference_args,
         )
         plan_str = extract_response_text(result)
@@ -2184,6 +2181,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         result = await self.executor_inferencer.ainfer(
             executor_input,
             inference_config=impl_ic,
+            run_context=self._rc_child("executor"),
             **_inference_args,
         )
         executor_str = extract_response_text(result)
@@ -2230,6 +2228,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 analysis_result = await self.analyzer_inferencer.ainfer(
                     state.get("original_request", state["current_input"]),
                     inference_config=analysis_ic,
+                    run_context=self._rc_child("analyzer"),
                     **_inference_args,
                 )
                 analysis_str = extract_response_text(analysis_result)
@@ -2601,6 +2600,20 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     # endregion
 
     # region Core Two-Phase Flow
+
+    def _iter_child_slots(self):
+        """§9.3/N-Major1: semantic slots (planner/executor/analyzer) matching the
+        ``ctx.child(slot)`` used in ``_ainfer`` so lifecycle ops bind each child's
+        own Tier-3 handle."""
+        seen_ids = set()
+        for slot, inf in (
+            ("planner", self.planner_inferencer),
+            ("executor", self.executor_inferencer),
+            ("analyzer", self.analyzer_inferencer),
+        ):
+            if inf is not None and id(inf) not in seen_ids:
+                seen_ids.add(id(inf))
+                yield (slot, inf)
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
         """Async inference — core plan-then-implement flow.

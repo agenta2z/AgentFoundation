@@ -256,6 +256,22 @@ class DualInferencer(LinearWorkflowInferencer):
     checkpoint_dir: Optional[str] = attrib(default=None, kw_only=True)
     enable_checkpoint: bool = attrib(default=False, kw_only=True)
 
+    # --- §3 Part B: multi-reviewer panel ---
+    # When >1, the review step runs ``review_inferencer`` k times and merges the
+    # parsed reviews (deterministic union / dedup / never-downgrade) via
+    # ``review_aggregator`` (defaults to ``flow_parsers.merge_reviews``). Default 1
+    # => single-reviewer path, byte-identical. ``num_reviewers: k`` is the §2.5
+    # ``[reviewer]*k`` panel realized over one declared reviewer definition.
+    num_reviewers: int = attrib(default=1, kw_only=True)
+    review_aggregator: Optional[Callable] = attrib(default=None, kw_only=True)
+    # Optional declarative ``[reviewer] * k`` (e.g. via ``_repeat_``): k INDEPENDENT
+    # reviewer instances. When set, panelist ``i`` runs on ``reviewers[i]`` (its own
+    # definition state — switch_role/template), not a reused ``review_inferencer``.
+    # When None (default), the panel reuses ``review_inferencer`` across distinct
+    # ``review/panelist_i`` child contexts (runtime state still isolated). If set,
+    # ``num_reviewers`` defaults to ``len(reviewers)``.
+    reviewers: Optional[list] = attrib(default=None, kw_only=True)
+
     # --- Workspace support (opt-in, overrides checkpoint_dir when set) ---
 
     # --- Workflow-suppressed attrs inherited from LWI (init=False) ---
@@ -340,6 +356,141 @@ class DualInferencer(LinearWorkflowInferencer):
         super(DualInferencer, self).__attrs_post_init__()
 
     # ------------------------------------------------------------------
+    # M-AF1/C5: runtime role resolution (no self-mutation under a real ctx)
+    # ------------------------------------------------------------------
+    def _role_get(self, name: str):
+        """Resolve a runtime role (``review_inferencer``/``fixer_inferencer``/``reviewers``):
+        under a real (non-legacy) ctx, the per-run value cached in ``ctx.node().scratch``
+        (so a shared instance run across N concurrent ctxs never clobbers); else the
+        instance attribute — the static definition, or the legacy/legacy-mint value a
+        legacy run mutated in place (byte-identical)."""
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            scratch = ctx.node().scratch
+            if name in scratch:
+                return scratch[name]
+        return getattr(self, name)
+
+    def _role_set(self, name: str, value, ctx) -> None:
+        """Store a runtime-selected role. Under a real (non-legacy) ``ctx`` write
+        ``ctx.node().scratch`` (no self-mutation → concurrency-isolated); else mutate the
+        instance attribute (legacy / legacy-mint — byte-identical, so post-call
+        ``self.review_inferencer`` reflects the selection)."""
+        if ctx is not None and not ctx.legacy_mint:
+            ctx.node().scratch[name] = value
+        else:
+            setattr(self, name, value)
+
+    # ------------------------------------------------------------------
+    # Commit 3 inherited-field audit: per-run TRANSIENT runtime fields
+    # ------------------------------------------------------------------
+    # The remaining per-run runtime fields Dual mutated on ``self`` during a
+    # call/attempt/round — ``_current_attempt``, ``_current_inference_config``,
+    # ``_current_extra_inference_args``, ``_current_round_ws``,
+    # ``_last_output_child_ws``, and the rebuilt ``step_configs`` — are all
+    # transient (re-derived each call; never serialized/resumed). They are
+    # virtualized into the active ctx's ``NodeRunState.scratch`` so a SHARED
+    # Dual/MFDual instance run under N concurrent ``RunContext``s never clobbers
+    # them across runs; with no active ctx, or a legacy / legacy-mint root, they
+    # fall back to an instance ``__dict__`` backing (byte-identical to the
+    # pre-virtualization behaviour — the legacy ``infer()`` path).
+    #
+    # Resolution mirrors ``_role_get``/``_role_set`` EXACTLY (the ``legacy_mint``
+    # check + ``ctx.node().scratch`` home), keeping the two seams coherent:
+    # ``_state``/``_pending_state`` are already virtualized by LWI's C10/G1
+    # compat-properties; these add the rest of the Dual-local runtime surface.
+    _RUN_SCRATCH_PREFIX = "_dual_run::"
+
+    def _run_get(self, name: str, default=None):
+        """Read a per-run transient field. Under a real (non-legacy) ctx return the
+        per-run value cached in ``ctx.node().scratch`` (concurrency-isolated); else the
+        instance ``__dict__`` backing (legacy / legacy-mint / no-ctx — byte-identical).
+        ``default`` is returned when neither home holds the field, so callers that used
+        ``getattr(self, "_current_*", <default>)`` keep their exact semantics."""
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            scratch = ctx.node().scratch
+            key = self._RUN_SCRATCH_PREFIX + name
+            if key in scratch:
+                return scratch[key]
+            return default
+        return self.__dict__.get(name + "_backing", default)
+
+    def _run_set(self, name: str, value) -> None:
+        """Write a per-run transient field. Under a real (non-legacy) ctx write
+        ``ctx.node().scratch`` (no self-mutation → concurrency-isolated); else mutate the
+        instance ``__dict__`` backing (legacy / legacy-mint / no-ctx — byte-identical)."""
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            ctx.node().scratch[self._RUN_SCRATCH_PREFIX + name] = value
+        else:
+            self.__dict__[name + "_backing"] = value
+
+    # ``_last_output_child_ws`` / ``_propose_child_ws`` — the per-run canonical-output
+    # trackers set by ``_step_propose_impl`` / ``_step_fix_impl`` and read by
+    # ``_finalize_output``. Virtualized as COMPAT-PROPERTIES (same seam as
+    # ``step_configs``) so plain ``self._<field>`` access transparently routes through
+    # the active ctx's scratch under a real context (concurrency-isolated — a shared
+    # Dual/MFDual instance run under N contexts never clobbers them) and the instance
+    # ``__dict__`` backing under legacy/no-ctx (byte-identical). They share the exact
+    # ``_run_get``/``_run_set`` backing key, so the existing explicit ``_run_set`` calls
+    # and these bare assignments resolve to the same home.
+    @property
+    def _last_output_child_ws(self):
+        return self._run_get("_last_output_child_ws", None)
+
+    @_last_output_child_ws.setter
+    def _last_output_child_ws(self, value):
+        self._run_set("_last_output_child_ws", value)
+
+    @property
+    def _propose_child_ws(self):
+        return self._run_get("_propose_child_ws", None)
+
+    @_propose_child_ws.setter
+    def _propose_child_ws(self, value):
+        self._run_set("_propose_child_ws", value)
+
+    # ``step_configs`` is virtualized as a COMPAT-PROPERTY (not via _run_get/_run_set)
+    # because it is inherited as an attrs ``attrib`` on LWI and read DIRECTLY as
+    # ``self.step_configs`` by the LWI engine itself (``_build_steps`` at build time,
+    # ``_setup_iteration`` when reset-per-iteration is on) — a property is the only seam
+    # that also routes those inherited direct reads through the active ctx. It is rebuilt
+    # per call/attempt and patched in place at the propose-override site
+    # (``self.step_configs[0] = ...``); confirmed Dual-local (NOT read by the base
+    # rich_python_utils ``Workflow`` engine — only by LWI/Dual). The in-place index
+    # assignment mutates the per-run list resolved by the getter, so it stays isolated
+    # under a real ctx and byte-identical under legacy. The attrs ``__init__`` assignment
+    # (no active ctx at construction) routes to the instance backing.
+    @property
+    def step_configs(self):
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            scratch = ctx.node().scratch
+            key = self._RUN_SCRATCH_PREFIX + "step_configs"
+            if key in scratch:
+                return scratch[key]
+        return self.__dict__.get("step_configs_backing", [])
+
+    @step_configs.setter
+    def step_configs(self, value):
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            ctx.node().scratch[self._RUN_SCRATCH_PREFIX + "step_configs"] = value
+            return
+        self.__dict__["step_configs_backing"] = value
+
+    # ------------------------------------------------------------------
     # Block WorkNodeBase.run() / arun() — callers must use infer()/ainfer()
     # ------------------------------------------------------------------
 
@@ -362,7 +513,7 @@ class DualInferencer(LinearWorkflowInferencer):
     # ------------------------------------------------------------------
 
     def _get_result_path(self, result_id, *args, **kwargs):
-        attempt = getattr(self, "_current_attempt", 0)
+        attempt = self._run_get("_current_attempt", 0)
         if self._workspace is not None:
             return self._workspace.checkpoint_path(
                 os.path.join(
@@ -445,8 +596,8 @@ class DualInferencer(LinearWorkflowInferencer):
         """
         super()._write_step_marker(step_name)
         child_inf = {
-            "review": self.review_inferencer,
-            "fix": self.fixer_inferencer,
+            "review": self._role_get("review_inferencer"),
+            "fix": self._role_get("fixer_inferencer"),
             "propose": self.base_inferencer,
         }.get(step_name)
         child_ws = getattr(child_inf, "_workspace", None) if child_inf else None
@@ -474,7 +625,7 @@ class DualInferencer(LinearWorkflowInferencer):
         entries that already exist, so the fix output always takes
         precedence.
         """
-        child_ws = getattr(self, "_last_output_child_ws", None)
+        child_ws = self._run_get("_last_output_child_ws", None)
         if child_ws is not None:
             self._symlink_child_output(child_ws)
             propose_ws = getattr(self, "_propose_child_ws", None)
@@ -547,7 +698,7 @@ class DualInferencer(LinearWorkflowInferencer):
             counter = None
         if counter is None:
             return self.base_inferencer
-        return self.fixer_inferencer if self.fixer_inferencer is not None else self.base_inferencer
+        return self._role_get("fixer_inferencer") if self._role_get("fixer_inferencer") is not None else self.base_inferencer
 
     def _resolve_prior_proposer_output_path(self) -> Optional[str]:
         """Resolve the on-disk file path of the active proposer's prior output.
@@ -753,13 +904,14 @@ class DualInferencer(LinearWorkflowInferencer):
                 config.max_consensus_attempts,
             )
 
-            # Set up instance-level state (NOT in self._state — not picklable)
-            self._current_attempt = attempt
+            # Per-run transient working state — virtualized into the active ctx
+            # (Commit 3 audit), with an instance backing under legacy/no-ctx.
+            # NOT in self._state (not picklable); re-derived each call.
+            self._run_set("_current_attempt", attempt)
             self._current_config = config
 
-            # Non-picklable data stays on self (re-derived on resume)
-            self._current_inference_config = inference_config
-            self._current_extra_inference_args = _inference_args
+            self._run_set("_current_inference_config", inference_config)
+            self._run_set("_current_extra_inference_args", _inference_args)
 
             # Build step_configs for this attempt
             self._build_step_configs_for_attempt(config, attempt)
@@ -976,12 +1128,13 @@ class DualInferencer(LinearWorkflowInferencer):
 
         Uses self._state directly.
         """
+        self._check_cancelled()  # §2.1/P-#6: halt at the consensus-step boundary
         state = self._state
 
         if self.initial_prompt is not None:
             initial_prompt = self._build_initial_prompt(
                 state["inference_input"],
-                getattr(self, "_current_inference_config", {}),
+                self._run_get("_current_inference_config", {}),
                 attempt=state["attempt_record"]["attempt"],
             )
         else:
@@ -996,22 +1149,31 @@ class DualInferencer(LinearWorkflowInferencer):
             parts_subfolder=_sf,
         )
 
-        # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
-        # during the call may mutate _workspace.root on the inferencer.
+        # M7: the canonical propose child is ``self._workspace.child("propose")`` — the
+        # base is always dispatched at ``_rc_child("propose")``, so this equals where it
+        # wrote. Byte-identical to the old bare ``base._workspace`` read in legacy;
+        # correct under a ctx (the bare base read, with the instance backing left None
+        # by write-purity, would fall through to the worker ROOT). Snapshot its root
+        # BEFORE ainfer() for the round audit.
+        _eff_propose_ws = (
+            self._workspace.child("propose") if self._workspace is not None else None
+        )
         _propose_ws_snapshot = (
-            str(self.base_inferencer._workspace.root)
-            if getattr(self.base_inferencer, "_workspace", None) is not None
-            else None
+            str(_eff_propose_ws.root) if _eff_propose_ws is not None else None
         )
         _raw_base = str(
             await self.base_inferencer.ainfer(
-                initial_prompt, **getattr(self, "_current_extra_inference_args", {})
+                initial_prompt,
+                run_context=self._rc_child("propose"),
+                **self._run_get("_current_extra_inference_args", {}),
             )
         )
-        # Track canonical output child for _finalize_output symlink
-        if getattr(self.base_inferencer, "_workspace", None) is not None:
-            self._last_output_child_ws = self.base_inferencer._workspace
-            self._propose_child_ws = self.base_inferencer._workspace
+        # Track canonical output child for _finalize_output symlink. Bare assignment
+        # routes through the compat-properties → ctx scratch under a ctx (concurrency-
+        # isolated), instance backing under legacy.
+        if _eff_propose_ws is not None:
+            self._last_output_child_ws = _eff_propose_ws
+            self._propose_child_ws = _eff_propose_ws
         _sf = f"Round{state['total_iterations'] + 1:02d}"
         self.log_debug(
             _raw_base,
@@ -1034,7 +1196,7 @@ class DualInferencer(LinearWorkflowInferencer):
         base_output_str = self._maybe_replace_with_file_reference(
             base_output_str,
             round_index=0,
-            inference_config=getattr(self, "_current_inference_config", {}),
+            inference_config=self._run_get("_current_inference_config", {}),
         )
         _sf = f"Round{state['total_iterations'] + 1:02d}"
         self.log_info(
@@ -1066,6 +1228,7 @@ class DualInferencer(LinearWorkflowInferencer):
         ``state.get("consensus_iteration", state.get("iteration", 0))``
         so old checkpoints containing ``"iteration"`` resume correctly.
         """
+        self._check_cancelled()  # §2.1/P-#6: halt at the review-step boundary
         state = self._state
         if state is None:
             state = dict(self._pending_state)
@@ -1081,13 +1244,23 @@ class DualInferencer(LinearWorkflowInferencer):
         attempt_num = state["attempt_record"]["attempt"]
 
         # Per-round workspace: assign review_inferencer to round_NN/children/review/
-        if self._workspace is not None and self.review_inferencer is not None:
+        if self._workspace is not None and self._role_get("review_inferencer") is not None:
             round_ws = self._workspace.child(f"round_{consensus_iter:02d}")
             review_ws = round_ws.child("review")
             review_ws.ensure_dirs()
-            self.review_inferencer._workspace = review_ws
+            # M7 workspace virtualization: publish the per-round review workspace
+            # into the review child's context so its ``_workspace`` getter resolves
+            # it from the context (§2.12 option-b) — run-state in the context, not
+            # only on the child instance. The instance assignment stays as the
+            # byte-identical fallback (orchestrator-side reads + no-context runs).
+            _review_child = self._rc_child("review")
+            self._publish_workspace_to_ctx(_review_child, review_ws)
+            if _review_child is None:
+                # Legacy (no context): mutate the child instance (byte-identical).
+                # Under a context the workspace is published above -> write-pure.
+                self._role_get("review_inferencer")._workspace = review_ws
             # Store round workspace for fix step to use
-            self._current_round_ws = round_ws
+            self._run_set("_current_round_ws", round_ws)
 
         logger.info(
             "[%s] ROUND_TRACE inner_loop_top: iteration=%d, total_iterations=%d",
@@ -1108,10 +1281,10 @@ class DualInferencer(LinearWorkflowInferencer):
                 state["counter_feedback_str"],
                 iteration=iteration,
                 attempt=attempt_num,
-                inference_config=getattr(self, "_current_inference_config", {}),
+                inference_config=self._run_get("_current_inference_config", {}),
             )
             review_leaf_can_render = self._leaf_can_self_render(
-                self.review_inferencer
+                self._role_get("review_inferencer")
             )
             if review_leaf_can_render:
                 # Modern path: leaf renders. Get the rendered prompt for
@@ -1123,16 +1296,33 @@ class DualInferencer(LinearWorkflowInferencer):
                     for k, v in review_feed.items()
                     if k not in ("input", "__template_space__")
                 }
-                review_prompt = self.review_inferencer._render_prompt(
-                    state["inference_input"],
-                    extra_feed=_review_extra_feed,
+                # §2.7: render this logging preview under the SAME ./review ctx the
+                # dispatch uses (run_context=self._rc_child("review")), so the leaf's
+                # _effective_role claims ./review (its own node) and reads the role's
+                # RoleState there — NOT the active worker node, which it would tag with
+                # this leaf's creator and then collide with the fixer's worker-node
+                # pre-render. Bridge is no-op-safe when no ctx is active.
+                from agent_foundation.common.inferencers.run_context import (
+                    enter_run as _af_enter_run,
+                    exit_run as _af_exit_run,
                 )
+
+                _rv_rc = self._rc_child("review")
+                _rv_tok = _af_enter_run(_rv_rc) if _rv_rc is not None else None
+                try:
+                    review_prompt = self._role_get("review_inferencer")._render_prompt(
+                        state["inference_input"],
+                        extra_feed=_review_extra_feed,
+                    )
+                finally:
+                    if _rv_tok is not None:
+                        _af_exit_run(_rv_tok)
             else:
                 # Legacy path: orchestrator renders.
                 review_prompt = self._render_role_prompt(
                     "review",
                     review_feed,
-                    getattr(self, "_current_inference_config", {}),
+                    self._run_get("_current_inference_config", {}),
                 )
         except _RoleDisabledError:
             # No review template available (and caller didn't explicitly
@@ -1178,26 +1368,28 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
         # during the call may mutate _workspace.root on the inferencer.
+        _eff_review_ws = self._read_child_workspace(self._role_get("review_inferencer"), "review")
         _review_ws_snapshot = (
-            str(self.review_inferencer._workspace.root)
-            if getattr(self.review_inferencer, "_workspace", None) is not None
-            else None
+            str(_eff_review_ws.root) if _eff_review_ws is not None else None
         )
         if review_leaf_can_render:
             # Reuse _review_extra_feed computed above for the logging prompt —
             # same dict, no re-computation, no re-rendering by Dual.
             # The leaf's _render_prompt fires once inside ainfer().
             _raw_review = str(
-                await self.review_inferencer.ainfer(
+                await self._role_get("review_inferencer").ainfer(
                     state["inference_input"],
+                    run_context=self._rc_child("review"),
                     extra_feed=_review_extra_feed,
-                    **getattr(self, "_current_extra_inference_args", {}),
+                    **self._run_get("_current_extra_inference_args", {}),
                 )
             )
         else:
             _raw_review = str(
-                await self.review_inferencer.ainfer(
-                    review_prompt, **getattr(self, "_current_extra_inference_args", {})
+                await self._role_get("review_inferencer").ainfer(
+                    review_prompt,
+                    run_context=self._rc_child("review"),
+                    **self._run_get("_current_extra_inference_args", {}),
                 )
             )
         _sf = f"Round{total_iters:02d}"
@@ -1221,6 +1413,93 @@ class DualInferencer(LinearWorkflowInferencer):
                 ),
             )
         parsed_review = self.review_parser(review_output_str)
+        # §3 Part B: multi-reviewer panel — run k reviewers and merge the parsed
+        # reviews. Effective k is ``1 + len(reviewers)`` when a declarative
+        # ``reviewers`` panel is supplied (``review_inferencer`` is panelist 0), else
+        # ``num_reviewers``. No-op when k<=1 (byte-identical single-reviewer path).
+        _panel_extra = (
+            list(self._role_get("reviewers")) if self._role_get("reviewers") else None
+        )
+        _panel_k = (
+            1 + len(_panel_extra)
+            if _panel_extra and self.num_reviewers <= 1
+            else self.num_reviewers
+        )
+        if _panel_k and _panel_k > 1:
+            from agent_foundation.common.inferencers.flow_parsers import (
+                merge_reviews,
+            )
+
+            # §3: each additional panelist runs under its OWN child node
+            # (review/panelist_i) so its state + Tier-3 live handles are isolated
+            # from the first reviewer and from each other (no session/subprocess
+            # cross-talk when the reviewer is a live-handle leaf). When ``reviewers``
+            # is set, panelist i is an INDEPENDENT instance (its own definition
+            # state); else the single ``review_inferencer`` is reused per child ctx.
+            # No child without an active ctx => legacy-mint, byte-identical.
+            _panel = [parsed_review]
+            _rev_parent = self._rc_child("review")
+            for _i in range(1, _panel_k):
+                _panelist = (
+                    _panel_extra[(_i - 1) % len(_panel_extra)]
+                    if _panel_extra
+                    else self._role_get("review_inferencer")
+                )
+                _panelist_ctx = (
+                    _rev_parent.child(f"panelist_{_i}")
+                    if _rev_parent is not None
+                    else None
+                )
+                if review_leaf_can_render:
+                    _rk = str(
+                        await _panelist.ainfer(
+                            state["inference_input"],
+                            run_context=_panelist_ctx,
+                            extra_feed=_review_extra_feed,
+                            **self._run_get("_current_extra_inference_args", {}),
+                        )
+                    )
+                else:
+                    _rk = str(
+                        await _panelist.ainfer(
+                            review_prompt,
+                            run_context=_panelist_ctx,
+                            **self._run_get("_current_extra_inference_args", {}),
+                        )
+                    )
+                _rk_out = self.response_parser(_rk)
+                if _rk_out is not None:
+                    _panel.append(self.review_parser(_rk_out))
+                else:
+                    # A panelist whose output we can't parse must NOT be silently
+                    # dropped — that would mask a possible rejection (the all-approve
+                    # rule would ignore it). Count it as a NON-approval so it blocks
+                    # consensus, consistent with panelist 0 (which raises on a parse
+                    # failure).
+                    _panel.append({"approved": False, "issues": []})
+            _aggregator = self.review_aggregator or merge_reviews
+            _merged = _aggregator(_panel)
+            # Consensus only when EVERY panelist approves; issues are the merged
+            # (deduped, never-downgraded) union — the schema _default_check_consensus
+            # expects. Other top-level fields carry over from the first review.
+            parsed_review = dict(parsed_review)
+            parsed_review["issues"] = _merged.get(
+                "issues", parsed_review.get("issues", [])
+            )
+            parsed_review["approved"] = all(
+                bool(r.get("approved")) for r in _panel
+            )
+            # Never-downgrade the top-level severity: it becomes the WORST across the
+            # panel, so the consensus check's severity fallback (approved=False ->
+            # accept when severity is within threshold) can't be fooled by panelist
+            # 0's severity when another panelist flagged a higher one.
+            _levels = self.consensus_config.severity_levels or []
+            _rank = {s: i for i, s in enumerate(_levels)}
+            _panel_sevs = [
+                r.get("severity") for r in _panel if r.get("severity") in _rank
+            ]
+            if _panel_sevs:
+                parsed_review["severity"] = max(_panel_sevs, key=_rank.get)
         self.log_info(
             review_output_str,
             "ReviewResponse",
@@ -1260,7 +1539,7 @@ class DualInferencer(LinearWorkflowInferencer):
         self._state = state
 
         self._record_round_audit(
-            total_iters, "review", self.review_inferencer,
+            total_iters, "review", self._role_get("review_inferencer"),
             workspace_root_at_phase=_review_ws_snapshot,
         )
 
@@ -1279,6 +1558,7 @@ class DualInferencer(LinearWorkflowInferencer):
         Uses ``consensus_iteration`` instead of ``iteration`` and
         ``self._pending_state`` for checkpoint state sync.
         """
+        self._check_cancelled()  # §2.1/P-#6: halt at the fix-step boundary
         state = self._state
         # Read with fallback for old checkpoint compat
         iteration = state.get("consensus_iteration", state.get("iteration", 0))
@@ -1287,11 +1567,16 @@ class DualInferencer(LinearWorkflowInferencer):
         parsed_review = state["parsed_review"]
 
         # Per-round workspace: assign fixer to round_NN/children/fix/
-        round_ws = getattr(self, "_current_round_ws", None)
-        if round_ws is not None and self.fixer_inferencer is not None:
+        round_ws = self._run_get("_current_round_ws", None)
+        if round_ws is not None and self._role_get("fixer_inferencer") is not None:
             fix_ws = round_ws.child("fix")
             fix_ws.ensure_dirs()
-            self.fixer_inferencer._workspace = fix_ws
+            # M7 workspace virtualization (see review step): publish to the fix
+            # child's context + keep the instance assignment as the fallback.
+            _fix_child = self._rc_child("fix")
+            self._publish_workspace_to_ctx(_fix_child, fix_ws)
+            if _fix_child is None:
+                self._role_get("fixer_inferencer")._workspace = fix_ws  # legacy (byte-identical)
 
         try:
             # Phase 2 (leaf-owned template rendering): build feed dict, then
@@ -1307,7 +1592,7 @@ class DualInferencer(LinearWorkflowInferencer):
                 review_output=state.get("review_output_str"),
             )
             fixer_leaf_can_render = self._leaf_can_self_render(
-                self.fixer_inferencer
+                self._role_get("fixer_inferencer")
             )
             if fixer_leaf_can_render:
                 # Modern path: leaf renders. Pre-render for logging via
@@ -1318,10 +1603,25 @@ class DualInferencer(LinearWorkflowInferencer):
                     for k, v in followup_feed.items()
                     if k not in ("input", "__template_space__")
                 }
-                followup_prompt = self.fixer_inferencer._render_prompt(
-                    state["inference_input"],
-                    extra_feed=_fixer_extra_feed,
+                # §2.7: render this logging preview under the SAME ./fix ctx the
+                # dispatch uses (run_context=self._rc_child("fix")), so the fixer leaf
+                # claims ./fix (its own node) and reads the role's RoleState there —
+                # not the active worker node (which the reviewer already tagged).
+                from agent_foundation.common.inferencers.run_context import (
+                    enter_run as _af_enter_run,
+                    exit_run as _af_exit_run,
                 )
+
+                _fx_rc = self._rc_child("fix")
+                _fx_tok = _af_enter_run(_fx_rc) if _fx_rc is not None else None
+                try:
+                    followup_prompt = self._role_get("fixer_inferencer")._render_prompt(
+                        state["inference_input"],
+                        extra_feed=_fixer_extra_feed,
+                    )
+                finally:
+                    if _fx_tok is not None:
+                        _af_exit_run(_fx_tok)
             else:
                 # Legacy path: orchestrator renders.
                 followup_prompt = self._render_role_prompt(
@@ -1359,30 +1659,32 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
         # during the call may mutate _workspace.root on the inferencer.
+        _eff_fix_ws = self._read_child_workspace(self._role_get("fixer_inferencer"), "fix")
         _fix_ws_snapshot = (
-            str(self.fixer_inferencer._workspace.root)
-            if getattr(self.fixer_inferencer, "_workspace", None) is not None
-            else None
+            str(_eff_fix_ws.root) if _eff_fix_ws is not None else None
         )
         if fixer_leaf_can_render:
             # Reuse _fixer_extra_feed computed above — same dict, one render.
             _raw_fix = str(
-                await self.fixer_inferencer.ainfer(
+                await self._role_get("fixer_inferencer").ainfer(
                     state["inference_input"],
+                    run_context=self._rc_child("fix"),
                     extra_feed=_fixer_extra_feed,
-                    **getattr(self, "_current_extra_inference_args", {}),
+                    **self._run_get("_current_extra_inference_args", {}),
                 )
             )
         else:
             _raw_fix = str(
-                await self.fixer_inferencer.ainfer(
+                await self._role_get("fixer_inferencer").ainfer(
                     followup_prompt,
-                    **getattr(self, "_current_extra_inference_args", {}),
+                    run_context=self._rc_child("fix"),
+                    **self._run_get("_current_extra_inference_args", {}),
                 )
             )
         # Track canonical output child for _finalize_output symlink
-        if getattr(self.fixer_inferencer, "_workspace", None) is not None:
-            self._last_output_child_ws = self.fixer_inferencer._workspace
+        _eff_fix_ws_out = self._read_child_workspace(self._role_get("fixer_inferencer"), "fix")
+        if _eff_fix_ws_out is not None:
+            self._run_set("_last_output_child_ws", _eff_fix_ws_out)
         self.log_debug(
             _raw_fix,
             "RawFixResponse",
@@ -1431,7 +1733,7 @@ class DualInferencer(LinearWorkflowInferencer):
         self._state = state
         self._pending_state = dict(state)
         self._record_round_audit(
-            total_iters, "fix", self.fixer_inferencer,
+            total_iters, "fix", self._role_get("fixer_inferencer"),
             workspace_root_at_phase=_fix_ws_snapshot,
         )
         return fix_output_str
@@ -1524,38 +1826,6 @@ class DualInferencer(LinearWorkflowInferencer):
         if not leaf.template_key and not leaf.template_root_space:
             return False
         return True
-
-    async def _ainvoke_with_feed(
-        self,
-        leaf,
-        inference_input: str,
-        feed: dict,
-        extra_inference_args: dict,
-    ) -> str:
-        """Invoke a child leaf with a feed dict.
-
-        Routes between leaf-side rendering (modern, via extra_feed=) and
-        orchestrator-side rendering (legacy, via _render_role_prompt) based
-        on whether the leaf can self-render. Returns the raw response string.
-
-        The feed dict's reserved keys ({"input", "__template_space__"}) are
-        stripped before passing as extra_feed (the leaf re-derives input
-        from inference_input itself; __template_space__ comes from the
-        leaf's own template_root_space).
-        """
-        # Strip reserved keys — the leaf manages these itself.
-        leaf_extra_feed = {
-            k: v
-            for k, v in feed.items()
-            if k not in ("input", "__template_space__")
-        }
-        return str(
-            await leaf.ainfer(
-                inference_input,
-                extra_feed=leaf_extra_feed,
-                **extra_inference_args,
-            )
-        )
 
     def _build_initial_prompt(
         self,
@@ -1942,35 +2212,58 @@ class DualInferencer(LinearWorkflowInferencer):
     # region Lifecycle
 
     def _iter_child_inferencers(self):
-        """Active step inferencers: base (propose), review, fixer.
+        """Active step inferencers: base (propose), review, fixer, and any §3
+        ``reviewers`` panel members.
 
         Used uniformly by ``aconnect`` / ``adisconnect`` /
         ``_areset_sub_inferencers`` (lifecycle) and by
         ``InferencerBase.pre_retry`` (retry-time cleanup). A
         DualInferencer retry implies wholesale restart of the consensus
-        loop; resetting all three here is consistent with that semantic.
+        loop; resetting all here is consistent with that semantic. The
+        ``reviewers`` panel (independent ``[reviewer]*k`` instances) is included so
+        the extra panelists are connected/disconnected with the rest, not stranded.
         """
         seen_ids = set()
         for inf in (
             self.base_inferencer,
             self.review_inferencer,
             self.fixer_inferencer,
+            *(self.reviewers or []),
         ):
             if inf is not None and id(inf) not in seen_ids:
                 seen_ids.add(id(inf))
                 yield inf
 
+    def _iter_child_slots(self):
+        """§9.3/N-Major1: semantic slots matching the ``ctx.child(slot)`` used in
+        ``_ainfer`` (propose/review/fix) so lifecycle ops bind each child's OWN
+        Tier-3 handle. Mirrors the dedup of ``_iter_child_inferencers``."""
+        seen_ids = set()
+        for slot, inf in (
+            ("propose", self.base_inferencer),
+            ("review", self.review_inferencer),
+            ("fix", self.fixer_inferencer),
+        ):
+            if inf is not None and id(inf) not in seen_ids:
+                seen_ids.add(id(inf))
+                yield (slot, inf)
+
     async def _areset_sub_inferencers(self):
-        """Reset all sub-inferencers by disconnecting and reconnecting."""
-        for inf in self._iter_child_inferencers():
-            prev_session_id = getattr(inf, "active_session_id", None)
-            await inf.adisconnect()
-            if self.new_session_per_attempt:
-                if hasattr(inf, "reset_session"):
-                    inf.reset_session()
-                await inf.aconnect()
-            else:
-                await inf.aconnect(session_id=prev_session_id)
+        """Reset all sub-inferencers by disconnecting and reconnecting.
+
+        §9.3/N-R2: each child's reset runs under its own ``ctx.child(slot)`` so a
+        ``reset_session`` targets the child's OWN Tier-3 handle (no-op binding
+        without an active context -> byte-identical legacy behavior)."""
+        for slot, inf in self._iter_child_slots():
+            with self._with_child_ctx(slot):
+                prev_session_id = getattr(inf, "active_session_id", None)
+                await inf.adisconnect()
+                if self.new_session_per_attempt:
+                    if hasattr(inf, "reset_session"):
+                        inf.reset_session()
+                    await inf.aconnect()
+                else:
+                    await inf.aconnect(session_id=prev_session_id)
 
     async def aconnect(self, **kwargs):
         """Establish connections for all sub-inferencers.

@@ -220,7 +220,9 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
     def _collect_all_responses(self, input_val, state):
         """Collect all base responses for IntegrateAll mode."""
         return self._concat_base_responses(
-            *(self.base_inferencer.iter_infer(state["original_input"]))
+            *(self.base_inferencer.iter_infer(
+                state["original_input"], run_context=self._rc_child("base")
+            ))
         )
 
     def _build_reflective_response(self, state):
@@ -303,7 +305,9 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
 
         if self.reflection_style == ReflectionStyles.IntegrateAll:
             reflection_input = self._concat_base_responses(
-                *(self.base_inferencer.iter_infer(inference_input, **_inference_args))
+                *(self.base_inferencer.iter_infer(
+                    inference_input, run_context=self._rc_child("base"), **_inference_args
+                ))
             )
             processed_reflection_input = self._process_reflection_input(
                 inference_input=inference_input,
@@ -323,7 +327,7 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
         else:
             all_inference_responses = []
             for response in self.base_inferencer.iter_infer(
-                inference_input, **_inference_args
+                inference_input, run_context=self._rc_child("base"), **_inference_args
             ):
                 if self.reflection_style == ReflectionStyles.NoReflection:
                     inference_response = InferencerResponse(

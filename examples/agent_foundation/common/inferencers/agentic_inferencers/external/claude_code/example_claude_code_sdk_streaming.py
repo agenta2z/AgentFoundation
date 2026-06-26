@@ -204,7 +204,7 @@ def main():
         help="Query to send to Claude",
     )
     parser.add_argument(
-        "-r", "--root-folder",
+        "-t", "--target-path",
         default=os.path.expanduser("~"),
         help="Working directory for Claude Code agent (default: home dir)",
     )
@@ -221,7 +221,7 @@ def main():
 
     print()
     print("Claude Code SDK Inferencer Demo")
-    print(f"   Root folder: {args.target_path}")
+    print(f"   Target path: {args.target_path}")
     print()
 
     # Demo 1: Async single call

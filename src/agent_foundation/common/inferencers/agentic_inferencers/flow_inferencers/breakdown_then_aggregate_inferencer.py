@@ -383,17 +383,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     worker_query_fields: tuple = attrib(default=("description", "todos"), kw_only=True)
 
     # === Per-query worker ===
-    # worker_factory can be:
-    #   - Callable(sub_query, index) -> InferencerBase  (homogeneous, all same type)
-    #   - dict[str, Callable | functools.partial]: maps task type -> factory.
-    #     functools.partial entries are called with no args to create fresh instances.
-    #     "_default" can be a string referencing another key.
-    #     Requires task_type_arg_name and parser returning List[dict] with "args".
-    worker_factory: Any = attrib(default=None)
+    # ``worker_inferencers`` is the SINGLE source of per-subtask workers. Accepted shapes:
+    #   - Callable(sub_query, index) -> InferencerBase: homogeneous / dynamic-per-index.
+    #   - dict[str, Callable | functools.partial | LazyConfigFactory]: heterogeneous —
+    #     maps task type -> factory; ``partial``/``LazyConfigFactory`` entries are called
+    #     no-args for a fresh instance. ``"_default"`` may be a string referencing another
+    #     key. Requires ``task_type_arg_name`` and a parser returning List[dict] with "args".
+    #   - config recipe ``{_target_: <Worker>, ...}``: the ``lazy_config_factory`` metadata
+    #     makes the RPU config walker wrap it in a ``LazyConfigFactory`` (same machinery as
+    #     ``*_factory`` fields) — fresh instance per subtask, no magic ``_factory`` suffix.
+    #   - list[InferencerBase]: a pre-built static-K list, served round-robin.
+    # Every subtask gets its own FRESH worker (object identity = worker ID); created workers
+    # are ephemeral per-subtask locals, never stored on ``self`` (per-run state lives in the
+    # RunContext node). MFI sets this internally to its flow-builder closure.
+    worker_inferencers: Any = attrib(
+        default=None, kw_only=True, metadata={"lazy_config_factory": True}
+    )
 
     # When set, enables heterogeneous workers. Each sub_query item can be a dict
     # {"query": str, "args": {...}}. The value of args[task_type_arg_name] selects
-    # which worker factory to use from a dict-typed worker_factory.
+    # which worker factory to use from a dict-typed ``worker_inferencers``.
     task_type_arg_name: Optional[str] = attrib(default=None, kw_only=True)
     # Controls whether subtasks with multiple "todos" are expanded into one
     # worker per todo. Accepts bool (all types) or dict {task_type: bool}
@@ -558,6 +567,23 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         """
         return f"worker_{index}"
 
+    async def _cross_flow_depart_if_tagged(self, worker) -> None:
+        """Depart the cross-flow step barrier for ``worker`` if it is a coordinated flow.
+
+        No-op for ordinary BTA workers (untagged) or when no rendezvous is active. The
+        :class:`MultiFlowInferencer` subclass tags coordinated flow workers with
+        ``_cross_flow_index`` and provides ``_resolve_rendezvous``. The rendezvous's
+        ``leave`` is idempotent, so this worker-boundary safety net coexists with the
+        LWI-level depart (which fires only when the worker actually runs its ``_ainfer``).
+        """
+        idx = getattr(worker, "_cross_flow_index", None)
+        if idx is None:
+            return
+        resolver = getattr(self, "_resolve_rendezvous", None)
+        rdv = resolver() if resolver is not None else None
+        if rdv is not None:
+            await rdv.leave(idx)
+
     def _is_worker_child_name(self, name: str) -> bool:
         """Return True if ``name`` matches a worker child directory name.
 
@@ -573,6 +599,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # InferencerBase.__attrs_post_init__ syncs self.workspace → self._workspace.
         # The legacy `workspace_root` shorthand was removed 2026-05-05.
         super().__attrs_post_init__()
+
         if self._workspace is not None:
             self._workspace.ensure_dirs()
 
@@ -614,7 +641,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # Register subgraph factories for WorkGraph's registry-based expansion
         # reconstruction. On resume, _reconstruct_graph_expansions() looks up
         # expansion_id in subgraph_registry and calls the factory. The closure
-        # captures `self` so it can access worker_factory, aggregator_inferencer, etc.
+        # captures `self` so it can access worker_inferencers, aggregator_inferencer, etc.
         self.subgraph_registry = self.subgraph_registry or {}
         self.subgraph_registry["bta_diamond"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
         self.subgraph_registry["bta_workers"] = lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
@@ -850,6 +877,53 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         _logger.info("Parsed %d subtasks from JSON breakdown", len(queries))
         return queries
 
+    # ------------------------------------------------------------------
+    # Part F (GT#13): graph node identity = ctx path — route the reporter
+    # through the shared Tier-2 ``ctx.runtime.graph_reporter`` so a single
+    # shared inferencer instance reused across N concurrent RunContexts emits
+    # N distinct viz nodes (one per ``ctx.path``), instead of last-write-wins
+    # onto per-instance mutable reporter handles. Byte-identical with no ctx.
+    # ------------------------------------------------------------------
+    def _resolve_graph_reporter(self):
+        """The graph reporter sink for THIS orchestrator's own nodes (Part F).
+
+        Node identity is the running unit's **ctx path**, not its Python instance
+        (GT#13). So the reporter is resolved from the **shared Tier-2 sink**
+        ``ctx.runtime.graph_reporter`` (shared by reference down the ctx tree,
+        never persisted) and **namespaced by this orchestrator's ctx path** —
+        i.e. its flat child node ids (``worker_0``/``aggregator``/``breakdown``)
+        are auto-prefixed by where it sits in the ctx tree. Consequences:
+
+        * **Top-level run** (``ctx.path == "/"``): the relative path is empty, so
+          this returns the raw shared sink and node ids stay flat -> **byte-
+          identical** with the pre-Part-F instance read.
+        * **Nested BTA** (e.g. ``/parallel_0/worker_0``): returns the shared sink
+          namespaced under ``parallel_0/worker_0`` — so a single shared inferencer
+          reused across N concurrent ctxs emits N **distinct** node subtrees keyed
+          by path (replacing the old per-instance ``_bta_prefix`` disambiguation
+          and the last-write-wins ``worker.graph_reporter`` wiring).
+        * **No context** (legacy/no-ctx): returns the instance attrib exactly.
+
+        The shared sink is **seeded once** from the instance attrib the first time
+        a ctx is active and the slot is empty, so an externally-wired
+        ``self.graph_reporter`` (executor) transparently becomes the Tier-2 sink.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return self.graph_reporter
+        runtime = ctx.runtime
+        if runtime.graph_reporter is None and self.graph_reporter is not None:
+            # Seed-once: lift the externally-wired instance reporter into the
+            # shared Tier-2 binding so every node under this run resolves it.
+            runtime.graph_reporter = self.graph_reporter
+        # Namespace by this orchestrator's ctx path (relative to the run root):
+        # the per-node fan-out that makes node identity == ctx.path.
+        return runtime.child_reporter(ctx.path, base_path="/")
+
     def _make_graph_status_callback(self):
         """Build the async status callback for WorkGraphNode event propagation.
 
@@ -862,7 +936,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         _ImportFactory, workspace_root is None at construction; _workspace is
         assigned later at runtime via worker._workspace = worker_ws.
         """
-        reporter = self.graph_reporter
+        # Part F: resolve the shared Tier-2 sink (seeded from the instance) — this
+        # runs inside ``_ainfer`` under the active ctx; with no ctx it is the
+        # instance attrib (byte-identical).
+        reporter = self._resolve_graph_reporter()
         _bta_self = self
 
         async def _async_status_cb(event):
@@ -911,20 +988,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         so it propagates to expansion nodes automatically.
         """
         pending_topo = getattr(self, '_pending_topology', None)
+        _reporter = self._resolve_graph_reporter()  # Part F: shared Tier-2 sink
         _logger.info(
             "[BTA] _emit_pending_graph_topology: has_reporter=%s has_pending=%s",
-            self.graph_reporter is not None, pending_topo is not None
+            _reporter is not None, pending_topo is not None
         )
         if pending_topo is not None:
             _logger.info(
                 "[BTA] topology: %d nodes, %d edges",
                 len(pending_topo.nodes), len(pending_topo.edges)
             )
-        if self.graph_reporter is None or pending_topo is None:
+        if _reporter is None or pending_topo is None:
             return
         self._pending_topology = None  # clear before await (re-entrant safety)
         try:
-            await self.graph_reporter.on_graph_topology(pending_topo)
+            await _reporter.on_graph_topology(pending_topo)
 
             # Breakdown is a VIRTUAL node — manually prepended to the topology, NOT a real
             # WorkGraphNode. So the graph event callback never fires for it.
@@ -943,7 +1021,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         _bd_output = str(_cand)
                         break
                 try:
-                    await self.graph_reporter.on_node_status(
+                    await _reporter.on_node_status(
                         "breakdown", "completed",
                         output_path=_bd_output,
                     )
@@ -977,6 +1055,31 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             "checkpoint_dir or workspace must be set for result saving"
         )
 
+    def _get_effective_predefined_sub_queries(self):
+        """M5: read-through accessor for the runtime sub-queries.
+
+        Prefers a value stored in the active ``ctx.node.call`` (runtime-propagated
+        per-call input — written without mutating the definition) and falls back
+        to the instance field ``self.predefined_sub_queries``. **Byte-identical**
+        when no context override is present (returns the instance field exactly).
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            node = ctx.node(creator=(type(self).__qualname__, ctx.path))
+            call = node.call
+            override = None
+            if isinstance(call, dict):
+                override = call.get("predefined_sub_queries")
+            else:
+                override = getattr(call, "effective_sub_queries", None)
+            if override is not None:
+                return override
+        return self.predefined_sub_queries
+
     def _resolve_predefined_sub_queries(self) -> List:
         """Resolve predefined_sub_queries into a list of sub-queries.
 
@@ -989,7 +1092,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
               N = max_breakdown or max_concurrency or 1 (auto-repeat mode).
             - Any other type: coerced to str with a warning (single-item list).
         """
-        psq = self.predefined_sub_queries
+        psq = self._get_effective_predefined_sub_queries()
         if isinstance(psq, str):
             # Auto-repeat mode: replicate single query N times
             n = self.max_breakdown or self.max_concurrency or 1
@@ -1069,12 +1172,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     async def _emit_graph_reconcile(self):
         """Emit final node statuses so the frontend can correct any stale UI state."""
-        if self.graph_reporter is None:
+        _reporter = self._resolve_graph_reporter()  # Part F: shared Tier-2 sink
+        if _reporter is None:
             return
         try:
             statuses = {n.name: "completed" for n in self._all_nodes()}
             statuses["breakdown"] = "completed"
-            await self.graph_reporter.on_graph_reconcile(statuses)
+            await _reporter.on_graph_reconcile(statuses)
         except Exception:
             pass
 
@@ -1090,7 +1194,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         are the deliverables (organized under ``workers/``).
         """
         agg_inf = self.aggregator_inferencer
-        agg_ws = getattr(agg_inf, "_workspace", None) if agg_inf else None
+        # M7: resolve the aggregator's PUBLISHED workspace from its child ctx node
+        # (override-aware), not the bare property which under the parent ctx misses
+        # the child's mailbox and returns None/the BTA's own ws — orphaning the plan.
+        agg_ws = self._read_child_workspace(agg_inf, "aggregator") if agg_inf else None
 
         if agg_ws is not None:
             self._symlink_child_output(agg_ws, child_output_name=getattr(agg_inf, "output_path", None))
@@ -1107,7 +1214,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 for i, worker in enumerate(
                     getattr(self, "_worker_instances", [])
                 ):
-                    worker_ws = getattr(worker, "_workspace", None)
+                    # M7: read the worker's canonical workspace from the orchestrator's
+                    # own layout (self._workspace.child(<dir>)), not the bare property
+                    # which under the parent ctx misses the worker's published mailbox.
+                    worker_ws = (
+                        self._workspace.child(self._worker_child_name(i))
+                        if self._workspace is not None else None
+                    )
                     if worker_ws and worker_ws.has_deliverables:
                         self._symlink_or_copy(
                             worker_ws.deliverables_dir,
@@ -1182,7 +1295,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         agg_inf = self.aggregator_inferencer
         if agg_inf is None:
             return None
-        agg_ws = getattr(agg_inf, "_workspace", None)
+        # M7: override-aware read (see _finalize_output) — the truncated-response
+        # proposal-index fallback must also resolve the published aggregator workspace.
+        agg_ws = self._read_child_workspace(agg_inf, "aggregator")
         if agg_ws is None:
             return None
         out_name = getattr(agg_inf, "output_path", None) or "output.md"
@@ -1220,7 +1335,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # Check if aggregator produced deliverables (written by leaf's
         # _finalize_output which runs before this via __ainfer_single_impl)
         agg_inf = self.aggregator_inferencer
-        agg_ws = getattr(agg_inf, "_workspace", None) if agg_inf else None
+        # M7: resolve the aggregator's PUBLISHED workspace from its child ctx node
+        # (override-aware), not the bare property which under the parent ctx misses
+        # the child's mailbox and returns None/the BTA's own ws — orphaning the plan.
+        agg_ws = self._read_child_workspace(agg_inf, "aggregator") if agg_inf else None
         has_deliverables = (
             agg_ws is not None and getattr(agg_ws, "has_deliverables", False)
         )
@@ -1272,12 +1390,26 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         """The aggregator inferencer.
 
         Workers are factory-created per-run in generic BTA (via
-        ``worker_factory``), so this base implementation does not yield
+        ``worker_inferencers``), so this base implementation does not yield
         them — subclasses with declarative worker references (e.g.,
         :class:`MultiFlowInferencer`) extend this to include them.
         """
         if self.aggregator_inferencer is not None:
             yield self.aggregator_inferencer
+
+    def _iter_child_slots(self):
+        """§9.3/N-Major1: semantic slots for the static children (breakdown,
+        aggregator) matching the ``ctx.child(slot)`` used in ``_ainfer``. Workers
+        are dynamic (per-run via ``worker_inferencers`` — callable/dict/list) and are
+        bound to ``ctx.child(worker_node_name)`` at spawn time, not here."""
+        seen_ids = set()
+        for slot, inf in (
+            ("breakdown", self.breakdown_inferencer),
+            ("aggregator", self.aggregator_inferencer),
+        ):
+            if inf is not None and id(inf) not in seen_ids:
+                seen_ids.add(id(inf))
+                yield (slot, inf)
 
     def _validate_worker_isolation(self, workers):
         """Check that no two workers share a sub-inferencer instance.
@@ -1303,7 +1435,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     _logger.warning(
                         "BTA[%s] workers %d and %d share inferencer %s (id=0x%x). "
                         "This causes cross-worker state contamination. "
-                        "Ensure the worker_factory field uses LazyConfigFactory "
+                        "Ensure the worker_inferencers field uses LazyConfigFactory "
                         "(auto-applied for *_factory attrs with _target_:) to "
                         "produce independent sub-trees per call.",
                         getattr(self, "name", "?"), seen[iid], i,
@@ -1393,7 +1525,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # Emit initial single-node "Breakdown: Running" topology immediately.
         # This shows the user that something is happening before breakdown completes
         # (which can take 30-60s). The full diamond topology replaces it later.
-        if self.graph_reporter is not None:
+        # Part F: resolve (and seed) the shared Tier-2 reporter once — this runs
+        # under the active ctx (public ``ainfer`` bridge); no ctx -> instance attrib.
+        _reporter = self._resolve_graph_reporter()
+        if _reporter is not None:
             try:
                 from agent_foundation.common.inferencers.graph_events import (
                     GraphTopologyEvent, NodeStatus,
@@ -1404,7 +1539,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     edges=[],
                     layout="horizontal",
                 )
-                await self.graph_reporter.on_graph_topology(initial_topo)
+                await _reporter.on_graph_topology(initial_topo)
             except Exception as _e:
                 _logger.warning("[BTA] initial topology emit failed: %s", _e)
 
@@ -1468,7 +1603,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             # When breakdown returns GraphExpansionResult, _handle_graph_expansion
             # copies _graph_event_callback from the breakdown node to all worker
             # nodes — so they emit Running/Completed status events in real-time.
-            if self.graph_reporter is not None:
+            if _reporter is not None:  # Part F: shared Tier-2 sink (resolved above)
                 self.set_graph_event_callback(
                     self._make_graph_status_callback()
                 )
@@ -1481,7 +1616,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         result = self._unwrap_workgraph_result(result)
 
         # Emit full topology after expansion attaches subgraph
-        if self.graph_reporter is not None and not self._graph_topology_emitted:
+        if _reporter is not None and not self._graph_topology_emitted:  # Part F sink
             try:
                 from agent_foundation.common.inferencers.graph_events import (
                     GraphTopologyEvent, NodeStatus,
@@ -1558,7 +1693,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
             # Determine if this task type should expand todos
             task_type = None
-            if isinstance(self.worker_factory, dict) and self.task_type_arg_name:
+            if isinstance(self.worker_inferencers, dict) and self.task_type_arg_name:
                 task_type = sq_args.get(self.task_type_arg_name, "_default")
 
             if isinstance(self.expand_todos_to_workers, dict):
@@ -1567,9 +1702,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 should_expand = self.expand_todos_to_workers
 
             factory_entry = None
-            if task_type and isinstance(self.worker_factory, dict):
-                factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("_default")
+            if task_type and isinstance(self.worker_inferencers, dict):
+                factory_entry = self.worker_inferencers.get(
+                    task_type, self.worker_inferencers.get("_default")
                 )
                 if isinstance(factory_entry, dict):
                     should_expand = factory_entry.get("expand_todos", should_expand)
@@ -1605,19 +1740,28 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 query_str = sq
                 sq_args = {}
 
-            # Select and invoke worker factory
+            # Resolve a FRESH worker for this subtask from the single
+            # ``worker_inferencers`` source. Accepted shapes (see the field docstring):
+            #   list -> static-K round-robin; dict -> heterogeneous dispatch by task_type;
+            #   LazyConfigFactory/partial -> call no-args; callable -> call (sub_query, index).
+            from rich_python_utils.config_utils._lazy_config_factory import (
+                LazyConfigFactory,
+            )
+            worker = None
             task_type = None
-            if isinstance(self.worker_factory, dict):
+            wi = self.worker_inferencers
+            if isinstance(wi, list):
+                if wi:
+                    worker = wi[i % len(wi)]
+            elif isinstance(wi, dict):
                 task_type = (
                     sq_args.get(self.task_type_arg_name, "_default")
                     if self.task_type_arg_name
                     else "_default"
                 )
-                factory_entry = self.worker_factory.get(
-                    task_type, self.worker_factory.get("_default")
-                )
+                factory_entry = wi.get(task_type, wi.get("_default"))
                 if isinstance(factory_entry, str):
-                    factory_entry = self.worker_factory.get(factory_entry)
+                    factory_entry = wi.get(factory_entry)
                 if factory_entry is None:
                     raise ValueError(
                         f"No worker factory for task type '{task_type}' "
@@ -1627,14 +1771,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     factory = factory_entry["factory"]
                 else:
                     factory = factory_entry
-                from rich_python_utils.config_utils._lazy_config_factory import (
-                    LazyConfigFactory,
-                )
                 if isinstance(factory, functools.partial) and not isinstance(factory, LazyConfigFactory):
                     _logger.error(
-                        "BTA[%s] worker_factory[%s] is a functools.partial, not a "
+                        "BTA[%s] worker_inferencers[%s] is a functools.partial, not a "
                         "LazyConfigFactory. This causes cross-worker instance "
-                        "sharing. Ensure *_factory attrs use LazyConfigFactory "
+                        "sharing. Ensure factory recipes use LazyConfigFactory "
                         "(auto-applied by the config walker for _target_: entries).",
                         getattr(self, "name", "?"), task_type or "_default",
                     )
@@ -1642,20 +1783,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     worker = factory()
                 else:
                     worker = factory(sub_query=query_str, index=i)
-            else:
-                from rich_python_utils.config_utils._lazy_config_factory import (
-                    LazyConfigFactory,
-                )
-                if isinstance(self.worker_factory, functools.partial) and not isinstance(self.worker_factory, LazyConfigFactory):
+            elif wi is not None:
+                if isinstance(wi, functools.partial) and not isinstance(wi, LazyConfigFactory):
                     _logger.error(
-                        "BTA[%s] worker_factory is a functools.partial, not a "
+                        "BTA[%s] worker_inferencers is a functools.partial, not a "
                         "LazyConfigFactory. This causes cross-worker instance sharing.",
                         getattr(self, "name", "?"),
                     )
-                if isinstance(self.worker_factory, (functools.partial, LazyConfigFactory)):
-                    worker = self.worker_factory()
+                if isinstance(wi, (functools.partial, LazyConfigFactory)):
+                    worker = wi()
                 else:
-                    worker = self.worker_factory(sub_query=query_str, index=i)
+                    worker = wi(sub_query=query_str, index=i)
 
             # Assign child workspace to worker
             if self._workspace is not None and isinstance(worker, InferencerBase):
@@ -1675,7 +1813,19 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         use_final_deliverables_folder=use_fdl,
                     )
                 worker_ws.ensure_dirs()
-                worker._workspace = worker_ws
+                # M7 workspace virtualization (fan-out case): publish the per-worker
+                # workspace into the worker's child context so its ``_workspace``
+                # getter resolves it from the context (§2.12 option-b). The slot
+                # MUST match the worker's threaded run_context (``_node_name`` =
+                # ``{_bta_prefix}{worker_child_name}``). The instance assignment
+                # stays as the byte-identical fallback.
+                _worker_node_name = f"{_bta_prefix}{self._worker_child_name(i)}"
+                _worker_child = self._rc_child(_worker_node_name)
+                self._publish_workspace_to_ctx(_worker_child, worker_ws)
+                if _worker_child is None:
+                    # Legacy (no context): mutate the worker instance (byte-identical);
+                    # under a context the workspace is published above -> write-pure.
+                    worker._workspace = worker_ws
                 self.log_info(
                     {
                         "bta_name": getattr(self, "name", None),
@@ -1712,7 +1862,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 getattr(worker, "resume_with_saved_results", False)
             )
 
-            def _make_worker_fn(w, q, is_async, manages_resume, _reporter=None, _node_id=None):
+            def _make_worker_fn(w, q, is_async, manages_resume, _reporter=None, _node_id=None, _worker_ws=None):
                 def _try_load_from_output():
                     if manages_resume:
                         return None
@@ -1743,59 +1893,114 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
                 if is_async and hasattr(w, "ainfer"):
                     async def async_worker_fn(*_args, **_kwargs):
-                        cached = _try_load_from_output()
-                        if cached is not None:
+                        try:
+                            cached = _try_load_from_output()
+                            if cached is not None:
+                                if _reporter is not None and _node_id is not None:
+                                    try:
+                                        await _reporter.on_node_stream(
+                                            _node_id, str(cached), is_final=True
+                                        )
+                                    except Exception:
+                                        pass
+                                return cached
+                            self._check_cancelled()  # §2.1/P-#6: halt at worker boundary
+                            result = await w.ainfer(
+                                q,
+                                inference_config=inference_config,
+                                run_context=self._rc_child(_node_id or "worker", workspace=_worker_ws),
+                            )
                             if _reporter is not None and _node_id is not None:
                                 try:
                                     await _reporter.on_node_stream(
-                                        _node_id, str(cached), is_final=True
+                                        _node_id, str(result) if result else "", is_final=True
                                     )
                                 except Exception:
                                     pass
-                            return cached
-                        result = await w.ainfer(q, inference_config=inference_config)
-                        if _reporter is not None and _node_id is not None:
-                            try:
-                                await _reporter.on_node_stream(
-                                    _node_id, str(result) if result else "", is_final=True
-                                )
-                            except Exception:
-                                pass
-                        return result
+                            return result
+                        finally:
+                            # Cross-flow barrier safety net (no-op unless this is a
+                            # coordinated MultiFlow worker, tagged with ``_cross_flow_index``).
+                            # Covers the paths that satisfy the worker WITHOUT running its
+                            # ``_ainfer`` (backup-resume cache hit, cancel at the boundary),
+                            # where the LWI-level depart can't fire. ``leave`` is idempotent,
+                            # so the normal "ran _ainfer" double-call is harmless.
+                            await self._cross_flow_depart_if_tagged(w)
                     return async_worker_fn
                 else:
                     def worker_fn(*_args, **_kwargs):
                         cached = _try_load_from_output()
                         if cached is not None:
                             return cached
+                        self._check_cancelled()  # §2.1/P-#6: sync worker boundary
                         if hasattr(w, "infer"):
-                            return w.infer(q, inference_config=inference_config)
+                            return w.infer(
+                                q,
+                                inference_config=inference_config,
+                                run_context=self._rc_child(_node_id or "worker", workspace=_worker_ws),
+                            )
                         return w(q)
                     return worker_fn
 
-            worker_group = task_type if isinstance(self.worker_factory, dict) else None
+            worker_group = task_type if isinstance(self.worker_inferencers, dict) else None
 
-            # Graph visualization: inject per-node interactive
-            if self.graph_reporter is not None:
-                worker.interactive = self.graph_reporter.node_interactive(_node_name)
-                if hasattr(worker, 'stream_observer'):
-                    worker.stream_observer = self.graph_reporter.node_stream_observer(_node_name)
-                if hasattr(worker, 'graph_reporter') and worker.graph_reporter is None:
-                    worker.graph_reporter = self.graph_reporter.child_reporter(_node_name)
-                    if isinstance(worker, BreakdownThenAggregateInferencer):
+            # Graph visualization (Part F / GT#13): node identity = the worker's
+            # ctx path, NOT its Python instance. ``_reporter`` is THIS
+            # orchestrator's sink, already namespaced by its own ctx path; tagging
+            # it with the worker's flat node id (``_node_name``) places the worker
+            # at ``<this-path>/<node_name>`` — concurrency-safe because the sink is
+            # resolved from the shared Tier-2 binding and the node id is a value
+            # captured per WorkGraphNode (no shared mutable instance state).
+            _reporter = self._resolve_graph_reporter()
+            if _reporter is not None:
+                if isinstance(worker, BreakdownThenAggregateInferencer):
+                    # Nested BTA: do NOT push a reporter onto the instance — it
+                    # self-resolves from the shared Tier-2 sink + its OWN ctx path
+                    # (so the instance stays definition-only, safe to share). Clear
+                    # the legacy ``_bta_prefix`` disambiguation-name hack only when it
+                    # has no explicitly pre-wired reporter; path nesting (ctx.path)
+                    # now provides node-id uniqueness.
+                    if getattr(worker, 'graph_reporter', None) is None:
                         worker.name = None
+                else:
+                    # Leaf worker: the per-token streaming niceties
+                    # (interactive / stream_observer) are derived from this
+                    # path-namespaced sink and tagged with the worker's flat node
+                    # id. Byte-identical on the fresh-per-subtask path (distinct
+                    # instances); under shared reuse these per-token handles are the
+                    # one visualization-only surface still on the instance (R7).
+                    if hasattr(_reporter, "node_interactive"):
+                        worker.interactive = _reporter.node_interactive(_node_name)
+                    if hasattr(worker, 'stream_observer') and hasattr(
+                        _reporter, "node_stream_observer"
+                    ):
+                        worker.stream_observer = _reporter.node_stream_observer(_node_name)
 
-            _is_container = (
-                self.graph_reporter is not None
-                and hasattr(worker, 'graph_reporter')
-                and worker.graph_reporter is not None
+            _is_container = isinstance(worker, BreakdownThenAggregateInferencer) and (
+                _reporter is not None
             )
-            _w_reporter = self.graph_reporter if self.graph_reporter is not None else None
+            # The output-text emit (in the worker_fn closure) tags the worker's
+            # result with its flat node id on THIS orchestrator's path-namespaced
+            # sink — a per-closure captured value, concurrency-safe.
+            _w_reporter = _reporter
             node = WorkGraphNode(
                 name=_node_name,
                 value=_make_worker_fn(
                     worker, query_str, use_async, _worker_manages_resume,
                     _reporter=_w_reporter, _node_id=_node_name,
+                    # Root-cause fix: give the worker context its INTENDED workspace
+                    # (worker_<i>) verbatim instead of path-mirroring its namespaced
+                    # ctx-node name (plan_bta.worker_<i>). Descendants then root the
+                    # whole subtree under worker_<i>; the node name never leaks on
+                    # disk. Guarded so worker_ws is only referenced when it was set.
+                    _worker_ws=(
+                        worker_ws
+                        if (
+                            self._workspace is not None
+                            and isinstance(worker, InferencerBase)
+                        )
+                        else None
+                    ),
                 ),
                 result_pass_down_mode=ResultPassDownMode.ResultAsFirstArg,
                 group=worker_group,
@@ -1965,12 +2170,19 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                 )
                                 agg_ws = _bta_self._workspace.child("aggregator")
                                 agg_ws.ensure_dirs()
-                                agg_inf._workspace = agg_ws
+                                # M7 write-purity: only re-assign the instance under
+                                # legacy (no ctx); the aggregator resolves its
+                                # workspace from the context otherwise.
+                                _agg_child = _bta_self._rc_child("aggregator")
+                                _bta_self._publish_workspace_to_ctx(_agg_child, agg_ws)
+                                if _agg_child is None:
+                                    agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
                         result = await agg_inf.ainfer(
                             agg_input, inference_config=inference_config,
+                            run_context=self._rc_child("aggregator"),
                             **_agg_extra
                         )
                         if _reporter is not None:
@@ -1994,13 +2206,20 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                 )
                                 agg_ws = _bta_self._workspace.child("aggregator")
                                 agg_ws.ensure_dirs()
-                                agg_inf._workspace = agg_ws
+                                # M7 write-purity: only re-assign the instance under
+                                # legacy (no ctx); the aggregator resolves its
+                                # workspace from the context otherwise.
+                                _agg_child = _bta_self._rc_child("aggregator")
+                                _bta_self._publish_workspace_to_ctx(_agg_child, agg_ws)
+                                if _agg_child is None:
+                                    agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
                         if hasattr(agg_inf, "infer"):
                             return agg_inf.infer(
-                                agg_input, inference_config=inference_config
+                                agg_input, inference_config=inference_config,
+                                run_context=self._rc_child("aggregator"),
                             )
                         return agg_inf(agg_input)
                     return agg_fn
@@ -2014,11 +2233,23 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             if self._workspace is not None and isinstance(agg_inf, InferencerBase):
                 agg_ws = self._workspace.child("aggregator")
                 agg_ws.ensure_dirs()
-                agg_inf._workspace = agg_ws
+                # M7 workspace write-purity: publish to the aggregator's child ctx;
+                # only mutate the instance under legacy (no context). Byte-identical.
+                _agg_child = self._rc_child("aggregator")
+                self._publish_workspace_to_ctx(_agg_child, agg_ws)
+                if _agg_child is None:
+                    agg_inf._workspace = agg_ws
 
             _agg_node_name = f"{_bta_prefix}aggregator" if _bta_prefix else "aggregator"
-            if self.graph_reporter is not None and hasattr(agg_inf, 'stream_observer'):
-                agg_inf.stream_observer = self.graph_reporter.node_stream_observer(_agg_node_name)
+            # Part F: the aggregator's per-token observer + output emit go through
+            # THIS orchestrator's path-namespaced sink, tagged with the flat
+            # aggregator node id (``_bta_prefix`` is empty under a ctx — node
+            # identity comes from the ctx path). Byte-identical with no ctx.
+            _agg_reporter = self._resolve_graph_reporter()
+            if _agg_reporter is not None and hasattr(agg_inf, 'stream_observer') and (
+                hasattr(_agg_reporter, "node_stream_observer")
+            ):
+                agg_inf.stream_observer = _agg_reporter.node_stream_observer(_agg_node_name)
 
             agg_node = WorkGraphNode(
                 name=_agg_node_name,
@@ -2027,7 +2258,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     self.aggregator_prompt_builder,
                     original_query,
                     use_async,
-                    _reporter=self.graph_reporter,
+                    _reporter=_agg_reporter,
                     _inference_args=kwargs.get("_inference_args"),
                 ),
                 result_pass_down_mode=ResultPassDownMode.NoPassDown,
@@ -2107,17 +2338,25 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             "breakdown_inferencer must be set when predefined_sub_queries is None. "
                             "Either provide a breakdown_inferencer or set predefined_sub_queries."
                         )
-                    # Wire stream_observer for live breakdown streaming
-                    if _bta.graph_reporter is not None and hasattr(_bta.breakdown_inferencer, 'stream_observer'):
-                        _bta.breakdown_inferencer.stream_observer = _bta.graph_reporter.node_stream_observer("breakdown")
+                    # Wire stream_observer for live breakdown streaming (Part F:
+                    # through THIS BTA's path-namespaced shared sink, tagged with
+                    # the flat "breakdown" node id; byte-identical with no ctx).
+                    _bd_reporter = _bta._resolve_graph_reporter()
+                    if _bd_reporter is not None and hasattr(_bta.breakdown_inferencer, 'stream_observer') and (
+                        hasattr(_bd_reporter, "node_stream_observer")
+                    ):
+                        _bta.breakdown_inferencer.stream_observer = _bd_reporter.node_stream_observer("breakdown")
 
                     if hasattr(_bta.breakdown_inferencer, "ainfer"):
                         raw_output = await _bta.breakdown_inferencer.ainfer(
-                            _inf_input, inference_config=_inf_config, **_inference_args
+                            _inf_input, inference_config=_inf_config,
+                            run_context=_bta._rc_child("breakdown"),
+                            **_inference_args
                         )
                     else:
                         raw_output = _bta.breakdown_inferencer.infer(
-                            _inf_input, inference_config=_inf_config
+                            _inf_input, inference_config=_inf_config,
+                            run_context=_bta._rc_child("breakdown"),
                         )
 
                     # Guard: detect API error responses
@@ -2174,8 +2413,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     if not sub_queries:
                         return raw_output if raw_output is not None else ""
 
-                # Emit breakdown result as node_stream
-                if _bta.graph_reporter is not None:
+                # Emit breakdown result as node_stream (Part F: path-namespaced sink)
+                _bd_emit_reporter = _bta._resolve_graph_reporter()
+                if _bd_emit_reporter is not None:
                     try:
                         _summary = []
                         for _i, _sq in enumerate(sub_queries if isinstance(sub_queries, list) else [sub_queries]):
@@ -2187,7 +2427,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                 _desc = _desc[:297] + "..."
                             _summary.append(f"**{_i+1}.** {_desc}")
                         _bd_content = "\n\n".join(_summary)
-                        await _bta.graph_reporter.on_node_stream("breakdown", _bd_content, is_final=True)
+                        await _bd_emit_reporter.on_node_stream("breakdown", _bd_content, is_final=True)
                     except Exception as _e:
                         _logger.warning("[BTA] breakdown node_stream emit failed: %s", _e)
 
@@ -2214,7 +2454,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 # before they start running. Without this, the UI shows only
                 # "Breakdown: Running" until _arun() returns (after all workers
                 # and aggregator finish), which can be minutes.
-                if _bta.graph_reporter is not None and not _bta._graph_topology_emitted:
+                if _bta._resolve_graph_reporter() is not None and not _bta._graph_topology_emitted:
                     try:
                         from agent_foundation.common.inferencers.graph_events import (
                             GraphTopologyEvent, NodeStatus,
@@ -2292,7 +2532,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             "Either provide a breakdown_inferencer or set predefined_sub_queries."
                         )
                     raw_output = _bta.breakdown_inferencer.infer(
-                        _inf_input, inference_config=_inf_config
+                        _inf_input, inference_config=_inf_config,
+                        run_context=_bta._rc_child("breakdown"),
                     )
 
                     if _bta.breakdown_parser is not None:
