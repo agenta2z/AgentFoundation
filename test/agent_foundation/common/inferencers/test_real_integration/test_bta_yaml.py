@@ -4,9 +4,9 @@ Validates Requirement 23 from the integration test spec.
 Tests load BTA YAML templates, replace placeholders with temp paths, instantiate
 objects via ``rich_python_utils.config_utils``, and verify the resulting object tree.
 
-Note: ``worker_factory`` is a callable and cannot be expressed in YAML. The YAML
+Note: ``worker_inferencers`` is a callable and cannot be expressed in YAML. The YAML
 configs define ``breakdown_inferencer`` and ``aggregator_inferencer`` only; the
-``worker_factory`` must be set programmatically after instantiation.
+``worker_inferencers`` must be set programmatically after instantiation.
 """
 
 import os
@@ -83,7 +83,7 @@ def test_bta_yaml_instantiation(tmp_workspace):
     """Load bta_streaming_workers.yaml → instantiate → verify BTA with correct
     breakdown and aggregator types.
 
-    Note: ``worker_factory`` is a callable and must be set programmatically
+    Note: ``worker_inferencers`` is a callable and must be set programmatically
     after YAML instantiation.
 
     **Validates: Requirement 23.1**
@@ -111,9 +111,9 @@ def test_bta_yaml_instantiation(tmp_workspace):
         f"got {type(obj.aggregator_inferencer).__name__}"
     )
 
-    # worker_factory is not set via YAML (it's a callable)
-    assert obj.worker_factory is None, (
-        "worker_factory should be None from YAML — must be set programmatically"
+    # worker_inferencers is not set via YAML (it's a callable)
+    assert obj.worker_inferencers is None, (
+        "worker_inferencers should be None from YAML — must be set programmatically"
     )
 
     # max_breakdown from YAML

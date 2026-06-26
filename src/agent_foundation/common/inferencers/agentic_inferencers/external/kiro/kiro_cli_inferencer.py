@@ -20,6 +20,9 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+
+
 @attrs
 class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
     """Kiro CLI as a terminal-based streaming inferencer with session continuation.
@@ -283,6 +286,7 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # === Override: ainfer() — Session-Aware ===
 
+    @bridge_entrypoint
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
@@ -339,6 +343,7 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # === Override: infer() — Sync Session-Aware ===
 
+    @bridge_entrypoint
     def infer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:

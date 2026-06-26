@@ -195,3 +195,51 @@ def make_finalplan_parser():
 def make_ranking_parser():
     """Factory returning :func:`parse_ranking_tag`."""
     return parse_ranking_tag
+
+
+# Severity ordering for the "never downgrade" merge semantics (§3 Part B).
+_SEVERITY_ORDER = {
+    "info": 0, "nit": 0, "low": 1, "minor": 1, "medium": 2, "moderate": 2,
+    "high": 3, "major": 3, "critical": 4, "blocker": 4,
+}
+
+
+def _normalize_desc(s: Any) -> str:
+    """Whitespace/case-normalized description for dedup keys."""
+    return re.sub(r"\s+", " ", str(s or "").strip().lower())
+
+
+def merge_reviews(parsed_reviews: List[Any]) -> dict:
+    """§3 Part B — deterministically merge N parsed reviews into one review dict.
+
+    Each input is a review dict whose ``issues`` (or ``reviews``) list holds items
+    carrying ``location``/``description``/``severity``. The union is **deduped by
+    ``(location, normalized description)``**; on a duplicate the **higher severity
+    wins (never downgrade)** and ``agreement_count`` is incremented. Output is the
+    same review JSON schema (``{"issues": [...]}``) so the existing
+    ``_default_check_consensus`` stays correct. Deterministic (first-seen order).
+    """
+    by_key: dict = {}
+    order: list = []
+    for review in parsed_reviews or []:
+        if not isinstance(review, dict):
+            continue
+        issues = review.get("issues") or review.get("reviews") or []
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            key = (str(issue.get("location", "")), _normalize_desc(issue.get("description")))
+            sev = str(issue.get("severity", "medium")).lower()
+            if key in by_key:
+                existing = by_key[key]
+                existing["agreement_count"] = existing.get("agreement_count", 1) + 1
+                if _SEVERITY_ORDER.get(sev, 2) > _SEVERITY_ORDER.get(
+                    str(existing.get("severity", "medium")).lower(), 2
+                ):
+                    existing["severity"] = issue.get("severity", existing.get("severity"))
+            else:
+                merged = dict(issue)
+                merged["agreement_count"] = 1
+                by_key[key] = merged
+                order.append(key)
+    return {"issues": [by_key[k] for k in order]}

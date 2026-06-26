@@ -62,8 +62,13 @@ class InferencerContextCompressor:
         self._prompt_template = prompt_template or _DEFAULT_COMPRESSION_PROMPT
         self._fallback_on_error = fallback_on_error
 
-    async def __call__(self, context: str, max_length: int) -> str:
-        """Compress context text to fit within max_length chars."""
+    async def __call__(self, context: str, max_length: int, run_context=None) -> str:
+        """Compress context text to fit within max_length chars.
+
+        ``run_context`` (optional, M3/I6): threads the compression sub-inference
+        into the caller's context tree so it is not an orphaned LLM call.
+        Degrades to ``None`` (legacy mint) for callers that don't pass it.
+        """
         # Skip compression if already within budget
         if len(context) <= max_length:
             return context
@@ -74,7 +79,7 @@ class InferencerContextCompressor:
         )
 
         try:
-            compressed = await self._inferencer.ainfer(prompt)
+            compressed = await self._inferencer.ainfer(prompt, run_context=run_context)
             compressed = compressed.strip()
 
             # If LLM output still exceeds max_length, hard-truncate

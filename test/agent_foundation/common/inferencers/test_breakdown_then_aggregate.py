@@ -51,8 +51,8 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _make_worker_factory(self, response_fn=None):
-        """Return a worker_factory that creates MockInferencers.
+    def _make_worker_inferencers(self, response_fn=None):
+        """Return a worker_inferencers that creates MockInferencers.
 
         Args:
             response_fn: If provided, called with (sub_query, index) to produce
@@ -85,11 +85,11 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
             return "aggregated"
 
         aggregator = MockInferencer(response=agg_fn)
-        worker_factory = self._make_worker_factory()
+        worker_inferencers = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
         )
@@ -97,7 +97,7 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
         result = bta.infer("original question")
 
         # 3 workers should have been created
-        self.assertEqual(len(worker_factory.created_workers), 3)
+        self.assertEqual(len(worker_inferencers.created_workers), 3)
         # Aggregator should have been called
         self.assertEqual(aggregator._call_count, 1)
         # Aggregator input should contain all 3 worker results
@@ -112,11 +112,11 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
         should execute."""
         queries = "\n".join(f"{i + 1}. Query{i + 1}" for i in range(10))
         breakdown = MockInferencer(response=queries)
-        worker_factory = self._make_worker_factory()
+        worker_inferencers = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=None,
             max_breakdown=5,
             checkpoint_dir=self.tmpdir,
@@ -124,17 +124,17 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
 
         bta.infer("original question")
 
-        self.assertEqual(len(worker_factory.created_workers), 5)
+        self.assertEqual(len(worker_inferencers.created_workers), 5)
 
     def test_no_aggregator(self):
         """When aggregator_inferencer=None, raw tuple of worker results is
         returned."""
         breakdown = MockInferencer(response="1. A\n2. B")
-        worker_factory = self._make_worker_factory()
+        worker_inferencers = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
@@ -150,18 +150,18 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
     def test_single_sub_query(self):
         """Breakdown returns a single query; verify single worker executes."""
         breakdown = MockInferencer(response="1. OnlyOne")
-        worker_factory = self._make_worker_factory()
+        worker_inferencers = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
 
         result = bta.infer("question")
 
-        self.assertEqual(len(worker_factory.created_workers), 1)
+        self.assertEqual(len(worker_inferencers.created_workers), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ class TestErrorHandling(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=failing_factory,
+            worker_inferencers=failing_factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
@@ -231,7 +231,7 @@ class TestErrorHandling(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=lambda sub_query, index: MockInferencer(),
+            worker_inferencers=lambda sub_query, index: MockInferencer(),
             aggregator_inferencer=None,
             breakdown_parser=lambda x: [],
             checkpoint_dir=self.tmpdir,
@@ -252,7 +252,7 @@ class TestErrorHandling(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=lambda sub_query, index: MockInferencer(),
+            worker_inferencers=lambda sub_query, index: MockInferencer(),
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
@@ -303,7 +303,7 @@ class TestResumability(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=crashing_factory,
+            worker_inferencers=crashing_factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=False,
@@ -331,7 +331,7 @@ class TestResumability(unittest.TestCase):
 
         bta_resume = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=resuming_factory,
+            worker_inferencers=resuming_factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
@@ -401,7 +401,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _make_async_worker_factory(self, delay=0.05, tracker=None):
+    def _make_async_worker_inferencers(self, delay=0.05, tracker=None):
         """Create a worker factory that tracks concurrent execution.
 
         Args:
@@ -436,11 +436,11 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         n_workers = 6
         queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
-        factory, tracker = self._make_async_worker_factory(delay=0.05)
+        factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,  # No aggregator to avoid deadlock
             checkpoint_dir=self.tmpdir,
         )
@@ -460,11 +460,11 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         max_conc = 2
         queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
-        factory, tracker = self._make_async_worker_factory(delay=0.05)
+        factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,  # No aggregator to avoid deadlock
             checkpoint_dir=self.tmpdir,
             max_concurrency=max_conc,
@@ -489,11 +489,11 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         n_workers = 4
         queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
-        factory, tracker = self._make_async_worker_factory(delay=0.05)
+        factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,  # No aggregator to avoid deadlock
             checkpoint_dir=self.tmpdir,
             max_concurrency=1,
@@ -527,7 +527,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,  # No aggregator to avoid deadlock
             checkpoint_dir=self.tmpdir,
             max_concurrency=max_conc,
@@ -545,17 +545,17 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
     def test_max_concurrency_does_not_affect_sync_path(self):
         """max_concurrency should not break the sync infer() path."""
         breakdown = MockInferencer(response="1. Q1\n2. Q2\n3. Q3")
-        worker_factory_calls = []
+        worker_inferencers_calls = []
 
         def factory(sub_query, index):
-            worker_factory_calls.append(index)
+            worker_inferencers_calls.append(index)
             return MockInferencer(response=f"result_{index}")
 
         aggregator = MockInferencer(response=lambda inp: "aggregated")
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
             max_concurrency=2,
@@ -565,7 +565,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "aggregated")
         # All 3 workers should have been created and executed
-        self.assertEqual(len(worker_factory_calls), 3)
+        self.assertEqual(len(worker_inferencers_calls), 3)
 
 
     async def test_sliding_window_not_batched(self):
@@ -605,7 +605,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             max_concurrency=2,
@@ -656,7 +656,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         # max_concurrency=1 with aggregator — previously deadlocked
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=aggregator,
             checkpoint_dir=self.tmpdir,
             max_concurrency=1,
@@ -671,7 +671,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         # max_concurrency=2 with aggregator — also previously deadlocked
         bta2 = BreakdownThenAggregateInferencer(
             breakdown_inferencer=AsyncMockInferencer(response=queries),
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=AsyncMockInferencer(response="aggregated2"),
             checkpoint_dir=self.tmpdir,
             max_concurrency=2,
@@ -702,7 +702,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _make_worker_factory(self):
+    def _make_worker_inferencers(self):
         """Returns a factory that records which sub_queries each worker received."""
         received_queries = []
 
@@ -718,7 +718,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
     def test_predefined_list_skips_breakdown(self):
         """Test A: predefined_sub_queries list bypasses breakdown inferencer entirely."""
         breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
         aggregator_inputs = []
 
         def agg_fn(inp):
@@ -727,7 +727,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=MockInferencer(response=agg_fn),
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["Q_alpha", "Q_beta", "Q_gamma"],
@@ -747,11 +747,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_predefined_list_no_breakdown_inferencer_needed(self):
         """predefined_sub_queries works even when breakdown_inferencer=None."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["Q1", "Q2"],
@@ -765,11 +765,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_single_string_auto_repeat_uses_max_breakdown(self):
         """Test B: single string query auto-repeated max_breakdown times."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries="repeat me",
@@ -785,11 +785,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_single_string_auto_repeat_uses_max_concurrency_when_no_max_breakdown(self):
         """Test C: single string falls back to max_concurrency when max_breakdown=None."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries="repeat me",
@@ -806,11 +806,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_single_string_auto_repeat_fallback_to_1(self):
         """Test D: single string with max_breakdown=None, max_concurrency=None → 1 worker."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries="just one",
@@ -828,11 +828,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
     def test_default_none_runs_normal_breakdown(self):
         """Test E: predefined_sub_queries=None (default) → normal breakdown runs."""
         breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             # predefined_sub_queries not set — default None
@@ -857,11 +857,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
             json.dump({"sub_queries": ["CKPT_Q1", "CKPT_Q2"], "raw_output": ""}, f)
 
         breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
@@ -881,11 +881,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
         """Test G: breakdown_only=True is ignored (with warning) when predefined set."""
         import logging
 
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["Q1", "Q2"],
@@ -912,7 +912,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
         """Test H: breakdown_inferencer=None with predefined_sub_queries=None raises ValueError."""
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=lambda sub_query, index: MockInferencer(),
+            worker_inferencers=lambda sub_query, index: MockInferencer(),
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             # predefined_sub_queries=None (default)
@@ -928,11 +928,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_max_breakdown_caps_predefined_list(self):
         """max_breakdown cap is applied to predefined list (truncates to N)."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["Q1", "Q2", "Q3", "Q4", "Q5"],
@@ -946,11 +946,11 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
     def test_max_breakdown_cap_does_not_double_truncate_single_string(self):
         """max_breakdown=N with single string → exactly N workers, no double-cap."""
-        factory = self._make_worker_factory()
+        factory = self._make_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries="query",
@@ -969,7 +969,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
         """Empty predefined_sub_queries=[] returns '' (consistent with checkpoint path)."""
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=lambda sub_query, index: MockInferencer(),
+            worker_inferencers=lambda sub_query, index: MockInferencer(),
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=[],
@@ -995,7 +995,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=[
@@ -1021,7 +1021,7 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _make_async_worker_factory(self):
+    def _make_async_worker_inferencers(self):
         """Returns a factory recording which sub_queries each async worker received."""
         received_queries = []
 
@@ -1035,11 +1035,11 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
     async def test_ainfer_predefined_list(self):
         """predefined_sub_queries list works correctly in async path."""
         breakdown = AsyncMockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
-        factory = self._make_async_worker_factory()
+        factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=AsyncMockInferencer(response="aggregated"),
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["async_Q1", "async_Q2"],
@@ -1053,11 +1053,11 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_ainfer_single_string_auto_repeat(self):
         """Single string auto-repeat works in async path with max_breakdown."""
-        factory = self._make_async_worker_factory()
+        factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries="async query",
@@ -1073,7 +1073,7 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         """breakdown_inferencer=None + predefined_sub_queries=None raises ValueError in async."""
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=lambda sub_query, index: AsyncMockInferencer(),
+            worker_inferencers=lambda sub_query, index: AsyncMockInferencer(),
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )
@@ -1091,11 +1091,11 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         with open(ckpt_path, "w") as f:
             json.dump({"sub_queries": ["CKPT_Q1"], "raw_output": ""}, f)
 
-        factory = self._make_async_worker_factory()
+        factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
@@ -1110,11 +1110,11 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         """breakdown_only=True is ignored with warning in async path."""
         import logging
 
-        factory = self._make_async_worker_factory()
+        factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=None,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             predefined_sub_queries=["Q1", "Q2"],
@@ -1153,7 +1153,7 @@ class TestPostMortemFixes(unittest.TestCase):
         agg = MockInferencer(response="agg")
         bta = BreakdownThenAggregateInferencer(
             predefined_sub_queries=["q1", "q2"],
-            worker_factory=lambda i: MockInferencer(response=f"w{i}"),
+            worker_inferencers=lambda i: MockInferencer(response=f"w{i}"),
             aggregator_inferencer=agg,
             checkpoint_dir=self.tmpdir,
         )
@@ -1167,7 +1167,7 @@ class TestPostMortemFixes(unittest.TestCase):
         )
         bta = BreakdownThenAggregateInferencer(
             predefined_sub_queries=["q1"],
-            worker_factory=lambda i: MockInferencer(response=f"w{i}"),
+            worker_inferencers=lambda i: MockInferencer(response=f"w{i}"),
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
         )

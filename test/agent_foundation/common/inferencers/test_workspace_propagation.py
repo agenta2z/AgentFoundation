@@ -225,13 +225,13 @@ def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_
 
     # Worker factory returns fresh inferencers; a single one is enough to force
     # _build_subgraph_spec() to wire the aggregator node.
-    def _worker_factory(sub_query=None, index=None):
+    def _worker_inferencers(sub_query=None, index=None):
         return _make_minimal_inferencer()
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
         aggregator_inferencer=aggregator,
-        worker_factory=_worker_factory,
+        worker_inferencers=_worker_inferencers,
         workspace=InferencerWorkspace(root=tmp_ws_root),
         max_breakdown=1,
     )
@@ -325,6 +325,7 @@ def test_multiflow_propagation_delegates_flow_configs_to_lwi(tmp_ws_root):
             {"input": "q1", "initial_inferencer": flow1_init,
              "followup_inferencer": flow1_follow},
         ],
+        disable_aggregator=True,  # this test exercises workspace propagation, not aggregation
     )
     parent_ws = _make_workspace(tmp_ws_root)
     mfi._workspace = parent_ws  # triggers setter -> propagate
@@ -370,6 +371,7 @@ def test_multiflow_propagation_does_not_touch_flow_configs(tmp_ws_root, tmp_path
             {"input": "q0", "initial_inferencer": flow0_init,
              "followup_inferencer": flow0_follow},
         ],
+        disable_aggregator=True,  # this test exercises workspace propagation, not aggregation
     )
     parent_ws = _make_workspace(tmp_ws_root)
     mfi._workspace = parent_ws
@@ -750,7 +752,7 @@ def test_mfdual_reviewer_match_second_does_not_steal_flow_workspace(tmp_ws_root)
              "followup_inferencer": flow1_follow},
         ],
         multi_flow_aggregator_inferencer=aggregator,
-        reviewer_match_second=True,
+        reviewer_strategy="runner_up",
         workspace=InferencerWorkspace(root=tmp_ws_root),
     )
 

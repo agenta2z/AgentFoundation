@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from attr import attrs, attrib
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import active_run_context
 from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 
@@ -103,6 +104,12 @@ class TemplatedInferencer:
             active_template_type=active_template_type,
             active_template_root_space=active_template_root_space,
         )
+        # §9.2 layer-2: thread the base call as a "base" child node so its
+        # provenance/state stay isolated (no-op without an active ctx; respects a
+        # caller-supplied run_context). Keeps stray kwargs from this wrapper scoped.
+        _ctx = active_run_context()
+        if _ctx is not None and "run_context" not in kwargs:
+            kwargs["run_context"] = _ctx.child("base")
         return self.base_inferencer(prompt, inference_config=inference_config, **kwargs)
 
     def infer_raw(self, prompt: str, inference_config: Any = None, **kwargs) -> Any:
@@ -124,6 +131,9 @@ class TemplatedInferencer:
             >>> result = templated.infer_raw("What is the capital of France?")
             >>> print(result)  # "Paris"
         """
+        _ctx = active_run_context()
+        if _ctx is not None and "run_context" not in kwargs:
+            kwargs["run_context"] = _ctx.child("base")
         return self.base_inferencer(prompt, inference_config=inference_config, **kwargs)
 
     def infer(

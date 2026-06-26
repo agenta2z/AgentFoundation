@@ -120,6 +120,35 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _record_hitl_checkpoint(user_input) -> None:
+    """§2.11: record a HITL decision (approve/reject + user input) into the active
+    context node's Tier-1 ``checkpoints`` so resume can rehydrate it. Module-level
+    (not a method) so it works regardless of the calling object's class. Additive —
+    no-op without an active context; never affects control flow."""
+    try:
+        import time as _time
+
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return
+        node = ctx.node()
+        if isinstance(user_input, (str, int, float, bool, dict, list)) or user_input is None:
+            _payload_input = user_input
+        else:
+            _payload_input = str(user_input)
+        node.checkpoints[f"hitl_{len(node.checkpoints)}"] = {
+            "approved": user_input is not None,
+            "user_input": _payload_input,
+            "timestamp": _time.time(),
+        }
+    except Exception:  # pragma: no cover - best-effort persistence
+        pass
+
+
 @attrs(slots=False)
 class ConversationalInferencer(InferencerBase):
     """Self-contained agentic inferencer with tool execution, context management,
@@ -272,6 +301,34 @@ class ConversationalInferencer(InferencerBase):
         self,
         content: str,
         *,
+        run_context=None,
+        **kwargs: Any,
+    ) -> AgenticResult:
+        """Public conversational host entrypoint (§9.4 host wiring).
+
+        Installs the RunContext bridge for the turn (a host may mint and pass a
+        root ``run_context``; ``None`` installs a legacy root -> byte-identical),
+        then delegates to the implementation. The internal ``base_inferencer``
+        calls thread ``ctx.child("agent")`` (M3), so the run-state separation is
+        active across the turn.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        _rc_token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
+        try:
+            return await self._run_agentic_loop_impl(content, **kwargs)
+        finally:
+            exit_run(_rc_token)
+
+    async def _run_agentic_loop_impl(
+        self,
+        content: str,
+        *,
         interactive: Optional[InteractiveBase] = None,
         session_id: str = "",
         turn_number: int = 0,
@@ -281,7 +338,7 @@ class ConversationalInferencer(InferencerBase):
         on_round_start: Optional[Any] = None,
         on_round_complete: Optional[Any] = None,
     ) -> AgenticResult:
-        """Main entry point. Replaces ConversationRouter._agentic_loop().
+        """Implementation of :meth:`run_agentic_loop` (body unchanged).
 
         When interactive + session_id are provided AND base_inferencer supports
         ainfer_streaming(), uses stream_token_batches() for token-by-token delivery.
@@ -329,6 +386,9 @@ class ConversationalInferencer(InferencerBase):
         )
         last_raw_response = ""
         last_boundary_turn: int | None = None  # track last sent turn_boundary
+
+        # M9/D7/§2.8: rehydrate a paused conversation from the resumed RunStateStore.
+        self._rehydrate_from_resumed_store()
 
         # Consume any pending resume state from a prior _restore_pause_state
         _resume = getattr(self, "_pending_resume_state", None)
@@ -486,9 +546,11 @@ class ConversationalInferencer(InferencerBase):
                     # inferencer so the rendered prompt is the sole input.
                     self.base_inferencer.system_prompt = ""
 
+                    _agent_ctx = self._rc_child("agent")
+
                     async def token_gen():
                         async for chunk in self.base_inferencer.ainfer_streaming(
-                            rendered
+                            rendered, run_context=_agent_ctx
                         ):
                             yield chunk, {"turn_number": turn_number}
 
@@ -499,7 +561,9 @@ class ConversationalInferencer(InferencerBase):
                         turn_number=turn_number,
                     )
                 else:
-                    raw_response = await self.base_inferencer.ainfer(rendered)
+                    raw_response = await self.base_inferencer.ainfer(
+                        rendered, run_context=self._rc_child("agent")
+                    )
                     if not isinstance(raw_response, str):
                         raw_response = str(raw_response)
             except Exception as e:
@@ -950,13 +1014,38 @@ class ConversationalInferencer(InferencerBase):
     # Pause / Resume
     # =========================================================================
 
+    def _json_safe_prior_context(self) -> dict:
+        """§2.8/J7: ``prior_context`` is loosely typed — ``set_prior_context`` /
+        ``update_prior_context`` accept arbitrary caller values — so a stray callable,
+        live handle, or exception would make the pause blob non-serializable (Tier-1
+        ``to_json`` fails on resume) or persist garbage. Drop any non-JSON value (with
+        a warning) so the blob always round-trips. The CI's own typed state
+        (``sop_state`` / ``dynamic_context``) serializes separately via ``to_dict`` and
+        is unaffected."""
+        import json
+
+        safe: dict = {}
+        for key, value in self.prior_context.items():
+            try:
+                json.dumps(value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Dropping non-JSON-serializable prior_context[%r] (%s) from pause "
+                    "state; prior_context must hold JSON-serializable values.",
+                    key,
+                    type(value).__name__,
+                )
+                continue
+            safe[key] = value
+        return safe
+
     def _serialize_pause_state(
         self, *, turn_number: int = 0, iteration: int = 0,
     ) -> dict:
         """Capture CI state for pause."""
-        return {
+        blob = {
             "messages": list(self._messages),
-            "prior_context": dict(self.prior_context),
+            "prior_context": self._json_safe_prior_context(),
             "sop_state": self.sop_state.to_dict() if self.sop_state else None,
             "suspended_sops": [s.to_dict() for s in self._suspended_sops],
             "dynamic_context": (
@@ -966,10 +1055,58 @@ class ConversationalInferencer(InferencerBase):
             "turn_number": turn_number,
             "iteration": iteration,
         }
+        # D7/§2.8: mirror the pause blob into the active context node so it lands
+        # in the persisted Tier-1 RunStateStore (the durable resume artifact).
+        # Additive — the returned blob is unchanged (byte-identical without a ctx).
+        try:
+            from agent_foundation.common.inferencers.run_context import (
+                active_run_context,
+            )
+
+            _ctx = active_run_context()
+            if _ctx is not None:
+                _ctx.node().conversation = blob
+        except Exception:  # pragma: no cover - mirroring is best-effort
+            pass
+        return blob
+
+    def _rehydrate_from_resumed_store(self) -> None:
+        """M9/D7/§2.8: if the active context node carries a conversation blob loaded
+        from a resumed ``RunStateStore``, restore it — the READ side of
+        ``_serialize_pause_state`` that wires the host's ``RunStateStore.load`` into
+        the CI. No-op when a resume is already pending in-process or no blob exists;
+        best-effort so a fresh run is never blocked on restore."""
+        if getattr(self, "_pending_resume_state", None) is not None:
+            return
+        try:
+            from agent_foundation.common.inferencers.run_context import (
+                active_run_context,
+            )
+
+            _ctx = active_run_context()
+            if _ctx is not None and _ctx.node().conversation:
+                self._restore_pause_state(_ctx.node().conversation)
+        except Exception:  # pragma: no cover - resume is best-effort
+            pass
 
     def _restore_pause_state(self, state: dict) -> None:
-        """Restore CI state from a serialized pause snapshot."""
+        """Restore CI state from a serialized pause snapshot.
+
+        D7/§2.8: when the active context node carries a rehydrated conversation
+        blob (loaded from a resumed RunStateStore), prefer it over ``state``.
+        """
         from agent_foundation.common.workflow.sop_state import SOPState
+
+        try:
+            from agent_foundation.common.inferencers.run_context import (
+                active_run_context,
+            )
+
+            _ctx = active_run_context()
+            if _ctx is not None and _ctx.node().conversation:
+                state = _ctx.node().conversation
+        except Exception:  # pragma: no cover
+            pass
 
         self._messages = state["messages"]
         self.prior_context = dict(state.get("prior_context", {}))
@@ -1293,10 +1430,14 @@ class ConversationalInferencer(InferencerBase):
             return _SYNTHETIC_CONTINUE
         return None
 
-    async def run(self) -> AgenticResult | None:
+    async def run(self, *, run_context=None) -> AgenticResult | None:
         """Long-lived event loop. Drains inbox, calls run_agentic_loop per item.
 
         Returns when request_shutdown() is called.
+
+        ``run_context`` (§9.4 / G3): the SOP CLI host mints a session root and
+        passes it here; each inbox item runs under its own ``ctx.child(turn_N)``
+        so per-turn run-state is isolated. ``None`` (default) -> byte-identical.
         """
         if self._inbox is None:
             raise RuntimeError("Inbox not enabled; call enable_inbox() first")
@@ -1311,13 +1452,21 @@ class ConversationalInferencer(InferencerBase):
                     content = self._content_for_item(item)
                     if content is None:
                         continue
+                    _turn = self._next_turn_number()
+                    # Per-turn child context (no-op when no session root passed).
+                    _turn_ctx = (
+                        run_context.child(f"turn_{_turn}")
+                        if run_context is not None
+                        else None
+                    )
                     last_result = await self.run_agentic_loop(
                         content=content,
                         interactive=self._default_interactive,
-                        turn_number=self._next_turn_number(),
+                        turn_number=_turn,
                         on_new_turn=self._on_new_turn,
                         on_prompt_rendered=self._on_prompt_rendered,
                         on_turn_complete=self._on_turn_complete,
+                        run_context=_turn_ctx,
                     )
                 except Exception as e:
                     logger.exception("Inbox item %r failed: %s", item, e)
@@ -1822,6 +1971,7 @@ class ConversationalInferencer(InferencerBase):
         compressed = await self.context_compressor(
             self._dynamic_context.to_text(),
             self.context_budget.dynamic_context_max,
+            run_context=self._rc_child("context_compression"),
         )
         self._dynamic_context.compress(compressed)
 
@@ -1837,7 +1987,10 @@ class ConversationalInferencer(InferencerBase):
     ) -> ConversationResponse:
         """Sync single-step inference with conversation tool parsing."""
         raw = self.base_inferencer.infer(
-            inference_input, inference_config, **_inference_args
+            inference_input,
+            inference_config,
+            run_context=self._rc_child("agent"),
+            **_inference_args,
         )
         raw_str = str(raw) if not isinstance(raw, str) else raw
         return parse_conversation_response(raw_str)
@@ -1855,7 +2008,10 @@ class ConversationalInferencer(InferencerBase):
             )
 
         raw = await self.base_inferencer.ainfer(
-            inference_input, inference_config, **_inference_args
+            inference_input,
+            inference_config,
+            run_context=self._rc_child("agent"),
+            **_inference_args,
         )
         raw_str = str(raw) if not isinstance(raw, str) else raw
 
@@ -2217,6 +2373,10 @@ class ConversationalInferencer(InferencerBase):
         )
 
         user_input = await active_interactive.aget_input()
+        # §2.11: persist the HITL decision into the active context node (Tier-1
+        # checkpoints) so resume can rehydrate the approval. Additive; no-op
+        # without a context, never affects control flow.
+        _record_hitl_checkpoint(user_input)
         if user_input is None:
             return None
 
@@ -2491,6 +2651,7 @@ class ConversationalInferencer(InferencerBase):
 
         # Wait for ONE response with all collected values
         user_input = await active_interactive.aget_input()
+        _record_hitl_checkpoint(user_input)  # §2.11: persist HITL decision (Tier-1)
         if user_input is None:
             return None
 
@@ -2555,17 +2716,33 @@ class ConversationalInferencer(InferencerBase):
             self.base_inferencer.cache_folder = value
 
     async def ainfer_streaming(
-        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
     ):
-        """Delegate streaming to base inferencer."""
+        """Delegate streaming to the base inferencer under an "agent" child context.
+
+        §2.10: ``run_context`` is keyword-only so it never lands in ``**kwargs`` and
+        double-binds when forwarded (which would raise "multiple values for
+        run_context"). The agent child is derived from the explicit ``run_context``
+        when given, else the active context; the base call installs it as its bridge.
+        """
+        _agent_ctx = (
+            run_context.child("agent")
+            if run_context is not None
+            else self._rc_child("agent")
+        )
         if hasattr(self.base_inferencer, "ainfer_streaming"):
             async for chunk in self.base_inferencer.ainfer_streaming(
-                inference_input, inference_config, **kwargs
+                inference_input, inference_config, run_context=_agent_ctx, **kwargs
             ):
                 yield chunk
         else:
             result = await self.base_inferencer.ainfer(
-                inference_input, inference_config, **kwargs
+                inference_input, inference_config, run_context=_agent_ctx, **kwargs
             )
             yield str(result) if not isinstance(result, str) else result
 

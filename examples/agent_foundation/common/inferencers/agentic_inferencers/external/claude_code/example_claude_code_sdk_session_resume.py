@@ -199,7 +199,7 @@ def main():
         description="Claude Code SDK -- Multi-Turn Session & Isolation Demo"
     )
     parser.add_argument(
-        "-r", "--root-folder",
+        "-t", "--target-path",
         default=os.path.expanduser("~"),
         help="Working directory for Claude Code agent (default: home dir)",
     )

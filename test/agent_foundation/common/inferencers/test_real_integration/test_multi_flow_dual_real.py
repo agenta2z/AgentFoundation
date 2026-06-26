@@ -280,7 +280,7 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
         # Round 7 rule-based dispatch
         review_default=kiro,                  # default reviewer
         review_priority_pool=[claude],        # if Kiro wins, swap to Claude
-        fixer_match_winner=True,              # fixer = winning flow's CLI
+        fixer_strategy="winner",              # fixer = winning flow's CLI
 
         consensus_config=ConsensusConfig(
             max_iterations=p["max_iterations"],

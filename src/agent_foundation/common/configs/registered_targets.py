@@ -21,6 +21,16 @@ register_alias(
     "inferencer",
 )
 register_alias(
+    "AgOpenAIAPI",
+    f"{_P}.common.inferencers.api_inferencers.ag.ag_openai_api_inferencer.AgOpenAIApiInferencer",
+    "inferencer",
+)
+register_alias(
+    "AgGeminiAPI",
+    f"{_P}.common.inferencers.api_inferencers.ag.ag_gemini_api_inferencer.AgGeminiApiInferencer",
+    "inferencer",
+)
+register_alias(
     "RovoDevCLI",
     f"{_P}.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.RovoDevCliInferencer",
     "inferencer",
@@ -33,6 +43,16 @@ register_alias(
 register_alias(
     "ClaudeCodeSDK",
     f"{_P}.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer.ClaudeCodeSdkInferencer",
+    "inferencer",
+)
+register_alias(
+    "CodexCLI",
+    f"{_P}.common.inferencers.agentic_inferencers.external.codex.codex_cli_inferencer.CodexCliInferencer",
+    "inferencer",
+)
+register_alias(
+    "CodexSDK",
+    f"{_P}.common.inferencers.agentic_inferencers.external.codex.codex_sdk_inferencer.CodexSdkInferencer",
     "inferencer",
 )
 register_alias(

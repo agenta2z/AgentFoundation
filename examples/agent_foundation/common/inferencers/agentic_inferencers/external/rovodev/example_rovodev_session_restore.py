@@ -24,7 +24,7 @@ Prerequisites:
 
 Usage:
     python example_rovodev_session_restore.py
-    python example_rovodev_session_restore.py --working-dir /path/to/repo
+    python example_rovodev_session_restore.py --target-path /path/to/repo
 """
 
 import argparse
@@ -86,7 +86,7 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--working-dir",
+        "--target-path",
         help="Working directory for the agent (default: temp git repo)",
     )
     args = parser.parse_args()

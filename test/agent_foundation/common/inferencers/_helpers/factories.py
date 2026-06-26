@@ -154,11 +154,11 @@ def _make_pti(
     )
 
 
-def _make_bta_worker_factory(
+def _make_bta_worker_inferencer(
     worker_responses: Optional[List] = None,
     response_fn: Optional[Callable] = None,
 ):
-    """Build a worker_factory closure that creates MockInferencers.
+    """Build a worker_inferencers closure that creates MockInferencers.
 
     Two modes:
     - worker_responses=[r0, r1, ...]: index-keyed responses
@@ -191,20 +191,20 @@ def _make_bta(
     aggregator_response: Union[str, Callable, List] = "aggregated",
     breakdown_inferencer: Optional[InferencerBase] = None,
     aggregator_inferencer: Optional[InferencerBase] = None,
-    worker_factory: Optional[Callable] = None,
+    worker_inferencers: Optional[Callable] = None,
     **kwargs,
 ) -> BreakdownThenAggregateInferencer:
-    """BTA wired with mock breakdown + worker_factory + aggregator."""
+    """BTA wired with mock breakdown + worker_inferencers + aggregator."""
     if breakdown_inferencer is None and breakdown_response is not None:
         breakdown_inferencer = _make_mock_inferencer(breakdown_response)
     if aggregator_inferencer is None:
         aggregator_inferencer = _make_mock_inferencer(aggregator_response)
-    if worker_factory is None:
-        worker_factory = _make_bta_worker_factory(worker_responses=worker_responses)
+    if worker_inferencers is None:
+        worker_inferencers = _make_bta_worker_inferencer(worker_responses=worker_responses)
 
     return BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown_inferencer,
-        worker_factory=worker_factory,
+        worker_inferencers=worker_inferencers,
         aggregator_inferencer=aggregator_inferencer,
         **kwargs,
     )

@@ -17,8 +17,8 @@
 #   ├── review_inferencer                     judge the winning plan
 #   └── fixer_inferencer                      refine the winning plan
 #
-# Reviewer/fixer wiring: with winner_pick + reviewer_match_second +
-# fixer_match_winner, MFDual selects the reviewer (runner-up flow) and fixer
+# Reviewer/fixer wiring: with reviewer_strategy=runner_up +
+# fixer_strategy=winner, MFDual selects the reviewer (runner-up flow) and fixer
 # (winning flow) BY INDEX from flow_configs after each propose step. The
 # `_repeat_` deep-copies each flow into a distinct instance, so the is-identity
 # self-review check is satisfied WITHOUT an explicit inferencer_pool. The
@@ -77,8 +77,8 @@ _target_: MultiFlowDual
 _template_root_space: plan
 propagate_runtime_input: true
 winner_pick: true
-reviewer_match_second: true
-fixer_match_winner: true
+reviewer_strategy: runner_up
+fixer_strategy: winner
 visible_flows: all
 max_retry: 3
 
@@ -101,8 +101,8 @@ multi_flow_aggregator_inferencer:
   _target_: ${_params.main_inferencer}
   output_is_deliverable: true
 
-# No-winner fallback (overridden at runtime by reviewer_match_second /
-# fixer_match_winner whenever a winner is detected).
+# No-winner fallback (overridden at runtime by reviewer_strategy=runner_up /
+# fixer_strategy=winner whenever a winner is detected).
 review_inferencer:
   _target_: ${_params.main_inferencer}
 

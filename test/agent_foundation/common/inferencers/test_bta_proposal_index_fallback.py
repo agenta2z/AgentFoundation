@@ -47,6 +47,10 @@ class _StubBTA:
 
     _try_extract_proposal_index = _BTA._try_extract_proposal_index
     _read_aggregator_output_text = _BTA._read_aggregator_output_text
+    # _read_aggregator_output_text now resolves the aggregator workspace via the
+    # override-aware orchestrator read (M7); bind it too. With no active ctx it
+    # falls back to the bare ``agg_inf._workspace`` — byte-identical to the prior read.
+    _read_child_workspace = _BTA._read_child_workspace
 
     def __init__(self, workspace, aggregator_inferencer):
         self._workspace = workspace

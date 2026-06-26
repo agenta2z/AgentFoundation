@@ -59,6 +59,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
+from agent_foundation.common.inferencers.run_context import bridge_entrypoint
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -450,7 +451,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         if not self.enable_legacy and not self.output_schema:
             parsed = extract_json_from_output(stdout)
             if parsed and "response" in parsed:
-                output = parsed["response"]
+                # A null "response" (the model returned no text for this turn) must
+                # NOT become None — callers do result.output[:80]/.upper(); a
+                # successful call always yields a string. Normalize null -> "".
+                output = parsed["response"] or ""
             else:
                 logger.debug("JSON extraction failed, falling back to ANSI strip")
                 output = strip_ansi_codes(stdout).strip()
@@ -646,7 +650,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             if raw:
                 try:
                     parsed = extract_json_from_output(raw)
-                    if parsed and "response" in parsed:
+                    # truthy guard: a null/empty "response" must not reach .strip()
+                    # (AttributeError on None) — fall through to None so the caller
+                    # uses the raw stream instead.
+                    if parsed and parsed.get("response"):
                         content = parsed["response"].strip()
                         if content:
                             return content
@@ -785,6 +792,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             )
         return raw
 
+    @bridge_entrypoint
     async def ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
@@ -858,6 +866,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         return result
 
+    @bridge_entrypoint
     def infer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:

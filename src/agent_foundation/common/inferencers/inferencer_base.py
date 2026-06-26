@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import os
 import sys
@@ -15,6 +16,17 @@ from rich_python_utils.common_utils import dict_, iter__, resolve_environ
 from rich_python_utils.common_utils.function_helper import FallbackMode, execute_with_retry
 from rich_python_utils.path_utils import AllowedPath, PathAccess
 
+# M2: explicit RunContext carrier + the compat bridge (additive; inert until M3+
+# orchestrators read `_active_ctx`). `run_context` is **keyword-only** so it can
+# never land in `**_inference_args` (the kwarg-leak defense). The bridge mints a
+# legacy root when `run_context is None` (byte-identical) and is per-task (the
+# `_active_ctx` ContextVar) so concurrent fan-out branches don't clobber.
+from agent_foundation.common.inferencers.run_context import (
+    active_run_context,
+    enter_run,
+    exit_run,
+)
+
 # Retry prompt mode constants
 RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
 
@@ -26,6 +38,31 @@ _current_fallback_state: ContextVar[dict | None] = ContextVar("_current_fallback
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
 
 _logger = logging.getLogger(__name__)
+
+
+class _PrototypeCloneFactory:
+    """Factory wrapping a constructed inferencer prototype: each call returns a DEEP,
+    fully-independent copy with fresh ids (via ``deepcopy_with_fresh_id``).
+
+    Created automatically when a *bare* inferencer instance is assigned, in Python, to a
+    registered factory field (``metadata={"lazy_config_factory": True}`` — e.g. BTA's
+    ``worker_inferencers``). This gives the Python-assignment path the same fresh-per-call
+    semantics as the YAML/``LazyConfigFactory`` path, so each subtask gets its own worker.
+
+    ``__call__`` accepts and ignores any args so it satisfies BOTH the no-arg factory
+    convention and the ``(sub_query, index)`` convention used by BTA's worker resolver.
+    """
+
+    __slots__ = ("prototype",)
+
+    def __init__(self, prototype):
+        self.prototype = prototype
+
+    def __call__(self, *args, **kwargs):
+        return self.prototype.deepcopy_with_fresh_id()
+
+    def __repr__(self):
+        return f"_PrototypeCloneFactory({type(self.prototype).__name__})"
 
 
 @attrs
@@ -75,6 +112,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     model_id: str = attrib(default="")
     _secret_key: Union[str, Sequence[str]] = attrib(default=None)
+
+    # M4: optional per-call state factory. Generalizes LinearWorkflowInferencer's
+    # ``initial_state_factory`` (V10). When set AND a RunContext is active, the
+    # bridge populates ``ctx.node.call`` once per call with ``state_factory(input)``
+    # (a typed InferencerStateBase or a plain dict). Default ``None`` -> no-op,
+    # byte-identical. The state lives in the context, never on ``self``.
+    state_factory: Optional[Any] = attrib(default=None)
 
     # Class-level fire-once warning sets
     _paired_override_warned: set = set()
@@ -268,7 +312,29 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # attrib.
     @property
     def _workspace(self):
-        return getattr(self, "_InferencerBase__workspace", None)
+        # M7 §2.12 option-b: prefer a per-call workspace published into the
+        # active context's handles (``workspace_override``) when present — so a
+        # single shared instance can serve concurrent branches with distinct
+        # workspaces (the run-state is in the context, not on ``self``). Falls
+        # back to the instance backing — **byte-identical** when no override is
+        # set (no active context, or the orchestrator didn't publish one).
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            override = ctx.handles.get("workspace_override", None)
+            if override is not None:
+                return override
+        _backing = getattr(self, "_InferencerBase__workspace", None)
+        # M3/§2.12: when the instance has NO configured workspace, honor the active
+        # context's own workspace (a host-minted ``RunContext.root(workspace=...)``).
+        # Byte-identical: a legacy run of an unconfigured instance mints a root from
+        # ``self._workspace`` (=None), so ``ctx.workspace`` is also None here.
+        if _backing is None and ctx is not None and ctx.workspace is not None:
+            return ctx.workspace
+        return _backing
 
     @_workspace.setter
     def _workspace(self, value):
@@ -279,6 +345,26 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # Auto-invalidate derived state when workspace changes.
         for attr in getattr(type(self), '_DERIVED_FROM_WORKSPACE', ()):
             self.__dict__.pop(attr, None)
+
+    def _publish_workspace_to_ctx(self, child_ctx, workspace) -> None:
+        """M7: publish a per-child workspace into the child context's handles so
+        the child's ``_workspace`` getter resolves it from the context rather
+        than via instance mutation. No-op when ``child_ctx`` is None (legacy)."""
+        if child_ctx is not None and workspace is not None:
+            child_ctx.handles.set("workspace_override", workspace)
+
+    def _read_child_workspace(self, child_inf, slot):
+        """M7: resolve a child's effective workspace for orchestrator-side reads —
+        the published ctx ``workspace_override`` for ``slot`` when a context is
+        active, else the child's instance ``_workspace``. Lets an orchestrator
+        stop mutating ``child._workspace`` under a context (write-purity) while its
+        own reads still resolve. Byte-identical without a context."""
+        ctx = active_run_context()
+        if ctx is not None:
+            override = ctx.child(slot).handles.get("workspace_override", None)
+            if override is not None:
+                return override
+        return getattr(child_inf, "_workspace", None)
 
     # Subclasses may override this tuple to declare instance attributes that
     # are derived from ``_workspace`` and must be invalidated (removed from
@@ -414,6 +500,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
             reset_session: if True, calls self.reset_session() (when available).
         """
         import time
+        # M7 NOTE (write-purity boundary — empirically established): the deliverable
+        # flags (output_is_deliverable / is_deliverable_boundary) and workspace set
+        # here STAY instance-backed under a context. This is the plan's D6 / §2.12
+        # option-(a) rule: these are read POST-dispatch on the instance (e.g.
+        # MFDual's alias-dispatched fixer is asserted via ``fixer.output_is_deliverable``
+        # after the run; the workspace getter is intentionally instance-pure). Routing
+        # them to ctx.node breaks those post-call readers (verified by
+        # test_alias_dispatched_fixer_inherits_output_is_deliverable). The role
+        # TEMPLATE fields ARE virtualized (TemplatedInferencerBase.switch_role +
+        # RoleState), and session reset is ctx-aware (active_session_id) — but the
+        # deliverable flags remain instance state by design.
         # 1. Workspace assignment FIRST — triggers cascade
         if workspace is not None:
             self._workspace = workspace
@@ -473,7 +570,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         re-implement it. This is symmetric with how ``_propagate_to_children``
         already cascades ``template_extra_feed``.
 
-        Skips ``functools.partial`` factories (e.g. BTA's ``worker_factory``);
+        Skips ``functools.partial`` factories (e.g. BTA's ``worker_inferencers``);
         their instances get workspaces at runtime when the factory is invoked.
 
         Subclasses can opt out of propagation for specific attrs by setting
@@ -612,27 +709,39 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self._redirect_loggers_to_workspace(workspace)
 
     def _redirect_loggers_to_workspace(self, workspace):
-        """Redirect dict-keyed loggers to the workspace's logs/ directory."""
+        """Re-base workspace-derived loggers onto a new workspace root.
+
+        Only loggers we tagged in ``_ws_log_relpaths`` (those created from a
+        workspace via :meth:`_add_workspace_logger`) are re-pointed — each to its
+        *own* recorded relative path under the new root, so it keeps its filename
+        and untagged/user loggers are left untouched (no clobber). This is the
+        setter-time path (legacy + reviewer/fixer ``switch_role``); the location
+        isn't per-write here, so it rebuilds the immutable ``JsonLogger``.
+        """
         import os
         from rich_python_utils.io_utils.json_io import JsonLogger
 
-        child_log_dir = workspace.logs_dir
-        os.makedirs(child_log_dir, exist_ok=True)
-        child_log_path = os.path.join(child_log_dir, "session.jsonl")
+        relpaths = getattr(self, "_ws_log_relpaths", None)
+        if not relpaths:
+            return
+        os.makedirs(workspace.logs_dir, exist_ok=True)
         new_loggers = {}
+        changed = False
         for name, entry in self.logger.items():
             if isinstance(entry, tuple) and len(entry) == 2:
                 logger_inst, config = entry
             else:
                 logger_inst, config = entry, None
-            if isinstance(logger_inst, JsonLogger):
+            rel = relpaths.get(name)
+            if rel is not None and isinstance(logger_inst, JsonLogger):
                 new_kwargs = dict(logger_inst.keywords)
-                new_kwargs["file_path"] = child_log_path
+                new_kwargs["file_path"] = os.path.join(workspace.root, rel)
                 new_logger = JsonLogger(**new_kwargs)
                 new_loggers[name] = (new_logger, config) if config is not None else new_logger
+                changed = True
             else:
                 new_loggers[name] = entry
-        if new_loggers:
+        if changed:
             self.logger = new_loggers
 
     def __attrs_post_init__(self):
@@ -741,6 +850,33 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # does NOT call super() today, so it relies on enable_debug_mode() /
         # the YAML cascade instead (see plan F1).
         self._propagate_cascading_attributes()
+
+        # Independent path: a *bare* inferencer instance assigned (in Python) to a
+        # registered factory field is wrapped in a fresh-copy factory, so each call yields
+        # its own worker — matching the config/``LazyConfigFactory`` path. Runs after the
+        # cascade so clones inherit cascaded attrs.
+        self._wrap_bare_factory_inferencers()
+
+    def _wrap_bare_factory_inferencers(self):
+        """For each REGISTERED factory field (``metadata={"lazy_config_factory": True}``)
+        holding a bare :class:`InferencerBase`, replace it with a
+        :class:`_PrototypeCloneFactory` so each call returns a fresh, independent worker.
+
+        Gated on the metadata only (NOT the ``*_factory`` name suffix), so the blast radius
+        is exactly the registered fields (today: BTA ``worker_inferencers``). All other
+        worker sources are untouched: a config value is already a ``LazyConfigFactory``/
+        ``functools.partial`` at this point, and callables/lists/dicts are not
+        ``InferencerBase`` — none matches, so no other worker path is affected.
+        """
+        import attr
+        if not attr.has(type(self)):
+            return
+        for a in attr.fields(type(self)):
+            if not a.metadata.get("lazy_config_factory", False):
+                continue
+            val = getattr(self, a.name, None)
+            if isinstance(val, InferencerBase):
+                setattr(self, a.name, _PrototypeCloneFactory(val))
 
     def _for_each_child_inferencer(self, on_instance, on_partial):
         """Walk attrs fields and invoke callbacks for child inferencers.
@@ -883,6 +1019,31 @@ class InferencerBase(Debuggable, Resumable, ABC):
         for child in self._iter_child_inferencers():
             yield from child._collect_all_descendant_inferencers(_seen=_seen)
 
+    def _iter_child_slots(self) -> Iterator[tuple]:
+        """§9.3/N-Major1: slot-aware child iteration — yield ``(slot, child)`` so
+        lifecycle ops (``pre_retry``/``reset_session``/``aconnect``) can bind
+        ``_active_ctx = ctx.child(slot)`` and target each child's OWN Tier-3
+        handles. Default derives positional slots from ``_iter_child_inferencers``;
+        orchestrators override to match the deterministic ``ctx.child(slot)`` they
+        use in ``_ainfer`` (§2.7)."""
+        for i, child in enumerate(self._iter_child_inferencers()):
+            yield (f"child_{i}", child)
+
+    @contextlib.contextmanager
+    def _with_child_ctx(self, slot: str):
+        """Bind ``_active_ctx = active.child(slot)`` for the body so a child
+        lifecycle op resolves the child's slot. No-op (byte-identical) when no
+        context is active."""
+        ctx = active_run_context()
+        if ctx is None:
+            yield
+            return
+        token = enter_run(ctx.child(slot))
+        try:
+            yield
+        finally:
+            exit_run(token)
+
     async def pre_retry(
         self,
         attempt: int,
@@ -916,11 +1077,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
             _logger.warning(
                 "%s._pre_retry raised: %s", type(self).__name__, exc
             )
-        for child in self._iter_child_inferencers():
+        for slot, child in self._iter_child_slots():
             if child is None or id(child) in _seen:
                 continue
             try:
-                await child.pre_retry(attempt, exception, _seen=_seen)
+                # §9.3/N-Major1: bind the child's slot so its session-reset targets
+                # its OWN Tier-3 handle (no-op without an active ctx -> legacy).
+                with self._with_child_ctx(slot):
+                    await child.pre_retry(attempt, exception, _seen=_seen)
             except Exception as exc:  # noqa: BLE001 — best-effort cleanup
                 _logger.warning(
                     "%s.pre_retry (child of %s) raised: %s",
@@ -977,24 +1141,115 @@ class InferencerBase(Debuggable, Resumable, ABC):
         self._logger_awaiting_workspace = False
         self._add_workspace_logger(self._workspace)
 
+    def _ensure_ctx_workspace_logger(self) -> None:
+        """Un-defer the session logger for a context-dispatched inferencer.
+
+        An inferencer constructed without a workspace defers its ``_workspace``
+        JsonLogger (:meth:`_resolve_auto_logger` sets ``_logger_awaiting_workspace``
+        and returns before creating it). The only runtime un-defer trigger is the
+        ``_workspace`` *setter* (:meth:`_configure_for_workspace`). Under M7 a
+        ctx-dispatched child's workspace arrives via ``_publish_workspace_to_ctx``
+        (the setter is legacy-only), so a deferred logger would never be created
+        and the node would emit no session log despite running (the top BTA
+        aggregator and the outer Dual review/fix leaves hit exactly this).
+
+        Called from ``__ainfer_single_impl`` / ``__infer_single_impl`` — the
+        single point both the manual (``InferencerBase.ainfer``/``infer``) and the
+        ``@bridge_entrypoint`` (CLI / streaming leaf overrides that bypass
+        ``InferencerBase.ainfer``) ctx-install paths converge on, *after* the
+        bridge is installed (so the ctx-aware ``_workspace`` getter can resolve
+        the published ``workspace_override`` / ``ctx.workspace``) and before any
+        ``InferenceInput`` logging. No-op when there is no active context (legacy
+        → byte-identical), the logger is not deferred (eager / already-created /
+        ``switch_role`` already un-deferred), or the context published no
+        workspace (an unused placeholder slot).
+
+        Mutates only instance-local logger state — never ``self._workspace`` — so
+        it does not reintroduce the cross-branch instance mutation M7 removed; the
+        un-defer body is synchronous (no ``await``) so concurrent gathered
+        branches cannot create duplicate loggers, and per-branch write routing is
+        handled by :meth:`_log_path_override`.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        if active_run_context() is None:
+            return
+        if not getattr(self, "_logger_awaiting_workspace", False):
+            return
+        ws = self._workspace
+        if ws is None:
+            return
+        self._logger_awaiting_workspace = False
+        self._add_workspace_logger(ws)
+
+    def _tag_ws_log_relpath(self, name, file_path, workspace):
+        """Record a workspace-derived logger's path *relative to the workspace
+        root* (e.g. ``logs/session.jsonl``).
+
+        This static relpath is the half of the log path that never changes; the
+        dynamic half (the workspace root) is resolved later — at setter time by
+        :meth:`_redirect_loggers_to_workspace`, or per-write by
+        :meth:`_log_path_override` against the live run-context. Lets the logger
+        follow the inferencer to whatever workspace is effective without
+        hardcoding a filename or mutating the (possibly shared) logger.
+        """
+        if not hasattr(self, "_ws_log_relpaths"):
+            self._ws_log_relpaths = {}
+        self._ws_log_relpaths[name] = os.path.relpath(file_path, workspace.root)
+
     def _add_workspace_logger(self, workspace):
         """Create a JsonLogger at workspace.logs_dir and add it to self.logger."""
         from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
         from rich_python_utils.common_objects.debuggable import LoggerConfig
         log_dir = workspace.logs_dir
         os.makedirs(log_dir, exist_ok=True)
+        file_path = os.path.join(log_dir, "session.jsonl")
         json_entry = (JsonLogger(
-            file_path=os.path.join(log_dir, "session.jsonl"),
+            file_path=file_path,
             append=True,
             space_ext_mode=SpaceExtMode.MOVE,
         ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
         if isinstance(self.logger, dict):
+            # Post-normalize (deferred → upgrade): add directly + register config.
             self.logger["_workspace"] = json_entry[0]
             if not hasattr(self, "_resolved_logger_configs"):
                 self._resolved_logger_configs = {}
             self._resolved_logger_configs["_workspace"] = json_entry[1]
         else:
-            self.logger = [json_entry]
+            # Pre-normalize (logger == "auto", e.g. constructed with a workspace):
+            # hand _normalize_loggers a dict so the "_workspace" name and inline
+            # config survive. The old list form became an auto-named "logger_N"
+            # that the relpath tag below could never match.
+            self.logger = {"_workspace": json_entry}
+        self._tag_ws_log_relpath("_workspace", file_path, workspace)
+
+    def _log_path_override(self, logger_name, logger):
+        """Per-write override: route a workspace-derived logger to the *live*
+        run-context's workspace, re-based from the recorded relpath.
+
+        Returns ``None`` (no override → baked path used) when there is no active
+        context, the logger isn't workspace-derived, or the path already matches.
+        So legacy/no-ctx runs and loggers already pointed correctly (e.g. a
+        reviewer/fixer whose instance workspace was set via the setter) stay
+        byte-identical, and the override fires only for leaves whose deep
+        workspace was published to the context (never set on the instance).
+        Never mutates the logger — the path is returned for use as a call arg.
+        """
+        if active_run_context() is None:
+            return None
+        relpaths = getattr(self, "_ws_log_relpaths", None)
+        if not relpaths:
+            return None
+        rel = relpaths.get(logger_name)
+        if rel is None:
+            return None
+        ws = self._workspace
+        if ws is None:
+            return None
+        candidate = os.path.join(ws.root, rel)
+        return candidate if getattr(logger, "file_path", None) != candidate else None
 
     # -- Template rendering & output finalization -------------------------
     #
@@ -1333,6 +1588,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             Exception: If all retry attempts fail and default_return_or_raise is set to
                 None or an Exception object.
         """
+        # M7: un-defer the session logger now the ctx bridge is installed
+        # (mirrors __ainfer_single_impl) — the single seam both the manual and
+        # @bridge_entrypoint ctx-install paths converge on, before any logging.
+        self._ensure_ctx_workspace_logger()
         self._propagate_to_children()
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
@@ -1458,9 +1717,25 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 if isinstance(self.fallback_inferencer, list)
                 else [self.fallback_inferencer]
             )
+            # §9.3 E3/I3: each EXTERNAL fallback runs as a distinct child node
+            # (fallback/external_{i}) so its provenance/state/handles don't collide
+            # with the parent or siblings. No child (None) without an active ctx =>
+            # legacy-mint, byte-identical.
+            _fb_parent = active_run_context()
             external_wrappers = [
-                lambda inp, inf=inf, **kw: inf.infer(inp, inference_config, **kw)
-                for inf in fb_list
+                (
+                    lambda inp, inf=inf, _i=_i, **kw: inf.infer(
+                        inp,
+                        inference_config,
+                        run_context=(
+                            _fb_parent.child("fallback").child(f"external_{_i}")
+                            if _fb_parent is not None
+                            else None
+                        ),
+                        **kw,
+                    )
+                )
+                for _i, inf in enumerate(fb_list)
             ]
 
         # Build fallback chain and mode for the retry helper
@@ -1640,8 +1915,88 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             yield from iter__(response, atom_types=self.response_types)
 
+    def _rc_child(self, slot: str, *, workspace=None):
+        """M3 helper: derive the child RunContext for ``slot`` from the active ctx.
+
+        Returns ``active_run_context().child(slot)`` when a context is active
+        (always true within a public ``infer``/``ainfer`` call tree, since the
+        bridge installs one), else ``None`` so the child legacy-mints — keeping
+        the threading **byte-identical** while no reader consumes ``ctx`` yet.
+        Orchestrators pass the result as ``run_context=self._rc_child("<slot>")``
+        into child inference calls (the §2.7 deterministic slots).
+
+        ``workspace`` (optional): when given, the child context uses it as its
+        on-disk workspace VERBATIM instead of path-mirroring the (possibly
+        namespaced) slot — so a worker dispatched under ctx node ``plan_bta.worker_0``
+        can root its whole subtree under the intended ``worker_0`` workspace dir.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return None
+        # Sanitize to a valid single-component slot (child() rejects separators);
+        # robustness so a node-id-derived slot can never raise mid-call.
+        safe = str(slot).replace("/", "_").replace("\\", "_").strip() or "child"
+        if safe in (".", ".."):
+            safe = "child"
+        return ctx.child(safe, workspace=workspace)
+
+    def _check_cancelled(self, ctx=None) -> None:
+        """§2.1/P-#6: raise ``CancelledError`` if the (given or active) context's
+        shared ``cancellation_token`` is set. Orchestrators call this at child-
+        dispatch boundaries; the token is read-only and shared by reference, so a
+        cancel set anywhere is visible to all in-flight branches. No-op
+        (byte-identical) when there is no context or no token is set."""
+        if ctx is None:
+            ctx = active_run_context()
+        if ctx is None:
+            return
+        token = getattr(ctx.runtime, "cancellation_token", None)
+        if token is None:
+            return
+        # Support a plain flag-object ({"cancelled": True}) or a callable/event.
+        cancelled = False
+        if isinstance(token, dict):
+            cancelled = bool(token.get("cancelled"))
+        elif hasattr(token, "is_set"):
+            cancelled = token.is_set()
+        elif callable(token):
+            cancelled = bool(token())
+        else:
+            cancelled = bool(getattr(token, "cancelled", False))
+        if cancelled:
+            raise asyncio.CancelledError("run_context cancellation_token is set")
+
+    def _init_call_state(self, inference_input):
+        """M4: populate ``ctx.node.call`` once per call via ``state_factory``.
+
+        No-op (byte-identical) when ``state_factory`` is unset OR no RunContext is
+        active. The state object (typed ``InferencerStateBase`` or plain dict)
+        lives in the context node, never on ``self``.
+        """
+        if self.state_factory is None:
+            return
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return
+        node = ctx.node(creator=(type(self).__qualname__, ctx.path))
+        if node.call is None:
+            node.call = self.state_factory(inference_input)
+
     def infer(
-        self, inference_input: Any, inference_config: Any = None, **_inference_args
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **_inference_args,
     ):
         """
         Execute inference with automatic iterator detection.
@@ -1665,6 +2020,47 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         Raises:
             Exception: If inference fails after all retry attempts
+        """
+        # M2 bridge: capture the keyword-only carrier + install the per-task
+        # ContextVar (legacy-mint a root when None -> byte-identical). Inert until
+        # M3+ orchestrators read `_active_ctx`.
+        _rc_token = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        # The iterator-input / no-merger path returns a LAZY iterator (see
+        # _infer_dispatch); the context must stay alive until it is exhausted so
+        # each lazily-produced item runs under the same ctx (not detached). Every
+        # other path returns eagerly -> exit immediately (byte-identical).
+        _is_lazy = (
+            isinstance(inference_input, Iterator)
+            and self.post_response_merger is None
+        )
+        try:
+            self._init_call_state(inference_input)
+            result = self._infer_dispatch(
+                inference_input, inference_config, **_inference_args
+            )
+        except BaseException:
+            exit_run(_rc_token)
+            raise
+        if _is_lazy:
+            def _ctx_scoped_iter(_inner=result, _tok=_rc_token):
+                try:
+                    yield from _inner
+                finally:
+                    exit_run(_tok)
+
+            return _ctx_scoped_iter()
+        exit_run(_rc_token)
+        return result
+
+    def _infer_dispatch(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ):
+        """Internal dispatch for :meth:`infer` (the historical body, unchanged).
+
+        Split out so the public :meth:`infer` installs the RunContext bridge (M2)
+        without re-indenting this logic. May return a lazy iterator; the bridge is
+        inert at M2 (nothing reads ``_active_ctx`` yet), so the post-return
+        ContextVar teardown is behaviourally invisible.
         """
         if isinstance(inference_input, Iterator):
             iterator_result = self._infer_iterator(
@@ -1724,6 +2120,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
         num_workers: int = None,
         use_threading: bool = True,
         debug: bool = False,
+        *,
+        run_context=None,
         **_inference_args,
     ) -> list:
         """Process multiple inputs concurrently using thread or process pool.
@@ -1772,6 +2170,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         num_inputs = len(inference_inputs)
 
+        # D6/I2: parent context for per-input isolation (explicit or already-active).
+        _parent_ctx = run_context if run_context is not None else active_run_context()
+        if _parent_ctx is not None and not use_threading:
+            raise NotImplementedError(
+                "parallel_infer(use_threading=False) cannot carry an explicit "
+                "run_context: a RunContext (Tier-2 sinks + Tier-3 live handles) is "
+                "not picklable and ContextVars do not cross process boundaries. Use "
+                "use_threading=True (default) for per-input context isolation."
+            )
+
         if num_workers is None:
             if use_threading:
                 num_workers = min(num_inputs, 32)
@@ -1787,11 +2195,29 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             pool_class = ThreadPool
 
-        worker = partial(
-            self._infer_single,
-            inference_config=inference_config,
-            **_inference_args,
-        )
+        if _parent_ctx is not None:
+            # D6/I2: bind a per-input child context INSIDE each ThreadPool worker —
+            # a fresh thread starts with the default context (the parent's set is
+            # invisible) and a single shared copy_context() would give every worker
+            # the SAME ctx, defeating per-input isolation. Pair (i, input) so the
+            # worker knows its index for ``parallel_{i}``.
+            def _ctx_worker(_pair, _pc=_parent_ctx, _cfg=inference_config, _kw=_inference_args):
+                _i, _inp = _pair
+                _tok = enter_run(_pc.child(f"parallel_{_i}"))
+                try:
+                    return self._infer_single(_inp, _cfg, **_kw)
+                finally:
+                    exit_run(_tok)
+
+            worker = _ctx_worker
+            _data_iter = list(enumerate(inference_inputs))
+        else:
+            worker = partial(
+                self._infer_single,
+                inference_config=inference_config,
+                **_inference_args,
+            )
+            _data_iter = inference_inputs
         mp_target = MPTarget(
             worker,
             pass_pid_to_target=False,
@@ -1806,7 +2232,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         results = parallel_process_by_pool(
             num_p=num_workers,
-            data_iter=inference_inputs,
+            data_iter=_data_iter,
             target=mp_target,
             pool_object=pool_class,
             merge_output=True,
@@ -1942,6 +2368,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
             async_execute_with_retry,
         )
 
+        # M7: un-defer the session logger now the ctx bridge is installed (by
+        # either InferencerBase.ainfer's enter_run or the @bridge_entrypoint
+        # decorator on CLI/streaming overrides). This is the single seam both
+        # paths converge on, before any InferenceInput logging below.
+        self._ensure_ctx_workspace_logger()
         self._propagate_to_children()
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
@@ -2016,6 +2447,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             type(self)._pre_retry is not InferencerBase._pre_retry
             or type(self)._iter_child_inferencers
                 is not InferencerBase._iter_child_inferencers
+            # N-R1: a class that adopts ONLY the slot-aware iterator must still
+            # activate pre-retry cleanup, else it silently skips it.
+            or type(self)._iter_child_slots
+                is not InferencerBase._iter_child_slots
         )
         if (
             _user_callback is not None
@@ -2074,9 +2509,24 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 if isinstance(self.fallback_inferencer, list)
                 else [self.fallback_inferencer]
             )
+            # §9.3 E3/I3: each EXTERNAL fallback runs as a distinct child node
+            # (fallback/external_{i}) so its provenance/state/handles don't collide.
+            # No child without an active ctx => legacy-mint, byte-identical.
+            _fb_parent = active_run_context()
             external_wrappers = [
-                lambda inp, inf=inf, **kw: inf.ainfer(inp, inference_config, **kw)
-                for inf in fb_list
+                (
+                    lambda inp, inf=inf, _i=_i, **kw: inf.ainfer(
+                        inp,
+                        inference_config,
+                        run_context=(
+                            _fb_parent.child("fallback").child(f"external_{_i}")
+                            if _fb_parent is not None
+                            else None
+                        ),
+                        **kw,
+                    )
+                )
+                for _i, inf in enumerate(fb_list)
             ]
 
         # Build fallback chain and mode for the retry helper
@@ -2178,7 +2628,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 yield item
 
     async def ainfer(
-        self, inference_input: Any, inference_config: Any = None, **_inference_args
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **_inference_args,
     ):
         """Async version of infer().
 
@@ -2200,6 +2655,22 @@ class InferencerBase(Debuggable, Resumable, ABC):
             If input is Iterator without post_response_merger: Returns a list of atomized results.
             Otherwise: Returns a single post-processed inference result.
         """
+        # M2 bridge: keyword-only carrier + per-task ContextVar (legacy-mint when
+        # None -> byte-identical). The bridge is set before the body and reset in
+        # `finally`; inert until M3+ orchestrators read `_active_ctx`.
+        _rc_token = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        try:
+            self._init_call_state(inference_input)
+            return await self._ainfer_dispatch(
+                inference_input, inference_config, **_inference_args
+            )
+        finally:
+            exit_run(_rc_token)
+
+    async def _ainfer_dispatch(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ):
+        """Internal dispatch for :meth:`ainfer` (the historical body, unchanged)."""
         if isinstance(inference_input, Iterator):
             all_results = []
             async for item in self._ainfer_iterator(
@@ -2253,6 +2724,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
         inference_config: Any = None,
         max_concurrency: int = None,
         debug: bool = False,
+        *,
+        run_context=None,
         **_inference_args,
     ) -> list:
         """Async process multiple inputs concurrently using asyncio.gather.
@@ -2285,15 +2758,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         num_inputs = len(inference_inputs)
 
+        # D6/I1: the parent context for per-input isolation — an explicit
+        # ``run_context`` or the already-active context if nested. Under neither
+        # (a true legacy root) there is no per-input split -> byte-identical.
+        _parent_ctx = run_context if run_context is not None else active_run_context()
+
         if debug:
             self.log_debug(
                 f"aparallel_infer debug mode: {num_inputs} inputs",
                 "ParallelInfer",
             )
             results = []
-            for inp in inference_inputs:
-                result = await self._ainfer_single(
-                    inp, inference_config, **_inference_args
+            for _i, inp in enumerate(inference_inputs):
+                result = await self._aparallel_one(
+                    inp, _i, _parent_ctx, inference_config, _inference_args
                 )
                 results.append(result)
             return results
@@ -2308,15 +2786,29 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         semaphore = asyncio.Semaphore(max_concurrency)
 
-        async def _bounded_infer(inp):
+        async def _bounded_infer(inp, i):
             async with semaphore:
-                return await self._ainfer_single(
-                    inp, inference_config, **_inference_args
+                return await self._aparallel_one(
+                    inp, i, _parent_ctx, inference_config, _inference_args
                 )
 
-        tasks = [_bounded_infer(inp) for inp in inference_inputs]
+        tasks = [_bounded_infer(inp, i) for i, inp in enumerate(inference_inputs)]
         results = await asyncio.gather(*tasks)
         return list(results)
+
+    async def _aparallel_one(self, inp, i, parent_ctx, inference_config, inference_args):
+        """D6/I1: run one parallel input under a per-input child context
+        (``parallel_{i}``) when a parent context is active, so each input gets an
+        isolated state node + Tier-3 handles (no §2.7 same-creator collapse).
+        Byte-identical when ``parent_ctx`` is None (legacy true root)."""
+        if parent_ctx is None:
+            return await self._ainfer_single(inp, inference_config, **inference_args)
+        self._check_cancelled(parent_ctx)  # §2.1/P-#6: halt fan-out if cancelled
+        token = enter_run(parent_ctx.child(f"parallel_{i}"))
+        try:
+            return await self._ainfer_single(inp, inference_config, **inference_args)
+        finally:
+            exit_run(token)
 
     # region Async Lifecycle Methods
 

@@ -59,8 +59,8 @@ def _make_claude(tmp_workspace, **overrides):
     return ClaudeCodeCliInferencer(**kwargs)
 
 
-def _make_worker_factory(tmp_workspace):
-    """Return a worker_factory callable: (sub_query, index) → ClaudeCodeCliInferencer."""
+def _make_worker_inferencers(tmp_workspace):
+    """Return a worker_inferencers callable: (sub_query, index) → ClaudeCodeCliInferencer."""
 
     def factory(sub_query, index):
         return _make_claude(tmp_workspace)
@@ -93,12 +93,12 @@ async def test_breakdown_checkpoint_resume(tmp_workspace):
     )
 
     # Worker factory with short idle_timeout to force interruption during workers
-    def short_timeout_worker_factory(sub_query, index):
+    def short_timeout_worker_inferencers(sub_query, index):
         return _make_claude(tmp_workspace, idle_timeout_seconds=2)
 
     bta1 = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=short_timeout_worker_factory,
+        worker_inferencers=short_timeout_worker_inferencers,
         checkpoint_dir=checkpoint_dir,
         resume_with_saved_results=True,
         max_breakdown=2,
@@ -142,7 +142,7 @@ async def test_breakdown_checkpoint_resume(tmp_workspace):
 
     bta2 = BreakdownThenAggregateInferencer(
         breakdown_inferencer=FailIfCalledInferencer(),
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         checkpoint_dir=checkpoint_dir,
         resume_with_saved_results=True,
         max_breakdown=2,
@@ -184,7 +184,7 @@ async def test_worker_resume_from_cache(tmp_workspace):
     checkpoint_dir = str(tmp_workspace["checkpoint"])
     worker_call_count = {"count": 0}
 
-    def mixed_timeout_worker_factory(sub_query, index):
+    def mixed_timeout_worker_inferencers(sub_query, index):
         """First worker completes normally, second worker times out."""
         worker_call_count["count"] += 1
         if index == 0:
@@ -200,7 +200,7 @@ async def test_worker_resume_from_cache(tmp_workspace):
 
     bta1 = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=mixed_timeout_worker_factory,
+        worker_inferencers=mixed_timeout_worker_inferencers,
         checkpoint_dir=checkpoint_dir,
         resume_with_saved_results=True,
         max_breakdown=2,
@@ -223,7 +223,7 @@ async def test_worker_resume_from_cache(tmp_workspace):
     # the second worker executes fresh (Req 21.4)
     bta2 = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         checkpoint_dir=checkpoint_dir,
         resume_with_saved_results=True,
         max_breakdown=2,
@@ -277,7 +277,7 @@ async def test_corrupted_breakdown_checkpoint(tmp_workspace):
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=_make_worker_factory(tmp_workspace),
+        worker_inferencers=_make_worker_inferencers(tmp_workspace),
         checkpoint_dir=checkpoint_dir,
         resume_with_saved_results=True,
         max_breakdown=2,

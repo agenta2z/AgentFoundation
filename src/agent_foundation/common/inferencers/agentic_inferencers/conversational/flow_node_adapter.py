@@ -381,6 +381,13 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
 
         try:
             content = resume_content if resuming else rendered_task
+            # NOTE (provenance — intentional asymmetry vs the fallback path below):
+            # the wrapped conversational_inferencer IS this node's own work, so its
+            # run_agentic_loop is left un-threaded — the §2.2 nested-reuse mint policy
+            # runs it under THIS adapter's active ctx (its own node), not a child. The
+            # fallback path threads run_context=child("fallback") because the
+            # fallback_inferencer is a genuinely SEPARATE inferencer (a distinct sub-
+            # node). Exempted-with-reason in the §9.5 lint.
             coro = self.conversational_inferencer.run_agentic_loop(
                 content=content,
                 interactive=interactive,
@@ -443,7 +450,10 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
             fallback_kwargs = {k: v for k, v in kwargs.items()
                                if k not in ("interactive",)}
             return await self.fallback_inferencer.ainfer(
-                rendered_task, inference_config, **fallback_kwargs
+                rendered_task,
+                inference_config,
+                run_context=self._rc_child("fallback"),
+                **fallback_kwargs,
             )
 
 

@@ -428,7 +428,7 @@ class TestInheritanceAndShape(unittest.TestCase):
         )
         self.assertEqual(mfi.predefined_sub_queries, ["alpha", "beta"])
         self.assertIsNone(mfi.breakdown_inferencer)
-        self.assertIsNotNone(mfi.worker_factory)
+        self.assertIsNotNone(mfi.worker_inferencers)
 
     def test_empty_flow_configs_raises(self):
         with self.assertRaises(ValueError):
@@ -942,7 +942,7 @@ class TestNFlowScaling(unittest.TestCase):
 
 class TestBackwardCompat(unittest.TestCase):
     """T9: MultiFlow constructed with no new attrs behaves like a plain BTA
-    with predefined_sub_queries + worker_factory."""
+    with predefined_sub_queries + worker_inferencers."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

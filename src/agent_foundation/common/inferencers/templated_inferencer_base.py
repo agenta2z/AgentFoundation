@@ -94,6 +94,62 @@ def _deep_merge_into(target: dict, source: dict) -> None:
             target[k] = v
 
 
+# ---------------------------------------------------------------------------
+# Per-call template-feed override (Tier-3 handle, ctx-scoped, walk-up read)
+# ---------------------------------------------------------------------------
+#
+# An ORCHESTRATOR (e.g. MultiFlowInferencer) needs to pass per-flow / per-call
+# data into a SHARED child leaf's wrapper template (``{{ upstream_artifacts }}``)
+# WITHOUT mutating the child's instance ``template_extra_feed`` — because under
+# shared-instance reuse (one child reused across N flows / one orchestrator
+# across N concurrent RunContexts) an instance write clobbers concurrent calls
+# (the Decision-5 / state-separation hazard). The seam mirrors the proven
+# ``_publish_workspace_to_ctx`` → ctx-handle-read pattern: the orchestrator
+# publishes a per-call feed dict into a RunContext handle (under a key the leaf
+# never collides with), and the leaf merges it at render time.
+#
+# Resolution is a WALK-UP of the active ctx's ancestor paths (the same mechanism
+# MFI's ``_resolve_attempt_state`` uses): the override is published at the
+# orchestrator's own node or a child node, and the leaf — which renders under
+# its OWN (descendant) ctx — finds it by walking up. This keeps the publish
+# robust without the orchestrator reconstructing the leaf's exact child path
+# (e.g. LWI's ``step_{i}`` slot, which the dynamic-input builder cannot know).
+TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE: str = "__template_extra_feed_override__"
+
+
+def _resolve_ctx_feed_override() -> Optional[dict]:
+    """Return the per-call ``template_extra_feed`` override dict published into the
+    active RunContext's handle tree (walking UP ancestor paths), else ``None``.
+
+    Byte-identical with no active ctx / no published override (returns ``None`` →
+    the feed is built exactly as before). Handles are path-keyed and NOT inherited
+    by child contexts (``handles.py``), so a leaf rendering at ``/flow_0/step_1``
+    must walk up to find an override published at ``/flow_0`` (or the root).
+    """
+    from agent_foundation.common.inferencers.run_context import active_run_context
+
+    ctx = active_run_context()
+    if ctx is None:
+        return None
+    store = ctx._handle_store
+    # Enumerate ancestor paths from the active path up to the root, e.g.
+    # "/flow_0/step_1" -> ["/flow_0/step_1", "/flow_0", "/"].
+    segments = [s for s in ctx.path.split("/") if s]
+    seen: set = set()
+    for i in range(len(segments), -1, -1):
+        path = "/" + "/".join(segments[:i])
+        if path in seen:
+            continue
+        seen.add(path)
+        handles = store.peek(path)
+        if handles is None:
+            continue
+        override = handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE, None)
+        if isinstance(override, dict) and override:
+            return override
+    return None
+
+
 @attrs(slots=False)
 class TemplatedInferencerBase(InferencerBase):
     """Base class for inferencers that render their own ``inference_input``
@@ -224,6 +280,16 @@ class TemplatedInferencerBase(InferencerBase):
                 feed[var_name] = value if value else ""
 
         feed.update(self.template_extra_feed)
+        # Per-call ctx-scoped override (published by an orchestrator into a
+        # RunContext handle; resolved by walking up the active ctx tree). Sits
+        # ABOVE the instance ``template_extra_feed`` (so an orchestrator can pass
+        # per-flow/per-call data — e.g. ``upstream_artifacts`` — without mutating
+        # the shared child instance) and BELOW the explicit per-call ``extra_feed``
+        # kwarg (a direct caller still wins). Byte-identical when no override is
+        # published (``_resolve_ctx_feed_override`` returns None).
+        _ctx_override = _resolve_ctx_feed_override()
+        if _ctx_override:
+            feed.update(_ctx_override)
         if extra_feed:
             feed.update(extra_feed)
         if self.template_root_space:
@@ -303,7 +369,10 @@ class TemplatedInferencerBase(InferencerBase):
         """
         if self.template_manager is None:
             return inference_input
-        if not self.template_root_space and not self.template_key:
+        # M7 read-flip: resolve the effective role from the active context's
+        # RoleState (set by switch_role) when present, else the instance fields.
+        eff_key, eff_root, eff_master = self._effective_role()
+        if not eff_root and not eff_key:
             raise ValueError(
                 f"{type(self).__name__}: template_manager is set but neither "
                 f"template_root_space nor template_key is configured — cannot "
@@ -315,11 +384,35 @@ class TemplatedInferencerBase(InferencerBase):
             )
         feed = self._build_template_feed(inference_input, extra_feed=extra_feed)
         return self.template_manager(
-            self.template_key,
-            active_template_root_space=self.template_root_space,
-            master_version=self.template_master_version,
+            eff_key,
+            active_template_root_space=eff_root,
+            master_version=eff_master,
             **feed,
         )
+
+    def _effective_role(self):
+        """M7: (template_key, template_root_space, template_master_version) —
+        from the active context's RoleState when set, else the instance fields.
+        Byte-identical without a context (returns the instance values)."""
+        from agent_foundation.common.inferencers.run_context import (
+            RoleState,
+            active_run_context,
+        )
+
+        key = self.template_key
+        root = self.template_root_space
+        master = self.template_master_version
+        ctx = active_run_context()
+        if ctx is not None:
+            call = ctx.node(creator=(type(self).__qualname__, ctx.path)).call
+            if isinstance(call, RoleState):
+                if call.template_key is not None:
+                    key = call.template_key
+                if call.template_root_space is not None:
+                    root = call.template_root_space
+                if call.template_version is not None:
+                    master = call.template_version
+        return key, root, master
 
     def _propagate_to_children(self):
         """Push ``template_extra_feed`` and ``modes`` to child inferencers.
@@ -395,14 +488,47 @@ class TemplatedInferencerBase(InferencerBase):
         All remaining ``**base_kwargs`` are forwarded to
         ``InferencerBase.switch_role()`` (workspace, deliverable flags, etc.).
         """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        _ctx_active = active_run_context() is not None
         changes = {}
         for attr, val in {"template_key": template_key, "template_root_space": template_root_space,
                           "template_extra_feed": template_extra_feed, "template_variables": template_variables,
                           "template_version": template_version, "template_master_version": template_master_version,
                           "modes": modes}.items():
             if val is not None:
-                setattr(self, attr, val)
+                # M7 read-flip: under a context, run-state (role) goes to the
+                # context node (recorded below) and NOT onto ``self`` — the
+                # definition stays pure (the render pipeline reads via
+                # ``_effective_role``). Without a context, mutate ``self``
+                # (legacy / byte-identical).
+                if not _ctx_active:
+                    setattr(self, attr, val)
                 changes[attr] = val
         if changes:
             object.__setattr__(self, "_pending_role_changes", changes)
+            # Record the role change into the active context node (no-op without one).
+            self._record_role_state(new_role, changes)
         super().switch_role(new_role, **base_kwargs)
+
+    def _record_role_state(self, new_role, changes):
+        """M7: mirror a role switch into ``ctx.node.call`` as a ``RoleState``."""
+        from agent_foundation.common.inferencers.run_context import (
+            RoleState,
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return
+        node = ctx.node(creator=(type(self).__qualname__, ctx.path))
+        node.call = RoleState(
+            new_role=new_role,
+            template_key=changes.get("template_key"),
+            template_root_space=changes.get("template_root_space"),
+            template_version=changes.get("template_version"),
+            modes=changes.get("modes"),
+            changes=dict(changes),
+        )

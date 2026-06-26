@@ -16,6 +16,7 @@ from agent_foundation.apis.ag.gateway_mode import (
     DEFAULT_AI_GATEWAY_BASE_URL,
     DEFAULT_CLOUD_ID,
     DEFAULT_PROXIMITY_PORT,
+    DEFAULT_SLAUTH_GROUPS,
     DEFAULT_SLAUTH_SERVER_URL,
     DEFAULT_USE_CASE_ID,
     GatewayMode,
@@ -88,6 +89,7 @@ def _create_ai_gateway_client(
     cloud_id: str = None,
     use_case_id: str = None,
     slauth_server_url: str = None,
+    groups: str = None,
 ) -> AIGatewayClient:
     """
     Create an AI Gateway client with SLAUTH authentication.
@@ -122,12 +124,15 @@ def _create_ai_gateway_client(
         AIGatewayHeaders.USE_CASE_ID: use_case_id
     })
 
+    groups = groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS)
+    group_set = {g.strip() for g in groups.split(",") if g.strip()}
+
     try:
         from ai_gateway.client.common.filters import SlauthServerAuthFilter
 
         slauth_filter = SlauthServerAuthFilter(
             sl_auth_server_url=slauth_server_url,
-            groups={"atlassian-all"}
+            groups=group_set,
         )
 
         if not slauth_filter:
@@ -208,6 +213,7 @@ def _resolve_config(
     use_case_id: str = None,
     base_url: str = None,
     slauth_server_url: str = None,
+    groups: str = None,
 ) -> dict:
     """Resolve configuration from parameters, env vars, and defaults."""
     return {
@@ -216,6 +222,7 @@ def _resolve_config(
         "use_case_id": use_case_id or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
         "slauth_server_url": slauth_server_url or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
         "user_id": user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get('USER', ''),
+        "groups": groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
     }
 
 
@@ -232,7 +239,7 @@ def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeou
         Parsed JSON response dict.
     """
     env = "prod" if "prod" in config["base_url"] else "staging"
-    token = get_direct_slauth_token(env=env)
+    token = get_direct_slauth_token(env=env, groups=config.get("groups"))
     headers = build_direct_headers(
         token=token,
         user_id=config["user_id"],
@@ -310,6 +317,7 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
         cloud_id=config["cloud_id"],
         use_case_id=config["use_case_id"],
         slauth_server_url=config["slauth_server_url"],
+        groups=config.get("groups"),
     )
 
     request = RequestWrapper(
@@ -342,6 +350,91 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
         raise Exception(error_msg)
 
     return json.loads(response.body.decode('utf-8'))
+
+
+def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+    """Send request using the AI Gateway SDK's typed Bedrock client.
+
+    This is the most idiomatic SDK path: it uses ``client.bedrock.invoke_claude``
+    (the strongly-typed Claude route) rather than the low-level ``client.raw.http``
+    escape hatch. Auth is supplied via a pre-minted SLAuth token (from the atlas
+    CLI), so it does NOT require a local ``atlas slauth server`` to be running
+    (unlike ``slauth_server`` mode).
+
+    Args:
+        model_str: Bedrock model ID string (e.g. "anthropic.claude-opus-4-8").
+        request_payload: Anthropic/Bedrock request body.
+        config: Resolved configuration dict (must include base_url, user_id,
+            cloud_id, use_case_id, groups).
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Parsed Anthropic/Bedrock response dict (same shape as the other modes).
+    """
+    from ai_gateway.client.common.models import (
+        ClientRequest,
+        ClientResponse,
+        SyncFilter,
+        SyncFilterChain,
+    )
+    from ai_gateway.models.bedrock.chat import ClaudeRequest
+
+    env = "prod" if "prod" in config["base_url"] else "staging"
+    token = get_direct_slauth_token(env=env, groups=config.get("groups"))
+
+    class _PreMintedSlauthFilter(SyncFilter):
+        """Stamp a pre-minted SLAuth token onto every outbound request."""
+
+        def __init__(self, t: str):
+            if not t:
+                raise ValueError("pre-minted SLAuth token is empty")
+            self._token = t
+
+        def filter(self, request: ClientRequest, chain: SyncFilterChain) -> ClientResponse:
+            tok = self._token
+            if not tok.lower().startswith(("slauth ", "bearer ")):
+                tok = f"SLAUTH {tok}"
+            request.headers["Authorization"] = tok
+            return chain.next(request)
+
+    default_headers = HttpHeaders({
+        AIGatewayHeaders.USER_ID: config["user_id"],
+        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+    })
+
+    client = AIGatewayClient.sync(
+        base_url=config["base_url"],
+        default_headers=default_headers,
+        filters=[_PreMintedSlauthFilter(token)],
+    )
+
+    # Build the typed Claude request from the Anthropic/Bedrock payload. The
+    # ClaudeRequest model mirrors the Anthropic messages schema, so we forward
+    # the same fields the other modes use.
+    claude_req = ClaudeRequest(**request_payload)
+    response = client.bedrock.invoke_claude(model_str, RequestWrapper(claude_req))
+
+    if not (200 <= response.http_status.code < 300):
+        raw_body = getattr(response, "raw_body", None) or response.body
+        raw_str = (
+            raw_body.decode("utf-8", errors="replace")
+            if isinstance(raw_body, (bytes, bytearray))
+            else str(raw_body)
+        )
+        raise Exception(
+            f"SDK mode: AI Gateway returned status {response.http_status.code}: {raw_str}"
+        )
+
+    body = response.body
+    if isinstance(body, (bytes, bytearray)):
+        body = body.decode("utf-8")
+    if isinstance(body, str):
+        return json.loads(body)
+    # Some SDK versions return an already-parsed pydantic model / dict.
+    if hasattr(body, "model_dump"):
+        return body.model_dump()
+    return body
 
 
 def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
@@ -433,6 +526,7 @@ def generate_text(
         verbose: bool = False,
         gateway_mode: str = "auto",
         proximity_port: int = DEFAULT_PROXIMITY_PORT,
+        groups: str = None,
         **kwargs
 ) -> Union[str, List[str], Dict]:
     """
@@ -479,6 +573,7 @@ def generate_text(
         use_case_id=use_case_id,
         base_url=base_url,
         slauth_server_url=slauth_server_url,
+        groups=groups,
     )
 
     # Resolve gateway mode
@@ -514,7 +609,7 @@ def generate_text(
     )
     request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 120
 
-    if True:
+    if verbose:
         hprint_message(
             {
                 'model': model_str,
@@ -545,6 +640,8 @@ def generate_text(
                 response_data = _send_via_direct(model_str, request_payload, config, timeout=request_timeout)
             elif mode == GatewayMode.PROXIMITY:
                 response_data = _send_via_proximity(model_str, request_payload, port=proximity_port, timeout=request_timeout)
+            elif mode == GatewayMode.SDK:
+                response_data = _send_via_sdk(model_str, request_payload, config, timeout=request_timeout)
             elif mode == GatewayMode.SLAUTH_SERVER:
                 response_data = _send_via_slauth_server(model_str, request_payload, config, timeout=request_timeout)
             else:
@@ -720,6 +817,7 @@ async def generate_text_streaming(
         verbose: bool = False,
         gateway_mode: str = "auto",
         proximity_port: int = DEFAULT_PROXIMITY_PORT,
+        groups: str = None,
         **kwargs
 ) -> AsyncIterator[str]:
     """Stream text from Claude via AI Gateway, yielding chunks as they arrive.
@@ -761,6 +859,7 @@ async def generate_text_streaming(
         use_case_id=use_case_id,
         base_url=base_url,
         slauth_server_url=slauth_server_url,
+        groups=groups,
     )
 
     resolved_mode = GatewayMode(gateway_mode)
@@ -827,9 +926,10 @@ async def generate_text_streaming(
                     yield chunk
                 return
 
-            elif mode == GatewayMode.SLAUTH_SERVER:
-                # slauth_server doesn't support streaming — fall back to non-streaming
-                logger.info("slauth_server mode: falling back to non-streaming")
+            elif mode in (GatewayMode.SLAUTH_SERVER, GatewayMode.SDK):
+                # Neither SDK (typed bedrock invoke) nor slauth_server support
+                # SSE streaming here — fall back to a single non-streaming call.
+                logger.info("%s mode: falling back to non-streaming", mode)
                 result = await asyncio.to_thread(
                     generate_text,
                     prompt_or_messages=prompt_or_messages,
@@ -844,8 +944,9 @@ async def generate_text_streaming(
                     base_url=base_url,
                     slauth_server_url=slauth_server_url,
                     timeout=timeout,
-                    gateway_mode="slauth_server",
+                    gateway_mode=str(mode),
                     proximity_port=proximity_port,
+                    groups=groups,
                     **kwargs,
                 )
                 yield result
@@ -887,6 +988,7 @@ async def generate_text_async(
         verbose: bool = False,
         gateway_mode: str = "auto",
         proximity_port: int = DEFAULT_PROXIMITY_PORT,
+        groups: str = None,
         **kwargs
 ) -> Union[str, Dict]:
     """Async generate text using Claude via AI Gateway.

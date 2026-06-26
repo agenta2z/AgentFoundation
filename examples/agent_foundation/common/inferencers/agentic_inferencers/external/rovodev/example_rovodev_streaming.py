@@ -16,7 +16,7 @@ Prerequisites:
 Usage:
     python example_rovodev_streaming.py
     python example_rovodev_streaming.py --mode streaming --query "Explain decorators"
-    python example_rovodev_streaming.py --mode sync --working-dir /path/to/repo
+    python example_rovodev_streaming.py --mode sync --target-path /path/to/repo
 """
 
 import argparse

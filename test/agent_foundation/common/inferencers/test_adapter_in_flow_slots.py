@@ -141,7 +141,7 @@ class TestAdapterAsBTAAggregator(unittest.IsolatedAsyncioTestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=adapter,
             checkpoint_dir=self.tmpdir,
         )

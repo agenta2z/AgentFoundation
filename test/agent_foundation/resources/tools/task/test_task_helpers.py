@@ -99,13 +99,13 @@ def test_walk_replace_model_nested():
     cfg = {
         "_target_": "BTA",
         "breakdown_inferencer": {"model_name": "opus"},
-        "worker_factory": {"__default__": {"model_name": "opus"}},
+        "worker_inferencers": {"__default__": {"model_name": "opus"}},
         "aggregator_inferencer": {"model_name": "opus"},
     }
     n = ex._walk_replace_model(cfg, "sonnet")
     assert n == 3
     assert cfg["breakdown_inferencer"]["model_name"] == "sonnet"
-    assert cfg["worker_factory"]["__default__"]["model_name"] == "sonnet"
+    assert cfg["worker_inferencers"]["__default__"]["model_name"] == "sonnet"
     assert cfg["aggregator_inferencer"]["model_name"] == "sonnet"
 
 def test_walk_replace_model_idempotent():

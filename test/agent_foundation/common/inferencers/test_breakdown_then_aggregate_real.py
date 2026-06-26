@@ -249,7 +249,7 @@ def test_bta_full_pipeline(query: str, backend: str = "auto", max_breakdown: int
         # --- Step 2: Create worker factory ---
         workers_created = []
 
-        def worker_factory(sub_query, index):
+        def worker_inferencers(sub_query, index):
             """Create a worker for deep research on a sub-question."""
             worker, _ = create_inferencer(
                 backend,
@@ -263,7 +263,7 @@ def test_bta_full_pipeline(query: str, backend: str = "auto", max_breakdown: int
             workers_created.append((index, sub_query))
             return worker
 
-        print("  Created worker_factory")
+        print("  Created worker_inferencers")
 
         # --- Step 3: Create aggregator ---
         def aggregator_prompt_builder(worker_results, original_query=""):
@@ -293,7 +293,7 @@ def test_bta_full_pipeline(query: str, backend: str = "auto", max_breakdown: int
         # --- Step 4: Wire it all together via BTA ---
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown_inferencer,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=aggregator_inferencer,
             aggregator_prompt_builder=aggregator_prompt_builder,
             breakdown_parser=lambda raw: _robust_breakdown_parser(raw, max_breakdown),
@@ -399,7 +399,7 @@ def test_bta_no_aggregator(query: str, backend: str = "auto", max_breakdown: int
         )
         print(f"  Backend: {backend_name}")
 
-        def worker_factory(sub_query, index):
+        def worker_inferencers(sub_query, index):
             worker, _ = create_inferencer(
                 backend,
                 input_preprocessor=lambda q: (
@@ -410,7 +410,7 @@ def test_bta_no_aggregator(query: str, backend: str = "auto", max_breakdown: int
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown_inferencer,
-            worker_factory=worker_factory,
+            worker_inferencers=worker_inferencers,
             aggregator_inferencer=None,
             breakdown_parser=lambda raw: _robust_breakdown_parser(raw, max_breakdown),
             max_breakdown=max_breakdown,

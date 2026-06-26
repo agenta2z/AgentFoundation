@@ -185,9 +185,475 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     checkpoint_mode = attrib(default="jsonfy", init=False)
 
     # Internal state (not user-facing)
-    _pending_state: Optional[Dict] = attrib(default=None, init=False)
-    _inference_config: Optional[Dict] = attrib(default=None, init=False)
-    _inference_args: Optional[Dict] = attrib(default=None, init=False)
+    # M7/§2.9 + Part G (C10): the LinearWorkflow/Workflow RUNNER state machine is
+    # virtualized so a SHARED instance run under N concurrent RunContexts keeps
+    # isolated runner state.  Every per-run mutable runner attribute below is a
+    # compat-property routing to a per-run home when a RunContext is active —
+    # run-state lives in the context, not on ``self`` — else an instance backing
+    # (byte-identical without a context).
+    #
+    # Two homes, matching the engine's existing checkpoint classification:
+    #   * **Serialized / resume-restored** (``_state`` working dict, ``_loop_counts``,
+    #     ``_exec_seq``, ``_splice_*``, ``_step_attempt_counts``) -> the typed
+    #     ``LinearWorkflowState`` carrier (per-CALL; survives ``reset_attempt``).
+    #     For MFDual the carrier is ``ctx.node().call.runner`` (composed into
+    #     ``MFDualState``); for a plain LWI the working dict ``_state``/``_pending_state``
+    #     IS ``ctx.node().call`` and the other serialized fields live in a per-path
+    #     ``LinearWorkflowState`` lazily held in ``ctx.node().scratch`` (so the dict
+    #     ``.call`` and the runner bookkeeping never collide — GT#14).
+    #   * **Transient / re-derived each run** (``_steps``, the live expansion flags,
+    #     ``_state_picklability_verified``, per-run attempt flags, ``_inference_config``/
+    #     ``_inference_args``) -> the non-serialized per-path ``ctx.node().scratch`` dict
+    #     (concurrency-isolated; never resumed, matching the re-derived contract).
+    #
+    # ``_pending_state`` is the canonical template (G1, already shipped) and is kept
+    # byte-for-byte; ``_state`` mirrors it exactly so the two stay coherent.
+
+    # ------------------------------------------------------------------
+    # Part G runner-state resolution helpers (mirror ``_pending_state``)
+    # ------------------------------------------------------------------
+
+    # Reserved key under which a plain-LWI per-path ``LinearWorkflowState`` carrier
+    # is held in ``ctx.node().scratch`` (the serialized runner fields' home when
+    # ``.call`` is a raw working-state dict rather than a typed ``.call`` state).
+    _RUNNER_SCRATCH_KEY = "_lwi_runner_carrier"
+
+    def _runner_carrier(self, create: bool = True):
+        """Resolve the per-run ``LinearWorkflowState`` carrier for the serialized
+        runner fields (``loop_counts``/``exec_seq``/``splice_*``/``step_attempt_counts``).
+
+        Resolution mirrors ``_pending_state`` exactly:
+
+        * a RunContext is active and ``ctx.node().call`` is a TYPED state with a
+          ``runner`` carrier (e.g. ``MFDualState.runner``) -> that carrier (the
+          fields ride along with the serialized ``.call`` state);
+        * a RunContext is active and ``.call`` is a plain dict / ``None`` (a plain
+          LWI, whose working dict lives at ``.call``) -> a per-path
+          ``LinearWorkflowState`` lazily created in ``ctx.node().scratch`` (so it is
+          isolated per concurrent run yet survives ``reset_attempt``);
+        * no active context (legacy / direct call) -> ``None`` (caller uses the
+          instance backing — byte-identical to the pre-virtualization behaviour).
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            InferencerStateBase,
+            active_run_context,
+        )
+        from agent_foundation.common.inferencers.run_context.state import (
+            LinearWorkflowState,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return None
+        node = ctx.node()
+        call = node.call
+        if isinstance(call, InferencerStateBase):
+            runner = getattr(call, "runner", None)
+            if runner is not None:
+                return runner
+            # Typed ``.call`` without a runner carrier — fall back to the per-path
+            # scratch carrier rather than mutating the typed ``.call``.
+        carrier = node.scratch.get(self._RUNNER_SCRATCH_KEY)
+        if carrier is None and create:
+            carrier = LinearWorkflowState()
+            node.scratch[self._RUNNER_SCRATCH_KEY] = carrier
+        return carrier
+
+    def _runner_scratch(self):
+        """Return the per-path transient scratch dict for re-derived runner fields,
+        or ``None`` when no RunContext is active (caller uses the instance backing).
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is None:
+            return None
+        return ctx.node().scratch
+
+    @property
+    def _pending_state(self):
+        from agent_foundation.common.inferencers.run_context import (
+            InferencerStateBase,
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            call = ctx.node().call
+            # GT#14/G1: when ``.call`` is a TYPED state (e.g. MFDualState — the dispatch/role
+            # state lives there), the workflow working-state dict lives in its ``runner``
+            # carrier so the two don't collide. Plain dict/None → the legacy carrier IS .call.
+            if isinstance(call, InferencerStateBase):
+                runner = getattr(call, "runner", None)
+                if runner is not None:
+                    return runner.state
+            elif isinstance(call, dict) or call is None:
+                return call
+        return self.__dict__.get("_pending_state_backing")
+
+    @_pending_state.setter
+    def _pending_state(self, value):
+        from agent_foundation.common.inferencers.run_context import (
+            InferencerStateBase,
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            call = ctx.node().call
+            if isinstance(call, InferencerStateBase):
+                runner = getattr(call, "runner", None)
+                if runner is not None:
+                    runner.state = value
+                    return
+                # typed state without a runner carrier — fall through to the backing
+                # rather than clobbering the typed .call with a raw dict.
+            else:
+                ctx.node().call = value
+                return
+        self.__dict__["_pending_state_backing"] = value
+
+    # ------------------------------------------------------------------
+    # Part G: serialized runner fields -> the ``LinearWorkflowState`` carrier
+    # (``_state`` mirrors ``_pending_state`` exactly; the rest ride the carrier)
+    # ------------------------------------------------------------------
+
+    @property
+    def _state(self):
+        # The workflow working-state dict.  Resolves to the SAME home as
+        # ``_pending_state`` (typed ``call.runner.state`` | dict/None ``.call`` |
+        # the shared ``_pending_state_backing`` instance backing) so the two stay
+        # coherent: the Dual review step reads ``self._state`` then falls back to
+        # ``dict(self._pending_state)`` (dual_inferencer.py:1089-1092) and the
+        # rest of the engine reads ``self._state`` while ``_ainfer`` seeds via
+        # ``self._pending_state`` — they must be one object.
+        from agent_foundation.common.inferencers.run_context import (
+            InferencerStateBase,
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            call = ctx.node().call
+            if isinstance(call, InferencerStateBase):
+                runner = getattr(call, "runner", None)
+                if runner is not None:
+                    return runner.state
+            elif isinstance(call, dict) or call is None:
+                return call
+        return self.__dict__.get("_pending_state_backing")
+
+    @_state.setter
+    def _state(self, value):
+        from agent_foundation.common.inferencers.run_context import (
+            InferencerStateBase,
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            call = ctx.node().call
+            if isinstance(call, InferencerStateBase):
+                runner = getattr(call, "runner", None)
+                if runner is not None:
+                    runner.state = value
+                    return
+            else:
+                ctx.node().call = value
+                return
+        self.__dict__["_pending_state_backing"] = value
+
+    @property
+    def _loop_counts(self):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            return carrier.loop_counts
+        lc = self.__dict__.get("_loop_counts_backing")
+        if lc is None:
+            lc = {}
+            self.__dict__["_loop_counts_backing"] = lc
+        return lc
+
+    @_loop_counts.setter
+    def _loop_counts(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.loop_counts = value
+            return
+        self.__dict__["_loop_counts_backing"] = value
+
+    @property
+    def _exec_seq(self):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            return carrier.exec_seq
+        return self.__dict__.get("_exec_seq_backing", 0)
+
+    @_exec_seq.setter
+    def _exec_seq(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.exec_seq = value
+            return
+        self.__dict__["_exec_seq_backing"] = value
+
+    @property
+    def _step_attempt_counts(self):
+        # Accumulator (persists across resume) -> the serialized carrier, never the
+        # transient scratch.  Always returns a dict so ``hasattr`` stays True (the
+        # base only inits it ``if not hasattr`` — see workflow.py:1174,1513).
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            return carrier.step_attempt_counts
+        sac = self.__dict__.get("_step_attempt_counts_backing")
+        if sac is None:
+            sac = {}
+            self.__dict__["_step_attempt_counts_backing"] = sac
+        return sac
+
+    @_step_attempt_counts.setter
+    def _step_attempt_counts(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.step_attempt_counts = value
+            return
+        self.__dict__["_step_attempt_counts_backing"] = value
+
+    @property
+    def _splice_orig_args(self):
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            return carrier.splice_orig_args
+        return self.__dict__.get("_splice_orig_args_backing")
+
+    @_splice_orig_args.setter
+    def _splice_orig_args(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.splice_orig_args = value
+            return
+        self.__dict__["_splice_orig_args_backing"] = value
+
+    @_splice_orig_args.deleter
+    def _splice_orig_args(self):
+        # The base engine does ``del self._splice_orig_args`` after the first
+        # spliced step executes; clearing to ``None`` keeps the subsequent
+        # ``getattr(self, '_splice_orig_args', None)`` reads returning ``None``.
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            carrier.splice_orig_args = None
+            return
+        self.__dict__.pop("_splice_orig_args_backing", None)
+
+    @property
+    def _splice_orig_kwargs(self):
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            return carrier.splice_orig_kwargs
+        return self.__dict__.get("_splice_orig_kwargs_backing")
+
+    @_splice_orig_kwargs.setter
+    def _splice_orig_kwargs(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.splice_orig_kwargs = value
+            return
+        self.__dict__["_splice_orig_kwargs_backing"] = value
+
+    @_splice_orig_kwargs.deleter
+    def _splice_orig_kwargs(self):
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            carrier.splice_orig_kwargs = None
+            return
+        self.__dict__.pop("_splice_orig_kwargs_backing", None)
+
+    @property
+    def _splice_step_index(self):
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            return carrier.splice_step_index
+        return self.__dict__.get("_splice_step_index_backing")
+
+    @_splice_step_index.setter
+    def _splice_step_index(self, value):
+        carrier = self._runner_carrier()
+        if carrier is not None:
+            carrier.splice_step_index = value
+            return
+        self.__dict__["_splice_step_index_backing"] = value
+
+    @_splice_step_index.deleter
+    def _splice_step_index(self):
+        carrier = self._runner_carrier(create=False)
+        if carrier is not None:
+            carrier.splice_step_index = None
+            return
+        self.__dict__.pop("_splice_step_index_backing", None)
+
+    # ------------------------------------------------------------------
+    # Part G: transient runner fields -> the per-path ``NodeRunState.scratch``
+    # (re-derived each run; never serialized / resumed)
+    # ------------------------------------------------------------------
+
+    @property
+    def _steps(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_steps")
+        return self.__dict__.get("_steps_backing")
+
+    @_steps.setter
+    def _steps(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_steps"] = value
+            return
+        self.__dict__["_steps_backing"] = value
+
+    @property
+    def _inference_config(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_inference_config")
+        return self.__dict__.get("_inference_config_backing")
+
+    @_inference_config.setter
+    def _inference_config(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_inference_config"] = value
+            return
+        self.__dict__["_inference_config_backing"] = value
+
+    @property
+    def _inference_args(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_inference_args")
+        return self.__dict__.get("_inference_args_backing")
+
+    @_inference_args.setter
+    def _inference_args(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_inference_args"] = value
+            return
+        self.__dict__["_inference_args_backing"] = value
+
+    @property
+    def _expansion_count(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_expansion_count", 0)
+        return self.__dict__.get("_expansion_count_backing", 0)
+
+    @_expansion_count.setter
+    def _expansion_count(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_expansion_count"] = value
+            return
+        self.__dict__["_expansion_count_backing"] = value
+
+    @property
+    def _expansion_records(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            recs = scratch.get("_expansion_records")
+            if recs is None:
+                recs = []
+                scratch["_expansion_records"] = recs
+            return recs
+        recs = self.__dict__.get("_expansion_records_backing")
+        if recs is None:
+            recs = []
+            self.__dict__["_expansion_records_backing"] = recs
+        return recs
+
+    @_expansion_records.setter
+    def _expansion_records(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_expansion_records"] = value
+            return
+        self.__dict__["_expansion_records_backing"] = value
+
+    @property
+    def _expansion_active(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_expansion_active", False)
+        return self.__dict__.get("_expansion_active_backing", False)
+
+    @_expansion_active.setter
+    def _expansion_active(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_expansion_active"] = value
+            return
+        self.__dict__["_expansion_active_backing"] = value
+
+    @property
+    def _migration_needed(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_migration_needed", False)
+        return self.__dict__.get("_migration_needed_backing", False)
+
+    @_migration_needed.setter
+    def _migration_needed(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_migration_needed"] = value
+            return
+        self.__dict__["_migration_needed_backing"] = value
+
+    @property
+    def _state_picklability_verified(self):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            return scratch.get("_state_picklability_verified", False)
+        return self.__dict__.get("_state_picklability_verified_backing", False)
+
+    @_state_picklability_verified.setter
+    def _state_picklability_verified(self, value):
+        scratch = self._runner_scratch()
+        if scratch is not None:
+            scratch["_state_picklability_verified"] = value
+            return
+        self.__dict__["_state_picklability_verified_backing"] = value
+
+    # NOTE: ``_step_was_previously_attempted`` / ``_previous_attempt_info`` are the
+    # resume-marker signals the runner sets in ``_arun`` and that **child step
+    # closures read across a child-ctx boundary** (e.g. PTI's
+    # ``_build_executor_input`` reads ``self._step_was_previously_attempted`` while
+    # the executor's own ``ainfer`` has a child ctx active —
+    # ``plan_then_implement_inferencer.py:571``).  Routing them through the *active*
+    # node's scratch would write them on the LWI node and read them on the child
+    # node -> the signal would be invisible to the consumer.  They are therefore
+    # kept on the **instance backing** (byte-identical to pre-virtualization, and
+    # readable from any ctx within the run).  Per-run isolation for a shared
+    # instance under concurrency would require a captured-run node (cf. Part B's
+    # parent-node write) and is out of scope for this commit (the concurrency
+    # acceptance covers ``state``/``loop_counts``/``exec_seq``).
+    @property
+    def _step_was_previously_attempted(self):
+        return self.__dict__.get("_step_was_previously_attempted_backing", False)
+
+    @_step_was_previously_attempted.setter
+    def _step_was_previously_attempted(self, value):
+        self.__dict__["_step_was_previously_attempted_backing"] = value
+
+    @property
+    def _previous_attempt_info(self):
+        return self.__dict__.get("_previous_attempt_info_backing")
+
+    @_previous_attempt_info.setter
+    def _previous_attempt_info(self, value):
+        self.__dict__["_previous_attempt_info_backing"] = value
 
     def __attrs_post_init__(self):
         super(LinearWorkflowInferencer, self).__attrs_post_init__()
@@ -234,8 +700,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 InferencerBase,
             )
             for inf, child_name in (
-                (getattr(self, "default_initial_inferencer", None), "initial"),
-                (getattr(self, "default_followup_inferencer", None), "round01"),
+                (getattr(self, "default_initial_inferencer", None), self._dynamic_child_name(0)),
+                (getattr(self, "default_followup_inferencer", None), self._dynamic_child_name(1)),
             ):
                 if inf is None or not isinstance(inf, InferencerBase):
                     continue
@@ -255,8 +721,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 InferencerBase,
             )
             for inf, child_name in (
-                (getattr(self, "default_initial_inferencer", None), "initial"),
-                (getattr(self, "default_followup_inferencer", None), "round01"),
+                (getattr(self, "default_initial_inferencer", None), self._dynamic_child_name(0)),
+                (getattr(self, "default_followup_inferencer", None), self._dynamic_child_name(1)),
             ):
                 if inf is None or not isinstance(inf, InferencerBase):
                     continue
@@ -297,7 +763,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             results = (self._state or {}).get("dynamic_step_results", [])
             if results:
                 step_count = len(results)
-                child_name = "initial" if step_count == 1 else f"round{step_count - 1:02d}"
+                consensus_iter = (self._state or {}).get("consensus_iteration_id", 0)
+                child_name = self._dynamic_child_name(step_count - 1, consensus_iter)
                 child_ws = self._workspace.child(child_name)
                 from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
                 _output_name = self.output_path or DEFAULT_OUTPUT_FILENAME
@@ -377,16 +844,19 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         self._setup_child_workflows(state)
 
         # 3. Optionally reset child inferencer sessions
+        # §9.3/N-R2: bind each step's slot so reset_session targets the step's OWN
+        # Tier-3 handle (no-op binding without a context -> byte-identical legacy).
         if self.reset_sessions_per_iteration:
             seen_ids: set = set()
             for sc in self.step_configs:
                 inf = sc.inferencer
                 if inf is not None and id(inf) not in seen_ids:
                     seen_ids.add(id(inf))
-                    if hasattr(inf, "reset_session"):
-                        inf.reset_session()
-                    elif hasattr(inf, "new_session"):
-                        inf.new_session()
+                    with self._with_child_ctx(getattr(sc, "name", None) or "step"):
+                        if hasattr(inf, "reset_session"):
+                            inf.reset_session()
+                        elif hasattr(inf, "new_session"):
+                            inf.new_session()
 
         # 4. Record the completed iteration
         self._record_iteration(state)
@@ -603,6 +1073,24 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             return self.inferencer_factory(inferencer)
         return inferencer()
 
+    @staticmethod
+    def _dynamic_child_name(step_index, consensus_iter=0):
+        """Single source of truth for a dynamic step's on-disk child dir name.
+
+        A ``@staticmethod`` (no instance state) so peer orchestrators (e.g. the MFI's
+        per-flow path capture) can reuse the SAME naming convention without an LWI instance —
+        ``self._dynamic_child_name(...)`` calls from within the LWI keep working unchanged.
+
+        ``step 0 -> "initial"``, ``step N>=1 -> "round{N:02d}"``, with an
+        ``"_iter{K}"`` suffix for consensus iteration ``K>0``. Used by the
+        dispatch (the explicit workspace handed to ``_rc_child``), workspace
+        propagation, and ``_finalize_output`` so the three can never drift — the
+        regression was the dispatch landing output at the ctx slot ``step_{N}``
+        while ``_finalize_output`` looked for ``round{NN}``.
+        """
+        base = "initial" if step_index == 0 else f"round{step_index:02d}"
+        return base + (f"_iter{consensus_iter}" if consensus_iter and consensus_iter > 0 else "")
+
     def _build_dynamic_step_wrapper(self, inferencer, step_index):
         """Build a step wrapper closure for dynamic mode.
 
@@ -637,26 +1125,42 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 prev_results = state.get("dynamic_step_results", [])
                 prev = prev_results[-1] if prev_results else step_input
                 if self.dynamic_input_builder is not None:
-                    inp = self.dynamic_input_builder(state, prev)
+                    # call_maybe_async supports BOTH a sync builder (run inline — byte
+                    # identical to the old direct call) and an async builder (awaited).
+                    # MultiFlow's cross-flow-sync wrapper is async (it awaits a per-round
+                    # step barrier between publishing its output and reading peers').
+                    from rich_python_utils.common_utils.async_utils import (
+                        call_maybe_async,
+                    )
+
+                    inp = await call_maybe_async(self.dynamic_input_builder, state, prev)
                 else:
                     inp = prev
 
-            # Part D — Per-round workspace isolation (hierarchical layout)
+            # Part D — Per-step workspace (canonical initial/round{NN} layout)
             # ----------------------------------------------------------------
-            # step 0: uses children/initial/ (pre-assigned by propagation)
-            # step 1: uses children/round01/ (pre-assigned by propagation)
-            # step 2+: creates children/round02/, round03/, etc. on demand
-            if inf_instance is not None and step_index >= 2:
-                lwi_ws = self._workspace
-                if lwi_ws is not None:
-                    consensus_iter = state.get("consensus_iteration_id", 0) if state else 0
-                    iter_suffix = f"_iter{consensus_iter}" if consensus_iter > 0 else ""
-                    child_name = f"round{step_index:02d}{iter_suffix}"
-                    round_ws = lwi_ws.child(child_name)
-                    round_ws.ensure_dirs()
-                    inf_instance._workspace = round_ws
-                    if hasattr(inf_instance, "reset_session"):
-                        inf_instance.reset_session()
+            # The ctx node stays "step_{N}" (the §2.7 deterministic slot the
+            # step___expanded_* checkpoints correlate to), but the on-disk
+            # workspace is pinned to children/initial|round{NN} — the dir that
+            # propagation, _finalize_output, and the MFI flow-output resolver all
+            # address — and passed EXPLICITLY via _rc_child(workspace=...) (M7
+            # §2.12 ctx/workspace decoupling, mirroring the BTA worker dispatch).
+            # Without this, a step instance with no workspace backing resolves to
+            # the path-mirrored children/step_{N}, which _finalize_output never
+            # finds -> empty flow deliverable -> aggregator embeds raw <Response>.
+            consensus_iter = state.get("consensus_iteration_id", 0) if state else 0
+            _step_ws = (
+                self._workspace.child(self._dynamic_child_name(step_index, consensus_iter))
+                if self._workspace is not None
+                else None
+            )
+            if _step_ws is not None:
+                _step_ws.ensure_dirs()
+                # step>=2 reuses the followup instance across rounds; reset its
+                # session so each round starts clean (step 0/1 use the distinct
+                # default initial/followup instances).
+                if inf_instance is not None and step_index >= 2 and hasattr(inf_instance, "reset_session"):
+                    inf_instance.reset_session()
 
             # 2. Execute inferencer — forward inference_config and _inference_args
             # (stored by _ainfer at lines 742-743) to match static-mode behavior.
@@ -665,7 +1169,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 extra_kwargs["inference_config"] = self._inference_config
             if self._inference_args:
                 extra_kwargs.update(self._inference_args)
-            raw_result = await inf_instance.ainfer(inp, **extra_kwargs)
+            raw_result = await inf_instance.ainfer(
+                inp,
+                run_context=self._rc_child(f"step_{step_index}", workspace=_step_ws),
+                **extra_kwargs,
+            )
 
             # 3. Unpack result tuple
             actual_result, next_inferencer = self._resolve_next_inferencer(raw_result)
@@ -835,7 +1343,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 # 3. Execute
                 if _sc.inferencer is not None:
                     result = await _sc.inferencer.ainfer(
-                        step_input, **extra_kwargs
+                        step_input,
+                        run_context=self._rc_child(getattr(_sc, "name", None) or "step"),
+                        **extra_kwargs,
                     )
                 elif _sc.step_fn is not None:
                     from rich_python_utils.common_utils.async_utils import (

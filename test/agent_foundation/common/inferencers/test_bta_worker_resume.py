@@ -46,7 +46,7 @@ class TestWorkerNodeResume(unittest.TestCase):
 
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=_MockInferencer(response="unused"),
-            worker_factory=factory,
+            worker_inferencers=factory,
             aggregator_inferencer=_MockInferencer(response="aggregated"),
             checkpoint_mode="jsonfy",
             enable_result_save=True,

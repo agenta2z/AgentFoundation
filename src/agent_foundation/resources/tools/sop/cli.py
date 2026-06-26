@@ -217,34 +217,74 @@ async def run_sop(
     )
     ci.inbox_put_user(request)
 
-    if yolo:
-        # Yolo: run() processes all phases via inbox, exits when SOP completes
-        last_result = await ci.run()
-        if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
-            print("SOP completed successfully.")
-        elif ci.sop_state:
-            print(f"SOP ended at phase {ci.sop_state.current_phase} ({ci.sop_state.phase_status})")
-    else:
-        # Interactive: run() in background, user input feeds inbox
-        import asyncio as _aio
+    # §9.4 / E5: mint the SOP session-root RunContext (workspace = session_dir) so
+    # per-turn run-state is isolated under the inbox loop. Best-effort; None ->
+    # byte-identical legacy behavior.
+    _sop_root = None
+    from pathlib import Path as _Path
 
-        run_task = _aio.create_task(ci.run())
-        try:
-            while not ci._shutdown_requested:
-                try:
-                    line = await _aio.to_thread(input, "\n> ")
-                    ci.inbox_put_user(line)
-                except (EOFError, KeyboardInterrupt):
-                    print("\nAborted.")
+    _sop_store_path = _Path(session_dir) / "run_state" / "store.json"
+    try:
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            RunStateStore,
+        )
+
+        # M9: rehydrate the prior run-state store if this session is being resumed
+        # (mirrors the task executor) so dispatch/conversation state is restored.
+        _sop_store = None
+        if _sop_store_path.exists():
+            try:
+                _sop_store = RunStateStore.load(str(_sop_store_path))
+            except Exception:  # pragma: no cover - corrupt snapshot -> fresh
+                _sop_store = None
+        _sop_root = RunContext.root(
+            workspace=InferencerWorkspace(root=str(session_dir)),
+            store=_sop_store,
+        )
+    except Exception:  # pragma: no cover
+        _sop_root = None
+
+    try:
+        if yolo:
+            # Yolo: run() processes all phases via inbox, exits when SOP completes
+            last_result = await ci.run(run_context=_sop_root)
+            if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
+                print("SOP completed successfully.")
+            elif ci.sop_state:
+                print(f"SOP ended at phase {ci.sop_state.current_phase} ({ci.sop_state.phase_status})")
+        else:
+            # Interactive: run() in background, user input feeds inbox
+            import asyncio as _aio
+
+            run_task = _aio.create_task(ci.run(run_context=_sop_root))
+            try:
+                while not ci._shutdown_requested:
+                    try:
+                        line = await _aio.to_thread(input, "\n> ")
+                        ci.inbox_put_user(line)
+                    except (EOFError, KeyboardInterrupt):
+                        print("\nAborted.")
+                        ci.request_shutdown()
+                        break
+            finally:
+                if not ci._shutdown_requested:
                     ci.request_shutdown()
-                    break
-        finally:
-            if not ci._shutdown_requested:
-                ci.request_shutdown()
-            await run_task
+                await run_task
 
-        if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
-            print("SOP completed successfully.")
+            if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
+                print("SOP completed successfully.")
+    finally:
+        # M9: persist on EVERY exit (success/error/interrupt) so a SOP session can
+        # resume — mirrors the task executor's outer-finally persistence. Best-effort.
+        if _sop_root is not None:
+            try:
+                _sop_root._store.save(str(_sop_store_path))
+            except Exception:  # pragma: no cover
+                pass
 
     return 0
 

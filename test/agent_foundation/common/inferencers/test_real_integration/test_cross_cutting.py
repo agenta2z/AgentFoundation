@@ -190,7 +190,7 @@ async def test_pti_with_bta_composition(tmp_workspace):
     """PTI with BTA as executor: plan phase → BTA breaks down plan → parallel workers → aggregate.
 
     Configures PTI with planner=DualInferencer(claude, claude) and
-    executor=BTA(breakdown=claude, workers=claude, aggregator=claude).
+    executor=BTA(breakdown=claude, worker_inferencers=claude, aggregator=claude).
     The planner produces a plan via consensus, then the BTA executor breaks
     down the plan into sub-tasks, runs parallel streaming workers, and
     aggregates the results.
@@ -205,7 +205,7 @@ async def test_pti_with_bta_composition(tmp_workspace):
         tmp_workspace, append_system_prompt=BREAKDOWN_SYSTEM_PROMPT
     )
 
-    def worker_factory(sub_query, index):
+    def worker_inferencers(sub_query, index):
         return _make_claude(tmp_workspace)
 
     aggregator = _make_claude(
@@ -218,7 +218,7 @@ async def test_pti_with_bta_composition(tmp_workspace):
 
     bta_executor = BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown,
-        worker_factory=worker_factory,
+        worker_inferencers=worker_inferencers,
         aggregator_inferencer=aggregator,
         max_breakdown=2,
     )

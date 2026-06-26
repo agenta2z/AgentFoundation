@@ -168,11 +168,36 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     allowed_shell_commands: Optional[List[str]] = attrib(default=None)
 
     # Internal state
-    _client: Any = attrib(default=None, init=False, repr=False)
-    _disconnect_fn: Any = attrib(default=None, init=False, repr=False)
-    _connected_loop: Any = attrib(default=None, init=False, repr=False)
+    # M6 (Tier-3): the live SDK client + its disconnect fn + bound loop are
+    # connection-scoped handles -> compat-properties backed by ``_<name>_backing``
+    # and mirrored into ``ctx.handles`` for per-branch (V8) isolation. Byte-identical
+    # without an active context.
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
     _last_tool_use_count: int = attrib(default=0, init=False, repr=False)
+
+    @property
+    def _client(self):
+        return self._tier3_get("client", None)
+
+    @_client.setter
+    def _client(self, value):
+        self._tier3_set("client", value)
+
+    @property
+    def _disconnect_fn(self):
+        return self._tier3_get("disconnect_fn", None)
+
+    @_disconnect_fn.setter
+    def _disconnect_fn(self, value):
+        self._tier3_set("disconnect_fn", value)
+
+    @property
+    def _connected_loop(self):
+        return self._tier3_get("connected_loop", None)
+
+    @_connected_loop.setter
+    def _connected_loop(self, value):
+        self._tier3_set("connected_loop", value)
 
     def __attrs_post_init__(self) -> None:
         """Enforce enable_shell on allowed_tools and emit shell-gating logs."""
@@ -291,7 +316,9 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                                 "ToolUse",
                             )
                 case ResultMessage() as result_msg:
-                    self._session_id = result_msg.session_id
+                    # §2.10: mirror the live session into ctx.handles (V7), not just
+                    # the instance. Byte-identical without a context.
+                    self.active_session_id = result_msg.session_id
                     self.log_info(
                         f"session_id={result_msg.session_id}",
                         "ResultMessage",
@@ -325,7 +352,10 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         if kwargs.get("return_sdk_response", False):
             return SDKInferencerResponse(
                 content=response_text,
-                session_id=self._session_id,
+                # read via the property so it resolves the live session from the
+                # active context's connection branch (Tier-3), not the bare backing
+                # (which a context-scoped write never touches).
+                session_id=self.active_session_id,
                 tool_uses=self._last_tool_use_count,
             )
         return response_text
@@ -448,15 +478,20 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         await connect_future
         self._client = client
         self._disconnect_fn = _disconnect
-        self._session_id = session_id
+        self.active_session_id = session_id  # §2.10: mirror into ctx.handles too
         self._connected_loop = loop
         logger.debug("Claude Code SDK connected (session_id=%s)", session_id)
 
     async def adisconnect(self) -> None:
-        """Disconnect from Claude Code SDK."""
-        if self._disconnect_fn:
-            await self._disconnect_fn()
-            self._disconnect_fn = None
-        self._client = None
-        self._connected_loop = None
+        """Disconnect from Claude Code SDK — EVERY connection-scoped branch (each
+        ``ctx.child(slot)`` that established a client during ``_ainfer``) plus the
+        legacy backing. No context is active at this lifecycle boundary, so draining
+        by stored path (not just the active branch) is what reclaims them all (M6)."""
+        for h in self._iter_live_handle_sets():
+            fn = h.get("disconnect_fn")
+            if fn:
+                await fn()
+            h.set("disconnect_fn", None)
+            h.set("client", None)
+            h.set("connected_loop", None)
         logger.debug("Claude Code SDK disconnected")

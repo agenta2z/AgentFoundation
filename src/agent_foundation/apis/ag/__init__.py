@@ -23,7 +23,22 @@ from .ai_gateway_claude_llm import (
     ENV_NAME_SLAUTH_SERVER_URL,
 )
 
+from .ai_gateway_openai_llm import (
+    AIGatewayOpenAIModels,
+    generate_text as openai_generate_text,
+    generate_text_async as openai_generate_text_async,
+    generate_text_streaming as openai_generate_text_streaming,
+)
+
+from .ai_gateway_gemini_llm import (
+    AIGatewayGeminiModels,
+    generate_text as gemini_generate_text,
+    generate_text_async as gemini_generate_text_async,
+    generate_text_streaming as gemini_generate_text_streaming,
+)
+
 from .gateway_mode import (
+    DEFAULT_SLAUTH_GROUPS,
     GatewayMode,
     check_direct_available,
     check_proximity_available,
@@ -36,12 +51,21 @@ __all__ = [
     'generate_text',
     'generate_text_async',
     'generate_text_streaming',
+    'AIGatewayOpenAIModels',
+    'openai_generate_text',
+    'openai_generate_text_async',
+    'openai_generate_text_streaming',
+    'AIGatewayGeminiModels',
+    'gemini_generate_text',
+    'gemini_generate_text_async',
+    'gemini_generate_text_streaming',
     'DEFAULT_MAX_TOKENS',
     'ENV_NAME_AI_GATEWAY_USER_ID',
     'ENV_NAME_AI_GATEWAY_CLOUD_ID',
     'ENV_NAME_AI_GATEWAY_USE_CASE_ID',
     'ENV_NAME_AI_GATEWAY_BASE_URL',
     'ENV_NAME_SLAUTH_SERVER_URL',
+    'DEFAULT_SLAUTH_GROUPS',
     'GatewayMode',
     'check_direct_available',
     'check_proximity_available',

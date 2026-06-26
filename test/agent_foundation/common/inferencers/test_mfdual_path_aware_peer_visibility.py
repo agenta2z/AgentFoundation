@@ -218,5 +218,117 @@ class TestFormatFollowupInputInjectsPaths(unittest.TestCase):
         self.assertIn("PEER_SUMMARY_TEXT", out)
 
 
+class TestFollowupPathUnderCtxPublishedWorkspace(unittest.TestCase):
+    """M7 regression guard for own_path/peer_path resolution.
+
+    The unit tests above set ``inf._workspace`` directly — which is NOT how production
+    works. Under the M7 ctx/workspace decoupling the per-run workspace is PUBLISHED into the
+    run-context (via ``_rc_child(workspace=...)``) and the flow-config leaf instances'
+    ``_workspace`` stays ``None``. Resolving the followup file path off that stale instance
+    therefore returned ``None`` for every followup step in production (0/7 in run
+    ``wsfix8``), even though those unit tests stayed green.
+
+    This test reproduces the real condition (instance ``_workspace`` unset; workspaces arrive
+    only via the run-context) and asserts the followup input STILL references the prior
+    step's full output on disk — exercising the per-run ``_latest_per_flow_path`` capture
+    instead of the leaf instance. Fails before the fix (no ``on disk at`` block), passes
+    after.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="tmp_rovodev_mfi_ctxpath_")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_followup_input_references_prior_step_output_under_ctx(self):
+        import asyncio
+        import re
+
+        from attr import attrib, attrs
+
+        from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        @attrs
+        class _StepLeaf(InferencerBase):
+            """CLI-like leaf: writes its full artifact to ``outputs/output.md`` at its
+            ctx-resolved (step) workspace. Its instance ``_workspace`` is NEVER set, so the
+            only way to resolve its output path is the LIVE run-context (the M7 condition)."""
+
+            scripted: str = attrib(default="<Response>step</Response>")
+
+            def _write(self):
+                ws = self._workspace  # getter → ctx step workspace under M7
+                if ws is not None:
+                    out = ws.output_path("output.md")
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write("FULL ARTIFACT BODY\n" + self.scripted)
+
+            def _infer(self, inference_input, inference_config=None, **kw):
+                self._write()
+                return self.scripted
+
+            async def _ainfer(self, inference_input, inference_config=None, **kw):
+                self._write()
+                return self.scripted
+
+        f0_initial = _StepLeaf(scripted="<Response>INITIAL</Response>")
+        f0_followup = _StepLeaf(scripted="<Response>ROUND01</Response>")
+        # M7 condition: the flow leaves' instance backing workspace is UNSET.
+        self.assertIsNone(getattr(f0_initial, "_InferencerBase__workspace", "set"))
+
+        mfi = MultiFlowInferencer(
+            flow_configs=[
+                {
+                    "input": "design the plan",
+                    "initial_inferencer": f0_initial,
+                    "followup_inferencer": f0_followup,
+                    "end_condition": lambda s, r: s.get("dynamic_step_count", 0) >= 2,
+                    "max_dynamic_steps": 2,
+                },
+            ],
+            aggregator_inferencer=_StepLeaf(scripted="<Response>AGG</Response>"),
+            inject_upstream_artifacts=True,
+            workspace=InferencerWorkspace(root=os.path.join(self.tmpdir, "ws")),
+            checkpoint_dir=os.path.join(self.tmpdir, "ckpt"),
+        )
+
+        # Spy on the followup-input formatter to capture exactly what the leaf would receive.
+        captured = []
+        _orig = mfi._format_followup_input
+
+        def _spy(**kwargs):
+            out = _orig(**kwargs)
+            captured.append(out)
+            return out
+
+        mfi._format_followup_input = _spy
+
+        asyncio.run(mfi.ainfer("build the plan"))
+
+        self.assertTrue(captured, "no followup input was built (the flow did not iterate)")
+        joined = "\n\n".join(captured)
+        self.assertIn(
+            "Your previous full artifact is on disk at",
+            joined,
+            "followup input is missing the prior-step on-disk reference — the M7 own_path "
+            "regression (path resolved to None from the stale leaf instance _workspace)",
+        )
+        paths = re.findall(r"`([^`]*initial[/\\]outputs[/\\]output\.md)`", joined)
+        self.assertTrue(
+            paths, f"no initial-step output path referenced in followup input:\n{joined[:600]}"
+        )
+        self.assertTrue(
+            os.path.isfile(paths[0]),
+            f"referenced prior-step output does not exist on disk: {paths[0]!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

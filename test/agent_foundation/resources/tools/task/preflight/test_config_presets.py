@@ -111,7 +111,7 @@ def test_breakdown_yaml_shape():
     base = cfg["base_inferencer"]
     assert base["_target_"] == "BTA"
     assert base["task_type_arg_name"] == "worker_type"
-    wf = base["worker_factory"]
+    wf = base["worker_inferencers"]
     assert isinstance(wf, dict)
     assert set(wf.keys()) == {"leaf", "breakdown", "multiflow", "_default"}
     assert wf["_default"] == "leaf"  # string alias preserved (config walker _DATA_KEYS)
@@ -186,7 +186,7 @@ def test_breakdown_instantiates(tmp_path):
 
     assert isinstance(root, DualInferencer)
     assert isinstance(root.base_inferencer, BreakdownThenAggregateInferencer)
-    wf = root.base_inferencer.worker_factory
+    wf = root.base_inferencer.worker_inferencers
     assert isinstance(wf, dict)
     # Keys preserved; _default stays a string alias.
     assert {"leaf", "breakdown", "multiflow", "_default"} <= set(wf.keys())
@@ -232,14 +232,14 @@ def test_disable_aggregation_sets_flags_on_bta_and_mfdual():
         "_target_": "Dual",
         "base_inferencer": {
             "_target_": "BTA",
-            "worker_factory": {"multiflow": {"_target_": "MultiFlowDual"}},
+            "worker_inferencers": {"multiflow": {"_target_": "MultiFlowDual"}},
         },
     }
     n = _disable_aggregation(cfg)
     assert n == 2
     assert cfg["base_inferencer"]["disable_aggregator"] is True
     assert (
-        cfg["base_inferencer"]["worker_factory"]["multiflow"][
+        cfg["base_inferencer"]["worker_inferencers"]["multiflow"][
             "multi_flow_disable_aggregator"
         ]
         is True

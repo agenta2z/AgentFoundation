@@ -39,7 +39,7 @@ def _collect_leaf_inferencers(root):
         leaves[f"{prefix}.plan_aggregator"] = plan_bta.aggregator_inferencer
         leaves[f"{prefix}.plan_review"] = plan_dual.review_inferencer
 
-        plan_factory = plan_bta.worker_factory["__default__"]
+        plan_factory = plan_bta.worker_inferencers["__default__"]
         sample_mfdual = plan_factory()
         leaves[f"{prefix}.mfdual_agg"] = sample_mfdual.multi_flow_aggregator_inferencer
         for i, fc in enumerate(sample_mfdual.flow_configs):
@@ -50,7 +50,7 @@ def _collect_leaf_inferencers(root):
         leaves[f"{prefix}.exec_breakdown"] = exec_bta.breakdown_inferencer
         leaves[f"{prefix}.exec_aggregator"] = exec_bta.aggregator_inferencer
 
-        exec_factory = exec_bta.worker_factory["__default__"]
+        exec_factory = exec_bta.worker_inferencers["__default__"]
         sample_dual = exec_factory()
         leaves[f"{prefix}.exec_worker_base"] = sample_dual.base_inferencer
         leaves[f"{prefix}.exec_worker_review"] = sample_dual.review_inferencer
@@ -154,7 +154,7 @@ def test_structural_types_preserved_under_override(tmp_path, monkeypatch):
     plan_bta = plan_dual.base_inferencer
     assert isinstance(plan_bta, BreakdownThenAggregateInferencer)
 
-    plan_factory = plan_bta.worker_factory["__default__"]
+    plan_factory = plan_bta.worker_inferencers["__default__"]
     assert isinstance(plan_factory, functools.partial)
     sample_mfdual = plan_factory()
     assert isinstance(sample_mfdual, MultiFlowDualInferencer)
@@ -162,6 +162,6 @@ def test_structural_types_preserved_under_override(tmp_path, monkeypatch):
     exec_bta = root.base_inferencer.executor_inferencer
     assert isinstance(exec_bta, BreakdownThenAggregateInferencer)
 
-    exec_factory = exec_bta.worker_factory["__default__"]
+    exec_factory = exec_bta.worker_inferencers["__default__"]
     sample_exec_dual = exec_factory()
     assert isinstance(sample_exec_dual, DualInferencer)

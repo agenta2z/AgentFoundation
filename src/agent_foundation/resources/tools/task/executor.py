@@ -606,11 +606,56 @@ async def _run_conversational_router(
     if interactive is None and hasattr(ci, "yolo_mode"):
         ci.yolo_mode = True
 
+    # §9.4 host: mint the root RunContext for the conversational router turn
+    # (workspace-rooted) and persist the store for resume (M9). Best-effort; any
+    # failure falls back to the legacy call (run_context=None -> byte-identical).
+    _conv_root = None
     try:
-        result = await ci.run_agentic_loop(request, interactive=interactive)
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            RunStateStore,
+        )
+
+        # M9 resume: rehydrate from a prior snapshot when present.
+        _cstore_path = Path(working_dir) / "run_state" / "store.json"
+        _cstore = None
+        if _cstore_path.exists():
+            try:
+                _cstore = RunStateStore.load(str(_cstore_path))
+            except Exception:  # pragma: no cover
+                _cstore = None
+        _conv_root = RunContext.root(
+            workspace=InferencerWorkspace(root=str(working_dir)),
+            store=_cstore,
+        )
+    except Exception:  # pragma: no cover
+        _conv_root = None
+
+    try:
+        if _conv_root is not None:
+            result = await ci.run_agentic_loop(
+                request, interactive=interactive, run_context=_conv_root
+            )
+        else:
+            result = await ci.run_agentic_loop(request, interactive=interactive)
     except Exception as exc:
         _logger.exception("[task] conversational router failed")
         return _error(f"Conversational router failed: {exc}")
+    finally:
+        # M9: persist on EVERY exit (success/error/cancel) so an interrupted or
+        # HITL-paused conversational run can resume. Best-effort; never fatal.
+        if _conv_root is not None:
+            try:
+                _conv_root._store.save(
+                    str(Path(working_dir) / "run_state" / "store.json")
+                )
+            except Exception:  # pragma: no cover - persistence is best-effort
+                _logger.debug(
+                    "[task] router RunStateStore persist skipped", exc_info=True
+                )
 
     text = getattr(result, "text", None) or _extract_result_text(result)
     artifacts = _discover_artifacts(working_dir)
@@ -869,9 +914,42 @@ async def _run_topology(
     if mode == "confirm" and hasattr(inferencer, "interactive") and interactive is not None:
         inferencer.interactive = interactive
 
-    # Stage 9 — Run with cancellation propagation
+    # Stage 9 — Run with cancellation propagation.
+    # §9.4 host: mint the root RunContext (workspace-rooted) and thread it so the
+    # explicit run-state separation is active for this topology; persist the
+    # Tier-1 RunStateStore for resume (M9). Resilient: any failure to build the
+    # context falls back to the legacy call (run_context=None -> byte-identical).
+    _root_ctx = None
     try:
-        result = await inferencer.ainfer(request)
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+        from agent_foundation.common.inferencers.run_context import (
+            RunContext,
+            RunStateStore,
+        )
+
+        # M9 resume: rehydrate the Tier-1 store from a prior run's snapshot when
+        # present, so dispatch/conversation state is restored; else a fresh store.
+        _store_path = Path(working_dir) / "run_state" / "store.json"
+        _store = None
+        if _store_path.exists():
+            try:
+                _store = RunStateStore.load(str(_store_path))
+            except Exception:  # pragma: no cover - corrupt snapshot -> fresh
+                _store = None
+        _root_ctx = RunContext.root(
+            workspace=InferencerWorkspace(root=str(working_dir)),
+            store=_store,
+        )
+    except Exception:  # pragma: no cover - never block execution on context setup
+        _root_ctx = None
+
+    try:
+        if _root_ctx is not None:
+            result = await inferencer.ainfer(request, run_context=_root_ctx)
+        else:
+            result = await inferencer.ainfer(request)
     except asyncio.CancelledError:
         if hasattr(inferencer, "cancel"):
             try:
@@ -882,6 +960,17 @@ async def _run_topology(
     except Exception as exc:
         _logger.exception("[task] inferencer.ainfer failed")
         return _error(f"Execution failed: {exc}")
+    finally:
+        # M9: persist the Tier-1 run-state store on EVERY exit — success, error, OR
+        # cancel — so an interrupted/HITL-paused run can resume (the partial dispatch
+        # + conversation state lives in the store). Best-effort; never fatal.
+        if _root_ctx is not None:
+            try:
+                _root_ctx._store.save(
+                    str(Path(working_dir) / "run_state" / "store.json")
+                )
+            except Exception:  # pragma: no cover - persistence is best-effort
+                _logger.debug("[task] RunStateStore persist skipped", exc_info=True)
 
     # Stage 10 — Return ToolExecutionResult
     artifacts = _discover_artifacts(working_dir)

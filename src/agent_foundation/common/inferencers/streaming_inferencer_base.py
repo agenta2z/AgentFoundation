@@ -98,6 +98,23 @@ def _read_partial_from_cache(cache_path: str) -> Optional[str]:
         return None
 
 
+class _BackingHandleView:
+    """Adapts an instance's legacy ``_<name>_backing`` attrs to the ``LiveHandles``
+    ``get``/``set`` API so a leaf teardown treats the no-context backing uniformly
+    with the connection-scoped branches (see ``_iter_live_handle_sets``)."""
+
+    __slots__ = ("_owner",)
+
+    def __init__(self, owner: Any) -> None:
+        self._owner = owner
+
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._owner.__dict__.get(f"_{name}_backing", default)
+
+    def set(self, name: str, value: Any) -> None:
+        self._owner.__dict__[f"_{name}_backing"] = value
+
+
 @attrs
 class StreamingInferencerBase(InferencerBase):
     """Streaming + cache-based recovery base. Inherits from InferencerBase.
@@ -380,14 +397,142 @@ class StreamingInferencerBase(InferencerBase):
 
     # === Properties ===
 
+    def _get_live_handle_store(self):
+        """M6/§2.0 Note B: the CONNECTION-scoped, path-keyed live-handle store —
+        owned by THIS instance (the connection holder), so it persists across turns
+        (V7 continuity) independently of the per-turn RunContext tree, and isolates
+        concurrent branches by ``ctx.path`` (V8). Created lazily; never serialized.
+        """
+        store = self.__dict__.get("_live_handle_store")
+        if store is None:
+            from agent_foundation.common.inferencers.run_context import (
+                LiveHandleStore,
+            )
+
+            store = LiveHandleStore()
+            self.__dict__["_live_handle_store"] = store
+        return store
+
+    def _tier3_get(self, name: str, default: Any = None) -> Any:
+        """M6 Tier-3 read: the per-branch handle from THIS instance's connection-
+        scoped store at the active ``ctx.path`` (V8 isolation + V7 continuity);
+        else the instance backing — which holds a legacy/no-ctx connection or one
+        established at setup BEFORE any context (a shared base, NOT another branch's
+        handle, since branch writes never touch the backing). Byte-identical with
+        no active context.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            branch = self._get_live_handle_store().peek(ctx.path)
+            if branch is not None:
+                val = branch.get(name, None)
+                if val is not None:
+                    return val
+        return self.__dict__.get(f"_{name}_backing", default)
+
+    def _tier3_set(self, name: str, value: Any) -> None:
+        """M6 Tier-3 write: under a context, write ONLY the branch's handle in this
+        instance's connection-scoped store (keyed by ``ctx.path``) — NOT the instance
+        backing — so a branch never pollutes the shared base that other branches'
+        COLD reads fall back to (the V8 cold-read isolation fix). With no context,
+        write the instance backing (legacy, byte-identical)."""
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None:
+            self._get_live_handle_store().get_or_create(ctx.path).set(name, value)
+        else:
+            self.__dict__[f"_{name}_backing"] = value
+
+    def _iter_live_handle_sets(self):
+        """M6 teardown: yield a ``.get(name)``/``.set(name, value)`` view over EVERY
+        live-handle set this instance holds — each connection-scoped branch (keyed by
+        the ``ctx.path`` it was established under during ``_ainfer``) AND the legacy
+        no-context backing.
+
+        A leaf ``adisconnect`` runs at a lifecycle boundary (``__aexit__`` / host
+        cleanup) where ``active_run_context()`` is ``None`` (verified), so reading
+        only the active branch — as the per-call Tier-3 property shims do — would
+        strand every branch a context established during ``_ainfer`` (the V7/V8
+        handle leak: SDK clients / subprocesses never reclaimed). Draining by stored
+        path instead of by active context is the only teardown that reaches them."""
+        store = self.__dict__.get("_live_handle_store")
+        if store is not None:
+            # snapshot: the leaf clears entries as it tears each down
+            yield from list(store._by_path.values())
+        yield _BackingHandleView(self)
+
     @property
     def active_session_id(self) -> Optional[str]:
-        """Get the current active session ID for resumption."""
+        """Get the current active session ID for resumption.
+
+        M6 (Tier-3): the live session is a per-connection-branch handle. Under a
+        context it lives in THIS instance's connection-scoped store keyed by
+        ``ctx.path`` (V8 isolation + V7 continuity across turns); a sibling branch's
+        cold read therefore resolves to None (its own slot), never another branch's
+        session. Falls back to the instance ``_session_id`` (legacy/no-ctx, or a
+        session set at setup) — **byte-identical** with no active context.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            branch = self._get_live_handle_store().peek(ctx.path)
+            if branch is not None and branch.get("live_session_id") is not None:
+                return branch.get("live_session_id")
+            return self._session_id
+        # No active context: a read BETWEEN calls / by an external caller (e.g. the
+        # host, after ``ainfer`` returned and the bridge exited). Prefer an explicit
+        # instance/legacy session if one is set; otherwise surface the live connection's
+        # session from the connection-scoped store — else the public session id is
+        # invisible once the run context is gone (breaking V7 across-call continuity for
+        # a standalone leaf, whose session was written under the call's ctx path). Only
+        # when UNAMBIGUOUS (a single live connection); concurrent fan-out branches keep
+        # their own slots and are always read under their own ctx, never here.
+        if self._session_id is not None:
+            return self._session_id
+        store = self.__dict__.get("_live_handle_store")
+        if store is not None:
+            live = {
+                sid
+                for sid in (
+                    h.get("live_session_id") for h in list(store._by_path.values())
+                )
+                if sid is not None
+            }
+            if len(live) == 1:
+                return next(iter(live))
         return self._session_id
 
     @active_session_id.setter
     def active_session_id(self, value: Optional[str]) -> None:
-        self._session_id = value
+        # M6: under a context, write ONLY the branch's slot in this instance's
+        # connection-scoped store (keyed by ctx.path) — NOT the instance backing —
+        # so a branch never pollutes the shared base other branches cold-read (V8).
+        # With no context, write the instance backing (legacy, byte-identical).
+        from agent_foundation.common.inferencers.run_context import (
+            active_run_context,
+        )
+
+        ctx = active_run_context()
+        if ctx is not None and not ctx.legacy_mint:
+            self._get_live_handle_store().get_or_create(ctx.path).set(
+                "live_session_id", value
+            )
+        else:
+            # No context, OR a legacy-mint root (a bare call's throwaway root,
+            # whose connection-scoped handle store is discarded on bridge exit):
+            # write the instance backing so the post-call getter still sees it
+            # (mint_root's documented "mirror to the backing" intent) — byte-identical.
+            self._session_id = value
 
     # === Abstract Method ===
 
@@ -499,9 +644,39 @@ class StreamingInferencerBase(InferencerBase):
         # End of stream: buffered empties are dropped (BUFFER mode)
 
     async def ainfer_streaming(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Public async streaming entrypoint (M2/E2): installs the RunContext
+        bridge, then delegates to the streaming pipeline. ``_active_ctx`` stays
+        set across all yields (the generator runs in the consumer's task), so the
+        streaming primitive + ``active_session_id`` resolve to the right context.
+        ``run_context=None`` legacy-mints -> byte-identical.
+        """
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        _rc_token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
+        try:
+            async for _chunk in self._ainfer_streaming_pipeline(
+                inference_input, inference_config, **kwargs
+            ):
+                yield _chunk
+        finally:
+            exit_run(_rc_token)
+
+    async def _ainfer_streaming_pipeline(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> AsyncIterator[str]:
-        """Async streaming inference with idle timeout, caching, and filtering.
+        """Async streaming pipeline: idle timeout, caching, and filtering.
 
         Pipeline: ``_ainfer_streaming() → cache → _yield_filter() → yield``
 
@@ -796,7 +971,10 @@ class StreamingInferencerBase(InferencerBase):
         Use this when you want a clean conversational slate but don't need
         to tear down the connection itself (which ``adisconnect()`` handles).
         """
-        self._session_id = None
+        # M6: route through the ``active_session_id`` compat-property so that under
+        # an active context the connection-scoped ``ctx.handles.live_session_id`` is
+        # cleared (not just the instance) — byte-identical without a context.
+        self.active_session_id = None
 
     async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
         """When this inferencer (or its parent's recursion) is retried,
@@ -819,41 +997,67 @@ class StreamingInferencerBase(InferencerBase):
         """
         self.reset_session()
 
-    def new_session(self, prompt: str, **kwargs: Any) -> Any:
+    def new_session(self, prompt: str, *, run_context=None, **kwargs: Any) -> Any:
         """Start a new session, clearing any previous session.
 
         Args:
             prompt: The prompt to send.
+            run_context: optional RunContext carrier (M3/N-Major2) forwarded to infer().
             **kwargs: Additional arguments passed to ``infer()``.
 
         Returns:
             Inference result.
         """
-        self._session_id = None
-        return self.infer(prompt, new_session=True, **kwargs)
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
 
-    async def anew_session(self, prompt: str, **kwargs: Any) -> Any:
+        # N-Major2: install the bridge FIRST so the session reset lands on the
+        # intended branch's ctx.handles (not stale instance/parent state); the inner
+        # infer() reuses this active ctx. Byte-identical without a context.
+        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        try:
+            self.active_session_id = None
+            return self.infer(prompt, new_session=True, **kwargs)
+        finally:
+            exit_run(_tok)
+
+    async def anew_session(self, prompt: str, *, run_context=None, **kwargs: Any) -> Any:
         """Async: start a new session, clearing any previous session.
 
         Args:
             prompt: The prompt to send.
+            run_context: optional RunContext carrier (M3/N-Major2) forwarded to ainfer().
             **kwargs: Additional arguments passed to ``ainfer()``.
 
         Returns:
             Inference result.
         """
-        await self.adisconnect()
-        self._session_id = None
-        return await self.ainfer(prompt, new_session=True, **kwargs)
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        # N-Major2: bridge FIRST so adisconnect + session reset target the branch's
+        # ctx.handles; the inner ainfer() reuses this active ctx.
+        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        try:
+            await self.adisconnect()
+            self.active_session_id = None
+            return await self.ainfer(prompt, new_session=True, **kwargs)
+        finally:
+            exit_run(_tok)
 
     def resume_session(
-        self, prompt: str, session_id: Optional[str] = None, **kwargs: Any
+        self, prompt: str, session_id: Optional[str] = None, *, run_context=None, **kwargs: Any
     ) -> Any:
         """Resume a previous session.
 
         Args:
             prompt: The follow-up prompt.
             session_id: Session ID to resume. If None, uses ``active_session_id``.
+            run_context: optional RunContext carrier (M3/N-Major2) forwarded to infer().
             **kwargs: Additional arguments passed to ``infer()``.
 
         Returns:
@@ -862,16 +1066,27 @@ class StreamingInferencerBase(InferencerBase):
         Raises:
             ValueError: If no session_id provided and no active session.
         """
-        target = session_id or self._session_id
-        if not target:
-            raise ValueError(
-                "No session_id provided and no active session. "
-                "Call infer() first to start a session, or provide session_id."
-            )
-        return self.infer(prompt, session_id=target, **kwargs)
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        # N-Major2: bridge FIRST so active_session_id resolves the branch's live
+        # session (ctx.handles), not stale instance state; inner infer() reuses it.
+        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        try:
+            target = session_id or self.active_session_id
+            if not target:
+                raise ValueError(
+                    "No session_id provided and no active session. "
+                    "Call infer() first to start a session, or provide session_id."
+                )
+            return self.infer(prompt, session_id=target, **kwargs)
+        finally:
+            exit_run(_tok)
 
     async def aresume_session(
-        self, prompt: str, session_id: Optional[str] = None, **kwargs: Any
+        self, prompt: str, session_id: Optional[str] = None, *, run_context=None, **kwargs: Any
     ) -> Any:
         """Async: resume a previous session.
 
@@ -881,6 +1096,7 @@ class StreamingInferencerBase(InferencerBase):
         Args:
             prompt: The follow-up prompt.
             session_id: Session ID to resume. If None, uses ``active_session_id``.
+            run_context: optional RunContext carrier (M3/N-Major2) forwarded to ainfer().
             **kwargs: Additional arguments passed to ``ainfer()``.
 
         Returns:
@@ -889,15 +1105,26 @@ class StreamingInferencerBase(InferencerBase):
         Raises:
             ValueError: If no session_id provided and no active session.
         """
-        target = session_id or self._session_id
-        if not target:
-            raise ValueError(
-                "No session_id provided and no active session. "
-                "Call ainfer() first to start a session, or provide session_id."
-            )
-        if self._session_id != target:
-            await self.adisconnect()
-        return await self.ainfer(prompt, session_id=target, **kwargs)
+        from agent_foundation.common.inferencers.run_context import (
+            enter_run,
+            exit_run,
+        )
+
+        # N-Major2: bridge FIRST so active_session_id + adisconnect target the
+        # branch's live session (ctx.handles); inner ainfer() reuses this ctx.
+        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        try:
+            target = session_id or self.active_session_id
+            if not target:
+                raise ValueError(
+                    "No session_id provided and no active session. "
+                    "Call ainfer() first to start a session, or provide session_id."
+                )
+            if self.active_session_id != target:
+                await self.adisconnect()
+            return await self.ainfer(prompt, session_id=target, **kwargs)
+        finally:
+            exit_run(_tok)
 
     # === Recovery Helpers ===
 
@@ -950,13 +1177,16 @@ class StreamingInferencerBase(InferencerBase):
             mode = FallbackInferMode(mode)
 
         # 1. Session-based resumption (highest priority)
-        if self._session_id:
-            logger.info("Recovery via session resume (session_id=%s)", self._session_id)
+        # §2.10: read via active_session_id so recovery resumes the BRANCH's live
+        # session (ctx.handles), not stale instance state, under a context.
+        _recover_sid = self.active_session_id
+        if _recover_sid:
+            logger.info("Recovery via session resume (session_id=%s)", _recover_sid)
             try:
                 await self.adisconnect()
                 return await self._ainfer(
                     inference_input, inference_config,
-                    session_id=self._session_id, **kwargs
+                    session_id=_recover_sid, **kwargs
                 )
             except Exception as e:
                 logger.warning("Session resume failed: %s. Falling through.", e)

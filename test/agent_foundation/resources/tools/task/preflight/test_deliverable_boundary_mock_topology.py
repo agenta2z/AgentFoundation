@@ -217,7 +217,7 @@ def test_S9_BTA_post_step_extends_finalize(tmp_path):
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=_make_stub("breakdown", "breakdown.md"),
         aggregator_inferencer=_make_stub("agg", "aggregator.md"),
-        worker_factory=lambda **kw: _make_stub("worker", "w.md"),
+        worker_inferencers=lambda **kw: _make_stub("worker", "w.md"),
         output_path="aggregation_report.md",
     )
     bta._workspace = _ws(tmp_path / "bta_root")
@@ -250,7 +250,7 @@ def test_S10_BTA_no_op_when_flag_off(tmp_path):
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=_make_stub("breakdown", "b.md"),
         aggregator_inferencer=_make_stub("agg", "a.md"),
-        worker_factory=lambda **kw: _make_stub("w", "w.md"),
+        worker_inferencers=lambda **kw: _make_stub("w", "w.md"),
         output_path="agg.md",
     )
     bta._workspace = InferencerWorkspace(root=str(tmp_path / "bta"), use_final_deliverables_folder=False)
