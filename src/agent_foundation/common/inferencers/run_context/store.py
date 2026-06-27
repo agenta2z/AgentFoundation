@@ -144,15 +144,34 @@ class RunStateStore:
         this to durably snapshot run state alongside the existing result
         checkpoints. Tier-2 (sinks) and Tier-3 (live handles) are deliberately
         NOT persisted — they are re-supplied / re-established on resume.
+
+        Uses atomic write (temp file + rename) to prevent truncated store.json
+        on serialization errors. If serialization fails, the previous store.json
+        (if any) is left intact rather than being truncated mid-write.
         """
         import json
         import os
+        import tempfile
 
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_json(), f)
+        data = self.to_json()
+        fd, tmp_path = tempfile.mkstemp(
+            dir=directory, prefix=".store_", suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path: str) -> "RunStateStore":

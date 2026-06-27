@@ -335,6 +335,17 @@ class ConsensusIterationRecord:
     counter_feedback: Any = attrib(default=None)
     consensus_reached: bool = attrib(default=False)
 
+    def to_json(self) -> dict:
+        return {
+            "iteration": self.iteration,
+            "base_output": self.base_output,
+            "review_input": self.review_input,
+            "review_output": self.review_output,
+            "review_feedback": self.review_feedback,
+            "counter_feedback": self.counter_feedback,
+            "consensus_reached": self.consensus_reached,
+        }
+
 
 @attrs
 class ConsensusAttemptRecord:
@@ -353,6 +364,15 @@ class ConsensusAttemptRecord:
     consensus_reached: bool = attrib(default=False)
     final_output: str = attrib(default="")
     final_feedback: Any = attrib(default=None)
+
+    def to_json(self) -> dict:
+        return {
+            "attempt": self.attempt,
+            "iterations": [it.to_json() for it in self.iterations],
+            "consensus_reached": self.consensus_reached,
+            "final_output": self.final_output,
+            "final_feedback": self.final_feedback,
+        }
 
 
 @attrs

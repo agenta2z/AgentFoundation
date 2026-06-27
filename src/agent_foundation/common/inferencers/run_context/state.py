@@ -52,9 +52,13 @@ def encode_state(value: Any) -> Any:
       ``_state_class``);
     * ``dict`` -> recurse per value (may hold nested typed states);
     * ``list``/``tuple`` -> recurse per item;
+    * attrs objects without ``to_json()`` -> ``attrs.asdict`` fallback (prevents
+      ``json.dump`` truncation from non-serializable objects);
     * everything else -> passthrough (must be JSON-serializable).
 
     **Never** calls raw ``attrs.asdict`` on a typed state — that is the N-R3 bug.
+    The attrs fallback is ONLY for unregistered objects (e.g. ConsensusIterationRecord
+    before it got ``to_json()``).
     """
     to_json = getattr(value, "to_json", None)
     if callable(to_json):
@@ -63,6 +67,14 @@ def encode_state(value: Any) -> Any:
         return {k: encode_state(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [encode_state(v) for v in value]
+    # Defense-in-depth: attrs objects without to_json() → convert to dict so
+    # json.dump doesn't truncate the file mid-write on a TypeError.
+    import attrs as _attrs_mod
+    if _attrs_mod.has(type(value)):
+        return {
+            a.name: encode_state(getattr(value, a.name))
+            for a in _attrs_mod.fields(type(value))
+        }
     return value
 
 

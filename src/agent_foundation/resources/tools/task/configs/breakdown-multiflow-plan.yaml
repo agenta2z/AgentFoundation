@@ -59,6 +59,7 @@ _params:
   fixer_strategy: winner
   enable_deep_mode: true
   enable_elegant_mode: true
+  guardrail_model_tier: default       # model tier for the output guardrail judge (max/default/lite)
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
@@ -146,10 +147,16 @@ base_inferencer:
     multi_flow_aggregator_inferencer:
       _target_: ${_params.main_inferencer}
       output_is_deliverable: true
+      output_guardrail_inferencer:
+        _target_: ${_params.main_inferencer}
+        model_tier: ${_params.guardrail_model_tier}
 
   aggregator_inferencer:
     _target_: ${_params.main_inferencer}
     output_is_deliverable: true
+    output_guardrail_inferencer:
+      _target_: ${_params.main_inferencer}
+      model_tier: ${_params.guardrail_model_tier}
 
 review_inferencer:
   _target_: ${_params.main_inferencer}
