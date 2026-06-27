@@ -486,7 +486,9 @@ class MultiFlowDualInferencer(DualInferencer):
                     self.followup_template_root_space or getattr(FOLLOWUP_TEMPLATE_DEFAULTS, 'template_root_space', None))
         return (None, None)
 
-    def _reassign_role_workspace(self, inferencer, role_name: str) -> None:
+    def _reassign_role_workspace(
+        self, inferencer, role_name: str, *, panelist_slot: Optional[str] = None,
+    ) -> None:
         """Force a fresh workspace + session because role has changed.
 
         When MFDual reuses an instance across roles (e.g., winning flow's
@@ -506,6 +508,12 @@ class MultiFlowDualInferencer(DualInferencer):
             inferencer: the candidate inferencer to (possibly) reassign.
             role_name: 'fixer_inferencer' or 'review_inferencer' — used as the
                 child workspace directory name.
+            panelist_slot: when set (e.g. ``"review/panelist_1"``), use this as the
+                context-path slot instead of the default ``"review"`` or ``"fix"``.
+                Required for ``all_non_winners`` panel reviewers — each panelist
+                needs its own context path so their ``switch_role`` creator tags
+                don't collide (heterogeneous CLI types have different creator tuples).
+                Matches the path the Dual review step will actually run them under.
         """
         if inferencer is None or self._workspace is None:
             return
@@ -540,7 +548,7 @@ class MultiFlowDualInferencer(DualInferencer):
             exit_run,
         )
 
-        _role_slot = {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
+        _role_slot = panelist_slot or {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
             role_name, role_name
         )
         _rc = self._rc_child(_role_slot)
@@ -862,10 +870,16 @@ class MultiFlowDualInferencer(DualInferencer):
         self._reassign_role_workspace(self._role_get("fixer_inferencer"), "fixer_inferencer")
         # §3 panel: the extra non-winner panelists (reviewers list) must ALSO be
         # switched into the reviewer role/template — else they would review with
-        # their original flow role. Their per-panelist workspace is the
-        # ``review/panelist_i`` child the Dual review step publishes into the ctx.
-        for _panelist in (self._role_get("reviewers") or []):
-            self._reassign_role_workspace(_panelist, "review_inferencer")
+        # their original flow role. Each panelist gets its OWN context-path slot
+        # (``review/panelist_{i}``, 1-indexed) matching the path the Dual review
+        # step runs them under. Without this, heterogeneous-CLI panelists (e.g.
+        # CodexCLI + RovoDevCLI) collide on the shared ``/review`` path because
+        # their ``switch_role`` creator tuples differ.
+        for _i, _panelist in enumerate(self._role_get("reviewers") or [], start=1):
+            self._reassign_role_workspace(
+                _panelist, "review_inferencer",
+                panelist_slot=f"review/panelist_{_i}",
+            )
         # NOTE: reset_session is handled by switch_role() inside
         # _reassign_role_workspace — no separate call needed here.
 

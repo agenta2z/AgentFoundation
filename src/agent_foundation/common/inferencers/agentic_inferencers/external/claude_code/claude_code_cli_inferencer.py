@@ -124,6 +124,8 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         if self.target_path is None:
             self.target_path = os.path.expanduser("~/fbsource")
+        if self.model_name is None:
+            self.model_name = "sonnet"
         self.model_name = resolve_model_tag(self.model_name)
         self._resolve_claude_command()
 

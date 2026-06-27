@@ -440,6 +440,180 @@ def test_configs_instantiate_smoke(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Config params: reviewer_strategy, fixer_strategy, mode flags → topology + template
+# ---------------------------------------------------------------------------
+
+@skip_no_omegaconf
+def test_config_params_propagate_to_topology(tmp_path):
+    """Verify that _params.reviewer_strategy, fixer_strategy, enable_deep_mode, and
+    enable_elegant_mode resolve and propagate through both plan-only topologies to the
+    instantiated inferencer attributes and template_extra_feed."""
+    import agent_foundation.common.configs.registered_targets  # noqa: F401
+    from rich_python_utils.config_utils import instantiate, load_config
+
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
+        MultiFlowDualInferencer,
+        ReviewerStrategy,
+    )
+
+    base_overrides = {
+        "_params.workspace_root": str(tmp_path / "ws"),
+        "_params.main_inferencer": "ClaudeCodeCLI",
+        "_params.default_inferencer": "ClaudeCodeCLI",
+    }
+
+    def _worker_from(bta):
+        wi = bta.worker_inferencers
+        factory = (
+            (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
+            if isinstance(wi, dict) else wi
+        )
+        return factory()
+
+    # ---- (A) breakdown-multiflow-plan: params propagate to worker MFDual ----
+    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
+                           overrides=dict(base_overrides))
+    planner = instantiate(plan_cfg)
+    mfdual = _worker_from(planner.base_inferencer)
+    assert isinstance(mfdual, MultiFlowDualInferencer)
+
+    # reviewer_strategy + fixer_strategy
+    assert mfdual.reviewer_strategy is ReviewerStrategy.ALL_NON_WINNERS, (
+        f"expected all_non_winners; got {mfdual.reviewer_strategy}")
+    assert mfdual.fixer_strategy.value == "winner"
+
+    # enable_deep_mode + enable_elegant_mode reach the flow leaf template_extra_feed
+    mfi = mfdual.base_inferencer
+    for i, fc in enumerate(mfi.flow_configs):
+        for key in ("initial_inferencer", "followup_inferencer"):
+            leaf = fc.get(key)
+            tef = getattr(leaf, "template_extra_feed", {})
+            assert tef.get("enable_deep_mode") is True, (
+                f"breakdown flow[{i}].{key} missing enable_deep_mode in template_extra_feed")
+            assert tef.get("enable_elegant_mode") is True, (
+                f"breakdown flow[{i}].{key} missing enable_elegant_mode in template_extra_feed")
+
+    # ---- (B) multiflow-plan: same params at root MFDual ----
+    mf_cfg = load_config(str(_CONFIGS_DIR / "multiflow-plan.yaml"),
+                         overrides=dict(base_overrides))
+    root_mfdual = instantiate(mf_cfg)
+    assert isinstance(root_mfdual, MultiFlowDualInferencer)
+    assert root_mfdual.reviewer_strategy is ReviewerStrategy.ALL_NON_WINNERS
+    assert root_mfdual.fixer_strategy.value == "winner"
+
+    mfi = root_mfdual.base_inferencer
+    for i, fc in enumerate(mfi.flow_configs):
+        for key in ("initial_inferencer", "followup_inferencer"):
+            leaf = fc.get(key)
+            tef = getattr(leaf, "template_extra_feed", {})
+            assert tef.get("enable_deep_mode") is True, (
+                f"multiflow flow[{i}].{key} missing enable_deep_mode")
+            assert tef.get("enable_elegant_mode") is True, (
+                f"multiflow flow[{i}].{key} missing enable_elegant_mode")
+
+
+@skip_no_omegaconf
+def test_config_params_overridable_per_run(tmp_path):
+    """Verify that _params overrides actually change behavior (not just defaults)."""
+    import agent_foundation.common.configs.registered_targets  # noqa: F401
+    from rich_python_utils.config_utils import instantiate, load_config
+
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
+        MultiFlowDualInferencer,
+        ReviewerStrategy,
+    )
+
+    overrides = {
+        "_params.workspace_root": str(tmp_path / "ws"),
+        "_params.main_inferencer": "ClaudeCodeCLI",
+        "_params.reviewer_strategy": "runner_up",
+        "_params.enable_deep_mode": False,
+        "_params.enable_elegant_mode": False,
+    }
+
+    def _worker_from(bta):
+        wi = bta.worker_inferencers
+        factory = (
+            (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
+            if isinstance(wi, dict) else wi
+        )
+        return factory()
+
+    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
+                           overrides=dict(overrides))
+    planner = instantiate(plan_cfg)
+    mfdual = _worker_from(planner.base_inferencer)
+
+    # Overridden reviewer_strategy
+    assert mfdual.reviewer_strategy is ReviewerStrategy.RUNNER_UP, (
+        f"override to runner_up failed; got {mfdual.reviewer_strategy}")
+
+    # Overridden mode flags reach the leaves as False
+    mfi = mfdual.base_inferencer
+    for i, fc in enumerate(mfi.flow_configs):
+        leaf = fc.get("initial_inferencer")
+        tef = getattr(leaf, "template_extra_feed", {})
+        assert tef.get("enable_deep_mode") is False, (
+            f"flow[{i}] enable_deep_mode override to False failed; got {tef}")
+        assert tef.get("enable_elegant_mode") is False, (
+            f"flow[{i}] enable_elegant_mode override to False failed; got {tef}")
+
+
+@skip_no_omegaconf
+def test_mode_flags_reach_rendered_prompt(tmp_path):
+    """End-to-end: the config mode flags actually control what appears in the rendered
+    plan/main/initial.jinja2 prompt — deep_mode text present when True, absent when False."""
+    from jinja2 import Environment, FileSystemLoader
+    from jinja2 import Undefined as _JinjaUndefined
+
+    class _ChainableUndefined(_JinjaUndefined):
+        def __getattr__(self, _name):
+            return _ChainableUndefined()
+        def __str__(self):
+            return ""
+        def __iter__(self):
+            return iter([])
+        def __bool__(self):
+            return False
+
+    templates_dir = str(_AF_ROOT / "src" / "agent_foundation" / "resources" / "prompt_templates"
+                        / "plan" / "main")
+    env = Environment(loader=FileSystemLoader(templates_dir), undefined=_ChainableUndefined)
+    tmpl = env.get_template("initial.jinja2")
+
+    deep_marker = "Spawn as many agents as possible"
+    elegant_marker = "properly and elegantly"
+
+    base_feed = {
+        "context": {"user_request_with_task_preamble": "Test request."},
+        "user_request_with_task_preamble": "Test request.",
+        "output_path": "/tmp/test.md",
+        "task_instructions": "",
+    }
+
+    # Both enabled (the config default)
+    rendered_on = tmpl.render(**base_feed, enable_deep_mode=True, enable_elegant_mode=True,
+                              instructions={"modes": {"deep_mode": deep_marker,
+                                                       "elegant_mode": elegant_marker}})
+    assert deep_marker in rendered_on, "deep_mode text missing when enable_deep_mode=True"
+    assert elegant_marker in rendered_on, "elegant_mode text missing when enable_elegant_mode=True"
+
+    # Both disabled (per-run override)
+    rendered_off = tmpl.render(**base_feed, enable_deep_mode=False, enable_elegant_mode=False,
+                               instructions={"modes": {"deep_mode": deep_marker,
+                                                        "elegant_mode": elegant_marker}})
+    assert deep_marker not in rendered_off, "deep_mode text present when enable_deep_mode=False"
+    assert elegant_marker not in rendered_off, "elegant_mode text present when enable_elegant_mode=False"
+
+    # Default (vars absent = true via Jinja | default(true))
+    rendered_default = tmpl.render(**base_feed,
+                                   instructions={"modes": {"deep_mode": deep_marker,
+                                                            "elegant_mode": elegant_marker}})
+    assert deep_marker in rendered_default, "deep_mode text missing when var is absent (should default true)"
+    assert elegant_marker in rendered_default, "elegant_mode text missing when var is absent (should default true)"
+
+
+# ---------------------------------------------------------------------------
 # Real-CLI subprocess integration test — parametrized over plan + full modes
 # ---------------------------------------------------------------------------
 
