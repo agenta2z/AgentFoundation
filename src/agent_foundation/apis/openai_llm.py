@@ -13,24 +13,47 @@ ENV_NAME_OPENAI_API_KEY = 'OPENAI_APIKEY'
 
 
 class OpenAIModels(StrEnum):
+    """Enumeration for supported OpenAI models (direct API + Codex CLI/SDK).
+
+    See: https://platform.openai.com/docs/models
+         https://developers.openai.com/codex/models
     """
-    Enumeration for major supported ChatGPT models.
-    See details at https://platform.openai.com/docs/models/overview
-    """
+    # GPT-5.x family (current — 2026)
+    GPT_55 = 'gpt-5.5'
+    GPT_54 = 'gpt-5.4'
+    GPT_54_MINI = 'gpt-5.4-mini'
+    GPT_53_CODEX_SPARK = 'gpt-5.3-codex-spark'
+
+    # GPT-4.x family (legacy — still available via API)
+    GPT4O = 'gpt-4o'
+    GPT4_TURBO = 'gpt-4-turbo'
+    GPT4 = 'gpt-4'
+    GPT4_32K = 'gpt-4-32k-0613'
+
+    # GPT-3.5 family (legacy)
     GPT3 = 'gpt-3.5-turbo'
     GPT3_16K = 'gpt-3.5-turbo-16k'
-    GPT4 = "gpt-4"
-    GPT4_TURBO = 'gpt-4-turbo'
-    GPT4_32K = "gpt-4-32k-0613"
-    GPT4O = "gpt-4o"
+
+    # Version-agnostic aliases (point to the latest in each tier)
+    GPT_LATEST = 'gpt-5.5'
+    GPT_MINI_LATEST = 'gpt-5.4-mini'
+
+
+DEFAULT_OPENAI_MODEL = OpenAIModels.GPT_LATEST
 
 
 DEFAULT_MAX_TOKENS = {
+    # GPT-5.x (reasoning-capable, generous budgets)
+    f'{OpenAIModels.GPT_55}': 16384,
+    f'{OpenAIModels.GPT_54}': 16384,
+    f'{OpenAIModels.GPT_54_MINI}': 8192,
+    # GPT-4.x (legacy)
+    f'{OpenAIModels.GPT4O}': 4096,
     f'{OpenAIModels.GPT4}': 2048,
     f'{OpenAIModels.GPT4_32K}': 3096,
+    # GPT-3.5 (legacy)
     f'{OpenAIModels.GPT3}': 1024,
     f'{OpenAIModels.GPT3_16K}': 3096,
-    f'{OpenAIModels.GPT4O}': 4096
 }
 
 

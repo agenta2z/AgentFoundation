@@ -565,7 +565,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         directory and the WorkGraph node name, and by
         ``_is_worker_child_name`` for boundary/deliverable filtering.
         """
-        return f"worker_{index}"
+        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        return indexed_child_name("worker", index)
 
     async def _cross_flow_depart_if_tagged(self, worker) -> None:
         """Depart the cross-flow step barrier for ``worker`` if it is a coordinated flow.

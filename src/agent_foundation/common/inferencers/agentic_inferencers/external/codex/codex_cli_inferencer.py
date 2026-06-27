@@ -31,6 +31,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from attr import attrib, attrs
 
+from agent_foundation.apis.openai_llm import DEFAULT_OPENAI_MODEL
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
 )
@@ -76,7 +77,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     codex_command: str = attrib(default="codex")
     # ``None`` -> use Codex's configured default model (from ``codex login`` /
     # ``~/.codex/config.toml``); otherwise passed via ``-m``.
-    model_name: Optional[str] = attrib(default=None)
+    model_name: Optional[str] = attrib(default=DEFAULT_OPENAI_MODEL)
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
     # ``-s`` sandbox policy for fresh ``exec`` calls (resume inherits the
     # session's sandbox). One of ``_CODEX_SANDBOX_MODES``.
@@ -97,10 +98,26 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     # Escape hatch: extra raw args appended verbatim to the command.
     extra_cli_args: Optional[List[str]] = attrib(default=None)
 
+    # Anthropic/Claude model tags that may cascade via ``_model_name`` from configs
+    # targeting heterogeneous CLI topologies. Codex can't use these; reset to the
+    # OpenAI default so Codex uses a valid model.
+    _NON_CODEX_MODEL_PREFIXES = ("opus", "sonnet", "haiku", "claude", "fable")
+
     def __attrs_post_init__(self) -> None:
         """Initialize defaults after attrs init."""
         if self.target_path is None:
             self.target_path = os.getcwd()
+        if self.model_name and any(
+            self.model_name.lower().startswith(p) for p in self._NON_CODEX_MODEL_PREFIXES
+        ):
+            logger.info(
+                "[%s] Ignoring non-Codex model_name=%r (likely cascaded from "
+                "_model_name); resetting to %s.",
+                self.__class__.__name__,
+                self.model_name,
+                DEFAULT_OPENAI_MODEL,
+            )
+            self.model_name = DEFAULT_OPENAI_MODEL
         if (
             self.sandbox_mode is not None
             and self.sandbox_mode not in _CODEX_SANDBOX_MODES

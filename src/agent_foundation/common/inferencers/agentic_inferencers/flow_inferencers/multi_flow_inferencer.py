@@ -569,10 +569,11 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             ├── flow_1/
             └── aggregator/
         """
-        return f"flow_{index}"
+        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        return indexed_child_name("flow", index)
 
     def _is_worker_child_name(self, name: str) -> bool:
-        """Match ``flow_N`` names produced by the override above."""
+        """Match ``flow_NN`` names produced by the override above."""
         if not name.startswith("flow_"):
             return False
         return name[len("flow_"):].isdigit()
