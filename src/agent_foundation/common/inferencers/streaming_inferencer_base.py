@@ -78,9 +78,10 @@ class FallbackInferMode(enum.StrEnum):
     See also: FallbackMode in rich_python_utils.common_utils.function_helper
     """
 
-    CONTINUE = "continue"    # Feed partial back, ask model to continue. Return partial + continuation.
-    REFERENCE = "reference"  # Show partial as context, request fresh response. Return only new response.
-    RESTART = "restart"      # Ignore partial entirely. Equivalent to plain retry.
+    CONTINUE = "continue"                      # Feed partial back, ask model to continue. Return partial + continuation.
+    RETRY_WITH_REFERENCE = "retry_with_reference"  # Show partial as context, request fresh response. Return only new response.
+    REFERENCE = "retry_with_reference"         # Backward-compatible alias.
+    RESTART = "restart"                        # Ignore partial entirely. Equivalent to plain retry.
 
 
 
@@ -1171,8 +1172,19 @@ class StreamingInferencerBase(InferencerBase):
 
         Supports ``fallback_infer_mode`` as a runtime override via kwargs.
         """
-        # Determine mode (support runtime override)
-        mode = kwargs.pop("fallback_infer_mode", self.fallback_infer_mode)
+        # Determine mode: (1) explicit kwarg override, (2) guardrail-recommended
+        # handler from last_exception (output_validator returns a handler string
+        # → carried in ValueError.args[1]), (3) instance default.
+        mode = kwargs.pop("fallback_infer_mode", None)
+        if mode is None and last_exception is not None:
+            _exc_args = getattr(last_exception, "args", ())
+            if len(_exc_args) >= 2 and isinstance(_exc_args[1], str):
+                try:
+                    mode = FallbackInferMode(_exc_args[1])
+                except ValueError:
+                    pass
+        if mode is None:
+            mode = self.fallback_infer_mode
         if isinstance(mode, str):
             mode = FallbackInferMode(mode)
 
@@ -1237,7 +1249,16 @@ class StreamingInferencerBase(InferencerBase):
         management is async-only). Falls through directly to cache-based or
         RESTART recovery.
         """
-        mode = kwargs.pop("fallback_infer_mode", self.fallback_infer_mode)
+        mode = kwargs.pop("fallback_infer_mode", None)
+        if mode is None and last_exception is not None:
+            _exc_args = getattr(last_exception, "args", ())
+            if len(_exc_args) >= 2 and isinstance(_exc_args[1], str):
+                try:
+                    mode = FallbackInferMode(_exc_args[1])
+                except ValueError:
+                    pass
+        if mode is None:
+            mode = self.fallback_infer_mode
         if isinstance(mode, str):
             mode = FallbackInferMode(mode)
 

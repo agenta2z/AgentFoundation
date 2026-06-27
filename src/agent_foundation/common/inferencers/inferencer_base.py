@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import enum
 import logging
 import os
 import sys
@@ -38,6 +39,24 @@ _current_fallback_state: ContextVar[dict | None] = ContextVar("_current_fallback
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
 
 _logger = logging.getLogger(__name__)
+
+
+class ModelTier(str, enum.Enum):
+    """Provider-agnostic model quality tier.
+
+    Each CLI inferencer maps these to concrete model names for its provider:
+    - Claude: ``MAX`` → opus[1m], ``DEFAULT`` → sonnet, ``LITE`` → haiku
+    - OpenAI/Codex: ``MAX`` → gpt-5.5, ``DEFAULT`` → gpt-5.4, ``LITE`` → gpt-5.4-mini
+
+    Use as an alternative to ``model_name`` when you want to specify intent
+    ("I need a cheap judge") rather than a provider-specific model identifier.
+    Set via ``model_tier`` attr on any inferencer; ``__attrs_post_init__``
+    resolves it to the concrete ``model_name``.
+    """
+
+    MAX = "max"
+    DEFAULT = "default"
+    LITE = "lite"
 
 
 class _PrototypeCloneFactory:
@@ -152,6 +171,22 @@ class InferencerBase(Debuggable, Resumable, ABC):
     input_preprocessor: Callable = attrib(default=None)
     response_post_processor: Union[str, dict, Callable] = attrib(default=None)
     post_response_merger: Union[str, Callable] = attrib(default=None)
+
+    model_tier: Optional[str] = attrib(default=None)
+    """Provider-agnostic model quality tier (``"max"``/``"default"``/``"lite"``).
+    When set, the inferencer's ``__attrs_post_init__`` resolves it to a concrete
+    ``model_name`` for its provider. Overrides ``model_name`` when both are set.
+    None (default) = use ``model_name`` as-is. See ``ModelTier`` enum."""
+
+    output_guardrail_inferencer: Optional["InferencerBase"] = attrib(default=None)
+    """Optional lightweight LLM judge that validates output quality. When assigned,
+    it runs after each successful ``_ainfer``/``_infer`` return (inside the retry
+    loop's ``output_validator``). Receives a rendered judge prompt (the main input +
+    output) and returns a verdict. If rejected, the recovery chain fires with the
+    rejected output as ``last_partial_output``. Assign a cheap/fast model (e.g. haiku)
+    as the judge; it gets its own workspace under ``children/guardrail/``.
+    Disabled by default (``None``). Overridable verdict parser:
+    ``_parse_guardrail_verdict``."""
 
     # State graph support — optional list of StateGraphTracker instances
     state_graphs: list = attrib(default=None)
@@ -1596,6 +1631,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
+        self._last_inference_input = inference_input
 
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
@@ -1781,6 +1817,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 fallback_func=effective_fallback_func,
                 fallback_mode=effective_fallback_mode,
                 on_fallback_callback=_on_transition if effective_fallback_func else None,
+                output_validator=(
+                    self._run_output_guardrail_sync
+                    if self.output_guardrail_inferencer is not None
+                    else None
+                ),
             )
         except TimeoutError:
             self.log_info(
@@ -2324,6 +2365,114 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         return await self._ainfer(inference_input, inference_config, **kwargs)
 
+    # ------------------------------------------------------------------
+    # Output guardrail (LLM-based quality judge)
+    # ------------------------------------------------------------------
+
+    async def _run_output_guardrail(self, response) -> bool:
+        """Run the guardrail judge inferencer on the response.
+
+        Called as ``output_validator`` inside ``async_execute_with_retry`` when
+        ``output_guardrail_inferencer`` is assigned. Returns True to accept the
+        output, False to reject (triggers the recovery/fallback chain).
+
+        The judge gets its own workspace (``children/guardrail/``) and runs the
+        ``recovery/judge`` template with the main inferencer's input + output.
+        Subclasses override ``_parse_guardrail_verdict`` to customize the
+        verdict contract.
+        """
+        judge = self.output_guardrail_inferencer
+        if judge is None:
+            return True
+        try:
+            prompt = self._render_guardrail_prompt(response)
+            if self._workspace is not None:
+                guardrail_ws = self._workspace.child("guardrail")
+                guardrail_ws.ensure_dirs()
+                judge._workspace = guardrail_ws
+            verdict_raw = await judge.ainfer(prompt)
+            verdict = self._parse_guardrail_verdict(verdict_raw)
+            if verdict is not True:
+                _logger.info(
+                    "[%s] Output guardrail rejected: handler=%s",
+                    type(self).__name__, verdict,
+                )
+            return verdict
+        except Exception as exc:
+            _logger.warning(
+                "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
+                type(self).__name__, exc,
+            )
+            return True
+
+    def _run_output_guardrail_sync(self, response):
+        """Sync equivalent of ``_run_output_guardrail``."""
+        judge = self.output_guardrail_inferencer
+        if judge is None:
+            return True
+        try:
+            prompt = self._render_guardrail_prompt(response)
+            if self._workspace is not None:
+                guardrail_ws = self._workspace.child("guardrail")
+                guardrail_ws.ensure_dirs()
+                judge._workspace = guardrail_ws
+            verdict_raw = judge.infer(prompt)
+            verdict = self._parse_guardrail_verdict(verdict_raw)
+            if verdict is not True:
+                _logger.info(
+                    "[%s] Output guardrail rejected: handler=%s",
+                    type(self).__name__, verdict,
+                )
+            return verdict
+        except Exception as exc:
+            _logger.warning(
+                "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
+                type(self).__name__, exc,
+            )
+            return True
+
+    def _render_guardrail_prompt(self, response) -> str:
+        """Render the judge prompt with the main inferencer's input + output."""
+        from agent_foundation.common.inferencers.recovery import render_recovery_prompt
+
+        output_text = str(response.get("output", "") if isinstance(response, dict) else response)
+        input_text = str(getattr(self, "_last_inference_input", "") or "")
+        return render_recovery_prompt(
+            "recovery/judge",
+            prompt=input_text,
+            partial_output=output_text,
+        )
+
+    def _parse_guardrail_verdict(self, judge_response):
+        """Parse the guardrail judge response into a verdict.
+
+        Returns:
+            ``True`` to accept the output.
+            ``False`` to reject (plain retry with the same func).
+            A handler name string (``"restart"``, ``"retry_with_reference"``,
+            ``"continue"``) to reject and route to a specific recovery handler.
+
+        Default contract: the judge outputs one of:
+          - ``"PASS"`` → accept
+          - ``"RESTART: <reason>"`` → reject, retry from scratch
+          - ``"RETRY_WITH_REFERENCE: <reason>"`` → reject, retry with failed output as reference
+          - ``"CONTINUE: <reason>"`` → reject, continue from where it stopped
+          - ``"FAIL: <reason>"`` → reject, default recovery (retry_with_reference)
+
+        Subclasses can override for a custom verdict format.
+        """
+        text = str(judge_response).strip()
+        upper = text.upper()
+        if upper.startswith("PASS"):
+            return True
+        if upper.startswith("RESTART"):
+            return "restart"
+        if upper.startswith("CONTINUE"):
+            return "continue"
+        if upper.startswith("RETRY_WITH_REFERENCE") or upper.startswith("FAIL"):
+            return "retry_with_reference"
+        return True
+
     async def _ainfer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
@@ -2377,6 +2526,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
+        self._last_inference_input = inference_input
 
         if self.input_preprocessor is not None:
             inference_input = self.input_preprocessor(inference_input)
@@ -2578,6 +2728,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 fallback_func=effective_fallback_func,
                 fallback_mode=effective_fallback_mode,
                 on_fallback_callback=_on_transition if effective_fallback_func else None,
+                output_validator=(
+                    self._run_output_guardrail
+                    if self.output_guardrail_inferencer is not None
+                    else None
+                ),
             )
         except TimeoutError:
             self.log_info(

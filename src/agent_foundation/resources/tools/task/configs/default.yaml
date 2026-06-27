@@ -75,6 +75,7 @@ _params:
   fixer_strategy: winner              # MFDual fixer rule (winner | base)
   enable_deep_mode: true              # template mode: deep investigation + critical thinking
   enable_elegant_mode: true           # template mode: proper/elegant solutions, not hacky
+  guardrail_model_tier: default       # model tier for the output guardrail judge (max/default/lite)
 
 # ---------------------------------------------------------------------------
 # GLOBAL CASCADES

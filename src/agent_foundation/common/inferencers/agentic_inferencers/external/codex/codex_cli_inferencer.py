@@ -31,7 +31,6 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from attr import attrib, attrs
 
-from agent_foundation.apis.openai_llm import DEFAULT_OPENAI_MODEL
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
 )
@@ -77,7 +76,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     codex_command: str = attrib(default="codex")
     # ``None`` -> use Codex's configured default model (from ``codex login`` /
     # ``~/.codex/config.toml``); otherwise passed via ``-m``.
-    model_name: Optional[str] = attrib(default=DEFAULT_OPENAI_MODEL)
+    model_name: Optional[str] = attrib(default="gpt-5.5")
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
     # ``-s`` sandbox policy for fresh ``exec`` calls (resume inherits the
     # session's sandbox). One of ``_CODEX_SANDBOX_MODES``.
@@ -107,17 +106,28 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         """Initialize defaults after attrs init."""
         if self.target_path is None:
             self.target_path = os.getcwd()
-        if self.model_name and any(
+        if self.model_tier is not None:
+            self.model_name = self._resolve_model_for_tier(self.model_tier)
+        elif self.model_name and any(
             self.model_name.lower().startswith(p) for p in self._NON_CODEX_MODEL_PREFIXES
         ):
             logger.info(
                 "[%s] Ignoring non-Codex model_name=%r (likely cascaded from "
-                "_model_name); resetting to %s.",
+                "_model_name); resetting to default.",
                 self.__class__.__name__,
                 self.model_name,
-                DEFAULT_OPENAI_MODEL,
             )
-            self.model_name = DEFAULT_OPENAI_MODEL
+            self.model_name = "gpt-5.5"
+
+    _CODEX_TIER_MAP = {
+        "max": "gpt-5.5",
+        "default": "gpt-5.4",
+        "lite": "gpt-5.4-mini",
+    }
+
+    @classmethod
+    def _resolve_model_for_tier(cls, tier: str) -> str:
+        return cls._CODEX_TIER_MAP.get(str(tier).lower(), "gpt-5.5")
         if (
             self.sandbox_mode is not None
             and self.sandbox_mode not in _CODEX_SANDBOX_MODES

@@ -11,7 +11,6 @@ import subprocess
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO
 
 from attr import attrib, attrs
-from agent_foundation.apis.claude_llm import DEFAULT_CLAUDE_MODEL
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
     EffortLevel,
     PermissionModeLiteral,
@@ -94,7 +93,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     idle_timeout_seconds: int = attrib(default=1800)
     tool_use_idle_timeout_seconds: int = attrib(default=7200)
     empty_line_mode: EmptyLineMode = attrib(default=EmptyLineMode.SUPPRESS_LEADING)
-    model_name: str = attrib(default=DEFAULT_CLAUDE_MODEL)
+    model_name: str = attrib(default="opus[1m]")
     claude_command: str = attrib(default="claude")
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
     system_prompt: Optional[str] = attrib(default=None)
@@ -125,9 +124,21 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         if self.target_path is None:
             self.target_path = os.path.expanduser("~/fbsource")
-        if not self.model_name:
-            self.model_name = "sonnet"
+        if self.model_tier is not None:
+            self.model_name = self._resolve_model_for_tier(self.model_tier)
+        elif not self.model_name:
+            self.model_name = "opus[1m]"
         self.model_name = resolve_model_tag(self.model_name)
+
+    _CLAUDE_TIER_MAP = {
+        "max": "opus[1m]",
+        "default": "sonnet",
+        "lite": "haiku",
+    }
+
+    @classmethod
+    def _resolve_model_for_tier(cls, tier: str) -> str:
+        return cls._CLAUDE_TIER_MAP.get(str(tier).lower(), "sonnet")
         self._resolve_claude_command()
 
         # Shell-allowlist logging (no CLI flag equivalent, but downstream tools
