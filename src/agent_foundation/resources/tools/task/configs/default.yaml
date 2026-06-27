@@ -71,6 +71,10 @@ _params:
   exec_max_breakdown: 4              # executor BTA: number of execution subtasks
   flow_max_dynamic_steps: 3          # per-flow MFDual followup iterations cap
   consensus_max_iterations: 3        # cheap-mode default for ALL Dual review-and-fix loops
+  reviewer_strategy: all_non_winners  # MFDual reviewer rule (runner_up | all_non_winners | configured)
+  fixer_strategy: winner              # MFDual fixer rule (winner | base)
+  enable_deep_mode: true              # template mode: deep investigation + critical thinking
+  enable_elegant_mode: true           # template mode: proper/elegant solutions, not hacky
 
 # ---------------------------------------------------------------------------
 # GLOBAL CASCADES

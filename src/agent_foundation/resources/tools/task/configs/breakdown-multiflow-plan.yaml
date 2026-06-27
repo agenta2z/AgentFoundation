@@ -55,6 +55,10 @@ _params:
   plan_max_breakdown: 3
   flow_max_dynamic_steps: 3
   consensus_max_iterations: 3
+  reviewer_strategy: all_non_winners
+  fixer_strategy: winner
+  enable_deep_mode: true
+  enable_elegant_mode: true
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
@@ -119,10 +123,16 @@ base_inferencer:
     _target_: MultiFlowDual
     propagate_runtime_input: true
     winner_pick: true
-    reviewer_strategy: runner_up
-    fixer_strategy: winner
+    reviewer_strategy: ${_params.reviewer_strategy}
+    fixer_strategy: ${_params.fixer_strategy}
     visible_flows: all
     max_retry: 3
+
+    # Mode flags cascaded to flow leaves via template_extra_feed (outside _repeat_
+    # to avoid the bool-as-int distribution bug: true+true=2 matches _repeat_:2).
+    _template_extra_feed:
+      enable_deep_mode: ${_params.enable_deep_mode}
+      enable_elegant_mode: ${_params.enable_elegant_mode}
 
     flow_configs:
       - _repeat_: ${_params.num_flows}
