@@ -39,6 +39,17 @@ from agent_foundation.common.workspace.layout import (
 DEFAULT_OUTPUT_FILENAME = "output.md"
 
 
+def indexed_child_name(prefix: str, index: int) -> str:
+    """Consistent zero-padded naming for indexed workspace children.
+
+    All indexed workspace children (workers, flows, rounds, panelists) use this
+    single format: ``{prefix}_{index:02d}`` (e.g. ``worker_00``, ``flow_01``,
+    ``round_01``, ``panelist_01``). Centralizing the format here prevents
+    naming inconsistencies across the orchestrator hierarchy.
+    """
+    return f"{prefix}_{index:02d}"
+
+
 @attrs
 class InferencerWorkspace:
     """Unified directory layout manager for flow inferencer workspaces.

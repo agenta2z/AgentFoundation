@@ -825,13 +825,9 @@ class DualInferencer(LinearWorkflowInferencer):
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(_json.dumps(log_entry) + "\n")
 
+            # Cross-worker leakage detection (log-only, no filesystem nav symlinks).
             children_dir = getattr(self._workspace, "children_dir", None)
             if children_dir:
-                nav_dir = os.path.join(children_dir, f"round_{round_idx:02d}")
-                os.makedirs(nav_dir, exist_ok=True)
-                link_path = os.path.join(nav_dir, phase)
-
-                # Fix #7: cross-worker leakage detection
                 my_root = str(self._workspace.root).rstrip("/") + "/"
                 if not target.startswith(my_root):
                     logger.error(
@@ -839,15 +835,6 @@ class DualInferencer(LinearWorkflowInferencer):
                         "target %s outside %s",
                         round_idx, phase, target, self._workspace.root,
                     )
-
-                if os.path.islink(link_path):
-                    os.unlink(link_path)
-                try:
-                    os.symlink(target, link_path, target_is_directory=True)
-                except (OSError, NotImplementedError):
-                    pointer = os.path.join(nav_dir, f"{phase}.pointer.txt")
-                    with open(pointer, "w") as f:
-                        f.write(f"# Workspace pointer\n# Target: {target}\n")
         except Exception as exc:
             logger.warning("Round audit for %s/%s failed: %s", round_idx, phase, exc)
 
@@ -1245,7 +1232,8 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Per-round workspace: assign review_inferencer to round_NN/children/review/
         if self._workspace is not None and self._role_get("review_inferencer") is not None:
-            round_ws = self._workspace.child(f"round_{consensus_iter:02d}")
+            from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+            round_ws = self._workspace.child(indexed_child_name("round", consensus_iter))
             review_ws = round_ws.child("review")
             review_ws.ensure_dirs()
             # M7 workspace virtualization: publish the per-round review workspace
@@ -1439,17 +1427,24 @@ class DualInferencer(LinearWorkflowInferencer):
             # No child without an active ctx => legacy-mint, byte-identical.
             _panel = [parsed_review]
             _rev_parent = self._rc_child("review")
+            _round_ws = self._run_get("_current_round_ws")
             for _i in range(1, _panel_k):
                 _panelist = (
                     _panel_extra[(_i - 1) % len(_panel_extra)]
                     if _panel_extra
                     else self._role_get("review_inferencer")
                 )
+                from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+                _pname = indexed_child_name("panelist", _i)
                 _panelist_ctx = (
-                    _rev_parent.child(f"panelist_{_i}")
+                    _rev_parent.child(_pname)
                     if _rev_parent is not None
                     else None
                 )
+                if _round_ws is not None:
+                    _panelist_ws = _round_ws.child("review").child(_pname)
+                    _panelist_ws.ensure_dirs()
+                    _panelist._workspace = _panelist_ws
                 if review_leaf_can_render:
                     _rk = str(
                         await _panelist.ainfer(

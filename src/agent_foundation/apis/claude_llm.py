@@ -28,6 +28,7 @@ class ClaudeModels(StrEnum):
     CLAUDE_47_OPUS_1M = 'claude-opus-4-7[1m]'
     CLAUDE_47_OPUS_LATEST = 'opus'
     CLAUDE_47_OPUS_LATEST_1M = 'opus[1m]'
+    CLAUDE_OPUS_LATEST_1M = 'opus[1m]'
 
 DEFAULT_MAX_TOKENS = {
     # Source-of-truth max output tokens per Anthropic public docs (verified May 2026).
@@ -51,7 +52,7 @@ DEFAULT_MAX_TOKENS = {
     f'{ClaudeModels.CLAUDE_47_OPUS_LATEST_1M}': 128000,
 }
 
-DEFAULT_CLAUDE_MODEL = ClaudeModels.CLAUDE_47_OPUS_LATEST_1M
+DEFAULT_CLAUDE_MODEL = ClaudeModels.CLAUDE_OPUS_LATEST_1M
 
 
 def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]]):

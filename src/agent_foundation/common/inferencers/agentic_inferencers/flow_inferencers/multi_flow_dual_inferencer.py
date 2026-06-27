@@ -521,7 +521,18 @@ class MultiFlowDualInferencer(DualInferencer):
         original = getattr(self, f"_{role_name}_original", None)
         if inferencer is original:
             return
-        role_ws = self._workspace.child(role_name)
+        # Use the SHORT role name (review/fix) for the workspace dir — consistent with
+        # the round-scoped dirs the Dual review/fix step creates (round_NN/children/review/).
+        # Previously used the long attrs name (review_inferencer/fixer_inferencer), creating
+        # confusingly-named vestigial dirs alongside the round-scoped ones.
+        _ws_name = panelist_slot or {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
+            role_name, role_name
+        )
+        # Chain .child() for compound paths (e.g. "review/panelist_01") because
+        # InferencerWorkspace.child() rejects path separators.
+        role_ws = self._workspace
+        for _seg in _ws_name.split("/"):
+            role_ws = role_ws.child(_seg)
         role_ws.ensure_dirs()
         kwargs = dict(
             workspace=role_ws,
@@ -709,19 +720,38 @@ class MultiFlowDualInferencer(DualInferencer):
                 )
         if chosen is not None:
             pass
-        elif self.reviewer_match_all_non_winners and winner is not None:
+        elif self.reviewer_match_all_non_winners:
             # 2) §3 PANEL: every non-winner flow becomes a reviewer. Populate the
             # inherited Dual ``reviewers`` panel (review_inferencer = panelist 0, the
             # rest independent panelists); the Dual review step runs them under
             # ``review/panelist_i`` child ctxs and merges via merge_reviews.
-            if non_winners:
-                chosen = non_winners[0]
+            #
+            # When winner is None (aggregator output broken → winner_parser failed),
+            # fall back to ALL flows as reviewers — every flow is a "non-winner" when
+            # no winner was detected. This ensures the review ALWAYS runs with
+            # all_non_winners, acting as a recovery gate for broken propose output.
+            _candidates = non_winners if (winner is not None and non_winners) else None
+            if _candidates is None:
+                _all_flows = [
+                    cfg.get("initial_inferencer") for cfg in mfi.flow_configs
+                    if cfg.get("initial_inferencer") is not None
+                ]
+                if _all_flows:
+                    _candidates = _all_flows
+                    if winner is None:
+                        _logger.warning(
+                            "MultiFlowDual: reviewer_strategy=all_non_winners but no "
+                            "winner detected (broken aggregator output?). Falling back "
+                            "to ALL flows as reviewers — review will still run."
+                        )
+            if _candidates:
+                chosen = _candidates[0]
                 panel_set = True
-                panel_value = non_winners[1:] if len(non_winners) > 1 else None
+                panel_value = _candidates[1:] if len(_candidates) > 1 else None
             else:
                 _logger.warning(
                     "MultiFlowDual: reviewer_strategy=all_non_winners but no "
-                    "non-winner flows found. Reviewer unchanged."
+                    "candidate flows found. Reviewer unchanged."
                 )
         elif self.reviewer_match_second and winner is not None:
             # 2) Runner-up as reviewer (ranking-based or declaration-order fallback)
@@ -875,10 +905,11 @@ class MultiFlowDualInferencer(DualInferencer):
         # step runs them under. Without this, heterogeneous-CLI panelists (e.g.
         # CodexCLI + RovoDevCLI) collide on the shared ``/review`` path because
         # their ``switch_role`` creator tuples differ.
+        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
         for _i, _panelist in enumerate(self._role_get("reviewers") or [], start=1):
             self._reassign_role_workspace(
                 _panelist, "review_inferencer",
-                panelist_slot=f"review/panelist_{_i}",
+                panelist_slot=f"review/{indexed_child_name('panelist', _i)}",
             )
         # NOTE: reset_session is handled by switch_role() inside
         # _reassign_role_workspace — no separate call needed here.
@@ -899,15 +930,8 @@ class MultiFlowDualInferencer(DualInferencer):
             finally:
                 if _tok is not None:
                     exit_run(_tok)
-            dispatch_extra = {"mfdual_dispatch": {
-                "winner_idx": _w_idx,
-                "ranking": _rank,
-            }}
-            round_idx = (self._state.get("total_iterations", 0) + 1) if isinstance(getattr(self, "_state", None), dict) else 1
-            self._record_round_audit(
-                round_idx, "review_dispatch", self._role_get("review_inferencer"),
-                extra=dispatch_extra,
-            )
+            # Winner dispatch info is recorded in round_log.jsonl (by the Dual
+            # review step); no separate filesystem nav entry needed.
 
         return result
 

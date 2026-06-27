@@ -1616,7 +1616,7 @@ class TestFix6WorkerNaming(unittest.TestCase):
     """Verify hook-based _worker_child_name pattern."""
 
     def test_bta_default_worker_naming(self):
-        """BTA's default worker naming is worker_N."""
+        """BTA's default worker naming is worker_NN (zero-padded)."""
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
@@ -1624,20 +1624,22 @@ class TestFix6WorkerNaming(unittest.TestCase):
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=_Scripted(script=["q"]),
         )
-        self.assertEqual(bta._worker_child_name(0), "worker_0")
-        self.assertEqual(bta._worker_child_name(3), "worker_3")
-        self.assertTrue(bta._is_worker_child_name("worker_0"))
-        self.assertFalse(bta._is_worker_child_name("flow_0"))
+        self.assertEqual(bta._worker_child_name(0), "worker_00")
+        self.assertEqual(bta._worker_child_name(3), "worker_03")
+        self.assertTrue(bta._is_worker_child_name("worker_00"))
+        self.assertTrue(bta._is_worker_child_name("worker_0"))  # backward compat
+        self.assertFalse(bta._is_worker_child_name("flow_00"))
 
     def test_mfi_override_uses_flow_n(self):
-        """MultiFlowInferencer overrides to flow_N (hierarchical layout)."""
+        """MultiFlowInferencer overrides to flow_NN (zero-padded)."""
         mfi = MultiFlowInferencer(flow_configs=_make_minimal_flow_configs(2))
-        self.assertEqual(mfi._worker_child_name(0), "flow_0")
-        self.assertEqual(mfi._worker_child_name(1), "flow_1")
-        self.assertTrue(mfi._is_worker_child_name("flow_0"))
+        self.assertEqual(mfi._worker_child_name(0), "flow_00")
+        self.assertEqual(mfi._worker_child_name(1), "flow_01")
+        self.assertTrue(mfi._is_worker_child_name("flow_00"))
+        self.assertTrue(mfi._is_worker_child_name("flow_0"))  # backward compat
         self.assertTrue(mfi._is_worker_child_name("flow_99"))
         self.assertFalse(mfi._is_worker_child_name("flow_0_workflow"))
-        self.assertFalse(mfi._is_worker_child_name("worker_0"))
+        self.assertFalse(mfi._is_worker_child_name("worker_00"))
 
 
 class TestSharedInstancePurityUnderRealCtx(unittest.TestCase):

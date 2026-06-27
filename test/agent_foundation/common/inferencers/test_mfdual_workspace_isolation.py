@@ -86,7 +86,7 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         mfd._workspace = _make_workspace_with_child(role_ws)
         mfd._reassign_role_workspace(new_inf, "fixer_inferencer")
         # Verify workspace.child was called and switch_role was invoked
-        mfd._workspace.child.assert_called_once_with("fixer_inferencer")
+        mfd._workspace.child.assert_called_once_with("fix")
         role_ws.ensure_dirs.assert_called_once()
         new_inf.switch_role.assert_called_once()
         call_kwargs = new_inf.switch_role.call_args
@@ -237,7 +237,7 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         role_ws = _make_role_workspace()
         mfd._workspace = _make_workspace_with_child(role_ws)
         mfd._reassign_role_workspace(new_inf, "review_inferencer")
-        mfd._workspace.child.assert_called_once_with("review_inferencer")
+        mfd._workspace.child.assert_called_once_with("review")
 
     def test_handles_inferencer_without_reset_session(self):
         """Doesn't crash when inferencer has no reset_session -- switch_role
