@@ -85,13 +85,13 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         role_ws = _make_role_workspace()
         mfd._workspace = _make_workspace_with_child(role_ws)
         mfd._reassign_role_workspace(new_inf, "fixer_inferencer")
-        # Verify workspace.child was called and switch_role was invoked
-        mfd._workspace.child.assert_called_once_with("fix")
-        role_ws.ensure_dirs.assert_called_once()
+        # Workspace dir is NOT created at propose time (deferred to the round step).
+        # switch_role is invoked for template/session reset only, no workspace arg.
+        mfd._workspace.child.assert_not_called()
         new_inf.switch_role.assert_called_once()
         call_kwargs = new_inf.switch_role.call_args
         self.assertEqual(call_kwargs.kwargs.get("new_role") or call_kwargs.args[0], "fixer_inferencer")
-        self.assertIs(call_kwargs.kwargs["workspace"], role_ws)
+        self.assertNotIn("workspace", call_kwargs.kwargs)
         self.assertTrue(call_kwargs.kwargs["output_is_deliverable"])
 
     def test_role_switch_runs_under_role_child_ctx_not_worker_node(self):
@@ -237,7 +237,7 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         role_ws = _make_role_workspace()
         mfd._workspace = _make_workspace_with_child(role_ws)
         mfd._reassign_role_workspace(new_inf, "review_inferencer")
-        mfd._workspace.child.assert_called_once_with("review")
+        mfd._workspace.child.assert_not_called()
 
     def test_handles_inferencer_without_reset_session(self):
         """Doesn't crash when inferencer has no reset_session -- switch_role

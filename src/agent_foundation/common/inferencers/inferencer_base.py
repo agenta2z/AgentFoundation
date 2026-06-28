@@ -1209,13 +1209,27 @@ class InferencerBase(Debuggable, Resumable, ABC):
             active_run_context,
         )
 
-        if active_run_context() is None:
+        ctx = active_run_context()
+        if ctx is None:
             return
-        if not getattr(self, "_logger_awaiting_workspace", False):
-            return
+        awaiting = getattr(self, "_logger_awaiting_workspace", False)
         ws = self._workspace
-        if ws is None:
+        if not awaiting:
+            _logger.debug(
+                "[%s] _ensure_ctx_workspace_logger: NOT deferred (_logger_awaiting_workspace=%s, ws=%s)",
+                type(self).__name__, awaiting, "present" if ws else "None",
+            )
             return
+        if ws is None:
+            _logger.debug(
+                "[%s] _ensure_ctx_workspace_logger: deferred but no workspace (ctx.path=%s)",
+                type(self).__name__, getattr(ctx, "path", "?"),
+            )
+            return
+        _logger.debug(
+            "[%s] _ensure_ctx_workspace_logger: UN-DEFERRING workspace logger (ws=%s, ctx.path=%s)",
+            type(self).__name__, getattr(ws, "root", "?"), getattr(ctx, "path", "?"),
+        )
         self._logger_awaiting_workspace = False
         self._add_workspace_logger(ws)
 

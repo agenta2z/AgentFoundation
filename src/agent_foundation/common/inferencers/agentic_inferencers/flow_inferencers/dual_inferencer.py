@@ -624,8 +624,33 @@ class DualInferencer(LinearWorkflowInferencer):
         that the fix phase did not reproduce — ``_symlink_or_copy`` skips
         entries that already exist, so the fix output always takes
         precedence.
+
+        Safety net (B1): detect when the last review was not-consensus but
+        no fix ran — the output is the un-fixed propose, which may contain
+        CRITICAL issues the reviewer explicitly flagged.
         """
+        # Safety net: check if a review ran but fix never updated the output
         child_ws = self._run_get("_last_output_child_ws", None)
+        propose_ws = getattr(self, "_propose_child_ws", None)
+        state = getattr(self, "_state", None) or {}
+        last_iter = getattr(self, "_last_iteration_record", None)
+        if (
+            child_ws is not None
+            and propose_ws is not None
+            and child_ws is propose_ws
+            and last_iter is not None
+            and not getattr(last_iter, "consensus_reached", True)
+        ):
+            last_fb = getattr(last_iter, "review_feedback", None) or {}
+            sev = last_fb.get("severity", last_fb.get("overall_severity", ""))
+            logger.warning(
+                "[%s] DEGRADED: last review was NOT consensus (severity=%s, approved=%s) "
+                "but fix never ran — output is the un-fixed propose. The review's issues "
+                "were NOT addressed. This worker's output may be unreliable.",
+                self.phase or "DualInferencer",
+                sev,
+                last_fb.get("approved", last_fb.get("approve")),
+            )
         if child_ws is not None:
             self._symlink_child_output(child_ws)
             propose_ws = getattr(self, "_propose_child_ws", None)
@@ -737,7 +762,13 @@ class DualInferencer(LinearWorkflowInferencer):
         proposer = self._active_proposer()
         if proposer is None:
             return None
-        ws = getattr(proposer, "_workspace", None)
+        # Use _last_output_child_ws — the canonical workspace of whoever
+        # last produced output (propose or fix). Under M7 the proposer's
+        # workspace may be published to the child context only (not the
+        # instance), so direct proposer._workspace can return None.
+        ws = self._last_output_child_ws
+        if ws is None:
+            ws = getattr(proposer, "_workspace", None)
         if ws is None:
             return None
 
@@ -1230,24 +1261,23 @@ class DualInferencer(LinearWorkflowInferencer):
         total_iters = state["total_iterations"]
         attempt_num = state["attempt_record"]["attempt"]
 
-        # Per-round workspace: assign review_inferencer to round_NN/children/review/
+        # Context path for the primary reviewer — independent of workspace.
+        # Single reviewer: review/. Multi-reviewer panel: review/panelist_00/.
+        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        _review_child = self._rc_child("review")
+        _has_panel = bool(self._role_get("reviewers"))
+        if _has_panel and _review_child is not None:
+            _review_child = _review_child.child(indexed_child_name("panelist", 0))
+
+        # Per-round workspace (orthogonal to context path).
         if self._workspace is not None and self._role_get("review_inferencer") is not None:
-            from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
             round_ws = self._workspace.child(indexed_child_name("round", consensus_iter))
-            review_ws = round_ws.child("review")
+            if _has_panel:
+                review_ws = round_ws.child("review").child(indexed_child_name("panelist", 0))
+            else:
+                review_ws = round_ws.child("review")
             review_ws.ensure_dirs()
-            # M7 workspace virtualization: publish the per-round review workspace
-            # into the review child's context so its ``_workspace`` getter resolves
-            # it from the context (§2.12 option-b) — run-state in the context, not
-            # only on the child instance. The instance assignment stays as the
-            # byte-identical fallback (orchestrator-side reads + no-context runs).
-            _review_child = self._rc_child("review")
             self._publish_workspace_to_ctx(_review_child, review_ws)
-            if _review_child is None:
-                # Legacy (no context): mutate the child instance (byte-identical).
-                # Under a context the workspace is published above -> write-pure.
-                self._role_get("review_inferencer")._workspace = review_ws
-            # Store round workspace for fix step to use
             self._run_set("_current_round_ws", round_ws)
 
         logger.info(
@@ -1274,16 +1304,12 @@ class DualInferencer(LinearWorkflowInferencer):
             review_leaf_can_render = self._leaf_can_self_render(
                 self._role_get("review_inferencer")
             )
+            _review_extra_feed = {
+                k: v
+                for k, v in review_feed.items()
+                if k not in ("input", "__template_space__")
+            }
             if review_leaf_can_render:
-                # Modern path: leaf renders. Get the rendered prompt for
-                # logging by calling _render_prompt directly on the leaf —
-                # avoids the double-render that would occur if we used
-                # ainfer(..., render_only=True) followed by ainfer(...).
-                _review_extra_feed = {
-                    k: v
-                    for k, v in review_feed.items()
-                    if k not in ("input", "__template_space__")
-                }
                 # §2.7: render this logging preview under the SAME ./review ctx the
                 # dispatch uses (run_context=self._rc_child("review")), so the leaf's
                 # _effective_role claims ./review (its own node) and reads the role's
@@ -1295,7 +1321,7 @@ class DualInferencer(LinearWorkflowInferencer):
                     exit_run as _af_exit_run,
                 )
 
-                _rv_rc = self._rc_child("review")
+                _rv_rc = _review_child
                 _rv_tok = _af_enter_run(_rv_rc) if _rv_rc is not None else None
                 try:
                     review_prompt = self._role_get("review_inferencer")._render_prompt(
@@ -1356,7 +1382,17 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
         # during the call may mutate _workspace.root on the inferencer.
-        _eff_review_ws = self._read_child_workspace(self._role_get("review_inferencer"), "review")
+        # In panel mode, the primary reviewer's workspace is at _review_child
+        # (e.g. /review/panelist_00), not the bare /review slot.
+        _eff_review_ws = None
+        if _review_child is not None:
+            _eff_review_ws = getattr(_review_child.handles, "get", lambda *a: None)(
+                "workspace_override"
+            ) if hasattr(_review_child, "handles") else None
+        if _eff_review_ws is None:
+            _eff_review_ws = self._read_child_workspace(
+                self._role_get("review_inferencer"), "review"
+            )
         _review_ws_snapshot = (
             str(_eff_review_ws.root) if _eff_review_ws is not None else None
         )
@@ -1367,7 +1403,7 @@ class DualInferencer(LinearWorkflowInferencer):
             _raw_review = str(
                 await self._role_get("review_inferencer").ainfer(
                     state["inference_input"],
-                    run_context=self._rc_child("review"),
+                    run_context=_review_child,
                     extra_feed=_review_extra_feed,
                     **self._run_get("_current_extra_inference_args", {}),
                 )
@@ -1376,7 +1412,7 @@ class DualInferencer(LinearWorkflowInferencer):
             _raw_review = str(
                 await self._role_get("review_inferencer").ainfer(
                     review_prompt,
-                    run_context=self._rc_child("review"),
+                    run_context=_review_child,
                     **self._run_get("_current_extra_inference_args", {}),
                 )
             )
@@ -1426,6 +1462,18 @@ class DualInferencer(LinearWorkflowInferencer):
             # state); else the single ``review_inferencer`` is reused per child ctx.
             # No child without an active ctx => legacy-mint, byte-identical.
             _panel = [parsed_review]
+            from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name as _icn
+            self._record_round_audit(
+                total_iters, "review", self._role_get("review_inferencer"),
+                workspace_root_at_phase=_review_ws_snapshot,
+                extra={
+                    "audit_kind": "panelist",
+                    "panelist": _icn("panelist", 0),
+                    "approved": parsed_review.get("approved"),
+                    "severity": parsed_review.get("severity"),
+                    "num_issues": len(parsed_review.get("issues", [])),
+                },
+            )
             _rev_parent = self._rc_child("review")
             _round_ws = self._run_get("_current_round_ws")
             for _i in range(1, _panel_k):
@@ -1444,8 +1492,8 @@ class DualInferencer(LinearWorkflowInferencer):
                 if _round_ws is not None:
                     _panelist_ws = _round_ws.child("review").child(_pname)
                     _panelist_ws.ensure_dirs()
-                    _panelist._workspace = _panelist_ws
-                if review_leaf_can_render:
+                    self._publish_workspace_to_ctx(_panelist_ctx, _panelist_ws)
+                if self._leaf_can_self_render(_panelist):
                     _rk = str(
                         await _panelist.ainfer(
                             state["inference_input"],
@@ -1464,14 +1512,29 @@ class DualInferencer(LinearWorkflowInferencer):
                     )
                 _rk_out = self.response_parser(_rk)
                 if _rk_out is not None:
-                    _panel.append(self.review_parser(_rk_out))
+                    _parsed_panelist = self.review_parser(_rk_out)
+                    _panel.append(_parsed_panelist)
                 else:
-                    # A panelist whose output we can't parse must NOT be silently
-                    # dropped — that would mask a possible rejection (the all-approve
-                    # rule would ignore it). Count it as a NON-approval so it blocks
-                    # consensus, consistent with panelist 0 (which raises on a parse
-                    # failure).
-                    _panel.append({"approved": False, "issues": []})
+                    _parsed_panelist = {"approved": False, "issues": []}
+                    _panel.append(_parsed_panelist)
+                _panelist_ws_root = None
+                if _panelist_ctx is not None:
+                    _pw = getattr(_panelist_ctx.handles, "get", lambda *a: None)(
+                        "workspace_override"
+                    ) if hasattr(_panelist_ctx, "handles") else None
+                    if _pw is not None:
+                        _panelist_ws_root = str(_pw.root)
+                self._record_round_audit(
+                    total_iters, "review", _panelist,
+                    workspace_root_at_phase=_panelist_ws_root,
+                    extra={
+                        "audit_kind": "panelist",
+                        "panelist": _pname,
+                        "approved": _parsed_panelist.get("approved"),
+                        "severity": _parsed_panelist.get("severity"),
+                        "num_issues": len(_parsed_panelist.get("issues", [])),
+                    },
+                )
             _aggregator = self.review_aggregator or merge_reviews
             _merged = _aggregator(_panel)
             # Consensus only when EVERY panelist approves; issues are the merged
@@ -1510,11 +1573,16 @@ class DualInferencer(LinearWorkflowInferencer):
         reached = self.consensus_checker(parsed_review, threshold)
 
         logger.info(
-            "[%s] Iteration %d: severity=%s, consensus_reached=%s",
+            "[%s] Iteration %d: consensus_reached=%s, approved=%s, severity=%s, "
+            "threshold=%s, num_issues=%d, issue_severities=%s",
             self.phase or "DualInferencer",
             iteration,
-            parsed_review.get("severity", "UNKNOWN"),
             reached,
+            parsed_review.get("approved"),
+            parsed_review.get("severity", "UNKNOWN"),
+            threshold,
+            len(parsed_review.get("issues", [])),
+            [i.get("severity") for i in parsed_review.get("issues", [])],
         )
 
         iteration_record = ConsensusIterationRecord(
@@ -1536,6 +1604,14 @@ class DualInferencer(LinearWorkflowInferencer):
         self._record_round_audit(
             total_iters, "review", self._role_get("review_inferencer"),
             workspace_root_at_phase=_review_ws_snapshot,
+            extra={
+                "audit_kind": "merged" if _has_panel else "review",
+                "consensus_reached": reached,
+                "severity": parsed_review.get("severity"),
+                "approved": parsed_review.get("approved"),
+                "num_issues": len(parsed_review.get("issues", [])),
+                "iteration": iteration,
+            },
         )
 
         if reached:
@@ -1730,6 +1806,10 @@ class DualInferencer(LinearWorkflowInferencer):
         self._record_round_audit(
             total_iters, "fix", self._role_get("fixer_inferencer"),
             workspace_root_at_phase=_fix_ws_snapshot,
+            extra={
+                "iteration": iteration_record.iteration if iteration_record else None,
+                "has_counter_feedback": counter_feedback_str is not None,
+            },
         )
         return fix_output_str
 
@@ -2102,13 +2182,40 @@ class DualInferencer(LinearWorkflowInferencer):
         for issue in parsed_review.get("issues", []):
             issue_sev = issue.get("severity")
             if issue_sev is not None and not severity_at_most(issue_sev, threshold, levels):
+                logger.info(
+                    "[%s] ConsensusCheck: REJECTED — issue severity=%s exceeds threshold=%s. "
+                    "approved=%s, overall_severity=%s, num_issues=%d",
+                    self.phase or "DualInferencer",
+                    issue_sev, threshold,
+                    parsed_review.get("approved"),
+                    parsed_review.get("severity"),
+                    len(parsed_review.get("issues", [])),
+                )
                 return False
 
         if parsed_review.get("approved", False):
+            logger.info(
+                "[%s] ConsensusCheck: APPROVED — approved=%s, severity=%s, threshold=%s, num_issues=%d",
+                self.phase or "DualInferencer",
+                parsed_review.get("approved"),
+                parsed_review.get("severity"),
+                threshold,
+                len(parsed_review.get("issues", [])),
+            )
             return True
 
         severity_str = parsed_review.get("severity", levels[-1] if levels else "MAJOR")
-        return severity_at_most(severity_str, threshold, levels)
+        reached = severity_at_most(severity_str, threshold, levels)
+        logger.info(
+            "[%s] ConsensusCheck: %s — approved=%s, severity=%s, threshold=%s, "
+            "severity_at_most=%s, num_issues=%d",
+            self.phase or "DualInferencer",
+            "REACHED (severity within threshold)" if reached else "NOT REACHED",
+            parsed_review.get("approved"),
+            severity_str, threshold, reached,
+            len(parsed_review.get("issues", [])),
+        )
+        return reached
 
     # endregion
 

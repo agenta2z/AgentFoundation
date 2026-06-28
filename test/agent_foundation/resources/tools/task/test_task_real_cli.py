@@ -614,6 +614,107 @@ def test_mode_flags_reach_rendered_prompt(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Object initialization integration test — topology + workspace + logger
+# ---------------------------------------------------------------------------
+
+@skip_no_omegaconf
+def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
+    """Instantiate the breakdown-multiflow-plan topology with 3 heterogeneous
+    flows (Codex + Claude + RovoDev), assign workspaces (simulating runtime),
+    and verify that EVERY flow leaf inferencer has a properly configured
+    workspace logger.
+
+    This catches the B3 gap: Codex/Claude flows had empty logs/session/ at
+    runtime because their workspace logger was not properly set up during
+    the workspace propagation chain.
+    """
+    import agent_foundation.common.configs.registered_targets  # noqa: F401
+    from rich_python_utils.config_utils import instantiate, load_config
+
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
+        MultiFlowDualInferencer,
+    )
+
+    ws_root = str(tmp_path / "ws")
+    overrides = {
+        "_params.workspace_root": ws_root,
+        "_params.main_inferencer": "ClaudeCodeCLI",
+        "_params.flow_inferencers": ["CodexCLI", "ClaudeCodeCLI", "RovoDevCLI"],
+        "_params.num_flows": 3,
+    }
+
+    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
+                           overrides=dict(overrides))
+    planner = instantiate(plan_cfg)
+    bta = planner.base_inferencer
+    wi = bta.worker_inferencers
+    factory = (
+        (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
+        if isinstance(wi, dict) else wi
+    )
+    mfdual = factory()
+    assert isinstance(mfdual, MultiFlowDualInferencer)
+    mfi = mfdual.base_inferencer
+
+    # ---- Pre-workspace state: all flows should have _logger_awaiting_workspace=True ----
+    for i, fc in enumerate(mfi.flow_configs):
+        for key in ("initial_inferencer", "followup_inferencer"):
+            leaf = fc.get(key)
+            assert leaf is not None, f"flow[{i}].{key} is None"
+            assert getattr(leaf, "_logger_awaiting_workspace", False), (
+                f"flow[{i}].{key} ({type(leaf).__name__}) should have "
+                f"_logger_awaiting_workspace=True before workspace assignment"
+            )
+
+    # ---- Simulate the ACTUAL runtime workspace propagation chain ----
+    # At runtime: BTA builds each flow as an LWI worker (via _build_worker_factory),
+    # then assigns workspace to the LWI. The LWI's _propagate_workspace_to_children
+    # propagates to its default_initial_inferencer + default_followup_inferencer.
+    # This is the path that must create the workspace logger on each leaf.
+    from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+
+    worker_factory = mfi._build_worker_factory()
+    for i in range(len(mfi.flow_configs)):
+        lwi = worker_factory(sub_query=f"test_query_{i}", index=i)
+        # Assign workspace to the LWI (as BTA does at runtime)
+        lwi_ws = InferencerWorkspace(root=str(tmp_path / f"flow_{i:02d}"))
+        lwi._workspace = lwi_ws  # triggers _propagate_workspace_to_children
+
+        # Check BOTH initial and followup inferencers on this LWI
+        for attr_name, label in [
+            ("default_initial_inferencer", "initial"),
+            ("default_followup_inferencer", "followup"),
+        ]:
+            leaf = getattr(lwi, attr_name, None)
+            if leaf is None:
+                continue
+            leaf_type = type(leaf).__name__
+            awaiting = getattr(leaf, "_logger_awaiting_workspace", "MISSING")
+            logger_val = getattr(leaf, "logger", None)
+
+            if isinstance(logger_val, dict):
+                has_ws_logger = "_workspace" in logger_val
+            else:
+                has_ws_logger = False
+
+            assert not awaiting, (
+                f"flow[{i}].{label} ({leaf_type}): _logger_awaiting_workspace={awaiting} "
+                f"after LWI workspace propagation — workspace logger NOT created. "
+                f"logger type={type(logger_val).__name__}, "
+                f"has _workspace key={has_ws_logger}"
+            )
+            assert has_ws_logger, (
+                f"flow[{i}].{label} ({leaf_type}): logger has no '_workspace' entry — "
+                f"session logs will NOT be written to the workspace. "
+                f"logger type={type(logger_val).__name__}, "
+                f"logger keys={list(logger_val.keys()) if isinstance(logger_val, dict) else 'N/A'}"
+            )
+            assert getattr(leaf, "_workspace", None) is not None, (
+                f"flow[{i}].{label} ({leaf_type}): workspace is None after propagation"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Real-CLI subprocess integration test — parametrized over plan + full modes
 # ---------------------------------------------------------------------------
 
