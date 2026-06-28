@@ -643,13 +643,18 @@ class DualInferencer(LinearWorkflowInferencer):
         ):
             last_fb = getattr(last_iter, "review_feedback", None) or {}
             sev = last_fb.get("severity", last_fb.get("overall_severity", ""))
-            logger.warning(
-                "[%s] DEGRADED: last review was NOT consensus (severity=%s, approved=%s) "
-                "but fix never ran — output is the un-fixed propose. The review's issues "
-                "were NOT addressed. This worker's output may be unreliable.",
-                self.phase or "DualInferencer",
-                sev,
-                last_fb.get("approved", last_fb.get("approve")),
+            self.log_warning(
+                {
+                    "event": "DEGRADED_OUTPUT",
+                    "message": (
+                        "Last review was NOT consensus but fix never ran — "
+                        "output is the un-fixed propose. The review's issues "
+                        "were NOT addressed."
+                    ),
+                    "severity": sev,
+                    "approved": last_fb.get("approved", last_fb.get("approve")),
+                },
+                "DegradedOutput",
             )
         if child_ws is not None:
             self._symlink_child_output(child_ws)
@@ -1572,17 +1577,17 @@ class DualInferencer(LinearWorkflowInferencer):
         )
         reached = self.consensus_checker(parsed_review, threshold)
 
-        logger.info(
-            "[%s] Iteration %d: consensus_reached=%s, approved=%s, severity=%s, "
-            "threshold=%s, num_issues=%d, issue_severities=%s",
-            self.phase or "DualInferencer",
-            iteration,
-            reached,
-            parsed_review.get("approved"),
-            parsed_review.get("severity", "UNKNOWN"),
-            threshold,
-            len(parsed_review.get("issues", [])),
-            [i.get("severity") for i in parsed_review.get("issues", [])],
+        self.log_info(
+            {
+                "iteration": iteration,
+                "consensus_reached": reached,
+                "approved": parsed_review.get("approved"),
+                "severity": parsed_review.get("severity", "UNKNOWN"),
+                "threshold": threshold,
+                "num_issues": len(parsed_review.get("issues", [])),
+                "issue_severities": [i.get("severity") for i in parsed_review.get("issues", [])],
+            },
+            "ReviewIteration",
         )
 
         iteration_record = ConsensusIterationRecord(
@@ -1649,6 +1654,14 @@ class DualInferencer(LinearWorkflowInferencer):
             if _fix_child is None:
                 self._role_get("fixer_inferencer")._workspace = fix_ws  # legacy (byte-identical)
 
+        self.log_info(
+            {
+                "event": "FIX_STEP_ENTER",
+                "iteration": iteration,
+                "fixer": type(self._role_get("fixer_inferencer")).__name__,
+            },
+            "FixStep",
+        )
         try:
             # Phase 2 (leaf-owned template rendering): build feed dict, then
             # route between leaf-side rendering (modern) and orchestrator-
@@ -1700,14 +1713,18 @@ class DualInferencer(LinearWorkflowInferencer):
                     followup_feed,
                     getattr(self, "_current_inference_config", {}),
                 )
-        except _RoleDisabledError:
-            # No followup/fixer template available (and caller didn't
-            # explicitly configure one) → skip the fix step and treat the
-            # current base output as the final answer.
-            logger.info(
-                "[%s] Fixer role is disabled (no template available) — "
-                "skipping fix step; review verdict stands.",
-                self.phase or "DualInferencer",
+        except _RoleDisabledError as _rde:
+            self.log_warning(
+                {
+                    "event": "FIX_STEP_ROLE_DISABLED",
+                    "message": (
+                        "Fixer role disabled — fix step skipped. "
+                        "consensus_reached forced to True."
+                    ),
+                    "fixer": type(self._role_get("fixer_inferencer")).__name__,
+                    "error": str(_rde),
+                },
+                "FixStepSkipped",
             )
             iteration_record = getattr(self, "_last_iteration_record", None)
             if iteration_record is not None:
@@ -2182,38 +2199,46 @@ class DualInferencer(LinearWorkflowInferencer):
         for issue in parsed_review.get("issues", []):
             issue_sev = issue.get("severity")
             if issue_sev is not None and not severity_at_most(issue_sev, threshold, levels):
-                logger.info(
-                    "[%s] ConsensusCheck: REJECTED — issue severity=%s exceeds threshold=%s. "
-                    "approved=%s, overall_severity=%s, num_issues=%d",
-                    self.phase or "DualInferencer",
-                    issue_sev, threshold,
-                    parsed_review.get("approved"),
-                    parsed_review.get("severity"),
-                    len(parsed_review.get("issues", [])),
+                self.log_info(
+                    {
+                        "result": "REJECTED",
+                        "reason": "issue severity exceeds threshold",
+                        "issue_severity": issue_sev,
+                        "threshold": threshold,
+                        "approved": parsed_review.get("approved"),
+                        "overall_severity": parsed_review.get("severity"),
+                        "num_issues": len(parsed_review.get("issues", [])),
+                    },
+                    "ConsensusCheck",
                 )
                 return False
 
         if parsed_review.get("approved", False):
-            logger.info(
-                "[%s] ConsensusCheck: APPROVED — approved=%s, severity=%s, threshold=%s, num_issues=%d",
-                self.phase or "DualInferencer",
-                parsed_review.get("approved"),
-                parsed_review.get("severity"),
-                threshold,
-                len(parsed_review.get("issues", [])),
+            self.log_info(
+                {
+                    "result": "APPROVED",
+                    "approved": parsed_review.get("approved"),
+                    "severity": parsed_review.get("severity"),
+                    "threshold": threshold,
+                    "num_issues": len(parsed_review.get("issues", [])),
+                },
+                "ConsensusCheck",
             )
             return True
 
         severity_str = parsed_review.get("severity", levels[-1] if levels else "MAJOR")
         reached = severity_at_most(severity_str, threshold, levels)
-        logger.info(
-            "[%s] ConsensusCheck: %s — approved=%s, severity=%s, threshold=%s, "
-            "severity_at_most=%s, num_issues=%d",
-            self.phase or "DualInferencer",
-            "REACHED (severity within threshold)" if reached else "NOT REACHED",
-            parsed_review.get("approved"),
-            severity_str, threshold, reached,
-            len(parsed_review.get("issues", [])),
+        self.log_info(
+            {
+                "result": "REACHED" if reached else "NOT_REACHED",
+                "reason": "severity within threshold" if reached else "severity exceeds threshold",
+                "approved": parsed_review.get("approved"),
+                "severity": severity_str,
+                "threshold": threshold,
+                "severity_at_most": reached,
+                "num_issues": len(parsed_review.get("issues", [])),
+            },
+            "ConsensusCheck",
         )
         return reached
 

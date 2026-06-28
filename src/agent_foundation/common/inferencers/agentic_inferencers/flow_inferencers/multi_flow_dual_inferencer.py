@@ -810,8 +810,34 @@ class MultiFlowDualInferencer(DualInferencer):
                     fixer_alias,
                     exc,
                 )
-        if chosen_fix is None and self.fixer_match_winner and winner is not None:
-            chosen_fix = winner
+        if chosen_fix is None and self.fixer_match_winner:
+            if winner is not None:
+                chosen_fix = winner
+            else:
+                # No winner detected (broken aggregator output). Fall back to
+                # the first flow's initial_inferencer — a usable leaf that can
+                # render templates. Without this, fixer defaults to base_inferencer
+                # (the MFI orchestrator), which is not a TemplatedInferencerBase
+                # and triggers _RoleDisabledError → fix step silently skipped.
+                _fallback_flows = [
+                    cfg.get("initial_inferencer") for cfg in mfi.flow_configs
+                    if cfg.get("initial_inferencer") is not None
+                ] if mfi is not None else []
+                if _fallback_flows:
+                    chosen_fix = _fallback_flows[0]
+                    self.log_warning(
+                        {
+                            "event": "FIXER_FALLBACK_SAFETY_NET",
+                            "message": (
+                                "fixer_strategy=winner but no winner detected "
+                                "(aggregator output broken or missing <Winner> tag). "
+                                "Falling back to first flow inferencer as fixer. "
+                                "Review the aggregator workspace for guardrail rejections."
+                            ),
+                            "fallback_fixer": type(chosen_fix).__name__,
+                        },
+                        "FixerFallback",
+                    )
         if chosen_fix is not None:
             self._role_set("fixer_inferencer", chosen_fix, mfdual_ctx)
 
