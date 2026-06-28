@@ -11,12 +11,17 @@ Validates the manifest-emission contract added in the cached-hennessy fix plan
   • The manifest file is written next to the output as `<basename>_manifest.json`
     with the documented schema (schema_version, output, contributors, stats).
   • The manifest is NOT emitted when both flags are False.
-  • The deliverable copy logic also writes a `.self_promoted` marker into
-    deliverables_dir (required for upward surfacing via Pass 1 detection).
+  • `output_is_deliverable=True` PROMOTES agent-written outputs/ content into
+    final_deliverables/ (MOVE, not copy). A framework-written <Response> summary
+    (when the agent didn't write output_path) is a reference that STAYS in
+    outputs/ — only agent-written files are deliverables. Self-promotion is
+    detected upward via a non-empty final_deliverables/
+    (workspace.has_deliverables), NOT a `.self_promoted` marker (retired).
 
-These tests use a non-local-access stub inferencer (so `_finalize_output`
-actually writes a file) — see InferencerBase._finalize_output gate at
-inferencer_base.py:723.
+These tests use a non-local-access stub inferencer (returns a `<Response>`
+summary and writes no file); M7/M8 simulate the agent writing its deliverable
+to outputs/ to exercise the promotion path — see InferencerBase._finalize_output
+(and TestDeliverablePromotion for the full agent-wrote / non-writer matrix).
 
 YAML config under test (where the flags live):
   src/agent_foundation/resources/tools/task/configs/
@@ -150,7 +155,7 @@ def test_M5_deliverable_auto_enables_manifest(tmp_path):
     manifest_file = os.path.join(w.outputs_dir, "output_manifest.json")
     assert os.path.isfile(manifest_file), (
         "Manifest should auto-enable when output_is_deliverable=True "
-        "(see inferencer_base.py:764 condition `OR self.output_is_deliverable`)."
+        "(see inferencer_base.py condition `OR self.output_is_deliverable`)."
     )
 
 
@@ -198,42 +203,60 @@ def test_M6_manifest_schema_v1(tmp_path):
 # -------------------------------------------------------------------------
 
 @pytest.mark.preflight
-def test_M7_deliverable_copies_to_deliverables_dir(tmp_path):
-    """M7: `output_is_deliverable=True` copies output.md into deliverables_dir."""
-    w = _ws(tmp_path)
-    stub = _make_manifest_stub(output_is_deliverable=True)
-    stub._workspace = w
-    stub.infer("input")
+def test_M7_agent_written_deliverable_moves_to_deliverables_dir(tmp_path):
+    """M7: with output_is_deliverable=True, agent-written outputs/ content is
+    PROMOTED (moved) into final_deliverables/.
 
-    src = os.path.join(w.outputs_dir, "output.md")
-    dst = os.path.join(w.deliverables_dir, "output.md")
-    assert os.path.isfile(src), "Source output should exist in outputs_dir"
-    assert os.path.isfile(dst), (
-        f"Output should be copied to {dst}. Verify the deliverable-copy "
-        "block in _post_finalize_deliverable_and_manifest "
-        "(inferencer_base.py:753-762)."
-    )
-
-
-@pytest.mark.preflight
-def test_M8_self_promoted_marker_written(tmp_path):
-    """M8: `output_is_deliverable=True` writes `.self_promoted` marker.
-
-    This marker is required for Pass 1 detection in
-    `collect_child_boundary_deliverables` to surface non-boundary children's
-    deliverables (cached-hennessy plan, Step 5a).
+    Design (see InferencerBase._finalize_output + TestDeliverablePromotion):
+    only files the agent physically wrote to outputs/ are deliverables, and they
+    are MOVED (not copied) into final_deliverables/. (A framework-written
+    <Response> summary, when the agent didn't write output_path, is a reference
+    that stays in outputs/ — covered by TestDeliverablePromotion.)
     """
     w = _ws(tmp_path)
     stub = _make_manifest_stub(output_is_deliverable=True)
     stub._workspace = w
+    # Simulate the agent writing its deliverable to outputs/ (what a local-access
+    # leaf does before finalize); the stub itself only returns a <Response>.
+    with open(os.path.join(w.outputs_dir, "output.md"), "w") as f:
+        f.write("# Agent deliverable\nfull content")
     stub.infer("input")
 
-    marker = os.path.join(w.deliverables_dir, ".self_promoted")
-    assert os.path.isfile(marker), (
-        "`.self_promoted` marker must be written into deliverables_dir so "
-        "that parent BTAs detect this leaf as a self-promoted deliverable. "
-        "See inferencer_base.py:760-762."
+    src = os.path.join(w.outputs_dir, "output.md")
+    dst = os.path.join(w.deliverables_dir, "output.md")
+    assert os.path.isfile(dst), (
+        f"agent-written output.md should be promoted to {dst}."
     )
+    assert "Agent deliverable" in open(dst).read()
+    assert not os.path.isfile(src), (
+        "MOVE (not copy) semantics: output.md must NOT remain in outputs_dir "
+        "after promotion to final_deliverables/."
+    )
+
+
+@pytest.mark.preflight
+def test_M8_promoted_deliverable_self_promotes_via_has_deliverables(tmp_path):
+    """M8: a promoted deliverable makes the workspace report has_deliverables —
+    the marker-free self-promotion signal.
+
+    The legacy `.self_promoted` marker FILE was retired (no longer written by
+    _finalize_output). Upward surfacing via `collect_child_boundary_deliverables`
+    Pass 1 now keys on a NON-EMPTY `final_deliverables/`
+    (`workspace.has_deliverables`), not a marker file.
+    """
+    w = _ws(tmp_path)
+    stub = _make_manifest_stub(output_is_deliverable=True)
+    stub._workspace = w
+    with open(os.path.join(w.outputs_dir, "output.md"), "w") as f:
+        f.write("# Agent deliverable")
+    stub.infer("input")
+
+    assert w.has_deliverables, (
+        "After promotion, deliverables_dir must be non-empty so parent BTAs "
+        "detect this leaf as a self-promoted deliverable (Pass 1 keys on "
+        "workspace.has_deliverables, not a marker file)."
+    )
+    assert os.path.isfile(os.path.join(w.deliverables_dir, "output.md"))
 
 
 # -------------------------------------------------------------------------

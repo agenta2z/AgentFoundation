@@ -968,6 +968,15 @@ class TestDeliverablePromotion(unittest.TestCase):
     """Verify the redesigned _finalize_output: agent-written outputs/ content
     is MOVED to final_deliverables/, and <Response> summary is written to
     outputs/ only when the agent didn't write output_path.
+
+    INTENTIONAL CONTRACT — these tests PIN it (do not relax to "make the summary
+    a deliverable" without an explicit design change): a framework-written
+    <Response> summary is a reference and STAYS in outputs/; only files the agent
+    PHYSICALLY WROTE are promoted to final_deliverables/. See the DESIGN NOTE in
+    InferencerBase._finalize_output. The two non-writer cases below
+    (test_agent_writes_no_output_md_deliverable_true / test_no_agent_output_
+    deliverable_true) are the guardrails that catch an accidental "promote the
+    summary too" change.
     """
 
     def _make_inferencer(self, **kwargs):
