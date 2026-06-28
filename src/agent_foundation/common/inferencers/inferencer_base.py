@@ -1325,6 +1325,21 @@ class InferencerBase(Debuggable, Resumable, ABC):
            and write to ``outputs/output_path`` as a summary reference
            (this summary stays in ``outputs/``, not in deliverables).
         3. Emit manifest if applicable.
+
+        DESIGN NOTE — INTENTIONAL, do NOT "fix" by promoting the summary:
+        A deliverable is a substantive artifact the agent PHYSICALLY WROTE.  The
+        Step-2 ``<Response>`` summary is a *reference/narration* the framework
+        writes only when the agent didn't produce ``output_path`` itself — so it
+        deliberately stays in ``outputs/`` and is NEVER moved into
+        ``final_deliverables/``.  Consequence: a slot marked
+        ``output_is_deliverable`` surfaces a deliverable only when its inferencer
+        actually writes a file (local-access leaves do; pure-text / API leaves do
+        not — by design, and moot for shipped configs where every deliverable
+        slot is a local-access ClaudeCodeCLI).  Reordering so the summary is
+        materialized BEFORE the move would wrongly promote narration to a
+        deliverable.  This contract is pinned by ``TestDeliverablePromotion`` in
+        test_mfdual_workspace_anomalies_integration.py — change those tests first
+        if you ever intend to revisit this as a deliberate design change.
         """
         import shutil as _shutil
 
@@ -1356,6 +1371,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                                 agent_wrote_output_path = True
 
         # -- Step 2: Write <Response> summary if agent didn't write output_path --
+        # INTENTIONAL: this summary is a REFERENCE — it stays in outputs/ and is
+        # NOT promoted to final_deliverables/ (only agent-written files are
+        # deliverables). See the DESIGN NOTE above + TestDeliverablePromotion.
         if resolved and os.path.isabs(resolved) and not agent_wrote_output_path:
             if os.path.isfile(resolved) and os.path.getsize(resolved) > 0:
                 pass
