@@ -521,21 +521,12 @@ class MultiFlowDualInferencer(DualInferencer):
         original = getattr(self, f"_{role_name}_original", None)
         if inferencer is original:
             return
-        # Use the SHORT role name (review/fix) for the workspace dir — consistent with
-        # the round-scoped dirs the Dual review/fix step creates (round_NN/children/review/).
-        # Previously used the long attrs name (review_inferencer/fixer_inferencer), creating
-        # confusingly-named vestigial dirs alongside the round-scoped ones.
-        _ws_name = panelist_slot or {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
-            role_name, role_name
-        )
-        # Chain .child() for compound paths (e.g. "review/panelist_01") because
-        # InferencerWorkspace.child() rejects path separators.
-        role_ws = self._workspace
-        for _seg in _ws_name.split("/"):
-            role_ws = role_ws.child(_seg)
-        role_ws.ensure_dirs()
+        # Do NOT create a workspace dir here — the Dual review/fix step creates the
+        # round-scoped workspace (round_NN/children/review/children/panelist_NN/ or
+        # round_NN/children/fix/) and assigns it before ainfer(). Creating a pre-round
+        # workspace here produced empty scaffold dirs (children/review/, children/fix/)
+        # that were never populated and only caused confusion.
         kwargs = dict(
-            workspace=role_ws,
             output_is_deliverable=(True if role_name == "fixer_inferencer" else None),
         )
         # Pass template kwargs only when the inferencer supports them
@@ -562,7 +553,18 @@ class MultiFlowDualInferencer(DualInferencer):
         _role_slot = panelist_slot or {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
             role_name, role_name
         )
-        _rc = self._rc_child(_role_slot)
+        # For compound slots (e.g. "review/panelist_01"), chain .child() calls
+        # to build a nested context path. _rc_child() sanitizes "/" to "_" which
+        # would create a flat path that doesn't match the nested execution path.
+        if "/" in _role_slot:
+            from agent_foundation.common.inferencers.run_context import active_run_context
+            _ctx = active_run_context()
+            _rc = _ctx
+            if _ctx is not None:
+                for _seg in _role_slot.split("/"):
+                    _rc = _rc.child(_seg)
+        else:
+            _rc = self._rc_child(_role_slot)
         _tok = enter_run(_rc) if _rc is not None else None
         try:
             # Publish the runtime-resolved role into the role's OWN child node
@@ -896,17 +898,24 @@ class MultiFlowDualInferencer(DualInferencer):
         # C5: resolve the per-run roles via _role_get (ctx scratch under a real ctx,
         # else the instance attribute) — never read self.review_inferencer directly here,
         # which under a shared-instance ctx is the static definition, not the selection.
-        self._reassign_role_workspace(self._role_get("review_inferencer"), "review_inferencer")
+        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        _panel_list = self._role_get("reviewers") or []
+        _has_panel = bool(_panel_list)
+        # Primary reviewer: in panel mode, the execution path is
+        # review/panelist_00 (matching panelists 1+ at review/panelist_01, etc.).
+        # Single reviewer: the execution path is just review/.
+        if _has_panel:
+            self._reassign_role_workspace(
+                self._role_get("review_inferencer"), "review_inferencer",
+                panelist_slot=f"review/{indexed_child_name('panelist', 0)}",
+            )
+        else:
+            self._reassign_role_workspace(self._role_get("review_inferencer"), "review_inferencer")
         self._reassign_role_workspace(self._role_get("fixer_inferencer"), "fixer_inferencer")
         # §3 panel: the extra non-winner panelists (reviewers list) must ALSO be
         # switched into the reviewer role/template — else they would review with
-        # their original flow role. Each panelist gets its OWN context-path slot
-        # (``review/panelist_{i}``, 1-indexed) matching the path the Dual review
-        # step runs them under. Without this, heterogeneous-CLI panelists (e.g.
-        # CodexCLI + RovoDevCLI) collide on the shared ``/review`` path because
-        # their ``switch_role`` creator tuples differ.
-        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
-        for _i, _panelist in enumerate(self._role_get("reviewers") or [], start=1):
+        # their original flow role.
+        for _i, _panelist in enumerate(_panel_list, start=1):
             self._reassign_role_workspace(
                 _panelist, "review_inferencer",
                 panelist_slot=f"review/{indexed_child_name('panelist', _i)}",
