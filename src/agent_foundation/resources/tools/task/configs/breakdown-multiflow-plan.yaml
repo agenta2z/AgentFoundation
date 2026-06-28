@@ -77,6 +77,7 @@ _params:
   enable_deep_mode: true
   enable_elegant_mode: true
   guardrail_model_tier: default       # output guardrail judge tier (max/default/lite)
+  aggregator_max_retry: 3             # aggregator retry budget (guardrail RESTART consumes retries)
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
@@ -161,8 +162,13 @@ base_inferencer:
         iteration_judgment: true
         initial_inferencer:
           _target_: ${_params.flow_inferencers}
+          max_retry: ${_params.aggregator_max_retry}
+          output_guardrail_inferencer:
+            _target_: ${_params.main_inferencer}
+            model_tier: ${_params.guardrail_model_tier}
         followup_inferencer:
           _target_: ${_params.flow_inferencers}
+          max_retry: ${_params.aggregator_max_retry}
           output_guardrail_inferencer:
             _target_: ${_params.main_inferencer}
             model_tier: ${_params.guardrail_model_tier}
@@ -170,6 +176,7 @@ base_inferencer:
     multi_flow_aggregator_inferencer:
       _target_: ${_params.main_inferencer}
       output_is_deliverable: true
+      max_retry: ${_params.aggregator_max_retry}
       output_guardrail_inferencer:
         _target_: ${_params.main_inferencer}
         model_tier: ${_params.guardrail_model_tier}
@@ -177,6 +184,7 @@ base_inferencer:
   aggregator_inferencer:
     _target_: ${_params.main_inferencer}
     output_is_deliverable: true
+    max_retry: ${_params.aggregator_max_retry}
     output_guardrail_inferencer:
       _target_: ${_params.main_inferencer}
       model_tier: ${_params.guardrail_model_tier}

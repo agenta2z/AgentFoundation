@@ -729,6 +729,30 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 parts.append(f"### Upstream Outcome {idx + 1}\n{content}")
         return "\n\n".join(parts)
 
+    def _build_synthetic_aggregation(self, worker_results, original_query) -> str:
+        """Produce a synthetic aggregation when the LLM aggregator fails.
+
+        Lists the upstream worker outputs so downstream review/fix can still
+        consume them. Written to the aggregator's output.md so the pipeline
+        continues rather than crashing.
+        """
+        parts = [
+            "# Synthetic Aggregation (automatic fallback)\n",
+            "**Warning:** The LLM aggregator failed to produce a valid consolidated "
+            "output after exhausting all retries. This synthetic aggregation lists "
+            "the upstream worker outputs for manual review or downstream processing.\n",
+            f"**Original task:** {original_query}\n",
+        ]
+        worker_paths = getattr(self, "_last_worker_output_paths", None) or []
+        for idx, res in enumerate(worker_results):
+            path = worker_paths[idx] if idx < len(worker_paths) else None
+            parts.append(f"## Upstream Outcome {idx + 1}")
+            if path:
+                parts.append(f"(Full output at: `{path}`)\n")
+            summary = str(res)[:500] if res else "(empty)"
+            parts.append(summary)
+        return "\n\n".join(parts)
+
     def _inject_aggregator_extra_feed(
         self,
         worker_results,
@@ -2189,11 +2213,29 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
-                        result = await agg_inf.ainfer(
-                            agg_input, inference_config=inference_config,
-                            run_context=self._rc_child("aggregator"),
-                            **_agg_extra
-                        )
+                        try:
+                            result = await agg_inf.ainfer(
+                                agg_input, inference_config=inference_config,
+                                run_context=self._rc_child("aggregator"),
+                                **_agg_extra
+                            )
+                        except Exception as _agg_exc:
+                            _bta_self.log_warning(
+                                {
+                                    "event": "AGGREGATOR_FAILED",
+                                    "message": (
+                                        "All aggregator retries exhausted. Producing "
+                                        "synthetic aggregation with upstream worker "
+                                        "paths so downstream review/fix can still consume."
+                                    ),
+                                    "exception": str(_agg_exc),
+                                    "num_workers": len(worker_results),
+                                },
+                                "AggregatorFallback",
+                            )
+                            result = _bta_self._build_synthetic_aggregation(
+                                worker_results, original_query
+                            )
                         if _reporter is not None:
                             try:
                                 await _reporter.on_node_stream(

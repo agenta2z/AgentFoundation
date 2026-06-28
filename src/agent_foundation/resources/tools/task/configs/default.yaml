@@ -76,6 +76,7 @@ _params:
   enable_deep_mode: true              # template mode: deep investigation + critical thinking
   enable_elegant_mode: true           # template mode: proper/elegant solutions, not hacky
   guardrail_model_tier: default       # model tier for the output guardrail judge (max/default/lite)
+  aggregator_max_retry: 3             # aggregator retry budget (guardrail RESTART consumes retries)
 
 # ---------------------------------------------------------------------------
 # GLOBAL CASCADES
