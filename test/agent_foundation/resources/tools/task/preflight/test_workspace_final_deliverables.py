@@ -30,7 +30,7 @@ import pytest
 # Resolve the YAML config — same convention as the legacy
 # `test_yaml_smoke_instantiate`. preflight/ lives one level below task/.
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "openteam" / "server" / "resources" / "tools" / "task" / "topologies" / "breakdown-multiflow-plan-then-implement.yaml"
+YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
 # OpenStartup root: preflight/<this> → task/ → tools/ → resources/ → openteam/
 # → test/ → OpenStartup/.
 OPENSTARTUP_PATH = _HERE.parents[5]
@@ -38,7 +38,7 @@ OPENSTARTUP_PATH = _HERE.parents[5]
 TEMPLATES_DIR = _HERE.parents[1] / "task" / "configs" / "prompt_templates"
 if not TEMPLATES_DIR.exists():
     # Legacy smoke test points templates_dir at OpenStartup's prompt_templates.
-    TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+    TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
 
 
 def _load_topology(monkeypatch, tmp_path):

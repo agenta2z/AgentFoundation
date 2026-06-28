@@ -18,6 +18,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.claude_cod
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
+    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
@@ -85,6 +88,14 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
             Emitted as ``--effort <level>`` (Claude Code v2.1.119+).
         max_budget_usd: Maximum spend per call.
         extra_cli_args: Additional CLI arguments.
+        disable_osx_sandbox: Pass the Meta launcher's
+            ``--dangerously-disable-osx-sandbox`` flag. ``None`` (default)
+            resolves from the ``CLAUDE_CODE_INFERANCER_NO_SANDBOX`` env var;
+            an explicit ``True``/``False`` overrides it. Enable only when this
+            inferencer's ``claude`` subprocess must run nested inside an
+            already-sandboxed process — macOS forbids nesting seatbelt
+            sandboxes, so otherwise ``claude`` exits 71 with no output.
+            SECURITY: removes OS-level confinement of the agent's file access.
     """
 
     has_local_access: bool = attrib(default=True)
@@ -109,6 +120,14 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     effort: Optional[EffortLevel] = attrib(default="max")
     max_budget_usd: Optional[float] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
+    # Disable the Meta launcher's macOS seatbelt sandbox via
+    # ``--dangerously-disable-osx-sandbox``. ``None`` (default) resolves from
+    # the ``CLAUDE_CODE_INFERANCER_NO_SANDBOX`` env var in __attrs_post_init__;
+    # an explicit ``True``/``False`` overrides the env. Needed when this
+    # inferencer's ``claude`` subprocess runs nested inside an already-sandboxed
+    # process (macOS forbids nesting seatbelt sandboxes → exit 71). See
+    # ``common.resolve_disable_osx_sandbox`` for the security note.
+    disable_osx_sandbox: Optional[bool] = attrib(default=None)
 
     # Known Node.js Claude Code CLI paths to try as fallback
     _NODE_CLAUDE_PATHS: List[str] = [
@@ -116,9 +135,20 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         "npx @anthropic-ai/claude-code",
     ]
 
+    _CLAUDE_TIER_MAP = {
+        "max": "opus[1m]",
+        "default": "sonnet",
+        "lite": "haiku",
+    }
+
+    @classmethod
+    def _resolve_model_for_tier(cls, tier: str) -> str:
+        return cls._CLAUDE_TIER_MAP.get(str(tier).lower(), "sonnet")
+
     def __attrs_post_init__(self) -> None:
         """Initialize defaults after attrs init."""
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+            resolve_disable_osx_sandbox,
             resolve_model_tag,
         )
 
@@ -130,15 +160,12 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
             self.model_name = "opus[1m]"
         self.model_name = resolve_model_tag(self.model_name)
 
-    _CLAUDE_TIER_MAP = {
-        "max": "opus[1m]",
-        "default": "sonnet",
-        "lite": "haiku",
-    }
+        # Resolve the macOS-sandbox toggle to a concrete bool: an explicit
+        # ctor value wins; otherwise fall back to the env var.
+        self.disable_osx_sandbox = resolve_disable_osx_sandbox(
+            self.disable_osx_sandbox
+        )
 
-    @classmethod
-    def _resolve_model_for_tier(cls, tier: str) -> str:
-        return cls._CLAUDE_TIER_MAP.get(str(tier).lower(), "sonnet")
         self._resolve_claude_command()
 
         # Shell-allowlist logging (no CLI flag equivalent, but downstream tools
@@ -267,7 +294,20 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         verbose = kwargs.get("verbose", False)
         use_stdin = kwargs.get("use_stdin", False)
 
-        command_parts = [self.claude_command, "-p"]
+        command_parts = [self.claude_command]
+
+        # Meta launcher option — must be understood by the launcher wrapper, so
+        # emit it before the ``-p`` subcommand. Disables the macOS seatbelt
+        # sandbox so ``claude`` can run nested inside an already-sandboxed
+        # process (otherwise ``sandbox_apply`` fails → exit 71, empty output).
+        if self.disable_osx_sandbox:
+            from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+                DANGEROUSLY_DISABLE_OSX_SANDBOX,
+            )
+
+            command_parts.append(f"--{DANGEROUSLY_DISABLE_OSX_SANDBOX}")
+
+        command_parts.append("-p")
 
         if output_format:
             command_parts.append(f"--output-format {output_format}")
@@ -616,7 +656,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         """
         if override is not None:
             return float(override)
-        return float(max(self.idle_timeout_seconds, 1800))
+        return float(max(self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS))
 
     # _ainfer_streaming() — inherited from TerminalSessionInferencerBase.
     # Base class now handles stdin + stderr via large_input_mode=STDIN.

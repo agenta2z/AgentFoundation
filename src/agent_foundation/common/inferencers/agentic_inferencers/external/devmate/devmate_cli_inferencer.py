@@ -22,6 +22,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.co
     SessionMode,
     sync_config_to_target,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
+    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionTemplatedInferencerBase,
 )
@@ -290,6 +293,12 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # InferencerBase).
         if self.target_path is None:
             self.target_path = os.path.expanduser("~/fbsource")
+
+        # Wall-clock safety net for the sync subprocess path (base ``_infer``
+        # only enforces ``timeout`` when set). Floor at the shared default,
+        # scaling with ``idle_timeout_seconds``. (Async/streaming uses idle timeouts.)
+        if self.timeout is None:
+            self.timeout = max(self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
 
         # If both shell controls are set, generate an extended config that
         # restricts execute_command to the allowed commands. If only

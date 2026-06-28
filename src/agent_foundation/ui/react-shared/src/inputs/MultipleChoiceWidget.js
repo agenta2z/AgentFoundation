@@ -6,9 +6,18 @@
 
 import React, { useState } from 'react';
 
-export default function MultipleChoiceWidget({ config, onSubmit }) {
-  const [selections, setSelections] = useState(new Set());
-  const [customText, setCustomText] = useState('');
+export default function MultipleChoiceWidget({ config, onSubmit, submitLabel, readOnly, value }) {
+  // Read-only mode seeds the checked options + custom text from the committed value.
+  const [selections, setSelections] = useState(() => (
+    readOnly && value && Array.isArray(value.selections)
+      ? new Set(value.selections.map((s) => s.choice_index).filter((i) => i != null))
+      : new Set()
+  ));
+  const [customText, setCustomText] = useState(
+    readOnly && value && Array.isArray(value.selections)
+      ? (value.selections.find((s) => s.custom_text)?.custom_text || '')
+      : '',
+  );
 
   const options = config?.input_mode?.options || config?.options || config?.choices || [];
   const allowCustom = config?.input_mode?.allow_custom ?? config?.allow_custom ?? true;
@@ -42,6 +51,7 @@ export default function MultipleChoiceWidget({ config, onSubmit }) {
               type="checkbox"
               checked={selections.has(i)}
               onChange={() => toggleSelection(i)}
+              disabled={readOnly}
             />
             <span className="option-label">{opt.label}</span>
             {opt.description && (
@@ -50,22 +60,25 @@ export default function MultipleChoiceWidget({ config, onSubmit }) {
           </label>
         ))}
       </div>
-      {allowCustom && (
+      {allowCustom && (!readOnly || customText) && (
         <input
           type="text"
           className="widget-custom-input"
           placeholder="Add custom option..."
           value={customText}
           onChange={(e) => setCustomText(e.target.value)}
+          disabled={readOnly}
         />
       )}
-      <button
-        className="widget-submit"
-        onClick={handleSubmit}
-        disabled={selections.size === 0 && !customText.trim()}
-      >
-        Submit ({selections.size} selected)
-      </button>
+      {!readOnly && (
+        <button
+          className="widget-submit"
+          onClick={handleSubmit}
+          disabled={selections.size === 0 && !customText.trim()}
+        >
+          {submitLabel || 'Submit'} ({selections.size} selected)
+        </button>
+      )}
     </div>
   );
 }

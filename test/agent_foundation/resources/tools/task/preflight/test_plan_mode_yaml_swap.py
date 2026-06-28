@@ -2,7 +2,7 @@
 
 Background
 ----------
-The full topology `breakdown-multiflow-plan-then-implement.yaml` wraps PTI in
+The full topology `default.yaml` wraps PTI in
 an outer Dual that reviews the implementation deliverable. When `--plan` is
 selected and the implementation is disabled, PTI returns "" (empty string),
 causing the outer Dual to review an empty deliverable using
@@ -29,14 +29,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _HERE = Path(__file__).resolve().parent
-_TOPOLOGIES_DIR = _HERE.parents[1] / "configs"   # NOT used here; for reference
-# The PRODUCTION topologies dir (where the executor's swap looks):
-_PROD_TOPOLOGIES = (
-    _HERE.parents[5]  # OpenStartup/
-    / "src" / "openteam" / "server" / "resources" / "tools" / "task" / "topologies"
+_CONFIGS_DIR = _HERE.parents[1] / "configs"   # NOT used here; for reference
+# The PRODUCTION configs dir (where the executor's swap looks):
+_PROD_CONFIGS = (
+    _HERE.parents[5]  # AgentFoundation/
+    / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs"
 )
-_FULL_YAML = _PROD_TOPOLOGIES / "breakdown-multiflow-plan-then-implement.yaml"
-_STANDALONE_YAML = _PROD_TOPOLOGIES / "breakdown-multiflow-plan.yaml"
+_FULL_YAML = _PROD_CONFIGS / "default.yaml"
+_STANDALONE_YAML = _PROD_CONFIGS / "breakdown-multiflow-plan.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ def test_PMS6_executor_swap_logic_present_for_plan_mode():
     swap logic (i.e. it doesn't accidentally regress to a single-line
     `enable_implementation = False` toggle without the YAML swap)."""
     executor_path = (
-        _HERE.parents[5] / "src" / "openteam" / "server"
+        _HERE.parents[5] / "src" / "agent_foundation"
         / "resources" / "tools" / "task" / "executor.py"
     )
     src = executor_path.read_text()
@@ -186,14 +186,10 @@ def test_PMS9_followup_template_exists():
     """The fixer's `template_key: followup` MUST resolve to a real file —
     otherwise rendering crashes at the first fix iteration with
     TemplateNotFound."""
-    followup_path = (
-        _HERE.parents[5] / "src" / ".."
-        / ".." / ".." / ".." / ".."  # arbitrary; we'll resolve via known-good path
-    ).resolve()
-    # Better: directly check the AgentFoundation prompt_templates
-    af_followup = Path(
-        "/Users/tchen7/MyProjects/CoreProjects/AgentFoundation/src/"
-        "agent_foundation/resources/prompt_templates/plan/main/followup.jinja2"
+    # Directly check the AgentFoundation prompt_templates
+    af_followup = (
+        _HERE.parents[5] / "src" / "agent_foundation" / "resources"
+        / "prompt_templates" / "plan" / "main" / "followup.jinja2"
     )
     # Be tolerant of repo layout — check both standard locations
     candidates = [
@@ -226,7 +222,7 @@ def test_PMS10_run_topology_with_plan_mode_swaps_source(tmp_path, monkeypatch):
 
     captured = {}
 
-    def _fake_load_config(path, overrides=None):
+    def _fake_load_config(path, overrides=None, env_prefix=None, config_defaults=None, **_kw):
         captured["path"] = str(path)
         captured["overrides"] = overrides
         # Raise a sentinel exception so _run_topology bails before
@@ -281,7 +277,7 @@ def test_PMS11_run_topology_with_full_mode_does_NOT_swap(tmp_path, monkeypatch):
 
     captured = {}
 
-    def _fake_load_config(path, overrides=None):
+    def _fake_load_config(path, overrides=None, env_prefix=None, config_defaults=None, **_kw):
         captured["path"] = str(path)
         raise RuntimeError("__test_short_circuit__")
 
@@ -300,7 +296,7 @@ def test_PMS11_run_topology_with_full_mode_does_NOT_swap(tmp_path, monkeypatch):
 
     asyncio.run(_go())
     loaded_path = Path(captured["path"]).name
-    assert loaded_path == "breakdown-multiflow-plan-then-implement.yaml", (
+    assert loaded_path == "default.yaml", (
         f"With mode='full', load_config should receive the full PTI YAML "
         f"unchanged. Got: {loaded_path!r}. Swap is firing when it should not."
     )
@@ -312,7 +308,7 @@ def test_PMS7_execute_mode_does_NOT_swap_yaml():
     and runs implementation. Verify the source still reflects this
     asymmetric design."""
     executor_path = (
-        _HERE.parents[5] / "src" / "openteam" / "server"
+        _HERE.parents[5] / "src" / "agent_foundation"
         / "resources" / "tools" / "task" / "executor.py"
     )
     src = executor_path.read_text()

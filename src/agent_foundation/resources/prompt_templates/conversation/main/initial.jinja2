@@ -7,10 +7,6 @@
 {% if available_sops is defined and available_sops %}
 ## Available SOPs (Standard Operating Procedures)
 
-When user intends to enter an SOP, directly use the `/enter_sop <sop name>` command. 
-- SOP will gather necessary inputs (target path, options, strategy) through its initial phases. There is no need to gather these info before entering the SOP.
-- Add `--yolo` only when the user explicitly asked to run it autonomously without supervision. 
-
 {{ available_sops }}
 {% endif %}
 
@@ -93,18 +89,21 @@ For **1a (new user input)**, classify the message and act:
 An SOP is active (see `## Active SOP Context`):
 - **Conversational** (greeting, chitchat, no-tool conceptual question) → answer in natural language only; DO NOT invoke tools.
 - **Active-SOP-related request** (continuing or advancing the active SOP, or asking/discussing it) → diff `<SOPStatus>` against `<SOPNextStepGuidance>`; execute only the remaining sub-steps. If the current guidance is complete, say so and ask whether to proceed to the next phase. If the whole SOP is complete, summarize what was accomplished and ask what's next — do not re-execute completed steps.
-- **Other-SOP-related request** (entering, resuming, asking about, or operating on a *different* SOP than the active one) → enter it, passing the user's request so the SOP starts on it (`/enter_sop <name> "<request>"` to enter, `/resume_sop <name> "<request>"` to resume; omit the request to just enter/resume). Enter **interactively** and do NOT pre-collect the SOP's parameters yourself — the SOP gathers its own inputs through its initial phases; add `--yolo` only if the user explicitly asked to run it autonomously. Entering another SOP suspends the current one (it moves to `## In-Progress SOPs`); if reasonable, remind the user the current SOP can be resumed later.
-- **Ad-hoc request, not related to any SOP** (ask a question, do some planning, use a tool/skill, or perform a task — e.g. "search for X", "help quickly plan Y") → fulfill it, then remind the user where the active SOP left off so they can resume. If there is a `## Paused SOP`, offer `/resume_sop` at a natural break (never resume without the user's go-ahead).
+- **Other-SOP-related request** (entering, resuming, asking about, or operating on a *different* SOP than the active one) → enter it (or resume it if it's already in progress), passing the user's request so the SOP starts on it (omit the request to just enter/resume). Enter **interactively** and do NOT pre-collect the SOP's parameters yourself — the SOP gathers its own inputs through its initial phases; add `--yolo` only if the user explicitly asked to run it autonomously. Entering another SOP suspends the current one (it moves to `## In-Progress SOPs`); if reasonable, remind the user the current SOP can be resumed later.
+- **Ad-hoc request, not related to any SOP** (ask a question, do some planning, use a tool/skill, or perform a task — e.g. "search for X", "help quickly plan Y") → fulfill it, then remind the user where the active SOP left off so they can resume. If there is a `## Paused SOP`, offer to resume it at a natural break (never resume without the user's go-ahead).
 {% else %}
 No SOP is active:
 - **Conversational** (greeting, chitchat, no-tool conceptual question) → answer in natural language only; DO NOT invoke tools.
-- **SOP-related request** (start a new SOP, resume an in-progress one, or ask about available SOPs) → enter the SOP, passing the user's request so it starts on it (`/enter_sop <name> "<request>"` to start, `/resume_sop <name> "<request>"` to resume; omit the request to just start/resume); see `## Available SOPs` and `## In-Progress SOPs`. Enter **interactively** and do NOT pre-collect the SOP's parameters (target path, strategy, goal, etc.) with your own conversation tools — every SOP gathers its own inputs through its initial phases (with better UX: path auto-completion, structured choices). Add `--yolo` only if the user explicitly asked to run it autonomously without supervision.
+- **SOP-related request** (start a new SOP, resume an in-progress one, or ask about available SOPs) → enter the SOP (or resume an in-progress one), passing the user's request so it starts on it (omit the request to just start/resume); see `## Available SOPs` and `## In-Progress SOPs`. Enter **interactively** and do NOT pre-collect the SOP's parameters (target path, strategy, goal, etc.) with your own conversation tools — every SOP gathers its own inputs through its initial phases (with better UX: path auto-completion, structured choices). Add `--yolo` only if the user explicitly asked to run it autonomously without supervision.
 - **Ad-hoc request, not related to any SOP** (ask a question, do some planning, use a tool/skill, or perform a task) → fulfill it.
 {% endif %}
 
 In any branch:
+- **Enter an SOP vs. use a tool** — when user request could potentially leverage either an SOP or a tool, carefully think about the user's actual goal, not surface keywords:
+  * One-off operation an individual tool/skill handles → use that tool directly.
+  * The full systematic multi-step workflow (see `## Available SOPs`) → enter that SOP
 - **If a tool call fails or returns an error**, report it clearly, suggest a fix or workaround, and do not silently retry more than once.
-- **If the user asks to start an SOP that already appears under `## In-Progress SOPs`**, first ask whether to resume it (`/resume_sop <name>`) or start fresh (`/enter_sop <name> --fresh`) before entering.
+- **If the user asks to start an SOP that already appears under `## In-Progress SOPs`**, first ask whether to resume it or start it fresh (with `--fresh`) before entering.
 
 
 ## Response Format
@@ -146,8 +145,13 @@ Your user-facing answer goes inside `<Response>` tags. This is what the user eve
 
 (Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)
 
+NOTES (on SOP):
+- When the user intends to enter an SOP, invoke the `enter_sop` tool, passing the SOP name (plus any flags or an initial request) as its argument. (SOP-vs-standalone-tool routing lives in the Decision Procedure → "In any branch".)
+  * SOP will gather necessary inputs (target path, options, strategy) through its initial phases. There is no need to gather these info before entering the SOP.
+  * Add `--yolo` only when the user explicitly asked to run it autonomously without supervision.
+
 NOTES:
 - If a user's request requires an action (run a task, search knowledge, change settings), use the appropriate tool inside `<Response>`.
 - If a user's request is chatting (greetings, questions about concepts), respond directly inside `<Response>` without tools.
 - Use conversation tools only when you need critical user input. If the user's intent is clear, respond directly.
-- Always wrap tool calls in a fenced ```json ToolsToInvoke block. Never output raw JSON inline.
+- Always wrap every tool call in a fenced ```json ToolsToInvoke block — never output raw JSON inline, and never write a tool's name as visible prose. This includes the slash-prefixed commands listed under "Action Tools" (e.g. `/sop`, `/resume_sop`, `/model`): invoke them as `ToolsToInvoke` actions with `name` set to the command without its leading slash.

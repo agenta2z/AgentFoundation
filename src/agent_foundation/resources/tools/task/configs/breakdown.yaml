@@ -47,13 +47,13 @@ _params:
   workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
   default_inferencer: ClaudeCodeCLI
   main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
-  # Used ONLY by the `multiflow` worker type. NOTE: len(flow_inferencers) MUST
-  # equal num_flows — the `_repeat_: ${num_flows}` block below distributes this
-  # list per-copy, and a length mismatch raises ValueError at config load.
+  # Used ONLY by the `multiflow` worker type. num_flows is DERIVED from this
+  # list's length (below), so they can never mismatch and a single env var
+  # `TASK__FLOW_INFERENCERS=A,B,C` sets both the inferencers and the count.
   flow_inferencers:
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
-  num_flows: 2
+  num_flows: ${len:${_params.flow_inferencers}}
   plan_max_breakdown: 5
   flow_max_dynamic_steps: 3
   consensus_max_iterations: 3

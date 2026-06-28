@@ -152,6 +152,10 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         "proposals_path",
         "preselected_ids",
         "allow_zero",
+        # Prefill: a value the agent already knows (e.g. a path the user gave in
+        # their request) — the widget pre-populates its input so the user can
+        # confirm with one click instead of re-typing.
+        "default",
     ):
         _val = args.get(_key)
         if _val is not None and _val != "":

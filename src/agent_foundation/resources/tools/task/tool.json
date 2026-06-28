@@ -163,11 +163,11 @@
     {
       "name": "--config",
       "type": "string",
-      "description": "Topology preset (default 'default'). 'default'/'pti': full PTI plan+implement. 'breakdown': BTA coverage planning with adaptive per-subtask workers (leaf/breakdown/multiflow). 'multiple'/'multiflow': MFDual diversity, N parallel flows + winner pick. 'full-plan': BTA+MFDual coverage+diversity (alias for breakdown-multiflow-plan). 'disabled'/'conversation': conversational router that picks a preset per request (opt-in). Mode flags (--plan/--execute/--full/--confirm) apply only to 'default'/'pti'; the other presets are plan-only. Also accepts a YAML path or inline YAML.",
+      "description": "Topology preset (default 'default'). 'default'/'pti': full PTI plan+implement. 'breakdown': BTA coverage planning with adaptive per-subtask workers (leaf/breakdown/multiflow). 'multiflow-plan'/'multiflow': MFDual diversity, N parallel flows + winner pick. 'full-plan': BTA+MFDual coverage+diversity (alias for breakdown-multiflow-plan). 'disabled'/'conversation': conversational router that picks a preset per request (opt-in). Mode flags (--plan/--execute/--full/--confirm) apply only to 'default'/'pti'; the other presets are plan-only. Also accepts a YAML path or inline YAML.",
       "choices": [
         "default",
         "breakdown",
-        "multiple",
+        "multiflow-plan",
         "full-plan",
         "disabled",
         "conversation",

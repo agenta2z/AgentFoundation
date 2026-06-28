@@ -2,8 +2,6 @@ from enum import StrEnum
 from os import environ, path
 from typing import Union, List, Dict, Sequence, Tuple
 
-from anthropic import Anthropic
-
 from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.console_utils import hprint_message
 
@@ -160,6 +158,11 @@ def generate_text(
     """
     messages = _get_messages(prompt_or_messages)
     api_key = api_key or environ[ENV_NAME_CLAUDE_API_KEY]
+
+    # Lazy import: the `anthropic` SDK is only needed for this API-based path.
+    # The subprocess-based claude_cli backend imports DEFAULT_CLAUDE_MODEL from
+    # this module and must NOT require the SDK to be installed just to import it.
+    from anthropic import Anthropic
 
     client = Anthropic(api_key=api_key)
 

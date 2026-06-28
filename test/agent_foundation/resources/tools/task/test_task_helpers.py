@@ -60,13 +60,13 @@ def test_camel_to_kebab_idempotent():
 def test_resolve_default_pti():
     kind, payload = ex._resolve_agent_config("pti")
     assert kind == "file"
-    assert payload.name == "pti.yaml"
+    assert payload.name == "default.yaml"
 
 def test_resolve_pti_alias_routes_to_preset():
     # R2.7 — PTI has no _target_ alias; bare "PTI" must hit the preset (not synthesize)
     kind, payload = ex._resolve_agent_config("PTI")
     assert kind == "file"
-    assert payload.name == "pti.yaml"
+    assert payload.name == "default.yaml"
 
 def test_resolve_kebab_preset():
     kind, payload = ex._resolve_agent_config("multi-flow-dual")
@@ -193,9 +193,9 @@ def test_topology_is_pti_false_for_others():
 # ──────────────────────────────────────────────────────────────────────
 
 def test_property_p4_all_presets_instantiable():
-    """P4 — every *.yaml in topologies/ instantiates without raising."""
-    topologies_dir = ex._TOPOLOGIES_DIR
-    presets = sorted(topologies_dir.glob("*.yaml"))
+    """P4 — every *.yaml in configs/ instantiates without raising."""
+    configs_dir = ex._CONFIGS_DIR
+    presets = sorted(configs_dir.glob("*.yaml"))
     assert len(presets) >= 6, "need at least 6 presets"
     for p in presets:
         cfg = load_config(str(p), overrides={
@@ -249,7 +249,7 @@ def test_parser_quoted_with_confirm():
 
 def test_tool_json_schema():
     import json
-    tool_path = ex._TOPOLOGIES_DIR.parent / "tool.json"
+    tool_path = ex._CONFIGS_DIR.parent / "tool.json"
     data = json.loads(tool_path.read_text(encoding="utf-8"))
     assert data["name"] == "task"
     assert data["agent_enabled"] is True
@@ -325,7 +325,7 @@ def test_template_feed_via_override_reaches_inferencer():
     """A1#6 / R3.4 — proves --template-feed flag is unnecessary: BTA's
     template_extra_feed is reachable via dotted-key --override."""
     import asyncio
-    bta_yaml = ex._TOPOLOGIES_DIR / "bta.yaml"
+    bta_yaml = ex._CONFIGS_DIR / "bta.yaml"
     # Note: pre-2026-05-05 this passed `workspace_root: "/tmp/..."` to satisfy
     # the (now-removed) BTA convenience attrib. Workspace is not needed for
     # this template_extra_feed assertion (only for save_results), so it's

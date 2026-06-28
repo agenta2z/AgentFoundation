@@ -101,6 +101,14 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     reasoning_effort: Optional[str] = attrib(default=None)
     # Extra env merged into the SDK runtime environment.
     sdk_env: Dict[str, str] = attrib(factory=dict)
+    # kwargs forwarded verbatim to ``openai_codex.CodexConfig(**...)`` when
+    # constructing the SDK client (e.g. ``codex_bin``, ``launch_args_override``,
+    # ``config_overrides``, ``env``). ``None`` -> default ``AsyncCodex()`` (the
+    # bundled codex binary). Use this where the bundled binary can't run/auth --
+    # e.g. point the SDK at a working codex app-server:
+    # ``launch_args_override=("/path/to/codex", "--dangerously-disable-osx-sandbox",
+    # "app-server", "--listen", "stdio://")``.
+    codex_config_kwargs: Optional[Dict[str, Any]] = attrib(default=None)
 
     # Per-run internal state (not per-branch; plain attribs).
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
@@ -204,7 +212,12 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         for k, v in (self.sdk_env or {}).items():
             os.environ.setdefault(k, v)
 
-        client = AsyncCodex()
+        if self.codex_config_kwargs:
+            from openai_codex import CodexConfig
+
+            client = AsyncCodex(CodexConfig(**self.codex_config_kwargs))
+        else:
+            client = AsyncCodex()
         await client.__aenter__()
 
         thread_kwargs = self._thread_kwargs()

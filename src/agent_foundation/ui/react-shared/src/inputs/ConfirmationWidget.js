@@ -18,7 +18,7 @@ const fadeIn = keyframes`
   to   { opacity: 1; transform: translateY(0); }
 `;
 
-export default function ConfirmationWidget({ config, onSubmit, onView, onViewFolder }) {
+export default function ConfirmationWidget({ config, onSubmit, onView, onViewFolder, readOnly, value }) {
   const theme = useTheme();
   const prompt = config?.input_mode?.prompt || config?.prompt || '';
   const yesLabel = config?.input_mode?.metadata?.yes_label || 'Proceed';
@@ -29,7 +29,14 @@ export default function ConfirmationWidget({ config, onSubmit, onView, onViewFol
   const viewType = config?.input_mode?.metadata?.view_type || 'file';
 
   const [note, setNote] = useState('');
-  const [submitted, setSubmitted] = useState(null); // 'yes' | 'no' | null
+  // Read-only mode seeds the decision from the committed value → renders the frozen
+  // ✅/❌ state (no action buttons).
+  const [submitted, setSubmitted] = useState(() => {
+    if (!readOnly) return null;
+    if (value === 'yes' || value?.choice === 'yes') return 'yes';
+    if (value === 'no' || value?.choice === 'no') return 'no';
+    return null;
+  }); // 'yes' | 'no' | null
 
   const handleSubmit = (choice) => {
     if (submitted) return; // double-submit guard (matches SingleChoice/MultipleChoice pattern)

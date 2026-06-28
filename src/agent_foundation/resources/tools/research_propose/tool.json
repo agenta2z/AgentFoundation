@@ -18,8 +18,8 @@
       "template_master_version": "research_propose",
       "plan": true,
       "config": "breakdown-multiflow-plan",
+      "env_prefix": "RESEARCH_PROPOSE",
       "config_overrides": {
-        "_params.flow_inferencers": ["${oc.env:DEFAULT_RESEARCH_INFERENCER}", "${oc.env:DEFAULT_MAIN_INFERENCER}"],
         "_params.plan_max_breakdown": 5,
         "_params.flow_max_dynamic_steps": 3,
         "_params.consensus_max_iterations": 3,

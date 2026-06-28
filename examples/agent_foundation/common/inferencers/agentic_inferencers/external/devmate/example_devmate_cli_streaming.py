@@ -187,9 +187,9 @@ def main():
         help="Devmate model name (default: claude-sonnet-4.5)",
     )
     parser.add_argument(
-        "-r", "--repo-path",
+        "-t", "--target-path",
         default=os.path.expanduser("~/fbsource"),
-        help="Repo working directory for Devmate (default: ~/fbsource)",
+        help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
     parser.add_argument(
         "--config-name",
@@ -220,7 +220,7 @@ def main():
     print()
     print("🤖 Devmate CLI Inferencer Demo")
     print(f"   Model:        {inferencer.model_name}")
-    print(f"   Repo path:    {inferencer.target_path}")
+    print(f"   Target path:  {inferencer.target_path}")
     print(f"   Config name:  {inferencer.config_name}")
     print(f"   Max tokens:   {inferencer.max_tokens}")
     print()

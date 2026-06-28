@@ -231,9 +231,9 @@ def main():
         help="Devmate SDK model (default: claude-sonnet-4-5)",
     )
     parser.add_argument(
-        "-r", "--root-folder",
+        "-t", "--target-path",
         default=os.path.expanduser("~/fbsource"),
-        help="Working directory for Devmate agent (default: ~/fbsource)",
+        help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
     args = parser.parse_args()
     asyncio.run(main_async(args))

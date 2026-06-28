@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -49,6 +50,14 @@ def create_inferencer(args: argparse.Namespace):
     kwargs = {"target_path": args.target_path, "sandbox_mode": args.sandbox}
     if args.model:
         kwargs["model_name"] = args.model
+    # Optional: point the SDK at a specific codex app-server via a JSON object of
+    # openai_codex.CodexConfig kwargs. Needed where the bundled codex can't
+    # run/auth -- e.g. on a host that nests a seatbelt sandbox:
+    #   CODEX_SDK_CONFIG_KWARGS='{"launch_args_override": ["/usr/local/bin/codex",
+    #   "--dangerously-disable-osx-sandbox", "app-server", "--listen", "stdio://"]}'
+    cfg = os.environ.get("CODEX_SDK_CONFIG_KWARGS")
+    if cfg:
+        kwargs["codex_config_kwargs"] = json.loads(cfg)
     return CodexSdkInferencer(**kwargs)
 
 
@@ -151,7 +160,11 @@ def main():
     try:
         import openai_codex  # noqa: F401
     except ImportError:
-        print("❌ openai-codex SDK not installed. Run: pip install openai-codex")
+        print(
+            "❌ openai-codex SDK not installed. It is currently in beta; install "
+            "from the openai/codex repo:\n   pip install "
+            "'git+https://github.com/openai/codex.git#subdirectory=sdk/python'"
+        )
         sys.exit(1)
 
     print()

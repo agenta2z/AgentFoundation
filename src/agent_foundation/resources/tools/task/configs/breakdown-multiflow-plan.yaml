@@ -44,14 +44,31 @@
 # When used standalone, these are the defaults.
 # When imported by the full topology, the parent's _params takes precedence
 # (OmegaConf resolves ${_params.*} from the config root).
+#
+# ENV OVERRIDES (handled by the loader — see config_utils._instantiate):
+# every key here is overridable by ``<env_prefix>__<KEY>`` in upper case, e.g.
+# ``TASK__NUM_FLOWS``, ``TASK__PLAN_MAX_BREAKDOWN``, ``TASK__ENABLE_DEEP_MODE``.
+# Values are coerced to each key's type (int/bool/str). Lists accept a single
+# var — ``TASK__FLOW_INFERENCERS=DevmateCLI,MetamateSDK`` (comma) or
+# ``["DevmateCLI","MetamateSDK"]`` (JSON). ``env_prefix`` defaults to the
+# parent-of-``configs`` folder name if omitted. CLI ``--override`` still wins.
 _params:
+  env_prefix: TASK
   workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
   default_inferencer: ClaudeCodeCLI
-  main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
+  main_inferencer: ${_params.default_inferencer}
+  # Per-flow inferencers for the MFDual workers; each defaults to
+  # main_inferencer. Override the whole list with one env var:
+  # ``TASK__FLOW_INFERENCERS=A,B,C`` (comma or JSON).
   flow_inferencers:
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
-  num_flows: 2
+  # num_flows defaults to the list length (so just setting flow_inferencers
+  # gives that many flows). It can ALSO be set independently via
+  # ``TASK__NUM_FLOWS`` — the _repeat_ distribution adapts the list gracefully
+  # to the count: longer list is truncated, shorter is padded with its first
+  # element (so e.g. num_flows=5 + a 1-item list runs 5 identical flows).
+  num_flows: ${len:${_params.flow_inferencers}}
   plan_max_breakdown: 3
   flow_max_dynamic_steps: 3
   consensus_max_iterations: 3
@@ -59,11 +76,14 @@ _params:
   fixer_strategy: winner
   enable_deep_mode: true
   enable_elegant_mode: true
-  guardrail_model_tier: default       # model tier for the output guardrail judge (max/default/lite)
+  guardrail_model_tier: default       # output guardrail judge tier (max/default/lite)
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
 # ---------------------------------------------------------------------------
+# NOTE: these top-level _-cascades are NOT under _params, so they are not
+# covered by the <PREFIX>__<KEY> env overrides above. Tune them via CLI
+# --override (e.g. _model_name=sonnet) or move the value into _params.
 _logger: auto
 _debug_mode: true
 _model_name: opus[1m]

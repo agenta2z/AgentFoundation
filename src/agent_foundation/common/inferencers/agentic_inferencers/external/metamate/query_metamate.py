@@ -139,8 +139,8 @@ def _parse_assistant_text(bridge_outputs: Any) -> str:
             parts.append(ts.value)
             continue
         ir = getattr(content, "inline_reasoning", None)
-        if ir and getattr(ir, "markdown_content", None):
-            parts.append(ir.markdown_content)
+        if ir and getattr(ir, "content", None):
+            parts.append(ir.content)
             continue
         ci = getattr(content, "code_interpreter", None)
         if ci:
