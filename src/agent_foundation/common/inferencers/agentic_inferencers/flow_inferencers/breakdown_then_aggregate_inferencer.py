@@ -717,8 +717,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             elif agg_has_local and path:
                 parts.append(f"### Upstream Outcome {idx + 1}\n(See file: `{path}`)")
             else:
-                path_ref = f"\n(Full output at: `{path}`)" if path else ""
-                parts.append(f"### Upstream Outcome {idx + 1}\n{res}{path_ref}")
+                # Non-local aggregator: inline the FULL file content (not just
+                # the <Response> summary) so the aggregator sees the complete
+                # upstream artifact. Falls back to summary if file read fails.
+                content = str(res)
+                if path and os.path.isfile(path):
+                    try:
+                        content = open(path, encoding="utf-8").read()
+                    except (OSError, UnicodeDecodeError):
+                        pass
+                parts.append(f"### Upstream Outcome {idx + 1}\n{content}")
         return "\n\n".join(parts)
 
     def _inject_aggregator_extra_feed(

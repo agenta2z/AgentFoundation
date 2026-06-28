@@ -1861,6 +1861,18 @@ class DualInferencer(LinearWorkflowInferencer):
             "consensus_config", self.consensus_config
         )
         prior_output_path = self._resolve_prior_proposer_output_path() or ""
+        # When the reviewer lacks local file access, inline the FULL artifact
+        # content (from output.md on disk) as main_response instead of the
+        # <Response> summary. CLI reviewers can read the file themselves via
+        # prior_output_path; API reviewers cannot.
+        main_response = proposal
+        reviewer = self._role_get("review_inferencer")
+        reviewer_has_local = getattr(reviewer, "has_local_access", False) if reviewer else False
+        if not reviewer_has_local and prior_output_path and os.path.isfile(prior_output_path):
+            try:
+                main_response = open(prior_output_path, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                pass
         feed = {
             self.placeholder_input: inference_input,
             self.placeholder_proposal: proposal,
@@ -1868,7 +1880,7 @@ class DualInferencer(LinearWorkflowInferencer):
             "attempt": attempt,
             "round_index": max(0, iteration - 1),
             # Outer-template slots (always set; safe with empty-string sentinel).
-            "main_response": proposal,
+            "main_response": main_response,
             "prior_output_path": prior_output_path,
             # Consensus threshold guidance for review templates.
             "consensus_threshold": str(config.consensus_threshold),

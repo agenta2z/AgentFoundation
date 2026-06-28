@@ -676,16 +676,27 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         ``cfg["followup_prompt"]`` (legacy template path) or
         ``cfg["dynamic_input_builder"]`` (full callback).
         """
-        # Part A: include own-flow's prior output PATH so the LLM can read the
-        # full file content rather than rely solely on the (possibly summarized)
-        # text excerpt embedded in the prompt.
+        # Part A: include own-flow's prior output so the LLM can refine from
+        # the full artifact, not just the (possibly summarized) text excerpt.
+        # For flows WITH local access: pass a file path (the CLI reads it).
+        # For flows WITHOUT local access: inline the full file content.
         own_path = self._resolve_flow_output_path(flow_idx, path_snapshot=peer_path_snapshot)
+        flow_inf = self.flow_configs[flow_idx].get("followup_inferencer")
+        flow_has_local = getattr(flow_inf, "has_local_access", False) if flow_inf else False
+
+        own_prev_text = your_prev
+        if own_path and not flow_has_local and os.path.isfile(own_path):
+            try:
+                own_prev_text = open(own_path, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                pass
+
         own_block = _FOLLOWUP_OWN_PREVIOUS_HEADER.format(
             flow_idx=flow_idx,
             prev_step_idx=step_idx - 1,
-            your_prev=your_prev,
+            your_prev=own_prev_text,
         )
-        if own_path:
+        if own_path and flow_has_local:
             own_block += (
                 f"\n\nYour previous full artifact is on disk at:\n"
                 f"  `{own_path}`\n"
@@ -693,17 +704,22 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             )
         parts = [own_block]
         if visible_plans:
-            # Part A: also include each peer's on-disk path so cross-flow
-            # cross-pollination can leverage the full peer artifact, not just
-            # its inline text summary.
             peer_segments = []
             for idx, plan in visible_plans.items():
+                peer_path = self._resolve_flow_output_path(idx, path_snapshot=peer_path_snapshot)
+                # For non-local flows: inline the full peer artifact content
+                # instead of a useless path reference.
+                peer_text = plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER
+                if peer_path and not flow_has_local and os.path.isfile(peer_path):
+                    try:
+                        peer_text = open(peer_path, encoding="utf-8").read()
+                    except (OSError, UnicodeDecodeError):
+                        pass
                 segment = (
                     f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n"
-                    f"{plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER}"
+                    f"{peer_text}"
                 )
-                peer_path = self._resolve_flow_output_path(idx, path_snapshot=peer_path_snapshot)
-                if peer_path:
+                if peer_path and flow_has_local:
                     segment += (
                         f"\n\nThe full peer artifact is available at:\n"
                         f"  `{peer_path}`"
