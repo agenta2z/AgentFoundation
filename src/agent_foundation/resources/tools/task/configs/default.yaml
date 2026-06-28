@@ -66,7 +66,7 @@ _params:
   flow_inferencers:                  # per-flow inferencer list (imported BTA uses _repeat_ distribution)
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
-  num_flows: 2                       # number of parallel flows per MFDual worker
+  num_flows: ${len:${_params.flow_inferencers}}   # DERIVED from list length so TASK__FLOW_INFERENCERS drives the count without mismatch
   plan_max_breakdown: 3              # planner BTA: number of sub-planning subtasks
   exec_max_breakdown: 4              # executor BTA: number of execution subtasks
   flow_max_dynamic_steps: 3          # per-flow MFDual followup iterations cap

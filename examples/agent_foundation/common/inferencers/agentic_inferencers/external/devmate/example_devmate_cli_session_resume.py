@@ -120,9 +120,9 @@ def main():
         help="Devmate model name (default: claude-sonnet-4.5)",
     )
     parser.add_argument(
-        "-r", "--repo-path",
+        "-t", "--target-path",
         default=os.path.expanduser("~/fbsource"),
-        help="Repo working directory for Devmate (default: ~/fbsource)",
+        help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
     parser.add_argument(
         "--config-name",

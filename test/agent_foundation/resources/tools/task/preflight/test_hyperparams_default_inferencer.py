@@ -17,7 +17,7 @@ import pytest
 
 
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "openteam" / "server" / "resources" / "tools" / "task" / "topologies" / "breakdown-multiflow-plan-then-implement.yaml"
+YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
 OPENSTARTUP_PATH = Path(
     os.environ.get(
         "OPENSTARTUP_PATH",

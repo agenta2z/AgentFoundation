@@ -62,6 +62,45 @@ def test_underscore_wins_over_hyphen():
     assert d["arguments"]["expected_input_type"] == "url"
 
 
+def test_canonicalize_choices_json_string_coerced_to_list():
+    """LLM sometimes emits `choices` as a JSON STRING; left as a string,
+    `for c in choices` iterates CHARACTERS (one bogus 1-char option per char —
+    the "every-character-is-a-button" widget bug). It must be parsed to a list.
+    """
+    choices_str = json.dumps([
+        {"label": "Auto discover", "value": "auto_discover"},
+        {"label": "Specify paths", "value": "manual_paths"},
+    ])
+    # In arguments (ToolsToInvoke shape)
+    d = canonicalize_tool_data({"name": "single_choice", "arguments": {"choices": choices_str}})
+    assert [c["label"] for c in d["arguments"]["choices"]] == ["Auto discover", "Specify paths"]
+    # Flat / legacy shape
+    d2 = canonicalize_tool_data({"tool_type": "single_choice", "choices": choices_str})
+    assert [c["label"] for c in d2["choices"]] == ["Auto discover", "Specify paths"]
+    # Non-JSON garbage → [] (never char-iterated)
+    d3 = canonicalize_tool_data({"arguments": {"choices": "not json"}})
+    assert d3["arguments"]["choices"] == []
+
+
+def test_choices_json_string_builds_real_choiceitems():
+    """End-to-end: a ConversationTool built from a stringified-choices payload
+    yields the real options, not one ChoiceItem per character."""
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
+        parse_conversation_response,
+    )
+    choices_str = json.dumps([
+        {"label": "Auto discover", "value": "auto_discover"},
+        {"label": "Specify paths", "value": "manual_paths"},
+    ])
+    line = json.dumps({
+        "type": "conversation", "name": "single_choice",
+        "arguments": {"prompt": "How?", "choices": choices_str}, "output": ["mode"],
+    })
+    resp = "preamble\n\n```json ToolsToInvoke\n" + line + "\n```"
+    tool = parse_conversation_response(resp).conversation_tool
+    assert [c.label for c in tool.choices] == ["Auto discover", "Specify paths"]
+
+
 # --- schema round-trip ------------------------------------------------------
 
 

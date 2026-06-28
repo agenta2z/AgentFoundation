@@ -15,6 +15,7 @@ internal schema — a single point of truth, not scattered string fixes.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -92,6 +93,25 @@ def _coerce_output_list(data: dict[str, Any]) -> None:
             data[key] = [val] if val else []
 
 
+def _coerce_choices_list(data: dict[str, Any]) -> None:
+    """Coerce a JSON-string ``choices`` to a list, in place.
+
+    Same class of bug as :func:`_coerce_output_list`: the LLM sometimes emits
+    ``choices`` as a JSON-encoded STRING (e.g. ``'[{"label": "Auto", ...}]'``)
+    instead of an array. Left as a string, the downstream ``for c in choices``
+    iterates CHARACTERS — producing one bogus single-character option per
+    character (the "every-character-is-a-button" widget bug). Parse it back to a
+    list; anything that isn't valid JSON decoding to a list collapses to ``[]``.
+    """
+    raw = data.get("choices")
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            parsed = None
+        data["choices"] = parsed if isinstance(parsed, list) else []
+
+
 def coerce_parallel_group(raw: Any) -> int | None:
     """Leniently coerce a raw ``parallel_group`` value to ``int | None``.
 
@@ -127,11 +147,13 @@ def canonicalize_tool_data(data: dict[str, Any]) -> dict[str, Any]:
     args = data.get("arguments")
     if isinstance(args, dict):
         args = _canon_keys(args)
+        _coerce_choices_list(args)  # stringified choices → list (else char-iterated)
         if isinstance(args.get("choices"), list):
             args["choices"] = [_canon_choice(c) for c in args["choices"]]
         data["arguments"] = args
 
     # Flat / legacy choices at the top level.
+    _coerce_choices_list(data)  # stringified choices → list (else char-iterated)
     if isinstance(data.get("choices"), list):
         data["choices"] = [_canon_choice(c) for c in data["choices"]]
 

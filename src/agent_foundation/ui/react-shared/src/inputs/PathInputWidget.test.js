@@ -81,6 +81,42 @@ describe('PathInputWidget — provider absent', () => {
   });
 });
 
+describe('PathInputWidget — prefill (default)', () => {
+  it('pre-fills from an ABSOLUTE default, stripping the prefix; submits without retyping', () => {
+    const onSubmit = vi.fn();
+    const config = {
+      input_mode: {
+        prompt: 'Confirm the target path',
+        expected_input_type: 'path',
+        prefix: '/Users/zgchen/PycharmProjects/MyProjects',
+        metadata: {
+          expected_input_type: 'path',
+          prefix: '/Users/zgchen/PycharmProjects/MyProjects',
+          widget_type: 'path_input',
+          default: '/Users/zgchen/PycharmProjects/MyProjects/generative_recommenders',
+        },
+      },
+      // no provider → plain text field
+    };
+    renderWithTheme(<PathInputWidget config={config} onSubmit={onSubmit} />);
+
+    // Prefix is stripped → only the relative remainder shows in the box.
+    expect(screen.getByRole('textbox').value).toBe('generative_recommenders');
+
+    // One-click confirm, no retyping.
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    expect(onSubmit).toHaveBeenCalledWith({ content: 'generative_recommenders' });
+  });
+
+  it('accepts a RELATIVE default as-is (first-class input_mode.default)', () => {
+    const config = {
+      input_mode: { prompt: 'Confirm', expected_input_type: 'path', prefix: '/root', default: 'pkg/module' },
+    };
+    renderWithTheme(<PathInputWidget config={config} onSubmit={vi.fn()} />);
+    expect(screen.getByRole('textbox').value).toBe('pkg/module');
+  });
+});
+
 describe('PathInputWidget — multiple values', () => {
   it('emits { content: [...] } after adding multiple paths', () => {
     const onSubmit = vi.fn();

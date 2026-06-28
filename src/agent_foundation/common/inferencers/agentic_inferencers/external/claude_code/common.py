@@ -14,8 +14,9 @@ string into the dash-separated format expected by Claude Code, plus
 shared Literal type aliases for ``--effort`` and ``--permission-mode``.
 """
 
+import os
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 # Reasoning-effort levels accepted by ``claude --effort <level>`` (CLI
 # v2.1.119+). Higher levels allocate more thinking budget to the model
@@ -44,6 +45,54 @@ SDK_NATIVE_EFFORT_LEVELS: frozenset[str] = frozenset(
 SDK_NATIVE_PERMISSION_MODES: frozenset[str] = frozenset(
     {"default", "acceptEdits", "plan", "bypassPermissions"}
 )
+
+# --- macOS seatbelt sandbox toggle -----------------------------------------
+# Bare flag name (no leading dashes) for the Meta ``claude`` launcher option
+# that disables the macOS seatbelt sandbox. The CLI inferencer prepends
+# ``--`` to build the CLI token; the SDK inferencer passes the bare name as an
+# ``extra_args`` key (value ``None`` ⇒ a value-less boolean flag).
+DANGEROUSLY_DISABLE_OSX_SANDBOX = "dangerously-disable-osx-sandbox"
+
+# Environment variable that toggles the above, globally, for ALL Claude Code
+# inferencers (CLI + SDK) that don't set ``disable_osx_sandbox`` explicitly.
+# (Name spelling is intentional — matches the operator-set variable.)
+ENV_DISABLE_OSX_SANDBOX = "CLAUDE_CODE_INFERANCER_NO_SANDBOX"
+
+# Values (case-insensitive, surrounding whitespace stripped) that count as
+# "on" for a boolean environment flag.
+_TRUTHY_ENV_VALUES: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+
+def env_flag_enabled(name: str) -> bool:
+    """Return ``True`` iff env var ``name`` is set to a truthy value.
+
+    Truthy = one of ``1`` / ``true`` / ``yes`` / ``on`` (case-insensitive,
+    whitespace-stripped). Unset, empty, or any other value ⇒ ``False``.
+    """
+    val = os.environ.get(name)
+    return val is not None and val.strip().lower() in _TRUTHY_ENV_VALUES
+
+
+def resolve_disable_osx_sandbox(explicit: Optional[bool]) -> bool:
+    """Resolve whether to pass ``--dangerously-disable-osx-sandbox`` to ``claude``.
+
+    Precedence: an explicit constructor value (``True`` / ``False``) always
+    wins; ``None`` (the default) falls back to the
+    ``CLAUDE_CODE_INFERANCER_NO_SANDBOX`` environment variable.
+
+    Why this exists: the Meta ``claude`` launcher wraps each agent in a macOS
+    seatbelt sandbox. macOS forbids *nesting* seatbelt sandboxes, so when
+    ``claude`` runs inside an already-sandboxed process its ``sandbox_apply``
+    fails and the process exits 71 ("Operation not permitted") with no output.
+    Passing this flag skips the (failing) nested sandbox apply.
+
+    SECURITY: enabling this removes the OS-level confinement of the agent's
+    file access. Only enable it in trusted contexts where an outer sandbox (or
+    other isolation) is already in force.
+    """
+    if explicit is not None:
+        return bool(explicit)
+    return env_flag_enabled(ENV_DISABLE_OSX_SANDBOX)
 
 # Explicit mapping for Anthropic API / ClaudeModels values whose short
 # alias cannot be derived by simple date-stripping + regex conversion.

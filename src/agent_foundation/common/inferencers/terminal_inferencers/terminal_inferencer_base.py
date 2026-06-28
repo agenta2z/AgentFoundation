@@ -11,6 +11,13 @@ from attr import attrib, attrs
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
+# Default wall-clock floor (seconds) for a CLI subprocess inference call.
+# Shared across the terminal CLI inferencers (codex, claude_code, devmate,
+# metamate) as the floor for the synchronous ``subprocess.run()`` timeout, so a
+# wedged child process can't hang a sync ``infer()`` forever. Callers raise it
+# via the relevant idle/request timeout knob or by setting ``timeout`` directly.
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS: int = 1800
+
 
 @attrs
 class TerminalInferencerBase(InferencerBase):

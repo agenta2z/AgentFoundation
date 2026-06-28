@@ -23,7 +23,7 @@ import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import PathAutocompleteInput from './PathAutocompleteInput';
 import MultiValueInput from './MultiValueInput';
 
-export default function PathInputWidget({ config, onSubmit }) {
+export default function PathInputWidget({ config, onSubmit, submitLabel, readOnly, value }) {
   const inputMode = config?.input_mode || {};
   const prompt = inputMode.prompt || config?.prompt || '';
   const prefix = inputMode.prefix || inputMode.metadata?.prefix || '';
@@ -31,8 +31,27 @@ export default function PathInputWidget({ config, onSubmit }) {
   const placeholder = config?.placeholder || inputMode.placeholder || 'relative/path';
   const provider = config?.pathAutocompleteProvider;
 
-  const [single, setSingle] = useState('');
-  const [values, setValues] = useState([]);
+  // Prefill: a default the agent supplied (e.g. a path the user already gave in
+  // their request). Accept absolute OR relative — strip the prefix so the box
+  // shows the relative remainder (the prefix renders as its own adornment).
+  const rawDefault = inputMode.default ?? inputMode.metadata?.default;
+  const stripPrefix = (s) => {
+    if (typeof s !== 'string') return '';
+    return prefix && s.startsWith(prefix) ? s.slice(prefix.length).replace(/^\/+/, '') : s;
+  };
+  const defaultSingle = !allowMultiple ? stripPrefix(rawDefault) : '';
+  const defaultValues = allowMultiple
+    ? (Array.isArray(rawDefault) ? rawDefault.map(stripPrefix) : (rawDefault ? [stripPrefix(rawDefault)] : []))
+    : [];
+
+  // Read-only mode shows the committed value(s) disabled (no submit row);
+  // otherwise seed any prefill so the user can just confirm.
+  const [single, setSingle] = useState(
+    readOnly && value && typeof value.content === 'string' ? value.content : defaultSingle,
+  );
+  const [values, setValues] = useState(
+    readOnly && value && Array.isArray(value.content) ? value.content : defaultValues,
+  );
   const [submitted, setSubmitted] = useState(false);
 
   const canSubmit = allowMultiple ? values.length > 0 : !!single.trim();
@@ -65,13 +84,15 @@ export default function PathInputWidget({ config, onSubmit }) {
           values={values}
           onChange={setValues}
           addLabel="Add path"
-          renderInput={({ value, onChange }) => (
+          disabled={readOnly}
+          renderInput={({ value: draft, onChange }) => (
             <PathAutocompleteInput
-              value={value}
+              value={draft}
               onChange={onChange}
               prefix={prefix}
               provider={provider}
               placeholder={placeholder}
+              disabled={readOnly}
             />
           )}
         />
@@ -82,25 +103,28 @@ export default function PathInputWidget({ config, onSubmit }) {
           prefix={prefix}
           provider={provider}
           placeholder={placeholder}
-          autoFocus
+          autoFocus={!readOnly}
+          disabled={readOnly}
         />
       )}
 
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-        <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-          {allowMultiple ? 'Add one or more paths' : 'Enter a path relative to the prefix'}
-        </Typography>
-        <Button
-          variant="contained"
-          size="small"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          endIcon={<SendIcon sx={{ fontSize: 16 }} />}
-          sx={{ textTransform: 'none', px: 2, fontSize: '0.85rem' }}
-        >
-          Submit
-        </Button>
-      </Box>
+      {!readOnly && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+            {allowMultiple ? 'Add one or more paths' : 'Enter a path relative to the prefix'}
+          </Typography>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            endIcon={<SendIcon sx={{ fontSize: 16 }} />}
+            sx={{ textTransform: 'none', px: 2, fontSize: '0.85rem' }}
+          >
+            {submitLabel || 'Submit'}
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 }

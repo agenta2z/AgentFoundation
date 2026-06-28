@@ -18,6 +18,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
     DEFAULT_TIMEOUT,
     MetamateAgent,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
+    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalInferencerResponse,
     TerminalSessionInferencerBase,
@@ -78,6 +81,16 @@ class MetamateCliInferencer(TerminalSessionInferencerBase):
     timeout_seconds: int = attrib(default=DEFAULT_TIMEOUT)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
 
+    def __attrs_post_init__(self) -> None:
+        super().__attrs_post_init__()
+        # Give the synchronous subprocess path a wall-clock safety net: the base
+        # ``_infer`` only enforces ``timeout`` when set, and ``timeout_seconds``
+        # is only the server-side ``--timeout`` flag. Floor at the shared default
+        # but never below the server-side request budget, so an in-budget request
+        # is never killed early. (The async/streaming path uses idle timeouts.)
+        if self.timeout is None:
+            self.timeout = max(self.timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
+
     # === Abstract Method Implementations ===
 
     def construct_command(self, inference_input: Any, **kwargs: Any) -> str:
@@ -95,7 +108,7 @@ class MetamateCliInferencer(TerminalSessionInferencerBase):
         parts = [
             f"buck run {_BUCK_TARGET} --",
             f"--query {shlex.quote(prompt)}",
-            f"--api-key {self.api_key}",
+            f"--api-key {shlex.quote(self.api_key)}",
         ]
 
         agent = self.agent_name
@@ -103,7 +116,7 @@ class MetamateCliInferencer(TerminalSessionInferencerBase):
             agent = MetamateAgent.DEEP_RESEARCH.value
 
         if agent:
-            parts.append(f"--agent-name {agent}")
+            parts.append(f"--agent-name {shlex.quote(agent)}")
 
         if self.deep_research:
             parts.append("--deep-research")

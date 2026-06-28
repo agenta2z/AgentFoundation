@@ -19,8 +19,8 @@ actually writes a file) — see InferencerBase._finalize_output gate at
 inferencer_base.py:723.
 
 YAML config under test (where the flags live):
-  src/openteam/server/resources/tools/task/topologies/
-    breakdown_multiflow_plan_then_implement.yaml
+  src/agent_foundation/resources/tools/task/configs/
+    default.yaml
   (line numbers shift over time — search for `output_is_deliverable`).
 """
 from __future__ import annotations

@@ -20,17 +20,23 @@ import { useTheme } from '@mui/material/styles';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import PathInputWidget from './PathInputWidget';
 
-export default function TextInputWidget({ config, onSubmit }) {
+export default function TextInputWidget({ config, onSubmit, submitLabel, readOnly, value }) {
   const theme = useTheme();
 
   // Compatibility fallback: typed path input that did not get a widget_type.
   if (config?.input_mode?.expected_input_type === 'path') {
-    return <PathInputWidget config={config} onSubmit={onSubmit} />;
+    return <PathInputWidget config={config} onSubmit={onSubmit} submitLabel={submitLabel} readOnly={readOnly} value={value} />;
   }
 
   const prompt = config?.input_mode?.prompt || config?.prompt || '';
   const placeholder = config?.placeholder || 'Type your response...';
-  const [text, setText] = useState('');
+  // Prefill: a default the agent supplied (e.g. text the user already gave).
+  const rawDefault = config?.input_mode?.default ?? config?.input_mode?.metadata?.default;
+  const [text, setText] = useState(
+    readOnly && value && typeof value.content === 'string'
+      ? value.content
+      : (typeof rawDefault === 'string' ? rawDefault : ''),
+  );
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = () => {
@@ -70,7 +76,8 @@ export default function TextInputWidget({ config, onSubmit }) {
             handleSubmit();
           }
         }}
-        autoFocus
+        autoFocus={!readOnly}
+        disabled={readOnly}
         variant="outlined"
         sx={{
           '& .MuiOutlinedInput-root': {
@@ -82,21 +89,23 @@ export default function TextInputWidget({ config, onSubmit }) {
           '& .MuiInputBase-input': { color: 'text.primary', fontSize: '0.95rem' },
         }}
       />
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-        <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-          Enter to submit · Shift+Enter for new line
-        </Typography>
-        <Button
-          variant="contained"
-          size="small"
-          onClick={handleSubmit}
-          disabled={!text.trim()}
-          endIcon={<SendIcon sx={{ fontSize: 16 }} />}
-          sx={{ textTransform: 'none', px: 2, fontSize: '0.85rem' }}
-        >
-          Submit
-        </Button>
-      </Box>
+      {!readOnly && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+            Enter to submit · Shift+Enter for new line
+          </Typography>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleSubmit}
+            disabled={!text.trim()}
+            endIcon={<SendIcon sx={{ fontSize: 16 }} />}
+            sx={{ textTransform: 'none', px: 2, fontSize: '0.85rem' }}
+          >
+            {submitLabel || 'Submit'}
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 }

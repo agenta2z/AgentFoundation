@@ -1,5 +1,5 @@
 # ============================================================================
-# Plan-Only Topology: root MFDual   (--config multiple)
+# Plan-Only Topology: root MFDual   (--config multiflow-plan / multiflow)
 # ============================================================================
 #
 # Diversity-driven planning: N parallel single-flows explore the WHOLE task
@@ -33,16 +33,14 @@ _params:
   workspace_root: ???                # REQUIRED: injected by _run_topology via overrides
   default_inferencer: ClaudeCodeCLI
   main_inferencer: ${oc.env:DEFAULT_MAIN_INFERENCER,${.default_inferencer}}
-  # COUPLING CONSTRAINT: len(flow_inferencers) MUST equal num_flows. The
-  # `_repeat_: ${num_flows}` block distributes this list per-copy; a length
-  # mismatch raises `ValueError: Distribution list length N != _repeat_ M` at
-  # config load. To change the flow count, override BOTH together (or override
-  # flow_inferencers alone — its length wins).
+  # num_flows is DERIVED from this list's length (below), so they can never
+  # mismatch. Override the whole list (and the count) with one env var:
+  # `TASK__FLOW_INFERENCERS=A,B,C` → 3 flows.
   flow_inferencers:
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
-  num_flows: 3
+  num_flows: ${len:${_params.flow_inferencers}}
   flow_max_dynamic_steps: 3
   consensus_max_iterations: 3
   reviewer_strategy: all_non_winners

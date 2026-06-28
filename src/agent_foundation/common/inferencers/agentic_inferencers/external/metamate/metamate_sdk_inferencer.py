@@ -155,13 +155,27 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     def __attrs_post_init__(self) -> None:
         super().__attrs_post_init__()
         self.log_info(
-            f"api_key={self.api_key[:8]}..., surface={self.surface}, "
+            f"api_key={(self.api_key or '')[:8]}..., surface={self.surface}, "
             f"mode={self.mode}, agent_name={self.agent_name}, "
             f"auto_continue={self.auto_continue}, "
             f"poll_interval={self.poll_interval_seconds}s, "
             f"timeout={self.timeout_seconds}s",
             "Config",
         )
+
+    def reset_session(self) -> None:
+        """Clear conversation state so the next call starts fresh.
+
+        Extends the base (which clears ``_session_id`` / ``active_session_id``)
+        to also clear the MetaMate-specific ``_conversation_uuid`` /
+        ``_conversation_fbid``. Without this, ``_ainfer``'s ``auto_resume``
+        branch (which keys off ``_conversation_uuid``, not ``_session_id``)
+        would silently resume the previous conversation after a
+        ``reset_session()`` / ``_pre_retry()``.
+        """
+        super().reset_session()
+        self._conversation_uuid = None
+        self._conversation_fbid = None
 
     # === Streaming Primitive ===
 

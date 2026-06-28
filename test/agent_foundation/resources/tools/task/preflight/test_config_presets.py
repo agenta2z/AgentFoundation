@@ -2,7 +2,7 @@
 
 Covers the new presets added by the complexity-presets plan:
   - `breakdown.yaml`  — Dual{BTA{adaptive workers}} (coverage)
-  - `multiple.yaml`   — root MultiFlowDual (diversity)
+  - `multiflow-plan.yaml`   — root MultiFlowDual (diversity)
   - `full-plan`/`pti`/`multiflow` aliases via `_CONFIG_ALIASES`
   - `--plan` is a clean no-op for plan-only presets (no enable_implementation toggle)
 
@@ -34,7 +34,7 @@ pytestmark = pytest.mark.preflight
 # Files exist
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["breakdown", "multiple"])
+@pytest.mark.parametrize("name", ["breakdown", "multiflow-plan"])
 def test_new_preset_file_exists(name):
     assert (_CONFIGS_DIR / f"{name}.yaml").is_file(), (
         f"{name}.yaml missing from {_CONFIGS_DIR}"
@@ -49,8 +49,8 @@ def test_new_preset_file_exists(name):
     "spec,expected_filename",
     [
         ("breakdown", "breakdown.yaml"),
-        ("multiple", "multiple.yaml"),
-        ("multiflow", "multiple.yaml"),              # alias
+        ("multiflow-plan", "multiflow-plan.yaml"),
+        ("multiflow", "multiflow-plan.yaml"),              # alias
         ("full-plan", "breakdown-multiflow-plan.yaml"),  # alias
         ("breakdown-multiflow-plan", "breakdown-multiflow-plan.yaml"),  # back-compat
         ("default", "default.yaml"),
@@ -83,7 +83,7 @@ def test_unknown_config_raises():
 # ---------------------------------------------------------------------------
 
 def test_plan_only_presets_do_not_support_implementation():
-    for name in ("breakdown", "multiple", "breakdown-multiflow-plan"):
+    for name in ("breakdown", "multiflow-plan", "breakdown-multiflow-plan"):
         src = ("file", _CONFIGS_DIR / f"{name}.yaml")
         assert _config_supports_implementation(src) is False, (
             f"{name}.yaml is plan-only; --plan must be a no-op (no enable_implementation toggle)"
@@ -125,29 +125,44 @@ def test_breakdown_yaml_shape():
 
 
 def test_multiple_yaml_shape():
-    cfg = _load_yaml("multiple")
+    cfg = _load_yaml("multiflow-plan")
     # Root is MFDual directly — NOT wrapped in an outer Dual (MFDual IS a Dual).
     assert cfg["_target_"] == "MultiFlowDual"
     assert cfg.get("winner_pick") is True
     assert "flow_configs" in cfg
 
 
-def test_multiple_num_flows_matches_flow_inferencers():
-    """The _repeat_ distribution requires len(flow_inferencers) == num_flows."""
-    cfg = _load_yaml("multiple")
+def _assert_num_flows_matches(cfg, name):
+    """The _repeat_ distribution requires len(flow_inferencers) == num_flows.
+
+    ``num_flows`` may be a literal int, or DERIVED via
+    ``${len:${_params.flow_inferencers}}`` — the derived form guarantees the
+    match by construction, so both satisfy the invariant.
+    """
     num_flows = cfg["_params"]["num_flows"]
     flow_inf = cfg["_params"]["flow_inferencers"]
-    assert len(flow_inf) == num_flows, (
-        f"multiple.yaml: len(flow_inferencers)={len(flow_inf)} != num_flows={num_flows}; "
-        "the _repeat_ distribution would raise ValueError at load."
-    )
+    if isinstance(num_flows, int):
+        assert len(flow_inf) == num_flows, (
+            f"{name}: len(flow_inferencers)={len(flow_inf)} != num_flows={num_flows}; "
+            "the _repeat_ distribution would raise ValueError at load."
+        )
+    else:
+        assert (
+            isinstance(num_flows, str)
+            and "len:" in num_flows
+            and "flow_inferencers" in num_flows
+        ), (
+            f"{name}: num_flows={num_flows!r} is neither an int matching "
+            "len(flow_inferencers) nor the ${len:${_params.flow_inferencers}} derivation."
+        )
+
+
+def test_multiple_num_flows_matches_flow_inferencers():
+    _assert_num_flows_matches(_load_yaml("multiflow-plan"), "multiflow-plan.yaml")
 
 
 def test_breakdown_num_flows_matches_flow_inferencers():
-    cfg = _load_yaml("breakdown")
-    num_flows = cfg["_params"]["num_flows"]
-    flow_inf = cfg["_params"]["flow_inferencers"]
-    assert len(flow_inf) == num_flows
+    _assert_num_flows_matches(_load_yaml("breakdown"), "breakdown.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +213,7 @@ def test_multiple_instantiates_as_root_mfdual(tmp_path):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
             MultiFlowDualInferencer,
         )
-        root = _instantiate("multiple", tmp_path)
+        root = _instantiate("multiflow-plan", tmp_path)
     except ImportError as exc:  # pragma: no cover - env dependent
         pytest.skip(f"backend deps unavailable: {exc}")
 

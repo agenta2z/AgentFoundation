@@ -34,6 +34,9 @@ from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
 )
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
+    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
@@ -44,6 +47,24 @@ logger = logging.getLogger(__name__)
 
 # Valid values for ``codex exec -s/--sandbox``.
 _CODEX_SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
+
+# Meta launcher flag (must precede the ``exec`` subcommand) that skips the macOS
+# seatbelt sandbox. macOS forbids NESTING seatbelt sandboxes: when ``codex`` runs
+# inside an already-sandboxed process its ``sandbox_apply`` fails and it exits 71
+# ("Operation not permitted") with no output. Passing this skips the failing
+# nested apply. Mirrors ClaudeCode's ``disable_osx_sandbox`` handling.
+_DANGEROUSLY_DISABLE_OSX_SANDBOX = "--dangerously-disable-osx-sandbox"
+# Env var that toggles the above for codex inferencers that don't set
+# ``disable_osx_sandbox`` explicitly. (Spelling mirrors the Claude variable.)
+_ENV_DISABLE_OSX_SANDBOX = "CODEX_INFERANCER_NO_SANDBOX"
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_flag_enabled(name: str) -> bool:
+    """Return ``True`` iff env var ``name`` is set to a truthy value
+    (``1`` / ``true`` / ``yes`` / ``on``, case-insensitive, whitespace-stripped)."""
+    val = os.environ.get(name)
+    return val is not None and val.strip().lower() in _TRUTHY_ENV_VALUES
 
 
 from agent_foundation.common.inferencers.run_context import bridge_entrypoint
@@ -85,6 +106,13 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     # enterprise-managed Codex config may reject this and fall back to a safer
     # policy (non-fatal). When True, ``-s`` is omitted.
     dangerously_bypass: bool = attrib(default=False)
+    # ``--dangerously-disable-osx-sandbox`` (Meta launcher flag, prepended before
+    # ``exec``). ``None`` (default) resolves from the ``CODEX_INFERANCER_NO_SANDBOX``
+    # env var in __attrs_post_init__. Required when codex runs inside another
+    # seatbelt sandbox (which would otherwise make it exit 71 with no output).
+    # SECURITY: removes the OS-level confinement of the agent; only enable when an
+    # outer sandbox/isolation is already in force.
+    disable_osx_sandbox: Optional[bool] = attrib(default=None)
     # ``--skip-git-repo-check`` so Codex can run outside a git repo.
     skip_git_repo_check: bool = attrib(default=True)
     # ``-c model_reasoning_effort=<level>`` (Codex has no dedicated flag).
@@ -106,6 +134,8 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         """Initialize defaults after attrs init."""
         if self.target_path is None:
             self.target_path = os.getcwd()
+        if self.disable_osx_sandbox is None:
+            self.disable_osx_sandbox = _env_flag_enabled(_ENV_DISABLE_OSX_SANDBOX)
         if self.model_tier is not None:
             self.model_name = self._resolve_model_for_tier(self.model_tier)
         elif self.model_name and any(
@@ -118,16 +148,6 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
                 self.model_name,
             )
             self.model_name = "gpt-5.5"
-
-    _CODEX_TIER_MAP = {
-        "max": "gpt-5.5",
-        "default": "gpt-5.4",
-        "lite": "gpt-5.4-mini",
-    }
-
-    @classmethod
-    def _resolve_model_for_tier(cls, tier: str) -> str:
-        return cls._CODEX_TIER_MAP.get(str(tier).lower(), "gpt-5.5")
         if (
             self.sandbox_mode is not None
             and self.sandbox_mode not in _CODEX_SANDBOX_MODES
@@ -140,6 +160,16 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
             )
         self._resolve_codex_command()
         super().__attrs_post_init__()
+
+    _CODEX_TIER_MAP = {
+        "max": "gpt-5.5",
+        "default": "gpt-5.4",
+        "lite": "gpt-5.4-mini",
+    }
+
+    @classmethod
+    def _resolve_model_for_tier(cls, tier: str) -> str:
+        return cls._CODEX_TIER_MAP.get(str(tier).lower(), "gpt-5.5")
 
     def _resolve_codex_command(self) -> None:
         """Verify the ``codex`` command works; honor the ``CODEX_COMMAND`` override.
@@ -158,9 +188,12 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         if self.codex_command != "codex":
             return
 
+        probe = self.codex_command
+        if self.disable_osx_sandbox:
+            probe = f"{probe} {_DANGEROUSLY_DISABLE_OSX_SANDBOX}"
         try:
             result = _sp.run(
-                f"{self.codex_command} --version",
+                f"{probe} --version",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -207,7 +240,12 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         use_json = kwargs.get("use_json", False)
         use_stdin = kwargs.get("use_stdin", False)
 
-        parts: List[str] = [self.codex_command, "exec"]
+        parts: List[str] = [self.codex_command]
+        # ``--dangerously-disable-osx-sandbox`` is a launcher flag: it MUST precede
+        # the ``exec`` subcommand.
+        if self.disable_osx_sandbox:
+            parts.append(_DANGEROUSLY_DISABLE_OSX_SANDBOX)
+        parts.append("exec")
 
         # Resume is a subcommand: ``codex exec resume <session_id> [PROMPT]``.
         if is_resume:
@@ -365,7 +403,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         """Resolve the sync subprocess wall-clock timeout in seconds."""
         if override is not None:
             return float(override)
-        return float(max(self.idle_timeout_seconds, 1800))
+        return float(max(self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS))
 
     # === Streaming primitive ===
 

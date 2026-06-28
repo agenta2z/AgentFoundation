@@ -1,7 +1,7 @@
 """Preflight tests for YAML config — deliverable flags on aggregator inferencers.
 
 Verifies that the configured topology
-(`breakdown-multiflow-plan-then-implement.yaml`) has the deliverable-promotion
+(`default.yaml`) has the deliverable-promotion
 flags set on the right inferencers, so that the run produces the expected
 final_deliverables/ surfacing chain.
 
@@ -22,9 +22,9 @@ import yaml
 
 
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "openteam" / "server" / "resources" / "tools" / "task" / "topologies" / "breakdown-multiflow-plan-then-implement.yaml"
+YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
 OPENSTARTUP_PATH = _HERE.parents[5]
-TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
 
 
 def _load_raw_yaml():

@@ -204,9 +204,9 @@ def main():
         help="Devmate SDK model (default: claude-sonnet-4-5)",
     )
     parser.add_argument(
-        "-r", "--root-folder",
+        "-t", "--target-path",
         default=os.path.expanduser("~/fbsource"),
-        help="Working directory for Devmate agent (default: ~/fbsource)",
+        help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
     parser.add_argument(
         "-e", "--examples",
@@ -219,7 +219,7 @@ def main():
 
     print()
     print("Devmate SDK Inferencer Demo")
-    print(f"   Root folder: {args.target_path}")
+    print(f"   Target path: {args.target_path}")
     print(f"   Model:       {args.model}")
     print()
 

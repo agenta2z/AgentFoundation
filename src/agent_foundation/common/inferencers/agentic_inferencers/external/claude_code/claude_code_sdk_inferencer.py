@@ -137,6 +137,15 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             allocate more thinking budget at the cost of latency and tokens.
             ``"xhigh"`` is routed via ``extra_args`` because the installed
             SDK's typed Literal is narrower than the CLI's accepted set.
+        disable_osx_sandbox: Pass the Meta launcher's
+            ``--dangerously-disable-osx-sandbox`` flag (via ``extra_args``).
+            ``None`` (default) resolves from the
+            ``CLAUDE_CODE_INFERANCER_NO_SANDBOX`` env var; an explicit
+            ``True``/``False`` overrides it. Enable only when the SDK's
+            ``claude`` subprocess must run nested inside an already-sandboxed
+            process — macOS forbids nesting seatbelt sandboxes, so otherwise
+            ``claude`` exits 71 with no output. SECURITY: removes OS-level
+            confinement of the agent's file access.
     """
 
     # ClaudeCodeSdk launches the ``claude`` CLI as a subprocess with
@@ -166,6 +175,13 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # what the caller intended.
     enable_shell: bool = attrib(default=True)
     allowed_shell_commands: Optional[List[str]] = attrib(default=None)
+    # Disable the Meta launcher's macOS seatbelt sandbox (routed to the CLI via
+    # ``ClaudeAgentOptions.extra_args``). ``None`` (default) resolves from the
+    # ``CLAUDE_CODE_INFERANCER_NO_SANDBOX`` env var in __attrs_post_init__; an
+    # explicit ``True``/``False`` overrides it. Needed when the SDK's ``claude``
+    # subprocess runs nested inside an already-sandboxed process (macOS forbids
+    # nesting seatbelt sandboxes). See ``common.resolve_disable_osx_sandbox``.
+    disable_osx_sandbox: Optional[bool] = attrib(default=None)
 
     # Internal state
     # M6 (Tier-3): the live SDK client + its disconnect fn + bound loop are
@@ -201,6 +217,16 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
     def __attrs_post_init__(self) -> None:
         """Enforce enable_shell on allowed_tools and emit shell-gating logs."""
+        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+            resolve_disable_osx_sandbox,
+        )
+
+        # Resolve the macOS-sandbox toggle to a concrete bool: explicit ctor
+        # value wins; otherwise fall back to the env var.
+        self.disable_osx_sandbox = resolve_disable_osx_sandbox(
+            self.disable_osx_sandbox
+        )
+
         if not self.enable_shell:
             filtered = [t for t in self.allowed_tools if t != "Bash"]
             if not filtered:
@@ -258,6 +284,15 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 sdk_kwargs["effort"] = self.effort
             else:
                 extra_args["effort"] = self.effort
+        # macOS-sandbox toggle: the SDK has no typed field for this Meta
+        # launcher option, so route it through extra_args. A ``None`` value
+        # emits a value-less boolean flag (``--dangerously-disable-osx-sandbox``).
+        if self.disable_osx_sandbox:
+            from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+                DANGEROUSLY_DISABLE_OSX_SANDBOX,
+            )
+
+            extra_args[DANGEROUSLY_DISABLE_OSX_SANDBOX] = None
         return sdk_kwargs, extra_args
 
     # === Streaming Primitive ===

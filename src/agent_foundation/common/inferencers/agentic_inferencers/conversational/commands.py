@@ -129,7 +129,7 @@ class CommandRegistry:
             return await handler(rest.strip())
         return await handler()
 
-    async def dispatch_as_tool(self, tool_name: str, arguments: dict) -> str:
+    async def dispatch_as_tool(self, tool_name: str, arguments: Any) -> str:
         """Execute from LLM tool call (e.g., name='set_model', arguments={'model_name': 'sonnet'})."""
         entry = self._by_name.get(tool_name)
         if entry is None:
@@ -139,8 +139,16 @@ class CommandRegistry:
         handler = getattr(self._inferencer, attr_name)
 
         if meta.requires_args and arguments:
-            # Pass the first argument value as the positional arg
-            first_val = next(iter(arguments.values()), "")
+            # Pass the command's positional arg. The LLM usually emits a dict
+            # (first value wins), but sometimes emits `arguments` as a bare
+            # string (the whole arg line) or a single-element list — tolerate
+            # all of them so a benign output-shape variance doesn't crash the turn.
+            if isinstance(arguments, dict):
+                first_val = next(iter(arguments.values()), "")
+            elif isinstance(arguments, (list, tuple)):
+                first_val = arguments[0] if arguments else ""
+            else:
+                first_val = arguments
             return await handler(str(first_val))
         return await handler()
 

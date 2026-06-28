@@ -2489,6 +2489,46 @@ class ConversationalInferencer(InferencerBase):
             self.set_session_variables({v: final for v in tool.output_vars})
         return final
 
+    @staticmethod
+    def _is_affirmative_response(value: Any) -> bool:
+        """Whether a confirmation reply means "go ahead" (vs. a decline)."""
+        return str(value).strip().lower() in ("yes", "proceed")
+
+    def _open_user_input_gate_if_satisfied(
+        self, tools: list, collected: Optional[dict]
+    ) -> None:
+        """Open the user-input gate when a widget response satisfies a
+        ``requires_user_input`` SOP phase, so ``_check_phase_completion`` can
+        advance it.
+
+        A phase that asks for input is satisfied once the user supplies it. The
+        lone exception is a CONFIRMATION the user *declined* — a rejection is
+        not satisfaction, so the phase must not advance on it. Every other tool
+        type (clarification, single/multiple_choice, proposal_selection), and
+        an affirmative confirmation, satisfies the gate.
+
+        This mirrors the yolo auto-advance (which opens the gate for any
+        synthesized response). The interactive path previously opened it only
+        for a single affirmative confirmation, leaving every clarification /
+        choice / compound ``requires_user_input`` phase permanently stuck.
+        Path 2 in ``_check_phase_completion`` additionally guards on the
+        phase's ``requires user input`` directive, so opening the gate for a
+        phase that does not need input is harmless.
+        """
+        if not self.sop_state or not collected:
+            return
+        for tool in tools:
+            if tool.tool_type != ConversationToolType.CONFIRMATION:
+                continue
+            var = tool.output_vars[0] if tool.output_vars else None
+            value = collected.get(var) if var else None
+            if value is None and len(collected) == 1:
+                value = next(iter(collected.values()))
+            if not self._is_affirmative_response(value):
+                return  # user declined a confirmation — do not advance the phase
+        self.update_prior_context(_user_input_gate_passed=True)
+        self.sop_state.user_input_gate_passed = True
+
     async def _handle_conversation_tools(
         self,
         tools: list[ConversationTool],
@@ -2554,20 +2594,16 @@ class ConversationalInferencer(InferencerBase):
             )
             if result is None:
                 return None
-            # Signal confirmation gate passed for state tracker auto-completion
-            if (
-                tool.tool_type == ConversationToolType.CONFIRMATION
-                and str(result).lower() in ("yes", "proceed")
-            ):
-                self.update_prior_context(_user_input_gate_passed=True)
-                if self.sop_state:
-                    self.sop_state.user_input_gate_passed = True
             var_name = tools[0].output_vars[0] if tools[0].output_vars else "input"
             collected = {var_name: result}
             # Include any composite-choice nested binding so the synthesized user
             # message and __var__ action-arg substitution see the entered value,
             # matching the compound/yolo paths (one source of truth).
             collected.update(getattr(self, "_last_conv_nested_bindings", {}) or {})
+            # Open the user-input gate so a requires_user_input phase advances
+            # once the user has responded (a declined confirmation is withheld
+            # inside the helper — preserving the prior confirmation semantics).
+            self._open_user_input_gate_if_satisfied(tools, collected)
             return collected
 
         # Multiple tools: send ALL as a compound widget in one pending_input
@@ -2689,6 +2725,10 @@ class ConversationalInferencer(InferencerBase):
         else:
             collected["input"] = str(user_input)
 
+        # Open the user-input gate so a requires_user_input phase advances once
+        # the user has supplied the compound widget's inputs (a declined
+        # confirmation among them is withheld inside the helper).
+        self._open_user_input_gate_if_satisfied(tools, collected)
         return collected
 
     def reset_history(self) -> None:
@@ -2845,6 +2885,14 @@ def _build_input_mode(tool: ConversationTool) -> InputModeConfig:
         if tool.expected_input_type == "path":
             metadata["widget_type"] = "path_input"
         config.metadata = metadata
+    # Prefill: a default value the agent already knows (e.g. a path the user
+    # gave) rides in tool.metadata["default"]. Surface it on the wire so the
+    # widget pre-populates its input instead of forcing the user to re-type.
+    default_val = tool.metadata.get("default") if tool.metadata else None
+    if default_val not in (None, ""):
+        md = dict(config.metadata or {})
+        md["default"] = default_val
+        config.metadata = md
     logger.info("[_build_input_mode] output (fallback): mode=%s metadata=%s",
                 config.mode, config.metadata)
     return config

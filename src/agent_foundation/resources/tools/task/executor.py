@@ -43,7 +43,7 @@ _PTI_PRESET_NAMES = {"pti", "pti-simple"}
 _CONFIG_ALIASES: dict[str, str] = {
     "full-plan": "breakdown-multiflow-plan",   # coverage + diversity (existing file)
     "pti": "default",                          # full PTI plan+implement
-    "multiflow": "multiple",                   # diversity-only synonym
+    "multiflow": "multiflow-plan",             # diversity-only (file formerly multiple.yaml)
     "conversation": "disabled",                # conversational router (Phase 2)
 }
 
@@ -166,7 +166,7 @@ def _config_supports_implementation(source: tuple[str, Any]) -> bool:
     """True if the config contains a PTI / implementation phase that ``--plan`` can
     toggle or swap (i.e. the full plan+implement ``default.yaml``).
 
-    Plan-only presets (``breakdown``, ``multiple``, ``full-plan`` / the standalone
+    Plan-only presets (``breakdown``, ``multiflow-plan``, ``full-plan`` / the standalone
     planner) have NO implementation phase, so ``--plan`` must be a clean no-op for
     them — never the ``enable_implementation=False`` fallback (which would inject a
     constructor kwarg the plan-only root does not accept).
@@ -679,6 +679,8 @@ async def _run_topology(
     init_plan_path: Optional[str] = None,       # absolute path; --use-plan feeds PTI's initial_plan_file
     resume_workspace: Optional[str] = None,     # absolute path; takes precedence over auto-allocation
     session_context: Optional[dict] = None,
+    env_prefix: Optional[str] = None,           # highest-priority env namespace for _params (e.g. a derived tool's)
+    config_defaults: Optional[dict] = None,     # tool defaults applied below env (overridable by env/CLI)
 ):
     """Programmatic core — Stages 3-10 of the slash pipeline.
 
@@ -854,7 +856,8 @@ async def _run_topology(
 
     try:
         if source[0] == "file":
-            cfg = load_config(str(source[1]), overrides=overrides)
+            cfg = load_config(str(source[1]), overrides=overrides,
+                              env_prefix=env_prefix, config_defaults=config_defaults)
         else:
             cfg = OmegaConf.merge(OmegaConf.create(source[1]), OmegaConf.create(overrides))
     except Exception as exc:
@@ -992,9 +995,10 @@ async def execute(arguments: dict, session_context: dict):
     mode = arguments.get("mode") or _derive_mode_from_flags(arguments) or "full"
     spec = arguments.get("agent_config") or arguments.get("config") or "default"
     overrides = _parse_overrides(arguments.get("override", []))
-    config_overrides = arguments.get("config_overrides")
-    if config_overrides:
-        overrides.update(config_overrides)
+    # Tool config_overrides (from derived_from.defaults) are TOOL DEFAULTS, not
+    # forced overrides: thread them as config_defaults so they apply BELOW env.
+    # Precedence: CLI --override (overrides) > env (<PREFIX>__<KEY>) > config_defaults > YAML.
+    config_defaults = dict(arguments.get("config_overrides") or {}) or None
     model = arguments.get("model")
     no_dual = bool(arguments.get("no_dual"))
     no_aggregate = bool(arguments.get("no_aggregate"))
@@ -1077,4 +1081,9 @@ async def execute(arguments: dict, session_context: dict):
         init_plan_path=init_plan_path,
         resume_workspace=resume_workspace_str,
         session_context=session_context,
+        # Per-tool env namespace (e.g. derived tools set derived_from.defaults.env_prefix);
+        # highest-priority prefix for _params env overrides on a shared config.
+        env_prefix=arguments.get("env_prefix"),
+        # Tool config_overrides applied as a defaults layer BELOW env (overridable).
+        config_defaults=config_defaults,
     )
