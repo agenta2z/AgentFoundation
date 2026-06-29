@@ -134,7 +134,19 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         """Initialize defaults after attrs init."""
         if self.target_path is None:
             self.target_path = os.getcwd()
-        if self.disable_osx_sandbox is None:
+        # ``--dangerously-disable-osx-sandbox`` is a macOS-only launcher flag;
+        # Linux/Windows ``codex`` builds reject it. Coerce to False off macOS
+        # so a multi-OS shell rc with ``CODEX_INFERANCER_NO_SANDBOX=1`` doesn't
+        # break every subprocess. (Mirrors the ClaudeCode treatment.)
+        import sys as _sys
+        if _sys.platform != "darwin":
+            if self.disable_osx_sandbox is True or _env_flag_enabled(_ENV_DISABLE_OSX_SANDBOX):
+                logger.debug(
+                    "%s is a macOS-only flag; ignoring on platform=%s.",
+                    _DANGEROUSLY_DISABLE_OSX_SANDBOX, _sys.platform,
+                )
+            self.disable_osx_sandbox = False
+        elif self.disable_osx_sandbox is None:
             self.disable_osx_sandbox = _env_flag_enabled(_ENV_DISABLE_OSX_SANDBOX)
         if self.model_tier is not None:
             self.model_name = self._resolve_model_for_tier(self.model_tier)

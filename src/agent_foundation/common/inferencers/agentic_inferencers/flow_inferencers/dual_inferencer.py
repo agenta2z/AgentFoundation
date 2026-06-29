@@ -939,6 +939,11 @@ class DualInferencer(LinearWorkflowInferencer):
             # Build step_configs for this attempt
             self._build_step_configs_for_attempt(config, attempt)
 
+            # Part 3: emit this Dual's sub-graph once (propose[/review/fix]),
+            # namespaced under its ctx path so it nests under the parent phase node.
+            if attempt == 1:
+                await self._emit_dual_topology()
+
             # Set pending state (LWI convention — uses _pending_state)
             self._pending_state = {
                 "inference_input": inference_input,
@@ -1080,6 +1085,9 @@ class DualInferencer(LinearWorkflowInferencer):
             len(all_attempt_records),
         )
 
+        # Part 3: reconcile terminal stage statuses (propose[/review/fix]).
+        await self._emit_graph_reconcile()
+
         # Copy last round artifact to outputs/ (workspace mode only)
         self._finalize_response()
 
@@ -1093,6 +1101,91 @@ class DualInferencer(LinearWorkflowInferencer):
             consensus_achieved=consensus_achieved,
             phase=phase,
         )
+
+    # === Graph visualization (Part 3): Dual sub-topology + per-stage status ===
+    # Dual is Workflow-based; it emits its propose[/review/fix] steps as a sub-graph.
+    # self._resolve_graph_reporter() (inherited from InferencerBase) returns a
+    # reporter namespaced by this Dual's ctx path, so node ids/edges auto-qualify
+    # and the sub-graph nests under the parent phase node (e.g. "planner"). All
+    # emits are guarded — visualization must never abort inference.
+    def _graph_stage_names(self):
+        """Step names for this Dual's current step_configs (propose[/review/fix])."""
+        return [
+            getattr(sc, "name", "")
+            for sc in (getattr(self, "step_configs", None) or [])
+            if getattr(sc, "name", "")
+        ]
+
+    async def _emit_dual_topology(self):
+        """Emit this Dual's sub-graph (one node per step; loop fix->review)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            from agent_foundation.common.inferencers.graph_events import (
+                GraphTopologyEvent,
+                NodeStatus,
+            )
+
+            names = self._graph_stage_names()
+            if not names:
+                return
+            nodes, edges, prev = [], [], None
+            for name in names:
+                nodes.append(
+                    {
+                        "id": name,
+                        "label": name.capitalize(),
+                        "group": None,
+                        "status": NodeStatus.PENDING,
+                        "is_container": name == "propose",
+                    }
+                )
+                if prev is not None:
+                    edges.append({"source": prev, "target": name})
+                prev = name
+            if "fix" in names and "review" in names:
+                edges.append({"source": "fix", "target": "review"})
+            await reporter.on_graph_topology(
+                GraphTopologyEvent(nodes=nodes, edges=edges, layout="horizontal")
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[Dual] _emit_dual_topology failed", exc_info=True
+            )
+
+    async def _emit_stage_status(self, slot, status, output_path=""):
+        """Emit a node_status for a Dual stage node (guarded; no-op w/o reporter)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            await reporter.on_node_status(slot, status, output_path=output_path or "")
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[Dual] _emit_stage_status(%s, %s) failed", slot, status, exc_info=True
+            )
+
+    async def _emit_graph_reconcile(self):
+        """Emit a final reconcile marking this Dual's stages completed (guarded)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            names = self._graph_stage_names()
+            if not names:
+                return
+            await reporter.on_graph_reconcile({name: "completed" for name in names})
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[Dual] _emit_graph_reconcile failed", exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Step methods
@@ -1184,6 +1277,7 @@ class DualInferencer(LinearWorkflowInferencer):
         _propose_ws_snapshot = (
             str(_eff_propose_ws.root) if _eff_propose_ws is not None else None
         )
+        await self._emit_stage_status("propose", "running")
         _raw_base = str(
             await self.base_inferencer.ainfer(
                 initial_prompt,
@@ -1238,6 +1332,7 @@ class DualInferencer(LinearWorkflowInferencer):
             state["total_iterations"] + 1, "propose", self.base_inferencer,
             workspace_root_at_phase=_propose_ws_snapshot,
         )
+        await self._emit_stage_status("propose", "completed")
         return base_output_str
 
     async def _step_review_impl(self, step_input, state):

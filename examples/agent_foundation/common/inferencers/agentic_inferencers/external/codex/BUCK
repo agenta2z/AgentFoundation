@@ -1,0 +1,30 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Codex CLI streaming demo — sync / async streaming / multi-turn via
+# ``codex exec resume <session-id>``. Shells out to the ``codex`` CLI.
+python_binary(
+    name = "example_codex_cli_streaming",
+    srcs = ["example_codex_cli_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.codex",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.codex.example_codex_cli_streaming.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Codex SDK streaming demo — async ainfer / ainfer_streaming /
+# SDKInferencerResponse / multi-turn on a held Thread. Requires the
+# ``openai-codex-sdk`` Python package (already declared as a dep of
+# ``:agent_foundation``).
+python_binary(
+    name = "example_codex_sdk_streaming",
+    srcs = ["example_codex_sdk_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.codex",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.codex.example_codex_sdk_streaming.main",
+    deps = [
+        "fbsource//third-party/pypi/openai-codex-sdk:openai-codex-sdk",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

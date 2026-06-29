@@ -1,0 +1,51 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Claude Code CLI streaming demo — sync + async streaming + sync streaming modes.
+# Shells out to the ``claude`` CLI; no Python SDK dep needed.
+python_binary(
+    name = "example_claude_code_cli_streaming",
+    srcs = ["example_claude_code_cli_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.example_claude_code_cli_streaming.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Claude Code CLI session-resume demo — multi-turn via ``--resume <session-id>``.
+python_binary(
+    name = "example_claude_code_cli_session_resume",
+    srcs = ["example_claude_code_cli_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.example_claude_code_cli_session_resume.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Claude Code SDK streaming demo — async ainfer / ainfer_streaming /
+# SDKInferencerResponse / sync bridge. Requires the ``claude-agent-sdk`` Python
+# package (already declared as a dep of ``:agent_foundation``).
+python_binary(
+    name = "example_claude_code_sdk_streaming",
+    srcs = ["example_claude_code_sdk_streaming.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.example_claude_code_sdk_streaming.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Claude Code SDK session-resume demo — multi-turn + session isolation across
+# ``async with`` blocks.
+python_binary(
+    name = "example_claude_code_sdk_session_resume",
+    srcs = ["example_claude_code_sdk_session_resume.py"],
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.example_claude_code_sdk_session_resume.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

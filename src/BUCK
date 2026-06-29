@@ -7,6 +7,21 @@ python_library(
     srcs = glob([
         "agent_foundation/**/*.py",
     ]),
+    # Bundle the framework's data files alongside the .py sources so consumers
+    # built via Buck (e.g. the conversational AI host, derived-tool dispatcher,
+    # SOP runner) can ``load_tool`` / load prompt templates at runtime. Without
+    # this, ``Path(__file__).parent/"tool.json"`` would FileNotFoundError inside
+    # a buck-out link-tree because non-.py files would be absent.
+    resources = glob([
+        "agent_foundation/**/*.json",
+        "agent_foundation/**/*.jinja2",
+        "agent_foundation/**/*.jinja",
+        "agent_foundation/**/*.j2",
+        "agent_foundation/**/*.yaml",
+        "agent_foundation/**/*.yml",
+        "agent_foundation/**/*.md",
+        "agent_foundation/**/*.toml",
+    ]),
     base_module = "",
     typing = False,
     visibility = ["PUBLIC"],
@@ -23,7 +38,17 @@ python_library(
         # that reference it will fail at runtime if instantiated.
         "fbsource//third-party/pypi/flask:flask",
         "fbsource//third-party/pypi/httpx:httpx",
+        "fbsource//third-party/pypi/hydra-core:hydra-core",
         "fbsource//third-party/pypi/jinja2:jinja2",
+        # OmegaConf + hydra-core: ``rich_python_utils.config_utils.instantiate``
+        # uses Hydra's ``_target_`` resolution to build the topology graph from
+        # YAML; OmegaConf is the underlying config object. Both are required
+        # for any caller that runs a topology via the task or derived-tool
+        # executor.
+        "fbsource//third-party/pypi/lancedb:lancedb",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        # openai-codex-sdk (lazy-imported by CodexSdkInferencer).
+        "fbsource//third-party/pypi/openai-codex-sdk:openai-codex-sdk",
         # NOTE: `lancedb` removed (2026-05-26). Optional knowledge-store backend
         # (used only by ``agent_foundation/knowledge/retrieval/stores/pieces/
         # lancedb_store.py``, which lazily ``import lancedb`` inside
@@ -33,10 +58,12 @@ python_library(
         # actually constructs a ``LanceDBKnowledgePieceStore``. Re-add only
         # after the third-party landing.
         "fbsource//third-party/pypi/plotly:plotly",
+        "fbsource//third-party/pypi/prompt-toolkit:prompt-toolkit",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pydantic-core:pydantic-core",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/requests:requests",
+        "fbsource//third-party/pypi/rich:rich",
         "fbsource//third-party/pypi/websockets:websockets",
         "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
         "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",

@@ -11,9 +11,7 @@
   "asynchronous": true,
   "derived_from": {
     "tool": "task",
-    "arg_mappings": {
-      "workflow_target_path": "request"
-    },
+    "arg_mappings": {},
     "defaults": {
       "template_master_version": "research_propose",
       "plan": true,

@@ -126,6 +126,35 @@ def _detect_fbsource_root_for(cls) -> "str | None":
         current = parent
 
 
+# Sapling / EdenSCM / Mercurial repo-root markers. Devmate's Rust server
+# REQUIRES its CWD to resolve to one of these (else it aborts with
+# "Failed to find repo root"). ``~/fbsource`` has ``.hg`` + ``.eden``.
+_REPO_ROOT_MARKERS = (".hg", ".sl", ".eden")
+
+
+def cwd_repo_root(path: "str | None") -> "str | None":
+    """Walk up from ``path`` to the nearest Sapling/EdenSCM/Mercurial repo root.
+
+    Returns the directory containing a ``.hg`` / ``.sl`` / ``.eden`` marker, or
+    ``None`` if ``path`` is not inside such a repo. Unlike
+    ``_detect_fbsource_root_for`` (which walks the *inferencer class's* source
+    file to locate ``source_path`` for config sync), this walks an arbitrary
+    filesystem ``path`` — used to decide whether ``devmate`` can start with that
+    CWD and, if not, to reroot the server (see
+    ``DevmateCliInferencer._resolve_subprocess_cwd``).
+    """
+    if not path:
+        return None
+    current = os.path.abspath(os.path.expanduser(path))
+    while True:
+        if any(os.path.exists(os.path.join(current, m)) for m in _REPO_ROOT_MARKERS):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
 def sync_config_to_target(
     config_name: str,
     source_path: str,

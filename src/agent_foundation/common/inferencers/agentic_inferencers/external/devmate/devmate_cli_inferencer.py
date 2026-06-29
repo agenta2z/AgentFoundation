@@ -17,6 +17,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
     _detect_fbsource_root_for,
+    cwd_repo_root,
     generate_config_with_allowed_commands,
     resolve_model_tag,
     SessionMode,
@@ -63,6 +64,18 @@ def _looks_like_tool_use_corruption(error_text: str) -> bool:
         "tool_use" in error_text
         and "tool_result" in error_text
         and ("must be followed" in error_text or "orphan" in error_text.lower())
+    )
+
+
+def _looks_like_acl_pipeline_failure(error_text: str) -> bool:
+    """Transient devai backend ACL/identity failure: the whole session aborts
+    with "ACL permissions for requested pipeline failed ... plugboard.pipeline.devai".
+    Observed intermittently (~1/3 of calls); it's a backend flake, not a real
+    inference failure, so it should be retried rather than yield an empty flow."""
+    t = error_text or ""
+    return (
+        "ACL permissions for requested pipeline failed" in t
+        or "plugboard.pipeline.devai" in t
     )
 
 
@@ -216,6 +229,14 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     dump_output: bool = attrib(default=False)
     timeout_percent: Optional[int] = attrib(default=None)
     config_name: str = attrib(default="freeform")
+    # Reroot target for the devmate SERVER. devmate's Rust server requires its
+    # CWD to be inside a Sapling/EdenSCM repo (else "Failed to find repo root").
+    # When the analysis target (``effective_cwd``) is NOT such a repo, the server
+    # is rerooted to the first valid repo among ``devmate_repo_root`` → ~/fbsource
+    # → ~/www → CWD, and the external target is analyzed via ABSOLUTE paths
+    # (devmate's tools read/write arbitrary absolute paths once running).
+    # ``None`` (default) → auto-resolve.
+    devmate_repo_root: Optional[str] = attrib(default=None)
     privacy_type: Optional[str] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
     # Binary to invoke. Default ``"devmate"`` resolves via PATH to
@@ -261,6 +282,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     total_timeout_on_internal_error_detection_seconds: float = attrib(default=2400)
     _internal_failure_detected: bool = attrib(default=False, init=False)
     _internal_failure_reason: str = attrib(default="", init=False)
+    # One-shot guard so the root-in-Sapling reroot INFO/WARNING logs once.
+    _devmate_reroot_logged: bool = attrib(default=False, init=False, repr=False)
 
     # Session management - inherited from StreamingInferencerBase via TerminalSessionInferencerBase:
     #   auto_resume, active_session_id, new_session, anew_session, resume_session, aresume_session
@@ -327,6 +350,61 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # True so pre_exec_scripts are joined with ``&&`` into the SAME
         # shell that already starts in effective_cwd. A pre-exec ``cd``
         # would be a no-op.
+
+    # ------------------------------------------------------------------
+    # Root-in-Sapling fallback (Issue 1 fix). Devmate's server REQUIRES its CWD
+    # to be a Sapling/EdenSCM repo. When the analysis target isn't one, host the
+    # server in a valid repo (fbsource/www) and analyze the EXTERNAL target via
+    # absolute paths (verified: devmate reads/writes arbitrary absolute paths).
+    # ------------------------------------------------------------------
+    def _resolve_devmate_repo_root(self) -> "Optional[str]":
+        """First valid Sapling/EdenSCM root to host the devmate server."""
+        for cand in (
+            self.devmate_repo_root,
+            os.path.expanduser("~/fbsource"),
+            os.path.expanduser("~/www"),
+            os.getcwd(),
+        ):
+            root = cwd_repo_root(cand)
+            if root:
+                return root
+        return None
+
+    def _devmate_effective_root(self) -> "tuple[Optional[str], str]":
+        """Return ``(cwd, mode)`` where mode is:
+        ``"native"``   — the target is itself in a Sapling repo → run there;
+        ``"rerooted"`` — external target → host the server in fbsource/www;
+        ``"no_repo"``  — no repo anywhere → devmate can't start.
+        """
+        base = self.effective_cwd
+        if base and cwd_repo_root(base):
+            return base, "native"
+        root = self._resolve_devmate_repo_root()
+        if root:
+            return root, "rerooted"
+        return base, "no_repo"
+
+    def _resolve_subprocess_cwd(self, cwd: "Optional[str]" = None) -> "Optional[str]":
+        """Override: host the devmate server in a Sapling repo when the analysis
+        target isn't one (see class-level note). Native targets are unchanged."""
+        root, mode = self._devmate_effective_root()
+        if not self._devmate_reroot_logged:
+            if mode == "rerooted":
+                logger.info(
+                    "[%s] target %r is not a Sapling/EdenSCM repo; rooting the devmate "
+                    "server in %r and analyzing the target via absolute paths.",
+                    type(self).__name__, self.effective_cwd, root,
+                )
+                self._devmate_reroot_logged = True
+            elif mode == "no_repo":
+                logger.warning(
+                    "[%s] target %r is not a Sapling/EdenSCM repo and no ~/fbsource or "
+                    "~/www repo was found; devmate cannot start here and will produce no "
+                    "output. Use an fbsource/www target or set devmate_repo_root.",
+                    type(self).__name__, self.effective_cwd,
+                )
+                self._devmate_reroot_logged = True
+        return super()._resolve_subprocess_cwd(cwd if mode == "native" else root)
 
     @classmethod
     def _detect_source_root(cls) -> "Optional[str]":
@@ -428,6 +506,20 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             prompt = inference_input.get("prompt", str(inference_input))
         else:
             prompt = str(inference_input)
+
+        # When the server is rerooted to an fbsource/www repo (because the
+        # analysis target isn't a Sapling repo), devmate's CWD is NOT the target
+        # — so relative paths would resolve under the wrong repo. Anchor the
+        # analysis to the target's ABSOLUTE path and tell devmate to use
+        # absolute paths (its tools read/write them fine once running).
+        if self._devmate_effective_root()[1] == "rerooted":
+            prompt = (
+                f"IMPORTANT: The codebase to analyze is at the ABSOLUTE path "
+                f"`{self.effective_cwd}` — this is NOT the repository you are "
+                f"currently rooted in. Use absolute paths under that directory "
+                f"for ALL file reads and writes; do not assume files live in the "
+                f"current repository.\n\n"
+            ) + prompt
 
         # Get model and token settings (allow overrides via kwargs)
         model = kwargs.get("model_name", self.model_name)
@@ -659,6 +751,22 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             result["error"] = (
                 stderr.strip() if stderr else f"Command failed with code {return_code}"
             )
+
+        # Surface the real failure reason when the cleaned output is empty — so an
+        # empty devmate flow is never silent (e.g. "Failed to find repo root" goes
+        # to stderr, the ACL flake to stdout/raw_output). The streaming path
+        # captures stderr separately into ``_last_streaming_stderr``.
+        if not (result.get("output") or "").strip():
+            err_blob = (
+                (result.get("stderr") or "")
+                or (getattr(self, "_last_streaming_stderr", "") or "")
+                or (result.get("raw_output") or "")
+            )
+            if err_blob.strip():
+                logger.warning(
+                    "[%s] devmate produced EMPTY output; failure detail: %s",
+                    type(self).__name__, err_blob.strip()[:500],
+                )
 
         return result
 
@@ -1000,6 +1108,26 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
             if self.session_mode == SessionMode.NEW_SESSION_ON_ERROR:
                 self.active_session_id = None
+
+            # Transient devai backend ACL flake ("ACL permissions for requested
+            # pipeline failed … plugboard.pipeline.devai"). It lands on
+            # stdout/raw_output, not necessarily ``error``/``stderr`` (which may
+            # just be "Command failed with code 1"), so check a combined blob.
+            # Reset the session + back off so the retry loop (async_execute_with_retry
+            # around _ainfer) re-tries with a fresh session instead of yielding an
+            # empty flow — this is a backend flake, not a real inference failure.
+            acl_blob = " ".join(
+                str(_field(result, k, "") or "")
+                for k in ("error", "stderr", "raw_output", "output")
+            )
+            if _looks_like_acl_pipeline_failure(acl_blob):
+                self.active_session_id = None
+                logger.warning(
+                    "[%s] transient devai ACL failure (plugboard.pipeline.devai); "
+                    "resetting session and retrying.",
+                    type(self).__name__,
+                )
+                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
 
             if _looks_like_port_file_race(error_text):
                 await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
