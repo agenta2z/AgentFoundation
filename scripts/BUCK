@@ -1,0 +1,15 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Driver for end-to-end testing of the research_propose tool via the production
+# ``derived_tool_execute`` path (no standalone __main__ exists for derived tools).
+python_binary(
+    name = "run_research_propose",
+    srcs = ["run_research_propose.py"],
+    base_module = "agent_foundation.scripts",
+    main_function = "agent_foundation.scripts.run_research_propose.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

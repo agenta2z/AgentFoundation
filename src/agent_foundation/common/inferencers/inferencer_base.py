@@ -8,14 +8,19 @@ from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, ClassVar, Iterable, Iterator, List, Optional, Sequence, Type, Union
-
-from attr import attrib, attrs
-from rich_python_utils.common_objects.debuggable import Debuggable
-from rich_python_utils.common_objects.workflow.common.resumable import Resumable
-from rich_python_utils.common_utils import dict_, iter__, resolve_environ
-from rich_python_utils.common_utils.function_helper import FallbackMode, execute_with_retry
-from rich_python_utils.path_utils import AllowedPath, PathAccess
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    ClassVar,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+)
 
 # M2: explicit RunContext carrier + the compat bridge (additive; inert until M3+
 # orchestrators read `_active_ctx`). `run_context` is **keyword-only** so it can
@@ -27,6 +32,15 @@ from agent_foundation.common.inferencers.run_context import (
     enter_run,
     exit_run,
 )
+from attr import attrib, attrs
+from rich_python_utils.common_objects.debuggable import Debuggable
+from rich_python_utils.common_objects.workflow.common.resumable import Resumable
+from rich_python_utils.common_utils import dict_, iter__, resolve_environ
+from rich_python_utils.common_utils.function_helper import (
+    execute_with_retry,
+    FallbackMode,
+)
+from rich_python_utils.path_utils import AllowedPath, PathAccess
 
 # Retry prompt mode constants
 RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
@@ -34,7 +48,9 @@ RETRY_PROMPT_MODES = ("original", "simple_retry", "retry_with_original")
 # Module-level ContextVar for per-call fallback state.
 # Each asyncio Task from aparallel_infer gets its own context copy — no race.
 # Shared with streaming_inferencer_base.py for cache path tracking.
-_current_fallback_state: ContextVar[dict | None] = ContextVar("_current_fallback_state", default=None)
+_current_fallback_state: ContextVar[dict | None] = ContextVar(
+    "_current_fallback_state", default=None
+)
 
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
 
@@ -139,6 +155,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # byte-identical. The state lives in the context, never on ``self``.
     state_factory: Optional[Any] = attrib(default=None)
 
+    # Optional graph reporter for UI visualization (e.g. WebSocketGraphReporter).
+    # Protocol (duck-typed): on_graph_topology(event), on_node_status(node_id,
+    # status, error="", output_path=""), on_graph_reconcile(node_statuses),
+    # child_reporter(node_id). Set by the executor after instantiation (this
+    # module never imports WebSocket/UI code). Promoted into the shared Tier-2
+    # sink (ctx.runtime.graph_reporter) by _seed_graph_reporter_into_runtime() in
+    # ainfer()/infer(), so EVERY inferencer participates in graph viz — not just
+    # BTA. None (default) => no viz, byte-identical.
+    graph_reporter: Optional[Any] = attrib(default=None, kw_only=True)
+
     # Class-level fire-once warning sets
     _paired_override_warned: set = set()
     _nested_retry_warned: set = set()
@@ -161,7 +187,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     # External fallback inferencer(s) to try when the primary _infer/_ainfer fails.
     # None = no external fallback (self-recovery via _infer_recovery/_ainfer_recovery still applies).
-    fallback_inferencer: Union["InferencerBase", List["InferencerBase"], None] = attrib(default=None)
+    fallback_inferencer: Union["InferencerBase", List["InferencerBase"], None] = attrib(
+        default=None
+    )
 
     # Controls when the retry helper transitions to the next fallback callable.
     fallback_mode: FallbackMode = attrib(default=FallbackMode.ON_FIRST_FAILURE)
@@ -353,9 +381,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # workspaces (the run-state is in the context, not on ``self``). Falls
         # back to the instance backing — **byte-identical** when no override is
         # set (no active context, or the orchestrator didn't publish one).
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is not None:
@@ -378,7 +404,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self._configure_for_workspace(value)
             self._propagate_workspace_to_children(value)
         # Auto-invalidate derived state when workspace changes.
-        for attr in getattr(type(self), '_DERIVED_FROM_WORKSPACE', ()):
+        for attr in getattr(type(self), "_DERIVED_FROM_WORKSPACE", ()):
             self.__dict__.pop(attr, None)
 
     def _publish_workspace_to_ctx(self, child_ctx, workspace) -> None:
@@ -476,7 +502,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # Redundant-with-cwd case is harmless — see docstring.
         ws = self._workspace
         ws_root_raw = (
-            str(ws.root) if (ws is not None and hasattr(ws, "root") and ws.root) else None
+            str(ws.root)
+            if (ws is not None and hasattr(ws, "root") and ws.root)
+            else None
         )
         if ws_root_raw:
             try:
@@ -499,6 +527,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         projects. Subclasses may override for non-standard layouts.
         """
         import inspect
+
         try:
             source_file = inspect.getfile(cls)
         except (TypeError, OSError):
@@ -516,9 +545,15 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # Subclasses extend this tuple in their own class body.
     _ROLE_RELEVANT_ATTRS: tuple = ("output_is_deliverable", "is_deliverable_boundary")
 
-    def switch_role(self, new_role: str, *, workspace=None,
-                    output_is_deliverable=None, is_deliverable_boundary=None,
-                    reset_session=True):
+    def switch_role(
+        self,
+        new_role: str,
+        *,
+        workspace=None,
+        output_is_deliverable=None,
+        is_deliverable_boundary=None,
+        reset_session=True,
+    ):
         """Transition this inferencer to a new semantic role.
 
         Centralises the workspace-swap + session-reset + flag-update pattern
@@ -535,6 +570,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             reset_session: if True, calls self.reset_session() (when available).
         """
         import time
+
         # M7 NOTE (write-purity boundary — empirically established): the deliverable
         # flags (output_is_deliverable / is_deliverable_boundary) and workspace set
         # here STAY instance-backed under a context. This is the plan's D6 / §2.12
@@ -550,8 +586,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if workspace is not None:
             self._workspace = workspace
         # 2. Override deliverable flags
-        for attr, val in {"output_is_deliverable": output_is_deliverable,
-                          "is_deliverable_boundary": is_deliverable_boundary}.items():
+        for attr, val in {
+            "output_is_deliverable": output_is_deliverable,
+            "is_deliverable_boundary": is_deliverable_boundary,
+        }.items():
             if val is not None:
                 setattr(self, attr, val)
         # 3. Session reset
@@ -562,9 +600,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if history is None:
             history = []
             object.__setattr__(self, "_role_history", history)
-        changes = {**({"workspace": str(workspace.root)} if workspace else {}),
-                   **{k: v for k, v in {"output_is_deliverable": output_is_deliverable,
-                      "is_deliverable_boundary": is_deliverable_boundary}.items() if v is not None}}
+        changes = {
+            **({"workspace": str(workspace.root)} if workspace else {}),
+            **{
+                k: v
+                for k, v in {
+                    "output_is_deliverable": output_is_deliverable,
+                    "is_deliverable_boundary": is_deliverable_boundary,
+                }.items()
+                if v is not None
+            },
+        }
         # Merge template-layer changes stashed by TemplatedInferencerBase.switch_role
         pending = getattr(self, "_pending_role_changes", None)
         if pending:
@@ -647,7 +693,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             except Exception as exc:  # noqa: BLE001 — best-effort propagation
                 _logger.debug(
                     "Workspace propagation to %s[%r]=%s skipped: %s",
-                    field_name, key, type(child).__name__, exc,
+                    field_name,
+                    key,
+                    type(child).__name__,
+                    exc,
                 )
 
         def _on_partial(partial, field_name, key):
@@ -685,8 +734,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if parent_val is None:
                 continue  # parent unset — nothing to cascade for this attr
 
-            def _on_instance(child, field_name, key,
-                             _name=name, _cond=should_propagate, _pv=parent_val):
+            def _on_instance(
+                child,
+                field_name,
+                key,
+                _name=name,
+                _cond=should_propagate,
+                _pv=parent_val,
+            ):
                 if not isinstance(child, InferencerBase):
                     return  # duck-typed callables don't participate
                 if _cond(_pv, getattr(child, _name, None)):
@@ -754,6 +809,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         isn't per-write here, so it rebuilds the immutable ``JsonLogger``.
         """
         import os
+
         from rich_python_utils.io_utils.json_io import JsonLogger
 
         relpaths = getattr(self, "_ws_log_relpaths", None)
@@ -772,7 +828,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 new_kwargs = dict(logger_inst.keywords)
                 new_kwargs["file_path"] = os.path.join(workspace.root, rel)
                 new_logger = JsonLogger(**new_kwargs)
-                new_loggers[name] = (new_logger, config) if config is not None else new_logger
+                new_loggers[name] = (
+                    (new_logger, config) if config is not None else new_logger
+                )
                 changed = True
             else:
                 new_loggers[name] = entry
@@ -798,6 +856,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             from agent_foundation.common.inferencers.inferencer_workspace import (
                 InferencerWorkspace,
             )
+
             self.workspace = InferencerWorkspace(root=self.workspace)
 
         # Use property setter — triggers _configure_for_workspace if workspace is not None
@@ -824,6 +883,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if factory:
                 func = factory()
                 import functools as _ft
+
                 self.response_post_processor = (
                     _ft.partial(func, **kwargs) if kwargs else func
                 )
@@ -845,8 +905,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Paired-override warning: detect subclass overriding only one of
         # _ainfer_recovery / _infer_recovery (not both).
-        async_overridden = type(self)._ainfer_recovery is not InferencerBase._ainfer_recovery
-        sync_overridden = type(self)._infer_recovery is not InferencerBase._infer_recovery
+        async_overridden = (
+            type(self)._ainfer_recovery is not InferencerBase._ainfer_recovery
+        )
+        sync_overridden = (
+            type(self)._infer_recovery is not InferencerBase._infer_recovery
+        )
         if async_overridden != sync_overridden:
             cls_name = type(self).__name__
             if cls_name not in InferencerBase._paired_override_warned:
@@ -867,7 +931,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             cls_name = type(self).__name__
             for fb in fb_list:
-                if fb.max_retry > 1 and cls_name not in InferencerBase._nested_retry_warned:
+                if (
+                    fb.max_retry > 1
+                    and cls_name not in InferencerBase._nested_retry_warned
+                ):
                     InferencerBase._nested_retry_warned.add(cls_name)
                     _logger.warning(
                         f"{cls_name}: fallback_inferencer {type(fb).__name__} has "
@@ -904,6 +971,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         ``InferencerBase`` — none matches, so no other worker path is affected.
         """
         import attr
+
         if not attr.has(type(self)):
             return
         for a in attr.fields(type(self)):
@@ -931,8 +999,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 Signature: ``(partial, field_name, key) -> Optional[partial]``.
                 Return a new partial to replace the original, or None to keep it.
         """
-        import attr
         import functools
+
+        import attr
 
         attr_name = TEMPLATE_EXTRA_FEED_ATTR
 
@@ -963,9 +1032,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                         if new is not None:
                             new_dict[k] = new
                             changed = True
-                    elif callable(v) and isinstance(
-                        getattr(v, attr_name, None), dict
-                    ):
+                    elif callable(v) and isinstance(getattr(v, attr_name, None), dict):
                         on_instance(v, field.name, k)
                 if changed:
                     setattr(self, field.name, new_dict)
@@ -979,9 +1046,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     ):
                         on_instance(item, field.name, i)
 
-            elif callable(value) and isinstance(
-                getattr(value, attr_name, None), dict
-            ):
+            elif callable(value) and isinstance(getattr(value, attr_name, None), dict):
                 on_instance(value, field.name, None)
 
     def _propagate_to_children(self):
@@ -1109,9 +1174,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         try:
             await self._pre_retry(attempt, exception)
         except Exception as exc:  # noqa: BLE001 — best-effort cleanup
-            _logger.warning(
-                "%s._pre_retry raised: %s", type(self).__name__, exc
-            )
+            _logger.warning("%s._pre_retry raised: %s", type(self).__name__, exc)
         for slot, child in self._iter_child_slots():
             if child is None or id(child) in _seen:
                 continue
@@ -1123,7 +1186,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             except Exception as exc:  # noqa: BLE001 — best-effort cleanup
                 _logger.warning(
                     "%s.pre_retry (child of %s) raised: %s",
-                    type(child).__name__, type(self).__name__, exc,
+                    type(child).__name__,
+                    type(self).__name__,
+                    exc,
                 )
 
     async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
@@ -1205,9 +1270,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         branches cannot create duplicate loggers, and per-branch write routing is
         handled by :meth:`_log_path_override`.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is None:
@@ -1217,18 +1280,23 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if not awaiting:
             _logger.debug(
                 "[%s] _ensure_ctx_workspace_logger: NOT deferred (_logger_awaiting_workspace=%s, ws=%s)",
-                type(self).__name__, awaiting, "present" if ws else "None",
+                type(self).__name__,
+                awaiting,
+                "present" if ws else "None",
             )
             return
         if ws is None:
             _logger.debug(
                 "[%s] _ensure_ctx_workspace_logger: deferred but no workspace (ctx.path=%s)",
-                type(self).__name__, getattr(ctx, "path", "?"),
+                type(self).__name__,
+                getattr(ctx, "path", "?"),
             )
             return
         _logger.debug(
             "[%s] _ensure_ctx_workspace_logger: UN-DEFERRING workspace logger (ws=%s, ctx.path=%s)",
-            type(self).__name__, getattr(ws, "root", "?"), getattr(ctx, "path", "?"),
+            type(self).__name__,
+            getattr(ws, "root", "?"),
+            getattr(ctx, "path", "?"),
         )
         self._logger_awaiting_workspace = False
         self._add_workspace_logger(ws)
@@ -1250,16 +1318,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     def _add_workspace_logger(self, workspace):
         """Create a JsonLogger at workspace.logs_dir and add it to self.logger."""
-        from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
         from rich_python_utils.common_objects.debuggable import LoggerConfig
+        from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
+
         log_dir = workspace.logs_dir
         os.makedirs(log_dir, exist_ok=True)
         file_path = os.path.join(log_dir, "session.jsonl")
-        json_entry = (JsonLogger(
-            file_path=file_path,
-            append=True,
-            space_ext_mode=SpaceExtMode.MOVE,
-        ), LoggerConfig(pass_item_key_as="parts_key_path_root"))
+        json_entry = (
+            JsonLogger(
+                file_path=file_path,
+                append=True,
+                space_ext_mode=SpaceExtMode.MOVE,
+            ),
+            LoggerConfig(pass_item_key_as="parts_key_path_root"),
+        )
         if isinstance(self.logger, dict):
             # Post-normalize (deferred → upgrade): add directly + register config.
             self.logger["_workspace"] = json_entry[0]
@@ -1368,8 +1440,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 outputs_dir = ws.outputs_dir
                 if os.path.isdir(outputs_dir):
                     fd_basename = os.path.basename(fd)
-                    entries = [e for e in os.listdir(outputs_dir)
-                               if e != fd_basename]
+                    entries = [e for e in os.listdir(outputs_dir) if e != fd_basename]
                     if entries:
                         os.makedirs(fd, exist_ok=True)
                         for entry in entries:
@@ -1379,8 +1450,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                                 _shutil.move(src, dst)
                         # output_path was moved with everything else
                         if resolved:
-                            moved_path = os.path.join(
-                                fd, os.path.basename(resolved))
+                            moved_path = os.path.join(fd, os.path.basename(resolved))
                             if os.path.isfile(moved_path):
                                 agent_wrote_output_path = True
 
@@ -1392,9 +1462,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if os.path.isfile(resolved) and os.path.getsize(resolved) > 0:
                 pass
             else:
-                from agent_foundation.common.response_parsers import (
-                    extract_delimited,
-                )
+                from agent_foundation.common.response_parsers import extract_delimited
+
                 cleaned = extract_delimited(str(response))
                 if cleaned is None:
                     _logger.warning(
@@ -1446,6 +1515,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         platforms that don't support symlinks (Windows without developer mode).
         """
         import shutil as _shutil
+
         if os.path.lexists(dst):
             if os.path.islink(dst) and not os.path.exists(dst):
                 os.unlink(dst)
@@ -1453,8 +1523,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 return
         os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
         try:
-            os.symlink(os.path.abspath(src), dst,
-                       target_is_directory=os.path.isdir(src))
+            os.symlink(
+                os.path.abspath(src), dst, target_is_directory=os.path.isdir(src)
+            )
         except (OSError, NotImplementedError):
             if os.path.isdir(src):
                 _shutil.copytree(src, dst)
@@ -1483,14 +1554,27 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if ws is None or child_workspace is None:
             return
 
-        from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            DEFAULT_OUTPUT_FILENAME,
+        )
+
         own_name = self.output_path or DEFAULT_OUTPUT_FILENAME
         child_name = child_output_name or own_name
 
         # Symlink the output file (check deliverables first — leaf may have moved it)
-        child_deliv = getattr(child_workspace, "deliverable_path", lambda x: None)(child_name)
-        child_output = child_workspace.output_path(child_name) if hasattr(child_workspace, "output_path") else None
-        src = child_deliv if (child_deliv and os.path.isfile(child_deliv)) else child_output
+        child_deliv = getattr(child_workspace, "deliverable_path", lambda x: None)(
+            child_name
+        )
+        child_output = (
+            child_workspace.output_path(child_name)
+            if hasattr(child_workspace, "output_path")
+            else None
+        )
+        src = (
+            child_deliv
+            if (child_deliv and os.path.isfile(child_deliv))
+            else child_output
+        )
         if src and os.path.isfile(src):
             own_output = ws.output_path(own_name)
             self._symlink_or_copy(src, own_output)
@@ -1527,25 +1611,31 @@ class InferencerBase(Debuggable, Resumable, ABC):
                             for fname in sorted(os.listdir(cat_path)):
                                 fpath = os.path.join(cat_path, fname)
                                 if os.path.isfile(fpath):
-                                    contributors.append({
-                                        "category": cat_name.lower(),
-                                        "path": os.path.realpath(fpath),
-                                        "size_bytes": os.path.getsize(fpath),
-                                    })
+                                    contributors.append(
+                                        {
+                                            "category": cat_name.lower(),
+                                            "path": os.path.realpath(fpath),
+                                            "size_bytes": os.path.getsize(fpath),
+                                        }
+                                    )
                     elif entry.endswith(".jsonl") and os.path.isfile(entry_path):
-                        contributors.append({
-                            "category": "session_log",
-                            "path": os.path.realpath(entry_path),
-                            "size_bytes": os.path.getsize(entry_path),
-                        })
+                        contributors.append(
+                            {
+                                "category": "session_log",
+                                "path": os.path.realpath(entry_path),
+                                "size_bytes": os.path.getsize(entry_path),
+                            }
+                        )
 
         for src_info in getattr(self, "_consumed_upstream_paths", []):
             p = str(src_info)
             if os.path.isfile(p):
-                contributors.append({
-                    "category": "upstream_artifact",
-                    "path": os.path.realpath(p),
-                })
+                contributors.append(
+                    {
+                        "category": "upstream_artifact",
+                        "path": os.path.realpath(p),
+                    }
+                )
 
         manifest = {
             "schema_version": "1.0",
@@ -1593,7 +1683,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         return None
 
-    async def _atry_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+    async def _atry_resume_from_cache(
+        self, inference_input, inference_config=None, **kwargs
+    ):
         """Async hook — mirrors ``_try_resume_from_cache`` for ``_ainfer_single``.
 
         Base implementation delegates to the sync version.  Streaming inferencers
@@ -1674,7 +1766,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # ConversationalInferencer._render_prompt). When _extra_feed is
         # None, this call is byte-identical to the legacy form.
         if _extra_feed is not None:
-            inference_input = self._render_prompt(inference_input, extra_feed=_extra_feed)
+            inference_input = self._render_prompt(
+                inference_input, extra_feed=_extra_feed
+            )
         else:
             inference_input = self._render_prompt(inference_input)
 
@@ -1695,7 +1789,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(self._normalize_for_post_processor(resume_result))
+                resume_result = self.response_post_processor(
+                    self._normalize_for_post_processor(resume_result)
+                )
             return resume_result
 
         inference_args = self.default_inference_args.copy()
@@ -1765,7 +1861,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
         effective_total_timeout = total_timeout or None
 
         # -- Build _fallback_state and fallback chain --
-        _fallback_state = {"last_exception": None, "partial_output": None, "cache_path": None}
+        _fallback_state = {
+            "last_exception": None,
+            "partial_output": None,
+            "cache_path": None,
+        }
 
         # Recovery wrapper — reads from closure-captured _fallback_state
         def _recovery_wrapper(inp, **kw):
@@ -1821,7 +1921,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             _fallback_state["last_exception"] = exception
             if _fallback_state["cache_path"]:
                 try:
-                    with open(_fallback_state["cache_path"], "r", encoding="utf-8") as f:
+                    with open(
+                        _fallback_state["cache_path"], "r", encoding="utf-8"
+                    ) as f:
                         raw = f.read()
                     _fallback_state["partial_output"] = raw if raw.strip() else None
                 except OSError:
@@ -1848,7 +1950,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 total_timeout=effective_total_timeout,
                 fallback_func=effective_fallback_func,
                 fallback_mode=effective_fallback_mode,
-                on_fallback_callback=_on_transition if effective_fallback_func else None,
+                on_fallback_callback=_on_transition
+                if effective_fallback_func
+                else None,
                 output_validator=(
                     self._run_output_guardrail_sync
                     if self.output_guardrail_inferencer is not None
@@ -1876,7 +1980,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.response_post_processor is not None:
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
-            self.log_debug(processed_response, "PostProcessedResponse", is_artifact=True)
+            self.log_debug(
+                processed_response, "PostProcessedResponse", is_artifact=True
+            )
             return processed_response
 
         return inference_response
@@ -1892,7 +1998,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         if isinstance(response, str):
             return response
-        if hasattr(response, 'output') and isinstance(response.output, str):
+        if hasattr(response, "output") and isinstance(response.output, str):
             return response.output or ""
         raise TypeError(
             f"response_post_processor expects str or an object with a str .output attribute, "
@@ -2003,9 +2109,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         namespaced) slot — so a worker dispatched under ctx node ``plan_bta.worker_0``
         can root its whole subtree under the intended ``worker_0`` workspace dir.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is None:
@@ -2052,9 +2156,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         if self.state_factory is None:
             return
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is None:
@@ -2062,6 +2164,123 @@ class InferencerBase(Debuggable, Resumable, ABC):
         node = ctx.node(creator=(type(self).__qualname__, ctx.path))
         if node.call is None:
             node.call = self.state_factory(inference_input)
+
+    # ------------------------------------------------------------------
+    # Graph visualization (Part F / GT#13): uniform graph_reporter propagation.
+    # Node identity is the running unit's ctx.path (not its Python instance), so
+    # the reporter is resolved from the shared Tier-2 sink and namespaced by
+    # ctx.path. Promoted into the sink ONCE per run — eagerly in ainfer/infer so
+    # a non-emitting orchestrator (e.g. PTI) seeds it before its children run,
+    # and lazily in _resolve_graph_reporter() as a fallback. Inherited by every
+    # inferencer (not just BTA). Viz failures are swallowed — visualization must
+    # never abort inference.
+    # ------------------------------------------------------------------
+    def _seed_graph_reporter_into_runtime(self) -> None:
+        """Promote this inferencer's ``graph_reporter`` into the shared Tier-2
+        sink (``ctx.runtime.graph_reporter``) exactly once.
+
+        No-op when no run context is active, this inferencer has no reporter, or
+        the sink is already seeded. Fully guarded.
+        """
+        try:
+            reporter = self.graph_reporter
+            if reporter is None:
+                return
+            from agent_foundation.common.inferencers.run_context import (
+                active_run_context,
+            )
+
+            ctx = active_run_context()
+            if ctx is None:
+                return
+            if getattr(ctx.runtime, "graph_reporter", None) is None:
+                ctx.runtime.graph_reporter = reporter
+        except Exception:  # noqa: BLE001 - viz wiring must never break inference
+            pass
+
+    def _resolve_graph_reporter(self):
+        """The graph-reporter sink for THIS inferencer's own nodes.
+
+        Resolved from the shared Tier-2 sink and namespaced by ``ctx.path`` via
+        ``child_reporter`` — so one shared instance reused across N concurrent
+        contexts emits N distinct viz node subtrees (one per path), never
+        last-write-wins onto one node.
+
+        * No ctx (legacy/no-ctx): returns the instance attrib (byte-identical).
+        * Active ctx: seeds the shared sink once from this instance's reporter
+          (so an externally-wired ``self.graph_reporter`` becomes the Tier-2
+          sink), then returns the path-namespaced child reporter (``None`` when
+          nothing is wired).
+        """
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        ctx = active_run_context()
+        if ctx is None:
+            return self.graph_reporter
+        runtime = ctx.runtime
+        if runtime.graph_reporter is None and self.graph_reporter is not None:
+            runtime.graph_reporter = self.graph_reporter
+        return runtime.child_reporter(ctx.path, base_path="/")
+
+    # --- Reusable graph-emit primitives (used by PTI/Dual/MFDual orchestrators).
+    # Each resolves the path-namespaced reporter, so a top-level inferencer emits
+    # a ROOT topology (parent_node_id="") while a nested one emits a SUB-graph
+    # (parent_node_id=<its ctx path>). All guarded — viz never aborts inference.
+    async def _emit_graph_topology(self, nodes, edges=None) -> None:
+        """Emit a GraphTopologyEvent at this inferencer's ctx level (guarded)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None or not nodes:
+                return
+            from agent_foundation.common.inferencers.graph_events import (
+                GraphTopologyEvent,
+            )
+
+            await reporter.on_graph_topology(
+                GraphTopologyEvent(nodes=nodes, edges=edges or [], layout="horizontal")
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[%s] _emit_graph_topology failed",
+                type(self).__name__,
+                exc_info=True,
+            )
+
+    async def _emit_graph_node_status(self, node_id, status, output_path="") -> None:
+        """Emit a node_status for one node at this inferencer's ctx level (guarded)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            await reporter.on_node_status(node_id, status, output_path=output_path or "")
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[%s] _emit_graph_node_status(%s, %s) failed",
+                type(self).__name__,
+                node_id,
+                status,
+                exc_info=True,
+            )
+
+    async def _emit_graph_reconcile_statuses(self, statuses) -> None:
+        """Emit a final reconcile of terminal node statuses (guarded)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None or not statuses:
+                return
+            await reporter.on_graph_reconcile(statuses)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "[%s] _emit_graph_reconcile_statuses failed",
+                type(self).__name__,
+                exc_info=True,
+            )
 
     def infer(
         self,
@@ -2097,16 +2316,18 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # M2 bridge: capture the keyword-only carrier + install the per-task
         # ContextVar (legacy-mint a root when None -> byte-identical). Inert until
         # M3+ orchestrators read `_active_ctx`.
-        _rc_token = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _rc_token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         # The iterator-input / no-merger path returns a LAZY iterator (see
         # _infer_dispatch); the context must stay alive until it is exhausted so
         # each lazily-produced item runs under the same ctx (not detached). Every
         # other path returns eagerly -> exit immediately (byte-identical).
         _is_lazy = (
-            isinstance(inference_input, Iterator)
-            and self.post_response_merger is None
+            isinstance(inference_input, Iterator) and self.post_response_merger is None
         )
         try:
+            self._seed_graph_reporter_into_runtime()
             self._init_call_state(inference_input)
             result = self._infer_dispatch(
                 inference_input, inference_config, **_inference_args
@@ -2115,6 +2336,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             exit_run(_rc_token)
             raise
         if _is_lazy:
+
             def _ctx_scoped_iter(_inner=result, _tok=_rc_token):
                 try:
                     yield from _inner
@@ -2229,7 +2451,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         try:
             from rich_python_utils.mp_utils.mp_target import MPTarget
-            from rich_python_utils.mp_utils.parallel_process import parallel_process_by_pool
+            from rich_python_utils.mp_utils.parallel_process import (
+                parallel_process_by_pool,
+            )
         except ImportError as _e:
             raise NotImplementedError(
                 "parallel_infer requires rich_python_utils.mp_utils which is not "
@@ -2274,7 +2498,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             # invisible) and a single shared copy_context() would give every worker
             # the SAME ctx, defeating per-input isolation. Pair (i, input) so the
             # worker knows its index for ``parallel_{i}``.
-            def _ctx_worker(_pair, _pc=_parent_ctx, _cfg=inference_config, _kw=_inference_args):
+            def _ctx_worker(
+                _pair, _pc=_parent_ctx, _cfg=inference_config, _kw=_inference_args
+            ):
                 _i, _inp = _pair
                 _tok = enter_run(_pc.child(f"parallel_{_i}"))
                 try:
@@ -2418,22 +2644,33 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
+            guardrail_ws = None
             if self._workspace is not None:
                 guardrail_ws = self._workspace.child("guardrail")
                 guardrail_ws.ensure_dirs()
                 judge._workspace = guardrail_ws
-            verdict_raw = await judge.ainfer(prompt)
+            # Run the judge under its OWN child context ("…/guardrail") matching
+            # its child workspace. Without this it inherits the judged flow's
+            # active context and claims the SAME context path — a CollisionError
+            # ("Two distinct nodes must not share one context path") whenever the
+            # judge's class differs from the flow's (e.g. a Claude judge over a
+            # Devmate/Codex flow), which was caught and logged as fail-open spam.
+            verdict_raw = await judge.ainfer(
+                prompt, run_context=self._rc_child("guardrail", workspace=guardrail_ws)
+            )
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 _logger.info(
                     "[%s] Output guardrail rejected: handler=%s",
-                    type(self).__name__, verdict,
+                    type(self).__name__,
+                    verdict,
                 )
             return verdict
         except Exception as exc:
             _logger.warning(
                 "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
-                type(self).__name__, exc,
+                type(self).__name__,
+                exc,
             )
             return True
 
@@ -2444,22 +2681,29 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
+            guardrail_ws = None
             if self._workspace is not None:
                 guardrail_ws = self._workspace.child("guardrail")
                 guardrail_ws.ensure_dirs()
                 judge._workspace = guardrail_ws
-            verdict_raw = judge.infer(prompt)
+            # Own child context ("…/guardrail") — see _run_output_guardrail for why
+            # (avoids the cross-class context-path CollisionError / fail-open spam).
+            verdict_raw = judge.infer(
+                prompt, run_context=self._rc_child("guardrail", workspace=guardrail_ws)
+            )
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 _logger.info(
                     "[%s] Output guardrail rejected: handler=%s",
-                    type(self).__name__, verdict,
+                    type(self).__name__,
+                    verdict,
                 )
             return verdict
         except Exception as exc:
             _logger.warning(
                 "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
-                type(self).__name__, exc,
+                type(self).__name__,
+                exc,
             )
             return True
 
@@ -2467,7 +2711,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """Render the judge prompt with the main inferencer's input + output."""
         from agent_foundation.common.inferencers.recovery import render_recovery_prompt
 
-        output_text = str(response.get("output", "") if isinstance(response, dict) else response)
+        output_text = str(
+            response.get("output", "") if isinstance(response, dict) else response
+        )
         input_text = str(getattr(self, "_last_inference_input", "") or "")
         return render_recovery_prompt(
             "recovery/judge",
@@ -2566,7 +2812,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # Template rendering (opt-in: only when template_manager is set).
         # Round-7 invariant: conditional kwarg pass — see _infer_single.
         if _extra_feed is not None:
-            inference_input = self._render_prompt(inference_input, extra_feed=_extra_feed)
+            inference_input = self._render_prompt(
+                inference_input, extra_feed=_extra_feed
+            )
         else:
             inference_input = self._render_prompt(inference_input)
 
@@ -2585,7 +2833,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if self.state_graphs:
                 self.update_state_graphs(resume_result)
             if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(self._normalize_for_post_processor(resume_result))
+                resume_result = self.response_post_processor(
+                    self._normalize_for_post_processor(resume_result)
+                )
             return resume_result
 
         inference_args = self.default_inference_args.copy()
@@ -2628,17 +2878,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
         pre_retry_active = (
             type(self)._pre_retry is not InferencerBase._pre_retry
             or type(self)._iter_child_inferencers
-                is not InferencerBase._iter_child_inferencers
+            is not InferencerBase._iter_child_inferencers
             # N-R1: a class that adopts ONLY the slot-aware iterator must still
             # activate pre-retry cleanup, else it silently skips it.
-            or type(self)._iter_child_slots
-                is not InferencerBase._iter_child_slots
+            or type(self)._iter_child_slots is not InferencerBase._iter_child_slots
         )
         if (
             _user_callback is not None
             or retry_prompt_mode != "original"
             or pre_retry_active
         ):
+
             async def _internal_retry_callback(attempt, exception):
                 # 1. Subclass hook + recursive child propagation — fires
                 #    first so subsequent steps see clean state.
@@ -2671,7 +2921,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
         effective_attempt_timeout = attempt_timeout or None
 
         # -- Build _fallback_state and fallback chain --
-        _fallback_state = {"last_exception": None, "partial_output": None, "cache_path": None}
+        _fallback_state = {
+            "last_exception": None,
+            "partial_output": None,
+            "cache_path": None,
+        }
 
         # Recovery wrapper — reads from closure-captured _fallback_state
         async def _recovery_wrapper(inp, **kw):
@@ -2726,7 +2980,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             _fallback_state["last_exception"] = exception
             if _fallback_state["cache_path"]:
                 try:
-                    with open(_fallback_state["cache_path"], "r", encoding="utf-8") as f:
+                    with open(
+                        _fallback_state["cache_path"], "r", encoding="utf-8"
+                    ) as f:
                         raw = f.read()
                     _fallback_state["partial_output"] = raw if raw.strip() else None
                 except OSError:
@@ -2736,7 +2992,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             retry_args[0] = original_input
             # Forward to user-provided on_fallback_callback if present
             if _user_on_fallback is not None:
-                result = _user_on_fallback(from_func, to_func, exception, total_attempts)
+                result = _user_on_fallback(
+                    from_func, to_func, exception, total_attempts
+                )
                 if asyncio.iscoroutine(result):
                     await result
 
@@ -2759,7 +3017,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 attempt_timeout=effective_attempt_timeout,
                 fallback_func=effective_fallback_func,
                 fallback_mode=effective_fallback_mode,
-                on_fallback_callback=_on_transition if effective_fallback_func else None,
+                on_fallback_callback=_on_transition
+                if effective_fallback_func
+                else None,
                 output_validator=(
                     self._run_output_guardrail
                     if self.output_guardrail_inferencer is not None
@@ -2787,7 +3047,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if self.response_post_processor is not None:
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
-            self.log_debug(processed_response, "PostProcessedResponse", is_artifact=True)
+            self.log_debug(
+                processed_response, "PostProcessedResponse", is_artifact=True
+            )
             return processed_response
 
         return inference_response
@@ -2845,8 +3107,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # M2 bridge: keyword-only carrier + per-task ContextVar (legacy-mint when
         # None -> byte-identical). The bridge is set before the body and reset in
         # `finally`; inert until M3+ orchestrators read `_active_ctx`.
-        _rc_token = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _rc_token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         try:
+            self._seed_graph_reporter_into_runtime()
             self._init_call_state(inference_input)
             return await self._ainfer_dispatch(
                 inference_input, inference_config, **_inference_args
@@ -2983,7 +3248,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         results = await asyncio.gather(*tasks)
         return list(results)
 
-    async def _aparallel_one(self, inp, i, parent_ctx, inference_config, inference_args):
+    async def _aparallel_one(
+        self, inp, i, parent_ctx, inference_config, inference_args
+    ):
         """D6/I1: run one parallel input under a per-input child context
         (``parallel_{i}``) when a parent context is active, so each input gets an
         isolated state node + Tier-3 handles (no §2.7 same-creator collapse).
@@ -3047,4 +3314,3 @@ class InferencerBase(Debuggable, Resumable, ABC):
 # that must look up the attribute by name (introspection, partial keyword
 # manipulation, duck-typed protocol checks).
 TEMPLATE_EXTRA_FEED_ATTR: str = "template_extra_feed"
-

@@ -163,15 +163,21 @@ function computeUnifiedLayout(rootNodes, rootEdges, subGraphs, dims, focusedPath
   let maxW = rootLayout.totalW;
   let maxH = rootLayout.totalH;
 
-  // Only include sub-graph nodes for the focused container (not all)
-  const expandedParent = focusedPath?.length > 0 ? focusedPath[0] : null;
-
+  // Render the FULL focused chain (root -> ... -> deepest), each sub-graph laid
+  // out to the right of its (already-positioned) parent node. focusedPath is the
+  // chain of fully-qualified container ids (e.g. ["planner","planner/propose"]).
+  // Sub-graph node ids arrive ALREADY fully-qualified from the backend
+  // (NamespacedGraphReporter), so we DO NOT re-qualify here — re-prefixing would
+  // double them (e.g. "planner/planner/propose") and break status/output/drill.
+  const chain = Array.isArray(focusedPath) ? focusedPath : [];
   if (subGraphs) {
-    for (const [parentId, sg] of Object.entries(subGraphs)) {
-      if (!sg?.nodes?.length) continue;
-      if (parentId !== expandedParent) continue;
+    for (let level = 0; level < chain.length; level++) {
+      const parentId = chain[level];
+      const sg = subGraphs[parentId];
+      if (!sg?.nodes?.length) break;
       const parentPos = positions[parentId];
-      if (!parentPos) continue;
+      if (!parentPos) break; // parent not yet laid out -> cannot nest deeper
+      const depth = level + 1;
 
       const subLayout = computeLayout(sg.nodes, sg.edges, subDims);
       const offsetX = parentPos.x + dims.nodeW + SUB_GAP;
@@ -180,47 +186,46 @@ function computeUnifiedLayout(rootNodes, rootEdges, subGraphs, dims, focusedPath
       for (const sn of sg.nodes) {
         const sp = subLayout.positions[sn.id];
         if (!sp) continue;
-        const qid = `${parentId}/${sn.id}`;
+        const qid = sn.id; // already fully-qualified
         positions[qid] = {
           x: offsetX + sp.x, y: offsetY + sp.y,
           cx: offsetX + sp.cx, cy: offsetY + sp.cy,
         };
-        allNodes.push({ ...sn, id: qid, _qualifiedId: qid, _depth: 1, _parentId: parentId });
+        allNodes.push({ ...sn, id: qid, _qualifiedId: qid, _depth: depth, _parentId: parentId });
       }
 
-      // Collect sub-graph grouped columns with offset
+      // Collect sub-graph grouped columns with offset (ids already qualified)
       for (const [colIdx, group] of Object.entries(subLayout.groupedColumns || {})) {
         const gcKey = `${parentId}/${colIdx}`;
         subGroupedColumns[gcKey] = {
           ...group,
           x: offsetX + group.x,
           y: offsetY + group.y,
-          nodeIds: new Set([...group.nodeIds].map(id => `${parentId}/${id}`)),
-          nodes: group.nodes.map(n => ({ ...n, id: `${parentId}/${n.id}`, _qualifiedId: `${parentId}/${n.id}`, _depth: 1, _parentId: parentId })),
+          nodeIds: new Set([...group.nodeIds]),
+          nodes: group.nodes.map(n => ({ ...n, id: n.id, _qualifiedId: n.id, _depth: depth, _parentId: parentId })),
         };
       }
 
       for (const ep of subLayout.edgePaths) {
         const [srcId, tgtId] = ep.key.split('-');
-        const srcPos = positions[`${parentId}/${srcId}`];
-        const tgtPos = positions[`${parentId}/${tgtId}`];
+        const srcPos = positions[srcId];
+        const tgtPos = positions[tgtId];
         if (srcPos && tgtPos) {
           const sx = srcPos.x + subDims.nodeW, sy = srcPos.cy;
           const tx = tgtPos.x, ty = tgtPos.cy;
           const cp = (tx - sx) * 0.5;
           edgePaths.push({
-            key: `${parentId}/${srcId}-${parentId}/${tgtId}`,
+            key: `${srcId}-${tgtId}`,
             d: `M ${sx} ${sy} C ${sx + cp} ${sy}, ${tx - cp} ${ty}, ${tx} ${ty}`,
-            _depth: 1, _parentId: parentId,
+            _depth: depth, _parentId: parentId,
           });
         }
       }
 
-      // Connector edge from container to sub-graph
+      // Connector edge from the container node to its sub-graph entry node
       const firstSubNode = sg.nodes[0];
       if (firstSubNode) {
-        const fqid = `${parentId}/${firstSubNode.id}`;
-        const fpos = positions[fqid];
+        const fpos = positions[firstSubNode.id];
         if (fpos) {
           const sx = parentPos.x + dims.nodeW, sy = parentPos.cy;
           const tx = fpos.x, ty = fpos.cy;
@@ -501,7 +506,7 @@ export function GraphFlowView({
 
   // Auto-fit on topology change or focus change
   const nodeCount = activeNodes?.length || 0;
-  const focusKey = focusedPath.join('/');
+  const focusKey = focusedPath.length ? focusedPath[focusedPath.length - 1] : '';
   useEffect(() => {
     if (isFocusContext && focusKey && subGraphBounds[focusKey]) {
       fitToView(subGraphBounds[focusKey]);
@@ -530,7 +535,8 @@ export function GraphFlowView({
   // Focus-context: compute node opacity and badges
   const getNodeOpacity = useCallback((nodeId) => {
     if (!isFocusContext || focusedPath.length === 0) return 1;
-    const prefix = focusedPath.join('/');
+    // Highlight the entire focused branch (root container + all its descendants).
+    const prefix = focusedPath[0];
     if (nodeId === prefix || nodeId.startsWith(prefix + '/')) return 1;
     // Root nodes that are siblings of the focused container
     if (!nodeId.includes('/')) return 0.15;
@@ -557,7 +563,7 @@ export function GraphFlowView({
     return nodes.filter(n => n.id !== focused).map(n => {
       const pos = activePositions[n.id];
       if (!pos) return null;
-      const focusedBounds = subGraphBounds[focusedPath.join('/')];
+      const focusedBounds = subGraphBounds[focusKey];
       if (!focusedBounds) return null;
       const relX = pos.x < focusedBounds.x ? 'left' : 'right';
       const posPercent = Math.max(5, Math.min(90, ((pos.y / totalH) * 100)));

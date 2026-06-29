@@ -75,13 +75,18 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
     """Test construct_command method."""
 
     def test_construct_command_basic(self):
-        """Test basic command construction."""
-        inferencer = DevmateCliInferencer(
-            target_path="/test/repo",
-            no_create_commit=True,
-        )
-
-        command = inferencer.construct_command("Hello world")
+        """Test basic command construction (native target — no reroot)."""
+        # Use a real Sapling-repo target (``.sl`` marker) so devmate runs
+        # natively and the prompt is NOT rewritten by the root-in-Sapling
+        # fallback (which only fires for non-repo targets — see
+        # test_construct_command_reroots_external_target).
+        with tempfile.TemporaryDirectory() as repo:
+            os.makedirs(os.path.join(repo, ".sl"))
+            inferencer = DevmateCliInferencer(
+                target_path=repo,
+                no_create_commit=True,
+            )
+            command = inferencer.construct_command("Hello world")
 
         self.assertIn("devmate run", command)
         self.assertIn("freeform", command)
@@ -89,6 +94,22 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
         self.assertIn('"model_name=claude-opus-4.7-1m"', command)
         self.assertIn('"max_tokens=65536"', command)
         self.assertIn("--no-create-commit", command)
+
+    def test_construct_command_reroots_external_target(self):
+        """Issue 1 fix: when the target is NOT a Sapling/EdenSCM repo, the devmate
+        server is rerooted to a valid repo (fbsource/www) and the prompt is
+        anchored to the target's ABSOLUTE path so devmate reads/writes it."""
+        with tempfile.TemporaryDirectory() as ext:  # plain dir, not a repo
+            inferencer = DevmateCliInferencer(target_path=ext)
+            if inferencer._resolve_devmate_repo_root() is None:
+                self.skipTest("no Sapling repo (e.g. ~/fbsource) available to reroot to")
+            root, mode = inferencer._devmate_effective_root()
+            self.assertEqual(mode, "rerooted")
+            self.assertEqual(inferencer._resolve_subprocess_cwd(), root)
+            command = inferencer.construct_command("Document it")
+            self.assertIn("ABSOLUTE path", command)   # absolute-path anchor preamble
+            self.assertIn(ext, command)               # target conveyed by absolute path
+            self.assertIn("Document it", command)     # user input still present
 
     def test_construct_command_with_headless(self):
         """Test that --headless flag is added when headless=True."""

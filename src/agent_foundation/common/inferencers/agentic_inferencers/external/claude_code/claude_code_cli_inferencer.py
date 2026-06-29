@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import subprocess
+import weakref
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO
 
 from attr import attrib, attrs
@@ -145,6 +146,51 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     def _resolve_model_for_tier(cls, tier: str) -> str:
         return cls._CLAUDE_TIER_MAP.get(str(tier).lower(), "sonnet")
 
+    # ── Process-wide concurrency cap on claude subprocesses ──────────────
+    # The native ``claude`` binary aborts stdin with "no stdin data received
+    # in 3s" when many heavy claude processes start at once and starve each
+    # other's startup past that 3s wall-clock window — claude then runs with no
+    # prompt and exits "Input must be provided…", yielding EMPTY output. Seen
+    # under a multiflow/BTA fan-out (unbounded ``asyncio.gather``). Bounding the
+    # number of *simultaneous* claude subprocesses keeps each one's startup
+    # inside the window. Empirically: unbounded ≈ 88% empty; cap 4 ≈ 8%; cap 2
+    # ≈ 0% (14-core box). The residual at higher caps is recovered by the
+    # retry-on-stdin-race in ``_ainfer_streaming``. Tune via the
+    # ``CLAUDE_CODE_MAX_CONCURRENCY`` env var (<= 0 disables the cap).
+    _DEFAULT_MAX_CONCURRENCY: int = 4
+    # Per-event-loop semaphores (WeakKeyDictionary so a finished loop's entry is
+    # GC'd — the sync bridge spins up throwaway loops).
+    _concurrency_semaphores: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+    @classmethod
+    def _resolve_max_concurrency(cls) -> int:
+        raw = os.environ.get("CLAUDE_CODE_MAX_CONCURRENCY")
+        if raw is not None and raw.strip():
+            try:
+                return int(raw.strip())
+            except ValueError:
+                logger.warning(
+                    "[ClaudeCodeCliInferencer] invalid CLAUDE_CODE_MAX_CONCURRENCY=%r;"
+                    " using default %d",
+                    raw,
+                    cls._DEFAULT_MAX_CONCURRENCY,
+                )
+        return cls._DEFAULT_MAX_CONCURRENCY
+
+    @classmethod
+    def _concurrency_semaphore(cls) -> "Optional[asyncio.Semaphore]":
+        """The per-running-loop ``Semaphore`` capping concurrent claude
+        subprocesses (``None`` if the cap is disabled)."""
+        limit = cls._resolve_max_concurrency()
+        if limit <= 0:
+            return None
+        loop = asyncio.get_running_loop()
+        sem = cls._concurrency_semaphores.get(loop)
+        if sem is None:
+            sem = asyncio.Semaphore(limit)
+            cls._concurrency_semaphores[loop] = sem
+        return sem
+
     def __attrs_post_init__(self) -> None:
         """Initialize defaults after attrs init."""
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
@@ -206,10 +252,25 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         if self.claude_command != "claude":
             return
 
-        # Test if the default 'claude' command works
+        # Test if the default 'claude' command works.  When the Meta launcher's
+        # OS sandbox is disabled (disable_osx_sandbox /
+        # CLAUDE_CODE_INFERANCER_NO_SANDBOX), the PROBE must pass the SAME flag —
+        # otherwise the Meta ``claude`` applies its own sandbox-exec wrapper,
+        # which fails ("sandbox_apply: Operation not permitted") in a nested /
+        # restricted environment, so the probe fails and we wrongly fall back to
+        # the public npx CLI (which then rejects the Meta-only flag at stream
+        # time → exit 1 → empty output). The flag is Meta-specific, so it is
+        # applied ONLY to this primary ``claude`` probe, never the npx fallbacks.
+        probe_flag = ""
+        if self.disable_osx_sandbox:
+            from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+                DANGEROUSLY_DISABLE_OSX_SANDBOX,
+            )
+
+            probe_flag = f" --{DANGEROUSLY_DISABLE_OSX_SANDBOX}"
         try:
             result = _sp.run(
-                f"{self.claude_command} --version",
+                f"{self.claude_command}{probe_flag} --version",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -537,110 +598,146 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
 
-        # Bump StreamReader line limit from the asyncio default (64KB) to
-        # 16MB. Claude's stream-json events with tool_use input can carry
-        # the entire generated document on a single line, easily exceeding
-        # 64KB and triggering "Separator is not found, and chunk exceed
-        # the limit" on readline.
-        process = await asyncio.create_subprocess_shell(
-            full_command,
-            stdin=asyncio.subprocess.PIPE if use_stdin else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=self._resolve_subprocess_cwd(),
-            limit=16 * 1024 * 1024,
-        )
+        # Cap concurrent claude subprocesses (see _concurrency_semaphore). The
+        # native claude binary aborts stdin with "no stdin data received in 3s"
+        # when too many heavy claude processes start at once and starve each
+        # other's startup past that window → EMPTY output. The semaphore is held
+        # across the whole subprocess lifetime (spawn → exit), incl. the yields.
+        _sem = self._concurrency_semaphore()
+        if _sem is not None:
+            await _sem.acquire()
 
-        # Drain stdin/stderr concurrently with stdout so OS pipe buffers
-        # (~64KB on Windows) never fill — that would block claude.exe and
-        # deadlock the whole chain (observed with 73KB prompts: all 18
-        # claude.exe threads stuck in Wait, 0% CPU, no API connection).
-        # Mirrors what subprocess.communicate() does internally.
-        async def _send_stdin() -> None:
-            if not use_stdin or process.stdin is None:
-                return
+        # Whether claude produced any assistant text. If it produced NONE and
+        # stderr shows the stdin-startup abort, raise after releasing the
+        # semaphore so the retry chain re-runs the call (vs returning empty).
+        _produced_text = False
+        _stdin_race = False
+        try:
+            # Bump StreamReader line limit from the asyncio default (64KB) to
+            # 16MB. Claude's stream-json events with tool_use input can carry
+            # the entire generated document on a single line, easily exceeding
+            # 64KB and triggering "Separator is not found, and chunk exceed
+            # the limit" on readline.
+            process = await asyncio.create_subprocess_shell(
+                full_command,
+                stdin=asyncio.subprocess.PIPE if use_stdin else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self._resolve_subprocess_cwd(),
+                limit=16 * 1024 * 1024,
+            )
+
+            # Drain stdin/stderr concurrently with stdout so OS pipe buffers
+            # never fill — that would block claude and deadlock the chain
+            # (observed with 73KB prompts). Mirrors subprocess.communicate().
+            async def _send_stdin() -> None:
+                if not use_stdin or process.stdin is None:
+                    return
+                try:
+                    process.stdin.write(prompt.encode("utf-8"))
+                    await process.stdin.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # process may have exited; stderr will surface error
+                finally:
+                    try:
+                        process.stdin.close()
+                    except Exception:
+                        pass
+
+            async def _drain_stderr() -> bytes:
+                if process.stderr is None:
+                    return b""
+                return await process.stderr.read()
+
+            stdin_task = asyncio.create_task(_send_stdin())
+            stderr_task = asyncio.create_task(_drain_stderr())
+
             try:
-                process.stdin.write(prompt.encode("utf-8"))
-                await process.stdin.drain()
-            except (BrokenPipeError, ConnectionResetError):
-                pass  # process may have exited; stderr will surface error
+                async for line_bytes in process.stdout:
+                    line = line_bytes.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        event = _json.loads(line)
+                    except _json.JSONDecodeError:
+                        continue
+
+                    event_type = event.get("type")
+
+                    # Real-time streaming: text deltas are inside
+                    # stream_event → event → content_block_delta → delta.text
+                    if event_type == "stream_event":
+                        inner = event.get("event", {})
+                        if inner.get("type") == "content_block_delta":
+                            delta = inner.get("delta", {})
+                            if delta.get("type") == "text_delta" and delta.get("text"):
+                                _produced_text = True
+                                yield delta["text"]
+                                continue
+                        # Any other stream activity (thinking_delta,
+                        # input_json_delta, content_block_start, message_start,
+                        # ping, etc.) — emit an empty sentinel so the parent
+                        # class's dual-timer extends to tool_use_idle_timeout
+                        # (default 7200s for ClaudeCodeCli) instead of cutting
+                        # off the request mid-thinking on idle_timeout (300s).
+                        yield ""
+
+                    # Capture result event for session_id / cost / usage metadata
+                    elif event_type == "result":
+                        self._last_stream_result = event
+                        yield ""  # also a sign of activity
+                    else:
+                        # system, rate_limit_event, assistant (non-stream), etc.
+                        yield ""
+
             finally:
                 try:
-                    process.stdin.close()
+                    await stdin_task
                 except Exception:
                     pass
-
-        async def _drain_stderr() -> bytes:
-            if process.stderr is None:
-                return b""
-            return await process.stderr.read()
-
-        stdin_task = asyncio.create_task(_send_stdin())
-        stderr_task = asyncio.create_task(_drain_stderr())
-
-        try:
-            async for line_bytes in process.stdout:
-                line = line_bytes.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
                 try:
-                    event = _json.loads(line)
-                except _json.JSONDecodeError:
-                    continue
-
-                event_type = event.get("type")
-
-                # Real-time streaming: text deltas are inside
-                # stream_event → event → content_block_delta → delta.text
-                if event_type == "stream_event":
-                    inner = event.get("event", {})
-                    if inner.get("type") == "content_block_delta":
-                        delta = inner.get("delta", {})
-                        if delta.get("type") == "text_delta" and delta.get("text"):
-                            yield delta["text"]
-                            continue
-                    # Any other stream activity (thinking_delta,
-                    # input_json_delta, content_block_start, message_start,
-                    # ping, etc.) — emit an empty sentinel so the parent
-                    # class's dual-timer extends to tool_use_idle_timeout
-                    # (default 7200s for ClaudeCodeCli) instead of cutting
-                    # off the request mid-thinking on idle_timeout (300s).
-                    yield ""
-
-                # Capture result event for session_id / cost / usage metadata
-                elif event_type == "result":
-                    self._last_stream_result = event
-                    yield ""  # also a sign of activity
-                else:
-                    # system, rate_limit_event, assistant (non-stream), etc.
-                    yield ""
-
+                    stderr_bytes = await stderr_task
+                except Exception:
+                    stderr_bytes = b""
+                self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+                # If cleanup ran due to timeout/cancellation, the subprocess may
+                # still be alive — terminate it so process.wait() doesn't block
+                # forever waiting on a hung claude.exe.
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                    except (ProcessLookupError, OSError):
+                        pass
+                await process.wait()
+                if process.returncode != 0:
+                    logger.warning(
+                        "[%s] streaming subprocess exited with code %s. stderr: %s",
+                        self.__class__.__name__,
+                        process.returncode,
+                        self._last_streaming_stderr[:500] if self._last_streaming_stderr else "(empty)",
+                    )
+                # Detect claude's stdin-startup abort: no assistant text AND
+                # stderr shows the launcher gave up on stdin. Transient under
+                # concurrency (claude started too slowly to read stdin within
+                # its 3s grace) — flag for a retry once the semaphore is freed.
+                _err = self._last_streaming_stderr or ""
+                if (
+                    use_stdin
+                    and not _produced_text
+                    and ("no stdin data received" in _err
+                         or "Input must be provided" in _err)
+                ):
+                    _stdin_race = True
         finally:
-            try:
-                await stdin_task
-            except Exception:
-                pass
-            try:
-                stderr_bytes = await stderr_task
-            except Exception:
-                stderr_bytes = b""
-            self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
-            # If cleanup ran due to timeout/cancellation, the subprocess may
-            # still be alive — terminate it so process.wait() doesn't block
-            # forever waiting on a hung claude.exe.
-            if process.returncode is None:
-                try:
-                    process.kill()
-                except (ProcessLookupError, OSError):
-                    pass
-            await process.wait()
-            if process.returncode != 0:
-                logger.warning(
-                    "[%s] streaming subprocess exited with code %s. stderr: %s",
-                    self.__class__.__name__,
-                    process.returncode,
-                    self._last_streaming_stderr[:500] if self._last_streaming_stderr else "(empty)",
-                )
+            if _sem is not None:
+                _sem.release()
+
+        if _stdin_race:
+            raise RuntimeError(
+                "claude aborted before reading its stdin prompt "
+                "('no stdin data received in 3s') — transient startup race under "
+                "concurrency; raising so the retry chain re-runs the call."
+            )
 
     def _resolve_subprocess_timeout(
         self, override: Optional[float] = None

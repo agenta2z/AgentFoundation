@@ -1,5 +1,3 @@
-
-
 """PlanThenImplementInferencer — two-phase flow: plan first, then implement.
 
 Chains a planner and executor inferencer sequentially. The planner's output
@@ -25,32 +23,25 @@ import os
 import re
 import shutil
 from datetime import datetime, timezone
-from enum import Flag, auto
+from enum import auto, Flag
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     DualInferencerResponse,
+    extract_response_text,
     InferencerResponse,
     ReflectionStyles,
     ResponseSelectors,
-    extract_response_text,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
     LinearWorkflowInferencer,
     WorkflowStepConfig,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
-from agent_foundation.ui.interactive_base import (
-    InteractionFlags,
-    InteractiveBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
-from rich_python_utils.common_objects.workflow.common.exceptions import (
-    WorkflowAborted,
-)
+from rich_python_utils.common_objects.workflow.common.exceptions import WorkflowAborted
 from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
     StepResultSaveOptions,
 )
@@ -253,7 +244,6 @@ _CHILD_DEFAULTS = {
 
 # Attr name → short workspace name (for _setup_child_workflows)
 _CHILD_NAME_MAP = {k: v[0] for k, v in _CHILD_DEFAULTS.items()}
-
 
 
 @artifact_type(Workflow, type="json", group="workflows")
@@ -503,7 +493,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # --- Set LWI configuration attrs ---
         self.response_builder = self._build_response_from_state
         self.iteration_workspace_factory = (
-            lambda base, n: PlanThenImplementInferencer._get_iteration_workspace(base, n)
+            lambda base, n: PlanThenImplementInferencer._get_iteration_workspace(
+                base, n
+            )
         )
         self.reset_sessions_per_iteration = self.reset_sessions_per_meta_iteration
         self.iteration_record_builder = self._build_iteration_record
@@ -685,8 +677,12 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         ws = InferencerWorkspace(root=iter_workspace)
 
         # Only rewrite output_path for children without workspace
-        planner_has_ws = getattr(self.planner_inferencer, "_workspace", None) is not None
-        executor_has_ws = getattr(self.executor_inferencer, "_workspace", None) is not None
+        planner_has_ws = (
+            getattr(self.planner_inferencer, "_workspace", None) is not None
+        )
+        executor_has_ws = (
+            getattr(self.executor_inferencer, "_workspace", None) is not None
+        )
 
         for config_key, child_has_ws in (
             (self.plan_config_key, planner_has_ws),
@@ -904,9 +900,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             return "(first iteration — no prior history)"
 
         iter_workspace = os.path.dirname(outputs_dir)
-        root_ws = (
-            self.resume_workspace
-            or (self._workspace.root if self._workspace else None)
+        root_ws = self.resume_workspace or (
+            self._workspace.root if self._workspace else None
         )
         if root_ws is None:
             root_ws = os.path.dirname(os.path.dirname(iter_workspace))
@@ -970,9 +965,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
     def _parse_analysis_response(self, analysis_text: str) -> Tuple[bool, str]:
         """Parse analysis response JSON to extract continuation decision."""
-        from agent_foundation.common.response_parsers import (
-            extract_delimited,
-        )
+        from agent_foundation.common.response_parsers import extract_delimited
 
         try:
             cleaned = extract_delimited(analysis_text)
@@ -1119,9 +1112,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # New: child workspace artifacts (round files)
         child_art_dir = os.path.join(ws.children_dir, "planner", "artifacts")
         if os.path.isdir(child_art_dir):
-            child_files = glob.glob(
-                os.path.join(child_art_dir, "round*_plan.md")
-            )
+            child_files = glob.glob(os.path.join(child_art_dir, "round*_plan.md"))
             if child_files:
                 best = max(child_files, key=self._extract_round)
                 try:
@@ -1276,13 +1267,18 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     break
             if plan_file is None:
                 deliv = os.path.join(
-                    ws.children_dir, planner_child, "outputs",
-                    "final_deliverables", "output.md",
+                    ws.children_dir,
+                    planner_child,
+                    "outputs",
+                    "final_deliverables",
+                    "output.md",
                 )
                 if os.path.isfile(deliv):
                     plan_file = deliv
             if plan_file is None:
-                child_art_dir = os.path.join(ws.children_dir, planner_child, "artifacts")
+                child_art_dir = os.path.join(
+                    ws.children_dir, planner_child, "artifacts"
+                )
                 if os.path.isdir(child_art_dir):
                     child_files = glob.glob(
                         os.path.join(child_art_dir, "round*_plan.md")
@@ -1319,13 +1315,18 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     break
             if impl_file is None:
                 deliv = os.path.join(
-                    ws.children_dir, executor_child, "outputs",
-                    "final_deliverables", "output.md",
+                    ws.children_dir,
+                    executor_child,
+                    "outputs",
+                    "final_deliverables",
+                    "output.md",
                 )
                 if os.path.isfile(deliv):
                     impl_file = deliv
             if impl_file is None:
-                child_art_dir = os.path.join(ws.children_dir, executor_child, "artifacts")
+                child_art_dir = os.path.join(
+                    ws.children_dir, executor_child, "artifacts"
+                )
                 if os.path.isdir(child_art_dir):
                     child_files = glob.glob(
                         os.path.join(child_art_dir, "round*_implementation.md")
@@ -1965,9 +1966,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
         # Build iteration config
         if base_workspace:
-            iter_config = self._build_iteration_config(
-                inference_config, ws, iteration
-            )
+            iter_config = self._build_iteration_config(inference_config, ws, iteration)
             self._setup_iteration_workspace(ws, iteration, state["current_input"])
         else:
             iter_config = inference_config
@@ -1994,13 +1993,17 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 from agent_foundation.common.inferencers.inferencer_workspace import (
                     InferencerWorkspace,
                 )
+
                 pti_ws = InferencerWorkspace(root=ws)
                 # Write to the planner's deliverables — same location as if
                 # the planner Dual had run and finalized its output.
                 planner_ws = pti_ws.child("planner_inferencer")
                 planner_ws.ensure_dirs()
                 plan_output = os.path.join(
-                    planner_ws.root, "outputs", "final_deliverables", "output.md",
+                    planner_ws.root,
+                    "outputs",
+                    "final_deliverables",
+                    "output.md",
                 )
                 os.makedirs(os.path.dirname(plan_output), exist_ok=True)
                 with open(plan_output, "w") as f:
@@ -2031,6 +2034,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 )
 
         self.log_info(f"[{self.planner_phase}] Starting planning phase")
+        await self._emit_phase_status("planner", "running")
 
         result = await self.planner_inferencer.ainfer(
             state["current_input"],
@@ -2060,6 +2064,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if ws:
             self._write_step_completion_marker(ws, "plan")
 
+        await self._emit_phase_status(
+            "planner", "completed", output_path=plan_file_path or ""
+        )
         return plan_str
 
     async def _step_approval_impl(self, step_input, state):
@@ -2079,9 +2086,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 checkpoint_plan_review,
             )
 
-            plan_summary = (
-                f"{plan_str[:1000]}{'...' if len(plan_str) > 1000 else ''}"
-            )
+            plan_summary = f"{plan_str[:1000]}{'...' if len(plan_str) > 1000 else ''}"
             result = await checkpoint_plan_review(
                 interactive, plan_summary, default_action="approve"
             )
@@ -2177,6 +2182,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         # would be speculative infrastructure with no consumer.
 
         self.log_info(f"[{self.executor_phase}] Starting execution phase")
+        await self._emit_phase_status("executor", "running")
 
         result = await self.executor_inferencer.ainfer(
             executor_input,
@@ -2188,6 +2194,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
         state["executor_output_text"] = executor_str
         state["_executor_response"] = result
+        await self._emit_phase_status("executor", "completed")
 
         # Tier 2: write file-based completion marker
         ws = self._current_iteration_workspace
@@ -2293,7 +2300,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 plan_file_path=state.get(FIELD_PLAN_PATH),
                 plan_approved=state.get("plan_approved"),
                 analysis_output=state.get("_analysis_result_text"),
-                test_results_found=self._has_results(os.path.join(ws, "outputs")) if ws else False,
+                test_results_found=self._has_results(os.path.join(ws, "outputs"))
+                if ws
+                else False,
             )
             from rich_python_utils.common_utils.map_helper import dict__
 
@@ -2304,9 +2313,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         state["should_continue"] = should_continue
         if should_continue:
             next_request_text = next_request if "next_request" in dir() else ""
-            analysis_doc = (
-                analysis_doc_path if "analysis_doc_path" in dir() else None
-            )
+            analysis_doc = analysis_doc_path if "analysis_doc_path" in dir() else None
             analysis_summary = analysis_str[:500] if "analysis_str" in dir() else ""
             state["iteration"] += 1
             state["current_input"] = self._build_iteration_handoff(
@@ -2330,9 +2337,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     next_ws, state["iteration"], state["current_input"]
                 )
 
-        return state.get(
-            "_analysis_result_text", state.get("executor_output_text", "")
-        )
+        return state.get("_analysis_result_text", state.get("executor_output_text", ""))
 
     # endregion
 
@@ -2471,9 +2476,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         from agent_foundation.common.inferencers.inferencer_workspace import (
             InferencerWorkspace,
         )
-        iter_ws_path = self._get_iteration_workspace(
-            self._workspace.root, last_iter
-        )
+
+        iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
         iter_ws = InferencerWorkspace(
             root=iter_ws_path,
             use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
@@ -2484,13 +2488,25 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 child_ws = iter_ws.child(child_name)
                 # Symlink output file
                 child_deliv = child_ws.deliverable_path(filename)
-                child_out = child_ws.output_path(filename) if hasattr(child_ws, "output_path") else None
-                src = child_deliv if (child_deliv and os.path.isfile(child_deliv)) else child_out
+                child_out = (
+                    child_ws.output_path(filename)
+                    if hasattr(child_ws, "output_path")
+                    else None
+                )
+                src = (
+                    child_deliv
+                    if (child_deliv and os.path.isfile(child_deliv))
+                    else child_out
+                )
                 if src and os.path.isfile(src):
                     dst = self._workspace.output_path(filename)
                     self._symlink_or_copy(src, dst)
                 # Symlink deliverable file
-                if self._workspace.deliverables_dir and child_deliv and os.path.isfile(child_deliv):
+                if (
+                    self._workspace.deliverables_dir
+                    and child_deliv
+                    and os.path.isfile(child_deliv)
+                ):
                     dst = self._workspace.deliverable_path(filename)
                     if dst:
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -2516,9 +2532,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             InferencerWorkspace,
         )
 
-        iter_ws_path = self._get_iteration_workspace(
-            self._workspace.root, last_iter
-        )
+        iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
         # v1.7 Phase 4: propagate use_final_deliverables_folder so child
         # workspaces returned by iter_ws.child(role) have their deliverables_dir set.
         iter_ws = InferencerWorkspace(
@@ -2546,28 +2560,31 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 aggregate_into_self_deliverables,
                 collect_child_boundary_deliverables,
             )
+
             # PTI's child workspaces use SHORT names from _CHILD_DEFAULTS
             # (planner, executor, analyzer). They live under the iter_ws,
             # which is itself a child of self._workspace. Walk the iter_ws's
             # children to collect the role boundaries.
             children = collect_child_boundary_deliverables(
                 iter_ws,
-                boundary_filter=lambda name, ws: name in (
-                    "planner", "executor", "analyzer"
-                ),
+                boundary_filter=lambda name, ws: name
+                in ("planner", "executor", "analyzer"),
             )
             if children:
                 report = aggregate_into_self_deliverables(
-                    self._workspace, children,
+                    self._workspace,
+                    children,
                     namespace_strategy=self.deliverable_namespace_strategy,
                     conflict_strategy=self.deliverable_conflict_strategy,
                 )
                 if report.copied:
                     import logging
+
                     _pti_logger = logging.getLogger(__name__)
                     _pti_logger.info(
                         "PTI boundary surfaced %d role deliverable(s) → %s",
-                        len(report.copied), self._workspace.deliverables_dir,
+                        len(report.copied),
+                        self._workspace.deliverables_dir,
                     )
 
             # Publish PTI's own response (the implementation file) into
@@ -2635,9 +2652,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         #      InferencerBase, or set by a parent's
         #      ``_propagate_workspace_to_children`` after PTI's
         #      ``__attrs_post_init__`` has already run.
-        base_workspace = (
-            self.resume_workspace
-            or (self._workspace.root if self._workspace else None)
+        base_workspace = self.resume_workspace or (
+            self._workspace.root if self._workspace else None
         )
 
         # Handle "complete" early return for resume
@@ -2732,17 +2748,85 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             self.enable_result_save = StepResultSaveOptions.Always
             self.resume_with_saved_results = True
 
+        # Part 2: emit the PTI root graph (one node per enabled phase) so the UI
+        # renders the split view; each phase's nested Dual/BTA sub-graph nests
+        # under its node (ids == _rc_child slots). Guarded — never aborts inference.
+        await self._emit_root_topology()
+
         # Delegate to LWI's _ainfer which handles:
         # - _build_steps() from step_configs
         # - Workflow._arun() execution
         # - response_builder invocation
         # - final result caching
-        result = await super()._ainfer(inference_input, inference_config, **_inference_args)
+        try:
+            result = await super()._ainfer(
+                inference_input, inference_config, **_inference_args
+            )
+        except Exception:
+            await self._emit_graph_reconcile(error=True)
+            raise
+
+        # Final reconcile so phases the per-step emits missed still show terminal.
+        await self._emit_graph_reconcile()
 
         # Copy selected child outputs to workspace root outputs/
         self._finalize_outputs()
 
         return result
+
+    # === Graph visualization (Part 2): root phase topology + per-phase status ===
+    # PTI is Workflow-based (not a WorkGraph) so it builds GraphTopologyEvent
+    # manually. Node ids MUST equal the _rc_child slot names so each phase's
+    # nested sub-graph (child Dual/BTA at ctx.path "/<slot>") nests under it.
+    # All emits are guarded — visualization must never abort inference.
+    def _graph_phase_nodes(self):
+        """(slot, label) for each ENABLED PTI phase; ids match _rc_child slots."""
+        phases = []
+        if self.enable_planning:
+            phases.append(("planner", self.planner_phase or "Plan"))
+        if self.enable_implementation:
+            phases.append(("executor", self.executor_phase or "Implement"))
+        if self.enable_analysis:
+            phases.append(("analyzer", "Analysis"))
+        return phases
+
+    async def _emit_root_topology(self):
+        """Emit the PTI root graph: one container node per enabled phase."""
+        try:
+            from agent_foundation.common.inferencers.graph_events import NodeStatus
+
+            nodes, edges, prev = [], [], None
+            for slot, label in self._graph_phase_nodes():
+                nodes.append(
+                    {
+                        "id": slot,
+                        "label": label,
+                        "group": None,
+                        "status": NodeStatus.PENDING,
+                        "is_container": True,
+                    }
+                )
+                if prev is not None:
+                    edges.append({"source": prev, "target": slot})
+                prev = slot
+        except Exception:
+            return
+        await self._emit_graph_topology(nodes, edges)
+
+    async def _emit_phase_status(self, slot, status, output_path=""):
+        """Emit a node_status for a PTI phase node."""
+        await self._emit_graph_node_status(slot, status, output_path=output_path)
+
+    async def _emit_graph_reconcile(self, *, error: bool = False):
+        """Emit a final reconcile of terminal phase statuses."""
+        try:
+            from agent_foundation.common.inferencers.graph_events import NodeStatus
+
+            terminal = NodeStatus.ERROR if error else NodeStatus.COMPLETED
+            statuses = {slot: terminal for slot, _ in self._graph_phase_nodes()}
+        except Exception:
+            return
+        await self._emit_graph_reconcile_statuses(statuses)
 
     # endregion
 

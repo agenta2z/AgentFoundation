@@ -14,9 +14,13 @@ string into the dash-separated format expected by Claude Code, plus
 shared Literal type aliases for ``--effort`` and ``--permission-mode``.
 """
 
+import logging
 import os
 import re
+import sys
 from typing import Literal, Optional
+
+_logger: logging.Logger = logging.getLogger(__name__)
 
 # Reasoning-effort levels accepted by ``claude --effort <level>`` (CLI
 # v2.1.119+). Higher levels allocate more thinking budget to the model
@@ -90,6 +94,19 @@ def resolve_disable_osx_sandbox(explicit: Optional[bool]) -> bool:
     file access. Only enable it in trusted contexts where an outer sandbox (or
     other isolation) is already in force.
     """
+    # OS guard: ``--dangerously-disable-osx-sandbox`` is a macOS-only flag.
+    # Linux/Windows builds of ``claude`` reject it with "is only supported on
+    # macOS" and exit 1, returning empty output. Silently coerce to False off
+    # macOS so a Linux dev/server with ``CLAUDE_CODE_INFERANCER_NO_SANDBOX=1``
+    # set in their shell rc (a common multi-OS setup) doesn't break every
+    # subprocess. Log once at debug level for traceability.
+    if sys.platform != "darwin":
+        if explicit is True or env_flag_enabled(ENV_DISABLE_OSX_SANDBOX):
+            _logger.debug(
+                "%s is a macOS-only flag; ignoring on platform=%s.",
+                DANGEROUSLY_DISABLE_OSX_SANDBOX, sys.platform,
+            )
+        return False
     if explicit is not None:
         return bool(explicit)
     return env_flag_enabled(ENV_DISABLE_OSX_SANDBOX)
