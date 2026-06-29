@@ -1919,8 +1919,10 @@ class DualInferencer(LinearWorkflowInferencer):
             total_iters, "fix", self._role_get("fixer_inferencer"),
             workspace_root_at_phase=_fix_ws_snapshot,
             extra={
+                "audit_kind": "fix",
                 "iteration": iteration_record.iteration if iteration_record else None,
                 "has_counter_feedback": counter_feedback_str is not None,
+                "consensus_reached": state.get("consensus_reached"),
             },
         )
         return fix_output_str
