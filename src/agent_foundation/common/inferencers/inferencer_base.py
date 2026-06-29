@@ -2644,20 +2644,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
-            guardrail_ws = None
-            if self._workspace is not None:
-                guardrail_ws = self._workspace.child("guardrail")
-                guardrail_ws.ensure_dirs()
-                judge._workspace = guardrail_ws
-            # Run the judge under its OWN child context ("…/guardrail") matching
-            # its child workspace. Without this it inherits the judged flow's
-            # active context and claims the SAME context path — a CollisionError
-            # ("Two distinct nodes must not share one context path") whenever the
-            # judge's class differs from the flow's (e.g. a Claude judge over a
-            # Devmate/Codex flow), which was caught and logged as fail-open spam.
-            verdict_raw = await judge.ainfer(
-                prompt, run_context=self._rc_child("guardrail", workspace=guardrail_ws)
-            )
+            guardrail_ctx = self._prepare_guardrail_judge(judge)
+            verdict_raw = await judge.ainfer(prompt, run_context=guardrail_ctx)
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 _logger.info(
@@ -2681,16 +2669,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
-            guardrail_ws = None
-            if self._workspace is not None:
-                guardrail_ws = self._workspace.child("guardrail")
-                guardrail_ws.ensure_dirs()
-                judge._workspace = guardrail_ws
-            # Own child context ("…/guardrail") — see _run_output_guardrail for why
-            # (avoids the cross-class context-path CollisionError / fail-open spam).
-            verdict_raw = judge.infer(
-                prompt, run_context=self._rc_child("guardrail", workspace=guardrail_ws)
-            )
+            guardrail_ctx = self._prepare_guardrail_judge(judge)
+            verdict_raw = judge.infer(prompt, run_context=guardrail_ctx)
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 _logger.info(
@@ -2707,14 +2687,67 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             return True
 
-    def _render_guardrail_prompt(self, response) -> str:
-        """Render the judge prompt with the main inferencer's input + output."""
-        from agent_foundation.common.inferencers.recovery import render_recovery_prompt
+    def _prepare_guardrail_judge(self, judge):
+        """Isolate the guardrail judge before invocation; return its run-context.
 
-        output_text = str(
-            response.get("output", "") if isinstance(response, dict) else response
-        )
+        Fixes two coupled defects observed when a templated CLI judge runs as an
+        output_validator:
+
+        1. **Double-wrap.** ``_render_guardrail_prompt`` already produces the
+           COMPLETE judge instruction (``recovery/judge.jinja2``). If the judge
+           inherited a planning template (via cascade), its own ``_render_prompt``
+           would wrap the judge prompt a SECOND time ("You are tasked with
+           creating artifacts: [You are a quality judge…]") — so the judge does
+           planning instead of judging. We neutralize the judge's template_manager
+           (once; idempotent) so it executes the pre-rendered prompt verbatim,
+           mirroring how recovery prompts are pre-rendered and fed back raw.
+
+        2. **Context collision + workspace scatter.** Running the judge with no
+           run-context made it claim the CALLER's context node (CollisionError →
+           fail-open) and split its artifacts (cache under guardrail/, logs under
+           the caller's workspace via context-override precedence in the
+           ``_workspace`` getter). We give the judge its OWN ``guardrail`` child
+           context with the guardrail workspace published to it (M7 pattern), so
+           its node, workspace, cache, and logs all resolve consistently under
+           ``children/guardrail/`` and never collide with the caller.
+        """
+        # (1) Pre-rendered prompt → never let the judge re-template it.
+        if getattr(judge, "template_manager", None) is not None:
+            judge.template_manager = None
+        # (2) Own run-context child + published guardrail workspace (M7).
+        guardrail_ctx = self._rc_child("guardrail")
+        if self._workspace is not None:
+            guardrail_ws = self._workspace.child("guardrail")
+            self._publish_workspace_to_ctx(guardrail_ctx, guardrail_ws)
+            if guardrail_ctx is None:
+                judge._workspace = guardrail_ws  # legacy (no active context)
+        return guardrail_ctx
+
+    def _render_guardrail_prompt(self, response) -> str:
+        """Render the judge prompt (``recovery/judge``) with input + output.
+
+        Unified with ``StreamingInferencerBase._render_recovery_prompt``: render
+        via this inferencer's OWN ``template_manager`` when present — it already
+        carries the recovery template root (added in
+        ``StreamingInferencerBase.__attrs_post_init__`` via ``add_template_root``),
+        so custom roots / overrides of ``recovery/judge.jinja2`` apply and the
+        guardrail shares the single, flexible templating path used by the
+        ``continue`` / ``retry_with_reference`` recovery prompts. Recovery
+        templates live at ``recovery/<name>.jinja2`` (no type subdir), so render
+        with ``active_template_type=""``. Falls back to the standalone recovery
+        TemplateManager when this inferencer has no ``template_manager``.
+        """
+        output_text = str(response.get("output", "") if isinstance(response, dict) else response)
         input_text = str(getattr(self, "_last_inference_input", "") or "")
+        tm = getattr(self, "template_manager", None)
+        if tm is not None:
+            return tm(
+                "recovery/judge",
+                active_template_type="",
+                prompt=input_text,
+                partial_output=output_text,
+            )
+        from agent_foundation.common.inferencers.recovery import render_recovery_prompt
         return render_recovery_prompt(
             "recovery/judge",
             prompt=input_text,

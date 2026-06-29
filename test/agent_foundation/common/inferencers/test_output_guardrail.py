@@ -183,5 +183,77 @@ class TestJudgePromptRendering(unittest.TestCase):
         self.assertIn("CONTINUE", prompt)
 
 
+class TestGuardrailUnifiedRendering(unittest.TestCase):
+    """The guardrail prompt should render via the inferencer's OWN template_manager
+    (unified with continue/retry_with_reference recovery prompts), not only the
+    standalone recovery TemplateManager."""
+
+    def test_renders_recovery_judge_via_own_template_manager(self):
+        from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
+            ClaudeCodeCliInferencer,
+        )
+        from rich_python_utils.string_utils.formatting.template_manager import (
+            TemplateManager,
+        )
+        from agent_foundation.common.inferencers.constants.paths import (
+            DEFAULT_PROMPT_TEMPLATES_DIR,
+        )
+
+        tm = TemplateManager(
+            templates=[str(DEFAULT_PROMPT_TEMPLATES_DIR)], active_template_type="main"
+        )
+        inf = ClaudeCodeCliInferencer(
+            template_manager=tm, template_root_space="plan", template_key="initial"
+        )
+        inf._last_inference_input = "the original task"
+        rendered = inf._render_guardrail_prompt({"output": "PARTIAL_OUTPUT_MARKER"})
+
+        # Rendered the recovery/judge template (verdict contract present)…
+        self.assertIn("quality judge", rendered.lower())
+        self.assertIn("PASS", rendered)
+        self.assertIn("RESTART", rendered)
+        # …with the real input + output woven in…
+        self.assertIn("the original task", rendered)
+        self.assertIn("PARTIAL_OUTPUT_MARKER", rendered)
+        # …and did NOT double-wrap with the planning template.
+        self.assertNotIn("You are tasked with creating artifacts", rendered)
+
+
+class TestGuardrailNoDoubleWrap(unittest.TestCase):
+    """The guardrail prompt is already fully rendered (recovery/judge). A judge
+    that carries its own (planning) template must NOT wrap it a second time."""
+
+    def test_templated_judge_template_neutralized(self):
+        # A judge that "carries a template" — simulate via a truthy template_manager.
+        @attrs
+        class _TemplatedJudge(InferencerBase):
+            _seen_prompt = attrib(default=None, init=False)
+
+            def _infer(self, inference_input, inference_config=None, **kwargs):
+                # Record the prompt the judge actually executes.
+                object.__setattr__(self, "_seen_prompt", str(inference_input))
+                return "PASS"
+
+        judge = _TemplatedJudge()
+        # Give it a non-None template_manager so the double-wrap path WOULD fire
+        # if we didn't neutralize it.
+        judge.template_manager = object()
+
+        inf = _StubInferencer(output_guardrail_inferencer=judge)
+        inf._last_inference_input = "do the task"
+        inf.set_responses(["the output"])
+        result = inf.infer("input")
+        self.assertEqual(str(result), "the output")
+
+        # The fix must have neutralized the judge's template_manager so it ran
+        # the pre-rendered guardrail prompt verbatim (no second wrap).
+        self.assertIsNone(judge.template_manager)
+        # And the prompt the judge executed is the fully-rendered judge prompt,
+        # containing the verdict contract — NOT a planning-template wrapper.
+        self.assertIsNotNone(judge._seen_prompt)
+        self.assertIn("quality judge", judge._seen_prompt.lower())
+        self.assertNotIn("You are tasked with creating artifacts", judge._seen_prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
