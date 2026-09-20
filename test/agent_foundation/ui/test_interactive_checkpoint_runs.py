@@ -4,19 +4,20 @@ Before Phase 0, interactive_checkpoint.py called await interactive.aget_input()
 and await interactive.asend_response(), but InteractiveBase didn't define these
 methods — causing AttributeError at runtime. This test verifies the fix.
 """
-import asyncio
-import pytest
 
-from attr import attrs, attrib
+import asyncio
+
+import pytest
+from agent_foundation.ui.input_modes import ChoiceOption
 from agent_foundation.ui.interactive_base import InteractionFlags
-from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
 from agent_foundation.ui.interactive_checkpoint import (
-    run_checkpoint,
     checkpoint_plan_review,
     checkpoint_results_review,
     CheckpointResult,
+    run_checkpoint,
 )
-from agent_foundation.ui.input_modes import ChoiceOption
+from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
@@ -27,6 +28,7 @@ class FakeInteractive(RichInteractiveBase):
     interactive_checkpoint passes input_mode= to asend_response, which
     only RichInteractiveBase.send_response() accepts.
     """
+
     responses: list = attrib(factory=list, kw_only=True)
     _response_idx: int = attrib(default=0, init=False)
     _sent: list = attrib(factory=list, init=False)

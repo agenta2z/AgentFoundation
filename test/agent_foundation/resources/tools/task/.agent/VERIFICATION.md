@@ -1,10 +1,10 @@
 # task — Run Verification Catalog
 
-> **Purpose**: Tool-specific post-run verification for `/task` (the production task tool). Use **together with** the common catalog at `../VERIFICATION.md` (covers A1–A19 / O-1 – O-22 that apply to any BTA/Dual-based tool).
+> **Purpose**: Tool-specific post-run verification for `/task` (the production task tool). Use **together with** the common catalog at `../../.agent/VERIFICATION.md` (covers A1–A20 / O-1 – O-24 that apply to any BTA/Dual-based tool).
 >
 > Only **historical, documented** observations appear in §2. Speculative "what could go wrong" items are intentionally excluded — VERIFICATION docs catalog observed reality, not imagined risk.
 >
-> **Last updated**: 2026-06-25 (AF-native refresh — OS→AF migration + state/definition-separation + M7 fixes; see the `wsfix8` §4 baseline)
+> **Last updated**: 2026-06-29 (added TK-A-17 / TK-O-12 covering the v8 breakdown-collapse failure mode + its fix; scoped TK-A-16 for deterministic guardrails. Earlier: merged the OS task-catalog additions — TK-A-9..16 / TK-O-6..11 covering the v5–v7 consensus-fix, audit-log, session-log, panelist, scaffold, and output-guardrail-judge issues; common catalog moved to `tools/.agent/`)
 
 ---
 
@@ -75,9 +75,9 @@ task_<YYYYMMDD_HHMMSS>_<uuid>/
    export WS=$(ls -td /Users/tchen7/MyProjects/CoreProjects/AgentFoundation/_runtime/tasks/*/* | head -1)   # AF nests runs under tasks/<tool-name>/<run-id>; run dirs are <tool-name>_<YYYYMMDD_HHMMSS>_<uuid>, NOT task_*
    echo "Auditing: $WS"
    ```
-3. Run the **common audit body** (paste from `../VERIFICATION.md` §1 one-liner sanity script) — verifies A1–A19
+3. Run the **common audit body** (paste from `../../.agent/VERIFICATION.md` §1 one-liner sanity script) — verifies A1–A19
 4. Run the **tool-specific audit pack** below (TK-A-1 – TK-A-N) — adds task-only structural checks
-5. If any check FAILS, consult `../VERIFICATION.md` §2 (common observations) FIRST, then §2 below (task-specific) — root cause may be tool-agnostic.
+5. If any check FAILS, consult `../../.agent/VERIFICATION.md` §2 (common observations) FIRST, then §2 below (task-specific) — root cause may be tool-agnostic.
 
 ---
 
@@ -95,11 +95,20 @@ These rows extend the common audit with task-only structural concerns (multi-agg
 | TK-A-6 | Inner aggregators reference peer flows via `(See file: ...)` / `(See outputs folder: ...)` | For each `worker_N/children/propose/children/aggregator/.../InferenceInput/*.txt`, the prompt contains a marker pair — `(See outputs folder: .../flow_N/outputs)` AND `(See file: .../flow_N/outputs/output.md)` — for BOTH flow_0 AND flow_1 of the SAME worker_N subtree | (Common A7 extension) |
 | TK-A-7 | No iteration runaway | `worker_N/.../jsonl.parts/Round<NN>/` count ≤ `flow_max_dynamic_steps`; top-level `round_NN/` count ≤ `consensus_max_iterations` | (Cost guard) |
 | TK-A-8 | Flow FOLLOWUP-step input references the prior step's full-output file on disk (own + peer), not just the lossy summary | For each `flow_M/children/round*/.../InferenceInput/*.txt` (round ≥ 01), the prompt MUST contain the own-flow on-disk reference — an `on disk at` / `previous full artifact` block pointing at the flow's own prior `children/{initial\|round*}/outputs/output.md`; AND, when a visible peer has already produced output, a `full peer artifact is available` reference to that peer's output. The referenced path MUST exist + be non-empty. Summary-text-only (no file path) FAILS. **Distinct from TK-A-6**: TK-A-6 audits the AGGREGATOR input (BTA-orchestrator resolution — always passed); TK-A-8 audits the FOLLOWUP-step input (MFI `_resolve_flow_output_path` — regressed under M7, fixed 2026-06-25). A passing TK-A-6 says NOTHING about TK-A-8. | TK-O-5 |
+| TK-A-9 | Fix contributed to every non-consensus worker | For every MFDual worker whose last review was NOT consensus (`consensus_reached=false` in `round_log.jsonl`), the worker's `output.md` MUST differ from its `propose/outputs/.../output.md` (a fix actually changed the output). Byte-identical = fix silently skipped. | TK-O-6 |
+| TK-A-10 | No CRITICAL-rejected output shipped | No worker's final `output.md` corresponds to a last-round review with unresolved CRITICAL severity. Check the last `audit_kind: "merged"` entry in each worker's `round_log.jsonl` — if `severity=CRITICAL`/`approved=false`, a fix entry MUST follow (or the worker is flagged `DEGRADED`). | TK-O-6 |
+| TK-A-11 | Round-log entries carry decision fields | Every `review` entry in `round_log.jsonl` contains `consensus_reached`, `severity`, `approved`, `audit_kind`; every `fix` entry contains `audit_kind: "fix"` + `consensus_reached`. Bare `{round,phase,inferencer_class,timestamp}` rows FAIL. | TK-O-7 |
+| TK-A-12 | Per-panelist audit entries present (panel mode) | In panel mode (2+ reviewers), each review round has per-panelist entries (`audit_kind: "panelist"`, with `panelist: panelist_NN`) PLUS one merged entry (`audit_kind: "merged"`). | TK-O-7 |
+| TK-A-13 | Session logs for ALL CLI inferencer types | Every flow step (`initial`, `round01`, …) AND every reviewer/fixer leaf has a NON-empty `logs/session/` regardless of CLI type (Codex, Claude, RovoDev). A created-but-empty `logs/session/` FAILS. | TK-O-8 |
+| TK-A-14 | Consistent panelist dirs | In panel mode the primary reviewer gets `review/children/panelist_00/` (not bare `review/`); all panelists have `panelist_NN/` dirs starting at `00` with no numbering gaps. | TK-O-9 |
+| TK-A-15 | No empty scaffold dirs | No empty `children/review/` or `children/fix/` at the worker root, and no empty `children/guardrail/` (scaffold subdirs present but 0 files) for accepted (PASS) guardrail verdicts. | TK-O-10 |
+| TK-A-16 | Output-guardrail judge actually JUDGED (not double-wrapped) | For **LLM/CLI judges** (the aggregator + flow leaves, whose `output_guardrail_inferencer` is a `${_params.main_inferencer}` CLI): each `children/guardrail/` has a non-empty `logs/session/` and the judge emitted a parseable verdict (`PASS`/`RESTART`/`RETRY_WITH_REFERENCE`/`CONTINUE`). The judge's `InferenceInput` is the judge prompt VERBATIM (starts with `You are a lightweight quality judge`), NOT wrapped in the planning template (`You are tasked with creating artifacts…`). No `already claimed by creator` CollisionError for the guardrail path. **Carve-out**: a *deterministic* guardrail (e.g. `SubtaskStructureJudge` on the breakdown leaf — pure-Python, duck-typed) intentionally makes **no** CLI call, so it creates **no** `children/guardrail/` dir and writes **no** session log — do NOT flag its absence; verify it via TK-A-17 (subtask count) instead. | TK-O-11 |
+| TK-A-17 | Breakdown produced subtasks → flows actually spawned (never a SILENT 0) | A live breakdown yields ≥1 subtask: `children/propose/children/` has ≥1 `worker_NN/` AND an `aggregator/`, and the breakdown `outputs/output.md` is a JSON decomposition (not pure narration). If a breakdown legitimately yields 0 (transient/agent failure), the degrade MUST be LOUD: a `BREAKDOWN_EMPTY_DEGRADE` warning is present in the logs (never a silent skip-to-0-workers with exit 0). FAIL = `propose/children/` has only `breakdown/` (no workers, no aggregator) AND no `BREAKDOWN_EMPTY_DEGRADE` warning. | TK-O-12 |
 
 ### Quick wrapper
 
 ```bash
-# Run common audit body (see ../VERIFICATION.md §1 one-liner)
+# Run common audit body (see ../../.agent/VERIFICATION.md §1 one-liner)
 # Then run task-specifics:
 
 set -u
@@ -202,11 +211,48 @@ echo "TK-A-8 followup inputs with prior-output file ref: $fu_ok / $fu_total (exp
 - **Distinguishes from healthy**: A healthy followup input contains, in addition to the summary text, an explicit `on disk at` / `previous full artifact` path to the flow's own prior `children/{initial|round*}/outputs/output.md` (must exist + be non-empty), plus a `full peer artifact is available at` path for each visible peer that has produced output.
 - **Contrast with TK-A-6 (why both rows exist)**: TK-A-6's `(See file:)` refs come from the BTA re-deriving each worker's path from the ORCHESTRATOR's OWN live workspace (`_bta_self._workspace.child(...)`) — an M7-correct path that always PASSED. TK-O-5 / TK-A-8 audit the FOLLOWUP-step input, whose path resolution went through the stale-leaf `_workspace`. A green TK-A-6 is NOT evidence for TK-A-8.
 
+### TK-O-6 — Worker fix step silently skipped despite a CRITICAL review rejection (B1)
+- **Look for**: A worker's `round_log.jsonl` has a review entry with `consensus_reached: false` and `severity: CRITICAL`/`MAJOR` but NO subsequent fix entry; the worker's `output.md` is byte-identical to `propose/outputs/.../output.md` (review/fix contributed nothing); `consensus_achieved: true` in the MFDual `InferenceResponse` despite the rejection.
+- **Source**: Runs `multimodal_plan_3flow_20260627_140601_8d62955c` (v5) and `…_20260628_091301_3b63d7fd` (v6) — worker_00 hit this in both. Root cause: `fixer_strategy=winner` with NO winner detected → fixer fell back to the MFI orchestrator (not a `TemplatedInferencerBase`) → `_RoleDisabledError` → handler forced `consensus_reached=True`. **Fixed** in `multi_flow_dual_inferencer.py::_select_reviewer_and_fixer` (when `winner is None`, fall back to the first flow's `initial_inferencer` as fixer); confirmed in v7 (2 graceful FixerFallbacks, all workers ran fix cycles).
+- **Distinguishes from healthy**: a non-consensus worker has fix entries in `round_log`, `output.md` differs from propose, and `total_iterations` reflects the consensus loop actually iterating.
+
+### TK-O-7 — round_log.jsonl lacks decision fields / per-panelist entries (B2)
+- **Look for**: `round_log.jsonl` entries contain only `{round, phase, inferencer_class, timestamp}` — missing `consensus_reached`/`severity`/`approved`/`audit_kind`/`panelist`. In panel mode, only one review entry per round (no per-panelist breakdown).
+- **Source**: Run `…_20260627_140601_8d62955c` (v5) — all workers' round_logs were bare. **Fixed** in `dual_inferencer.py` by passing `extra=` dicts at the review (`:1604`) and fix (`:1823`) audit call sites, plus per-panelist audit entries (`audit_kind: "panelist"`) and a merged entry (`audit_kind: "merged"`).
+- **Distinguishes from healthy**: per-panelist entries for each reviewer + a merged entry with the decision fields, and fix entries with `audit_kind: "fix"` + `consensus_reached`.
+
+### TK-O-8 — Per-step session logs empty for CodexCLI / ClaudeCodeCLI (B3)
+- **Look for**: Flow-step dirs (`flow_00/children/initial/logs/session/`, `flow_01/children/round01/logs/session/`) exist but contain 0 files — only RovoDevCLI (flow_02) writes session logs. The `logs/` dir is present (workspace was assigned) but the logger was never resolved for the other CLI types.
+- **Source**: Run `…_20260627_140601_8d62955c` (v5) — flow_00 (Codex) + flow_01 (Claude) had 0 session files across all workers/steps; flow_02 (RovoDev) had 8/step. **Fixed** via workspace/ctx propagation so the deferred logger resolves for all CLI types; confirmed in v6/v7 (all three CLI types log 8 files/step).
+- **Distinguishes from healthy**: every flow step has a non-empty `logs/session/` (InferenceInput + InferenceResponse) regardless of CLI type.
+
+### TK-O-9 — Primary reviewer (panelist 0) has no dedicated workspace dir (B4)
+- **Look for**: In panel mode the primary reviewer runs under bare `review/` while extras get `review/children/panelist_01/`, `panelist_02/` — no `panelist_00/`. Panelist-dir count ≠ reviewer count (e.g. 2 reviewers but 1 panelist dir).
+- **Source**: Run `…_20260627_140601_8d62955c` (v5) — worker_01/02 had only `panelist_01/` (1 dir for 2 reviewers). **Fixed** in `dual_inferencer.py` (primary reviewer gets `panelist_00/` in panel mode; single-reviewer mode keeps bare `review/`); confirmed in v6/v7.
+- **Distinguishes from healthy**: all reviewers have `panelist_NN/` dirs starting at `00`, no gaps.
+
+### TK-O-10 — Empty scaffold dirs pollute the workspace tree (B5)
+- **Look for**: Each worker has empty `children/review/` + `children/fix/` at the worker root (alongside the real `round_NN/children/review|fix/`); and/or empty `children/guardrail/` dirs (scaffold subdirs present, 0 files) created when the guardrail judge accepted (PASS) without writing.
+- **Source**: v5 (6 empty review/fix scaffolds) + v7 (`…_20260628_152604_4fab40a1`, ~20 empty guardrail scaffolds). **Fixed** by (1) not creating the workspace in `_reassign_role_workspace` (review/fix scaffolds) and (2) removing the eager `ensure_dirs()` from `_run_output_guardrail` (guardrail scaffolds).
+- **Distinguishes from healthy**: no empty `review/`, `fix/`, or `guardrail/` dirs — every dir that exists contains files.
+
+### TK-O-11 — Output-guardrail judge double-wrapped → planned instead of judging; ran without context isolation (v7)
+- **Look for**: A `children/guardrail/` whose `logs/` and `outputs/` are EMPTY but whose `_runtime/inferencer_cache/` holds a stream file containing **plan-writing narration** ("I'll investigate… write the consolidated plan") rather than a `PASS`/`RESTART` verdict; the judge's `InferenceInput` starts with the PLANNING template (`You are tasked with creating artifacts…`) with `You are a lightweight quality judge` buried inside `## Original User Request` (double-wrap); `already claimed by creator … CollisionError` followed by `Output guardrail judge failed … accepting output (fail-open)` in the log. **Auditor trap**: this judge session is easily mistaken for a SECOND aggregator invocation with a "default preamble" (the source of the spurious v7 "A16 fail" / "aggregator ran twice" findings) — a `winner_pick`/`<Winner>` grep on the judge cache is meaningless.
+- **Source**: Run `multimodal_plan_3flow_20260628_152604_4fab40a1` (v7) — every guardrail judge (outer + 3 inner) was double-wrapped and never actually judged (silent fail-open). Root cause: `inferencer_base.py::_run_output_guardrail` rendered the complete judge prompt then called `judge.ainfer(prompt)` on a judge that inherited the plan template (→ re-wrapped → did planning), AND ran with no isolated run-context (→ claimed the caller's ctx node → CollisionError; cache landed under `guardrail/` while the session log resolved to the caller's workspace). **Fixed**: render `recovery/judge` via `self.template_manager` (unified with `_render_recovery_prompt`), neutralize the judge's `template_manager` so it executes the pre-rendered prompt verbatim, and run it under its own `_rc_child("guardrail")` with the workspace published (M7) — see `_prepare_guardrail_judge`. Guarded by `test_output_guardrail.py::TestGuardrailNoDoubleWrap` + `TestGuardrailUnifiedRendering`.
+- **Distinguishes from healthy**: the judge emits a parseable verdict; `children/guardrail/logs/session/` + `outputs/` are populated; no CollisionError; the judge's `InferenceInput` is the judge prompt verbatim (no planning-template wrapper).
+
+---
+
+### TK-O-12 — Breakdown turn cut short → 0 subtasks → ENTIRE multi-flow pipeline silently skipped (v8)
+- **Look for**: `children/propose/children/` containing ONLY `breakdown/` (no `worker_NN/`, no `aggregator/`); the breakdown `outputs/output.md` is pure narration ("I'll start by investigating the codebase…") with no JSON `subtasks` array; **no** `BREAKDOWN_EMPTY_DEGRADE` warning in the log; yet the run still exits 0 with a populated top-level `outputs/output.md` symlink (the outer Dual reviewed/fixed the raw narration into a single-agent plan). Run wall-clock is anomalously short (v8 = 41 min vs a healthy ~2 h). The aggregator + guardrail judge NEVER run, so a "0 collisions" health signal is meaningless.
+- **Source**: Run `multimodal_plan_3flow_20260629_021219_1ca9970a` (v8). Root cause was NOT the agent choosing to write a file — the breakdown agent's final turn was killed mid-stream by the nested `claude` CLI's byte-stream idle watchdog (`CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`, inherited at 20000 ms from the interactive session): a normal >20 s think-pause tripped a synthetic `API Error: Response stalled mid-stream` that ended the turn before any inline `<Response>` JSON was emitted (return code still 0). The BTA then parsed 0 subtasks and **silently** returned the raw narration (`if not sub_queries: return raw_output`), skipping all worker fan-out. **Fixed** with three layers: (1) `ClaudeCodeCliInferencer.byte_stream_idle_timeout_ms=120000` written into the spawned subprocess env (`_build_subprocess_env`) so a long think-pause no longer kills spawned agents; (2) a deterministic `SubtaskStructureJudge` (`output_guardrail_inferencer`) + `max_retry: 3` on the breakdown leaf (`breakdown-multiflow-plan.yaml` + `default.yaml`) so a narration/0-subtask breakdown is REJECTED and retried; (3) BTA now emits a LOUD `BREAKDOWN_EMPTY_DEGRADE` `self.log_warning` then degrades — never a silent skip. Guarded by `test/agent_foundation/common/inferencers/guardrails/test_subtask_structure_judge.py` (judge + failsafe) and `…/external/claude_code/test_byte_stream_idle_env.py` (scoped timeout). See also common-catalog **O-24**.
+- **Distinguishes from healthy**: v9 (`…_20260629_103951_192264bc`) — breakdown `output.md` is a 12 KB JSON decomposition → 3 `worker_NN/` + `aggregator/` spawned; ran ~2 h; aggregator guardrail judge ran 61× with real verdicts; 0 `BREAKDOWN_EMPTY_DEGRADE`.
+
 ---
 
 ## §3 Authoring Guide — Adding a NEW task-Specific Observation
 
-Follow the same rules as the common catalog (`../VERIFICATION.md` §3):
+Follow the same rules as the common catalog (`../../.agent/VERIFICATION.md` §3):
 
 1. **Observation, not cause.** Describe what an unhealthy run LOOKS LIKE in the workspace/log, not why it happened.
 2. **Historical-only.** Add a TK-O entry ONLY if there is documented evidence the issue occurred — cite the source (a plan file, code comment, test, or a recorded run workspace). Do NOT add speculative "what could go wrong" entries.

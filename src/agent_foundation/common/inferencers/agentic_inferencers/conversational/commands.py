@@ -166,20 +166,25 @@ class CommandRegistry:
         """Render commands as tool-like descriptions for the LLM prompt."""
         lines: list[str] = []
         for meta, attr_name in self._by_name.values():
-            if meta.name in {m.name for m in self.list_commands() if m.name == meta.name}:
+            if meta.name in {
+                m.name for m in self.list_commands() if m.name == meta.name
+            }:
                 handler = getattr(type(self._inferencer), attr_name, None)
                 # Derive parameter info from method signature
                 params = ""
                 if handler and meta.requires_args:
                     sig = inspect.signature(handler)
                     param_names = [
-                        p.name for p in sig.parameters.values()
-                        if p.name != "self"
+                        p.name for p in sig.parameters.values() if p.name != "self"
                     ]
                     if param_names:
                         params = f" <{'> <'.join(param_names)}>"
 
-                aliases = f" (aliases: {', '.join('/' + a for a in meta.aliases)})" if meta.aliases else ""
+                aliases = (
+                    f" (aliases: {', '.join('/' + a for a in meta.aliases)})"
+                    if meta.aliases
+                    else ""
+                )
                 lines.append(f"- `/{meta.name}{params}`{aliases}: {meta.description}")
         # Deduplicate (aliases cause repeats)
         seen: set[str] = set()

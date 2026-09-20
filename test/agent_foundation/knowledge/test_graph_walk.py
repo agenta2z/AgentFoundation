@@ -6,10 +6,11 @@ for the unified graph walk functions.
 
 Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 5.1, 5.2, 5.3, 5.4
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 # Path resolution for imports
 _current_file = Path(__file__).resolve()
@@ -29,21 +30,22 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
-
 from agent_foundation.knowledge.retrieval.graph_walk import (
-    SeedNode,
-    find_search_seeds,
+    _node_passes_space_filter,
+    _should_skip_piece,
     find_identity_seeds,
+    find_search_seeds,
     graph_walk,
     merge_graph_contexts,
-    _should_skip_piece,
-    _node_passes_space_filter,
+    SeedNode,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from conftest import InMemoryEntityGraphStore
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 
 
 # ── In-memory piece store for unit tests ─────────────────────────────────────
@@ -71,7 +73,15 @@ class InMemoryPieceStore(KnowledgePieceStore):
     def remove(self, piece_id: str) -> bool:
         return self._pieces.pop(piece_id, None) is not None
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
+    def search(
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
+        spaces=None,
+    ):
         return [(p, 0.5) for p in list(self._pieces.values())[:top_k]]
 
     def list_all(self, entity_id=None, knowledge_type=None, spaces=None):
@@ -93,7 +103,15 @@ class FailingPieceStore(KnowledgePieceStore):
     def remove(self, piece_id):
         return False
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
+    def search(
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
+        spaces=None,
+    ):
         return []
 
     def list_all(self, entity_id=None, knowledge_type=None, spaces=None):
@@ -103,7 +121,9 @@ class FailingPieceStore(KnowledgePieceStore):
 # ── Helper to build a simple graph ──────────────────────────────────────────
 
 
-def _make_node(node_id: str, spaces: Optional[List[str]] = None, label: str = "") -> GraphNode:
+def _make_node(
+    node_id: str, spaces: Optional[List[str]] = None, label: str = ""
+) -> GraphNode:
     return GraphNode(
         node_id=node_id,
         node_type="concept",
@@ -213,9 +233,13 @@ class TestDepthZeroTraversal:
         neighbor = _make_node("neighbor", spaces=["main"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="seed", target_id="neighbor", edge_type="KNOWS",
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="seed",
+                target_id="neighbor",
+                edge_type="KNOWS",
+            )
+        )
         seed = _make_seed(seed_node, score=0.9, source="search")
 
         result = graph_walk(store, piece_store, [seed], traversal_depth=0)
@@ -246,9 +270,13 @@ class TestGetNeighborsException:
         store.add_node(good_node)
         store.add_node(bad_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="good_seed", target_id="neighbor_of_good", edge_type="KNOWS",
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="good_seed",
+                target_id="neighbor_of_good",
+                edge_type="KNOWS",
+            )
+        )
 
         good_seed = _make_seed(good_node, score=0.8, source="search")
         bad_seed = _make_seed(bad_node, score=0.6, source="search")
@@ -263,7 +291,9 @@ class TestGetNeighborsException:
 
         store.get_neighbors = patched_get_neighbors
 
-        result = graph_walk(store, piece_store, [bad_seed, good_seed], traversal_depth=1)
+        result = graph_walk(
+            store, piece_store, [bad_seed, good_seed], traversal_depth=1
+        )
 
         # bad_seed: depth-0 entry only (walk skipped)
         # good_seed: depth-0 + depth-1 neighbor
@@ -292,10 +322,14 @@ class TestGetRelationsException:
         neighbor = _make_node("neighbor_rel", spaces=["main"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="seed_rel", target_id="neighbor_rel", edge_type="WORKS_AT",
-            properties={"piece_id": "some_piece"},
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="seed_rel",
+                target_id="neighbor_rel",
+                edge_type="WORKS_AT",
+                properties={"piece_id": "some_piece"},
+            )
+        )
 
         seed = _make_seed(seed_node, score=0.9, source="search")
 
@@ -328,10 +362,14 @@ class TestPieceStoreReturnsNone:
         neighbor = _make_node("neighbor_pn", spaces=["main"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="seed_pn", target_id="neighbor_pn", edge_type="USES",
-            properties={"piece_id": "nonexistent_piece"},
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="seed_pn",
+                target_id="neighbor_pn",
+                edge_type="USES",
+                properties={"piece_id": "nonexistent_piece"},
+            )
+        )
 
         seed = _make_seed(seed_node, score=0.8, source="search")
 
@@ -359,10 +397,14 @@ class TestPieceStoreException:
         neighbor = _make_node("neighbor_pe", spaces=["main"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="seed_pe", target_id="neighbor_pe", edge_type="MANAGES",
-            properties={"piece_id": "will_fail"},
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="seed_pe",
+                target_id="neighbor_pe",
+                edge_type="MANAGES",
+                properties={"piece_id": "will_fail"},
+            )
+        )
 
         seed = _make_seed(seed_node, score=0.7, source="search")
 
@@ -397,15 +439,24 @@ class TestSpaceFiltering:
         store.add_node(no_match_neighbor)
         store.add_node(overlap_neighbor)
 
-        store.add_relation(GraphEdge(source_id="seed_sf", target_id="match", edge_type="KNOWS"))
-        store.add_relation(GraphEdge(source_id="seed_sf", target_id="no_match", edge_type="KNOWS"))
-        store.add_relation(GraphEdge(source_id="seed_sf", target_id="overlap", edge_type="KNOWS"))
+        store.add_relation(
+            GraphEdge(source_id="seed_sf", target_id="match", edge_type="KNOWS")
+        )
+        store.add_relation(
+            GraphEdge(source_id="seed_sf", target_id="no_match", edge_type="KNOWS")
+        )
+        store.add_relation(
+            GraphEdge(source_id="seed_sf", target_id="overlap", edge_type="KNOWS")
+        )
 
         seed = _make_seed(seed_node, score=0.9, source="search")
 
         result = graph_walk(
-            store, piece_store, [seed],
-            traversal_depth=1, spaces=["main", "work"],
+            store,
+            piece_store,
+            [seed],
+            traversal_depth=1,
+            spaces=["main", "work"],
         )
 
         depth_1_ids = {e["target_node_id"] for e in result if e["depth"] == 1}
@@ -422,7 +473,9 @@ class TestSpaceFiltering:
         neighbor = _make_node("neighbor_ns", spaces=["anything"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(source_id="seed_ns", target_id="neighbor_ns", edge_type="KNOWS"))
+        store.add_relation(
+            GraphEdge(source_id="seed_ns", target_id="neighbor_ns", edge_type="KNOWS")
+        )
 
         seed = _make_seed(seed_node, score=0.5, source="search")
 
@@ -453,14 +506,21 @@ class TestSpaceFilteringEmptyNodeSpaces:
         store.add_node(empty_spaces_neighbor)
         store.add_node(has_spaces_neighbor)
 
-        store.add_relation(GraphEdge(source_id="seed_es", target_id="empty_spaces", edge_type="KNOWS"))
-        store.add_relation(GraphEdge(source_id="seed_es", target_id="has_spaces", edge_type="KNOWS"))
+        store.add_relation(
+            GraphEdge(source_id="seed_es", target_id="empty_spaces", edge_type="KNOWS")
+        )
+        store.add_relation(
+            GraphEdge(source_id="seed_es", target_id="has_spaces", edge_type="KNOWS")
+        )
 
         seed = _make_seed(seed_node, score=0.8, source="search")
 
         result = graph_walk(
-            store, piece_store, [seed],
-            traversal_depth=1, spaces=["main"],
+            store,
+            piece_store,
+            [seed],
+            traversal_depth=1,
+            spaces=["main"],
         )
 
         depth_1_ids = {e["target_node_id"] for e in result if e["depth"] == 1}
@@ -713,16 +773,22 @@ class TestMultiEdgeToSameNeighbor:
         store.add_node(store_node)
 
         # Two edges to the same target
-        store.add_relation(GraphEdge(
-            source_id="user", target_id="store",
-            edge_type="MEMBER_OF",
-            properties={"piece_id": "membership_piece"},
-        ))
-        store.add_relation(GraphEdge(
-            source_id="user", target_id="store",
-            edge_type="SHOPS_AT",
-            properties={},
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="user",
+                target_id="store",
+                edge_type="MEMBER_OF",
+                properties={"piece_id": "membership_piece"},
+            )
+        )
+        store.add_relation(
+            GraphEdge(
+                source_id="user",
+                target_id="store",
+                edge_type="SHOPS_AT",
+                properties={},
+            )
+        )
 
         seed = _make_seed(user_node, score=1.0, source="identity")
 
@@ -736,24 +802,19 @@ class TestMultiEdgeToSameNeighbor:
         # Depth-1: should have both MEMBER_OF and SHOPS_AT
         depth_1 = [e for e in result if e["depth"] == 1]
         store_rels = [
-            e["relation_type"] for e in depth_1
-            if e["target_node_id"] == "store"
+            e["relation_type"] for e in depth_1 if e["target_node_id"] == "store"
         ]
         assert "MEMBER_OF" in store_rels
         assert "SHOPS_AT" in store_rels
         assert len(store_rels) == 2
 
         # The MEMBER_OF entry should have the piece
-        member_entry = next(
-            e for e in depth_1 if e["relation_type"] == "MEMBER_OF"
-        )
+        member_entry = next(e for e in depth_1 if e["relation_type"] == "MEMBER_OF")
         assert member_entry["piece"] is not None
         assert member_entry["piece"].piece_id == "membership_piece"
 
         # The SHOPS_AT entry should have no piece
-        shops_entry = next(
-            e for e in depth_1 if e["relation_type"] == "SHOPS_AT"
-        )
+        shops_entry = next(e for e in depth_1 if e["relation_type"] == "SHOPS_AT")
         assert shops_entry["piece"] is None
 
     def test_single_edge_still_works(self):
@@ -765,9 +826,13 @@ class TestMultiEdgeToSameNeighbor:
         neighbor = _make_node("n", spaces=["main"])
         store.add_node(seed_node)
         store.add_node(neighbor)
-        store.add_relation(GraphEdge(
-            source_id="s", target_id="n", edge_type="KNOWS",
-        ))
+        store.add_relation(
+            GraphEdge(
+                source_id="s",
+                target_id="n",
+                edge_type="KNOWS",
+            )
+        )
 
         seed = _make_seed(seed_node, score=0.8, source="search")
 

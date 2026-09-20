@@ -4,7 +4,6 @@ import json
 from typing import List, Optional, Tuple
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.knowledge_updater import (
     KnowledgeUpdater,
     UpdateConfig,
@@ -88,38 +87,50 @@ def _make_piece(
 
 def _make_replace_llm_fn():
     """LLM that always returns replace action."""
+
     def llm_fn(prompt: str) -> str:
-        return json.dumps({
-            "action": "replace",
-            "confidence": 0.9,
-            "reasoning": "New content is an update",
-            "changes_summary": "Replaced content",
-        })
+        return json.dumps(
+            {
+                "action": "replace",
+                "confidence": 0.9,
+                "reasoning": "New content is an update",
+                "changes_summary": "Replaced content",
+            }
+        )
+
     return llm_fn
 
 
 def _make_merge_llm_fn(strategy: str = "append"):
     """LLM that always returns merge action."""
+
     def llm_fn(prompt: str) -> str:
-        return json.dumps({
-            "action": "merge",
-            "confidence": 0.8,
-            "reasoning": "Content should be combined",
-            "merge_strategy": strategy,
-            "changes_summary": "Merged content",
-        })
+        return json.dumps(
+            {
+                "action": "merge",
+                "confidence": 0.8,
+                "reasoning": "Content should be combined",
+                "merge_strategy": strategy,
+                "changes_summary": "Merged content",
+            }
+        )
+
     return llm_fn
 
 
 def _make_no_change_llm_fn():
     """LLM that always returns no_change action."""
+
     def llm_fn(prompt: str) -> str:
-        return json.dumps({
-            "action": "no_change",
-            "confidence": 0.7,
-            "reasoning": "No update needed",
-            "changes_summary": "",
-        })
+        return json.dumps(
+            {
+                "action": "no_change",
+                "confidence": 0.7,
+                "reasoning": "No update needed",
+                "changes_summary": "",
+            }
+        )
+
     return llm_fn
 
 
@@ -196,9 +207,7 @@ class TestUpdateById:
     def test_replace_with_llm(self):
         piece = _make_piece("Old content")
         store = InMemoryPieceStore(pieces=[piece])
-        updater = KnowledgeUpdater(
-            piece_store=store, llm_fn=_make_replace_llm_fn()
-        )
+        updater = KnowledgeUpdater(piece_store=store, llm_fn=_make_replace_llm_fn())
 
         result = updater.update_by_id(piece.piece_id, "New content")
 
@@ -249,9 +258,7 @@ class TestUpdateById:
     def test_no_change_from_llm(self):
         piece = _make_piece("Content")
         store = InMemoryPieceStore(pieces=[piece])
-        updater = KnowledgeUpdater(
-            piece_store=store, llm_fn=_make_no_change_llm_fn()
-        )
+        updater = KnowledgeUpdater(piece_store=store, llm_fn=_make_no_change_llm_fn())
 
         result = updater.update_by_id(piece.piece_id, "New content")
 
@@ -309,9 +316,7 @@ class TestUpdateById:
         def mock_embedding_fn(text: str) -> List[float]:
             return [0.4, 0.5, 0.6]
 
-        updater = KnowledgeUpdater(
-            piece_store=store, embedding_fn=mock_embedding_fn
-        )
+        updater = KnowledgeUpdater(piece_store=store, embedding_fn=mock_embedding_fn)
 
         result = updater.update_by_id(piece.piece_id, "New content")
 
@@ -372,9 +377,7 @@ class TestUpdateByContent:
         store = InMemoryPieceStore(pieces=[p1, p2], search_score=0.90)
         updater = KnowledgeUpdater(piece_store=store)
 
-        results = updater.update_by_content(
-            "New content", domain="testing"
-        )
+        results = updater.update_by_content("New content", domain="testing")
 
         # Only p1 should match the domain filter
         assert len(results) == 1
@@ -392,9 +395,7 @@ class TestUpdateByContent:
     def test_with_llm_no_change_skipped(self):
         piece = _make_piece("Content")
         store = InMemoryPieceStore(pieces=[piece], search_score=0.90)
-        updater = KnowledgeUpdater(
-            piece_store=store, llm_fn=_make_no_change_llm_fn()
-        )
+        updater = KnowledgeUpdater(piece_store=store, llm_fn=_make_no_change_llm_fn())
 
         results = updater.update_by_content("New content")
 
@@ -569,7 +570,9 @@ class TestComputeFinalContent:
 
     def test_merge_interleave(self):
         result = self.updater._compute_final_content(
-            "P1\n\nP2", "N1\n\nN2", UpdateAction.MERGE,
+            "P1\n\nP2",
+            "N1\n\nN2",
+            UpdateAction.MERGE,
             {"merge_strategy": "interleave"},
         )
         assert "P1" in result
@@ -578,9 +581,7 @@ class TestComputeFinalContent:
         assert "N2" in result
 
     def test_merge_default_is_append(self):
-        result = self.updater._compute_final_content(
-            "A", "B", UpdateAction.MERGE, {}
-        )
+        result = self.updater._compute_final_content("A", "B", UpdateAction.MERGE, {})
         assert result == "A\n\nB"
 
     def test_no_change_returns_existing(self):
@@ -603,55 +604,69 @@ def _make_instruction_mode_llm_fn(
     Distinguishes calls by checking for the "Determine Input Mode" marker
     in the intent prompt vs "Apply the user's instruction" in the generation prompt.
     """
+
     def llm_fn(prompt: str) -> str:
         if "Determine Input Mode" in prompt:
             # Intent analysis call
-            return json.dumps({
-                "input_mode": "instruction",
-                "action": action,
-                "confidence": 0.95,
-                "reasoning": "User gave an instruction, not content",
-                "changes_summary": "Applied instruction",
-            })
+            return json.dumps(
+                {
+                    "input_mode": "instruction",
+                    "action": action,
+                    "confidence": 0.95,
+                    "reasoning": "User gave an instruction, not content",
+                    "changes_summary": "Applied instruction",
+                }
+            )
         elif "Apply the user's instruction" in prompt:
             # Content generation call
-            return json.dumps({
-                "generated_content": generated,
-            })
+            return json.dumps(
+                {
+                    "generated_content": generated,
+                }
+            )
         else:
             # Fallback — shouldn't happen
             return json.dumps({"action": "no_change"})
+
     return llm_fn
 
 
 def _make_content_mode_llm_fn(action: str = "replace"):
     """LLM that always returns input_mode=content (existing behavior)."""
+
     def llm_fn(prompt: str) -> str:
-        return json.dumps({
-            "input_mode": "content",
-            "action": action,
-            "confidence": 0.9,
-            "reasoning": "User provided actual content",
-            "changes_summary": "Replaced content",
-        })
+        return json.dumps(
+            {
+                "input_mode": "content",
+                "action": action,
+                "confidence": 0.9,
+                "reasoning": "User provided actual content",
+                "changes_summary": "Replaced content",
+            }
+        )
+
     return llm_fn
 
 
 def _make_failing_generation_llm_fn():
     """LLM that returns instruction mode intent, but raises on generation call."""
+
     def llm_fn(prompt: str) -> str:
         if "Determine Input Mode" in prompt:
-            return json.dumps({
-                "input_mode": "instruction",
-                "action": "replace",
-                "confidence": 0.9,
-                "reasoning": "Instruction detected",
-                "changes_summary": "Would apply instruction",
-            })
+            return json.dumps(
+                {
+                    "input_mode": "instruction",
+                    "action": "replace",
+                    "confidence": 0.9,
+                    "reasoning": "Instruction detected",
+                    "changes_summary": "Would apply instruction",
+                }
+            )
         elif "Apply the user's instruction" in prompt:
             raise RuntimeError("LLM generation failed")
         else:
             return json.dumps({"action": "no_change"})
+
     return llm_fn
 
 
@@ -663,7 +678,9 @@ class TestInstructionModeUpdate:
 
     def test_instruction_replace_generates_content(self):
         """When LLM classifies as instruction mode, generated content replaces piece."""
-        piece = _make_piece("Grocery store shopping procedure: 1. Get cart 2. Shop 3. Checkout")
+        piece = _make_piece(
+            "Grocery store shopping procedure: 1. Get cart 2. Shop 3. Checkout"
+        )
         store = InMemoryPieceStore(pieces=[piece])
         updater = KnowledgeUpdater(
             piece_store=store,
@@ -757,13 +774,15 @@ class TestInstructionModeUpdate:
         # Even if LLM returns instruction mode, without update_instruction
         # the guard prevents entering instruction path
         def llm_fn(prompt: str) -> str:
-            return json.dumps({
-                "input_mode": "instruction",
-                "action": "replace",
-                "confidence": 0.9,
-                "reasoning": "Test",
-                "changes_summary": "Test",
-            })
+            return json.dumps(
+                {
+                    "input_mode": "instruction",
+                    "action": "replace",
+                    "confidence": 0.9,
+                    "reasoning": "Test",
+                    "changes_summary": "Test",
+                }
+            )
 
         updater = KnowledgeUpdater(piece_store=store, llm_fn=llm_fn)
 
@@ -889,17 +908,29 @@ class TestStripJsonFences:
 
         def fenced_llm(prompt: str) -> str:
             if "Determine Input Mode" in prompt:
-                return '```json\n' + json.dumps({
-                    "input_mode": "instruction",
-                    "action": "replace",
-                    "confidence": 0.9,
-                    "reasoning": "Test",
-                    "changes_summary": "Test",
-                }) + '\n```'
+                return (
+                    "```json\n"
+                    + json.dumps(
+                        {
+                            "input_mode": "instruction",
+                            "action": "replace",
+                            "confidence": 0.9,
+                            "reasoning": "Test",
+                            "changes_summary": "Test",
+                        }
+                    )
+                    + "\n```"
+                )
             elif "Apply the user's instruction" in prompt:
-                return '```json\n' + json.dumps({
-                    "generated_content": "Fenced result content",
-                }) + '\n```'
+                return (
+                    "```json\n"
+                    + json.dumps(
+                        {
+                            "generated_content": "Fenced result content",
+                        }
+                    )
+                    + "\n```"
+                )
             return json.dumps({"action": "no_change"})
 
         updater = KnowledgeUpdater(piece_store=store, llm_fn=fenced_llm)

@@ -6,7 +6,17 @@ Defines data models, runtime context, and protocol contracts for UI automation.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol, Union, runtime_checkable, TYPE_CHECKING
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    TYPE_CHECKING,
+    Union,
+)
+
 from pydantic import BaseModel, Field, validator
 
 if TYPE_CHECKING:
@@ -14,6 +24,7 @@ if TYPE_CHECKING:
 
 
 # region Target Specifications
+
 
 class TargetStrategy(str, Enum):
     """
@@ -54,15 +65,16 @@ class TargetStrategy(str, Enum):
       receives the target value and optional hints, returning an element reference.
       Value: 'agent'
     """
-    FRAMEWORK_ID = '__id__'    # Framework-assigned unique identifier
-    ID = 'id'                  # Native UI element identifier attribute
-    XPATH = 'xpath'            # XPath expression (web/XML)
-    CSS = 'css'                # CSS selector (web)
-    TEXT = 'text'              # Text content matching
-    SOURCE = 'source'          # Source markup matching (HTML, XAML, etc.)
-    DESCRIPTION = 'description'  # AI-based natural language resolution
-    LITERAL = 'literal'        # Literal value (e.g., URLs)
-    AGENT = 'agent'            # Agent-based element finding (uses find_element_agent)
+
+    FRAMEWORK_ID = "__id__"  # Framework-assigned unique identifier
+    ID = "id"  # Native UI element identifier attribute
+    XPATH = "xpath"  # XPath expression (web/XML)
+    CSS = "css"  # CSS selector (web)
+    TEXT = "text"  # Text content matching
+    SOURCE = "source"  # Source markup matching (HTML, XAML, etc.)
+    DESCRIPTION = "description"  # AI-based natural language resolution
+    LITERAL = "literal"  # Literal value (e.g., URLs)
+    AGENT = "agent"  # Agent-based element finding (uses find_element_agent)
 
 
 class TargetSpec(BaseModel):
@@ -104,15 +116,24 @@ class TargetSpec(BaseModel):
         description: Natural language description for AI-based fallback resolution.
         options: Optional hints for agent-based resolution (e.g., ["static"] for cacheable elements).
     """
-    strategy: Optional[Union[TargetStrategy, str]] = None  # Optional - uses action's default if not specified
-    value: Optional[str] = None  # Value for strategy-based resolution (e.g., element ID, XPath)
-    description: Optional[str] = None  # Optional natural language description as fallback
-    options: Optional[List[str]] = None  # Optional hints for agent-based resolution (e.g., ["static"] for cacheable)
 
-    @validator('description', always=True)
+    strategy: Optional[Union[TargetStrategy, str]] = (
+        None  # Optional - uses action's default if not specified
+    )
+    value: Optional[str] = (
+        None  # Value for strategy-based resolution (e.g., element ID, XPath)
+    )
+    description: Optional[str] = (
+        None  # Optional natural language description as fallback
+    )
+    options: Optional[List[str]] = (
+        None  # Optional hints for agent-based resolution (e.g., ["static"] for cacheable)
+    )
+
+    @validator("description", always=True)
     def must_have_value_or_description(cls, v, values):
         """Value or description must be provided."""
-        value = values.get('value')
+        value = values.get("value")
         if not value and not v:
             raise ValueError("Must specify at least 'value' or 'description'")
         return v
@@ -155,18 +176,21 @@ class TargetSpecWithFallback(BaseModel):
     Attributes:
         strategies: Ordered list of TargetSpec objects to try. First match wins.
     """
+
     strategies: List[TargetSpec]
 
-    @validator('strategies')
+    @validator("strategies")
     def must_have_at_least_one(cls, v):
         if not v:
             raise ValueError("Must specify at least one strategy")
         return v
 
+
 # endregion
 
 
 # region Action Models
+
 
 class Action(BaseModel):
     """
@@ -215,20 +239,33 @@ class Action(BaseModel):
             }
         }
     """
+
     id: str  # Unique action identifier
     type: str  # Action type (e.g., "click", "input_text", "visit_url")
-    target: Optional[Union[TargetSpec, TargetSpecWithFallback, str, int, float]] = None  # Target element(s) - space-separated for composite actions; int/float for wait duration
+    target: Optional[Union[TargetSpec, TargetSpecWithFallback, str, int, float]] = (
+        None  # Target element(s) - space-separated for composite actions; int/float for wait duration
+    )
     args: Optional[Dict[str, Any]] = None  # Action-specific arguments
-    condition: Optional[str] = None  # Optional condition for execution (for future increments)
+    condition: Optional[str] = (
+        None  # Optional condition for execution (for future increments)
+    )
     on_error: str = "stop"  # Error handling policy (for future increments)
     output: Optional[str] = None  # Output variable name (for future increments)
     timeout: Optional[float] = None  # Action timeout in seconds (for future increments)
-    wait: Optional[Union[float, bool]] = None  # Wait after action: float=seconds, True=human confirmation
-    no_action_if_target_not_found: bool = False  # Skip action if target element not found
-    
+    wait: Optional[Union[float, bool]] = (
+        None  # Wait after action: float=seconds, True=human confirmation
+    )
+    no_action_if_target_not_found: bool = (
+        False  # Skip action if target element not found
+    )
+
     # Target not found branch - allows defining fallback actions when target cannot be resolved
-    target_not_found_actions: Optional[List['Action']] = None  # List of actions to execute when target not found
-    target_not_found_config: Optional[Dict[str, Any]] = None  # Config: retry_after_handling, max_retries, retry_delay
+    target_not_found_actions: Optional[List["Action"]] = (
+        None  # List of actions to execute when target not found
+    )
+    target_not_found_config: Optional[Dict[str, Any]] = (
+        None  # Config: retry_after_handling, max_retries, retry_delay
+    )
 
     class Config:
         extra = "forbid"  # Reject unknown fields
@@ -240,20 +277,23 @@ Action.update_forward_refs()
 
 class ActionSequence(BaseModel):
     """Complete action sequence specification."""
+
     version: str = "1.0"  # Schema version
     id: str  # Sequence identifier
     description: Optional[str] = None  # Human-readable description
     variables: Optional[Dict[str, Any]] = None  # Variables (for future increments)
     actions: List[Action]  # List of actions to execute
-    outputs: Optional[Dict[str, str]] = None  # Output definitions (for future increments)
+    outputs: Optional[Dict[str, str]] = (
+        None  # Output definitions (for future increments)
+    )
 
-    @validator('actions')
+    @validator("actions")
     def must_have_actions(cls, v):
         if not v:
             raise ValueError("Action sequence must contain at least one action")
         return v
 
-    @validator('actions')
+    @validator("actions")
     def action_ids_must_be_unique(cls, v):
         """Ensure all action IDs are unique."""
         ids = [action.id for action in v]
@@ -265,14 +305,17 @@ class ActionSequence(BaseModel):
     class Config:
         extra = "forbid"  # Reject unknown fields
 
+
 # endregion
 
 
 # region Execution Context and Results
 
+
 @dataclass
 class ActionResult:
     """Result of action execution."""
+
     success: bool
     value: Any = None
     error: Optional[Exception] = None
@@ -296,6 +339,7 @@ class ExecutionRuntime:
         current_action_id: ID of currently executing action
         node_states: Runtime state for each action during execution (keyed by action.id)
     """
+
     variables: Dict[str, Any] = field(default_factory=dict)
     results: Dict[str, ActionResult] = field(default_factory=dict)
     current_action_id: Optional[str] = None
@@ -383,7 +427,7 @@ class ExecutionRuntime:
         else:
             self.node_states[action_id][key] = value
 
-    def merge(self, other: 'ExecutionRuntime'):
+    def merge(self, other: "ExecutionRuntime"):
         """Merge another runtime's results and variables into this one.
 
         Used by loop constructs to merge advance sequence results back
@@ -404,6 +448,7 @@ class ExecutionResult:
 
     Contains success status, final context state, and any outputs.
     """
+
     success: bool
     context: ExecutionRuntime
     outputs: Dict[str, Any] = field(default_factory=dict)
@@ -413,35 +458,38 @@ class ExecutionResult:
 
 class LoopExecutionError(Exception):
     """Error during loop execution with iteration context.
-    
+
     Provides detailed context about which loop and iteration failed,
     wrapping the original error for debugging.
-    
+
     Attributes:
         loop_id: Identifier of the loop node that failed
         iteration: The iteration number (0-indexed) when failure occurred
         original_error: The underlying exception that caused the failure
     """
+
     def __init__(self, loop_id: str, iteration: int, original_error: Exception):
         self.loop_id = loop_id
         self.iteration = iteration
         self.original_error = original_error
-        super().__init__(f"Loop '{loop_id}' failed at iteration {iteration}: {original_error}")
+        super().__init__(
+            f"Loop '{loop_id}' failed at iteration {iteration}: {original_error}"
+        )
 
 
 class TargetNotFoundError(Exception):
     """Raised when target element not found after all retries.
-    
+
     This exception is raised when an action's target cannot be resolved
     after exhausting all retry attempts. It provides detailed context
     about the failed action and retry configuration.
-    
+
     Attributes:
         action_type: The type of action that failed (e.g., "click", "input_text")
         target: The target specification that could not be resolved
         attempt_count: Total number of attempts made (1 initial + retries)
         max_retries: Maximum retries that were configured
-    
+
     Example:
         >>> raise TargetNotFoundError(
         ...     action_type="click",
@@ -451,19 +499,20 @@ class TargetNotFoundError(Exception):
         ... )
         TargetNotFoundError: Target not found after 4 attempts (1 initial + 3 retries allowed). Action: click, Target: id:submit-btn
     """
+
     def __init__(
         self,
         action_type: str,
         target: Union[TargetSpec, TargetSpecWithFallback, str],
         attempt_count: int,
-        max_retries: int
+        max_retries: int,
     ):
         self.action_type = action_type
         self.target = target
         self.attempt_count = attempt_count
         self.max_retries = max_retries
         attempt_word = "attempt" if attempt_count == 1 else "attempts"
-        
+
         # Format target for display
         if isinstance(target, TargetSpec):
             target_str = f"{target.strategy}:{target.value}"
@@ -471,7 +520,7 @@ class TargetNotFoundError(Exception):
             target_str = f"fallback[{len(target.strategies)} strategies]"
         else:
             target_str = str(target)
-        
+
         super().__init__(
             f"Target not found after {attempt_count} {attempt_word} "
             f"(1 initial + {max_retries} retries allowed). "
@@ -481,14 +530,14 @@ class TargetNotFoundError(Exception):
 
 class BranchAlreadyExistsError(Exception):
     """Raised when attempting to define a duplicate branch on an action.
-    
+
     This exception is raised when `target_not_found()` is called twice
     on the same action, which would overwrite the existing branch definition.
-    
+
     Attributes:
         condition: The branch condition type (e.g., "target_not_found")
         action_type: The type of action that already has this branch
-    
+
     Example:
         >>> raise BranchAlreadyExistsError(
         ...     condition="target_not_found",
@@ -496,6 +545,7 @@ class BranchAlreadyExistsError(Exception):
         ... )
         BranchAlreadyExistsError: Branch 'target_not_found' already exists on action 'click'.
     """
+
     def __init__(self, condition: str, action_type: str):
         self.condition = condition
         self.action_type = action_type
@@ -503,10 +553,12 @@ class BranchAlreadyExistsError(Exception):
             f"Branch '{condition}' already exists on action '{action_type}'."
         )
 
+
 # endregion
 
 
 # region Protocols
+
 
 @runtime_checkable
 class ActionExecutor(Protocol):
@@ -522,7 +574,7 @@ class ActionExecutor(Protocol):
         action: Action,
         resolved_target: Any,
         action_metadata: "ActionMetadataRegistry",
-        resolved_targets: Any = None
+        resolved_targets: Any = None,
     ) -> ActionResult:
         """
         Execute action on resolved target.
@@ -550,10 +602,12 @@ class ActionExecutor(Protocol):
         """
         ...
 
+
 # endregion
 
 
 # region Loader Functions
+
 
 def load_sequence(source: Union[str, "Path"]) -> ActionSequence:
     """
@@ -573,7 +627,7 @@ def load_sequence(source: Union[str, "Path"]) -> ActionSequence:
     """
     import json
     from pathlib import Path
-    
+
     # Try to interpret as file path first
     path = Path(source) if isinstance(source, str) else source
 
@@ -609,7 +663,7 @@ def load_sequence_from_string(json_string: str) -> ActionSequence:
         ValueError: If JSON is invalid or doesn't match schema
     """
     import json
-    
+
     try:
         data = json.loads(json_string)
     except json.JSONDecodeError as e:
@@ -619,5 +673,6 @@ def load_sequence_from_string(json_string: str) -> ActionSequence:
         return ActionSequence(**data)
     except Exception as e:
         raise ValueError(f"Failed to parse action sequence: {e}") from e
+
 
 # endregion

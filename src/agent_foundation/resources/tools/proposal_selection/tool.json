@@ -27,11 +27,24 @@
       "type": "flag",
       "default": false,
       "description": "Allow the user to submit zero selections (otherwise the widget requires at least one)."
+    },
+    {
+      "name": "experiment-hub",
+      "type": "flag",
+      "default": false,
+      "description": "Route this selection to the Experiment Hub dashboard: the submit button becomes '📊 Go To Experiment Hub' and clicking it opens the hub subtab (Selection tab seeded with these proposals) IN ADDITION TO publishing selected_proposal_ids back to the workflow. Generic --<dashboard> convention (flag name == a registered Dashboard tool whose `embeds` lists proposal_selection)."
+    },
+    {
+      "name": "host-dashboard",
+      "type": "string",
+      "required": false,
+      "description": "Explicit/generic form of --experiment-hub: route this selection to the named Dashboard tool (its `embeds` must list proposal_selection). The submit button relabels to '📊 Go To <label>' and opens that dashboard subtab on submit."
     }
   ],
-  "usage_guidance": "Use after research-propose to let the user review and select which proposals to implement. Pairs with `task --use-proposal` for downstream execution.",
+  "usage_guidance": "Use after research-propose to let the user review and select which proposals to implement. Pairs with `task --use-proposal` for downstream execution. Add `--experiment-hub` to relabel the submit button to 'Go To Experiment Hub' and open the Experiment Hub dashboard subtab on submit (the hub becomes the single implementation owner; selected_proposal_ids is still published for the SOP).",
   "examples": [
-    "{\"tool_type\": \"proposal_selection\", \"prompt\": \"Which proposals to implement?\", \"proposals_path\": \"<ws>/outputs/proposals.json\"}"
+    "{\"tool_type\": \"proposal_selection\", \"prompt\": \"Which proposals to implement?\", \"proposals_path\": \"<ws>/outputs/proposals.json\"}",
+    "{\"tool_type\": \"proposal_selection\", \"prompt\": \"Select proposals for the Experiment Hub\", \"proposals_path\": \"<ws>/outputs/proposals.json\", \"experiment-hub\": true, \"output\": \"selected_proposal_ids\"}"
   ],
   "yolo_default": {
     "mode": "select_all"

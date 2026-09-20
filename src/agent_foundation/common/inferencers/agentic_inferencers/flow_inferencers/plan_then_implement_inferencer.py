@@ -350,12 +350,12 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     enable_analysis: bool = attrib(default=False)
     enable_multiple_iterations: bool = attrib(default=False)
 
-    # === v1.7 Deliverable Boundary Semantics (Phase 4) ===
-    # PTI is a boundary by default. The boundary mechanism only ACTIVATES
-    # when use_final_deliverables_folder=True; existing callers without that
-    # flag get a no-op (backward compatible).
-    is_deliverable_boundary: bool = attrib(default=True, kw_only=True)
-    publishes_response_as_deliverable: bool = attrib(default=True, kw_only=True)
+    # === Deliverable Boundary Semantics (two-axis model) ===
+    # PTI is a boundary by role: it always promotes its selected role children's
+    # deliverables up to its own ``outputs/``. Child SELECTION is role-based via
+    # the explicit ``boundary_filter`` passed to
+    # ``collect_child_boundary_deliverables`` (planner/executor/analyzer only) —
+    # bookkeeping/guardrail children are excluded there.
     # PTI uses by_role namespacing for its planner/executor/analyzer children.
     # The workspace child dirs use SHORT names from _CHILD_DEFAULTS:
     # planner, executor, analyzer (NOT *_inferencer). PTI does NOT have a
@@ -1266,16 +1266,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     plan_file = candidate
                     break
             if plan_file is None:
-                deliv = os.path.join(
-                    ws.children_dir,
-                    planner_child,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
-                if os.path.isfile(deliv):
-                    plan_file = deliv
-            if plan_file is None:
                 child_art_dir = os.path.join(
                     ws.children_dir, planner_child, "artifacts"
                 )
@@ -1313,16 +1303,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 if os.path.isfile(candidate):
                     impl_file = candidate
                     break
-            if impl_file is None:
-                deliv = os.path.join(
-                    ws.children_dir,
-                    executor_child,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
-                if os.path.isfile(deliv):
-                    impl_file = deliv
             if impl_file is None:
                 child_art_dir = os.path.join(
                     ws.children_dir, executor_child, "artifacts"
@@ -1978,8 +1958,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             await self._reset_sub_inferencers_for_meta_iteration()
 
         # --use-plan: place the plan where the planner would have written it
-        # (children/planner_inferencer/outputs/final_deliverables/output.md),
-        # write the .plan_completed marker, and return. PTI's resume detection
+        # (children/planner_inferencer/outputs/output.md), write the
+        # .plan_completed marker, and return. PTI's resume detection
         # (_detect_workspace_state) sees the planner output + marker → treats
         # planning as done → proceeds directly to implementation.
         if self.initial_plan_file and iteration == 1:
@@ -1995,16 +1975,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 )
 
                 pti_ws = InferencerWorkspace(root=ws)
-                # Write to the planner's deliverables — same location as if
+                # Write to the planner's outputs/ — same location as if
                 # the planner Dual had run and finalized its output.
                 planner_ws = pti_ws.child("planner_inferencer")
                 planner_ws.ensure_dirs()
-                plan_output = os.path.join(
-                    planner_ws.root,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
+                plan_output = planner_ws.output_path("output.md")
                 os.makedirs(os.path.dirname(plan_output), exist_ok=True)
                 with open(plan_output, "w") as f:
                     f.write(plan_text)
@@ -2465,8 +2440,9 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         """PTI override: symlink per-flag child outputs as own.
 
         Iterates ``_OUTPUT_MODE_MAP`` and symlinks each relevant child's
-        output based on ``output_mode`` (Flag enum — supports composites
-        like ``PLAN_AND_IMPLEMENTATION`` and ``ALL``).
+        ``outputs/`` file up to this PTI's ``outputs/`` based on ``output_mode``
+        (Flag enum — supports composites like ``PLAN_AND_IMPLEMENTATION`` and
+        ``ALL``).
         """
         if self._workspace is None:
             return super()._finalize_output(response)
@@ -2478,39 +2454,16 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         )
 
         iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
-        iter_ws = InferencerWorkspace(
-            root=iter_ws_path,
-            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
-        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
 
         for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
             if flag in self.output_mode:
                 child_ws = iter_ws.child(child_name)
-                # Symlink output file
-                child_deliv = child_ws.deliverable_path(filename)
-                child_out = (
-                    child_ws.output_path(filename)
-                    if hasattr(child_ws, "output_path")
-                    else None
-                )
-                src = (
-                    child_deliv
-                    if (child_deliv and os.path.isfile(child_deliv))
-                    else child_out
-                )
-                if src and os.path.isfile(src):
+                # Surface the child's outputs/ file up to this PTI's outputs/.
+                src = child_ws.output_path(filename)
+                if os.path.isfile(src):
                     dst = self._workspace.output_path(filename)
                     self._symlink_or_copy(src, dst)
-                # Symlink deliverable file
-                if (
-                    self._workspace.deliverables_dir
-                    and child_deliv
-                    and os.path.isfile(child_deliv)
-                ):
-                    dst = self._workspace.deliverable_path(filename)
-                    if dst:
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)
-                        self._symlink_or_copy(child_deliv, dst)
 
         resolved = self.resolve_output_path()
         if resolved and os.path.isfile(resolved):
@@ -2533,12 +2486,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         )
 
         iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
-        # v1.7 Phase 4: propagate use_final_deliverables_folder so child
-        # workspaces returned by iter_ws.child(role) have their deliverables_dir set.
-        iter_ws = InferencerWorkspace(
-            root=iter_ws_path,
-            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
-        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
 
         os.makedirs(self._workspace.outputs_dir, exist_ok=True)
         for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
@@ -2548,14 +2496,14 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 if os.path.isfile(src):
                     shutil.copy2(src, dst)
 
-        # === v1.7 Deliverable Boundary EXTENSION (Phase 4) ===
-        # Surface planner/executor/analyzer child boundaries to this PTI's
-        # final_deliverables/ with by_role namespacing.
-        if (
-            self.is_deliverable_boundary
-            and self._workspace is not None
-            and self._workspace.deliverables_dir is not None
-        ):
+        # === Deliverable Boundary EXTENSION (two-axis model) ===
+        # Surface planner/executor/analyzer child deliverables (outputs/) up
+        # to this PTI's outputs/ with by_role namespacing. PTI is a boundary
+        # by role, so this always runs; child SELECTION is role-based via the
+        # explicit boundary_filter below (bookkeeping/guardrail child dirs are
+        # excluded so the "any child with has_deliverables" default does not
+        # over-collect).
+        if self._workspace is not None:
             from agent_foundation.common.inferencers.deliverable_boundary import (
                 aggregate_into_self_deliverables,
                 collect_child_boundary_deliverables,
@@ -2564,7 +2512,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             # PTI's child workspaces use SHORT names from _CHILD_DEFAULTS
             # (planner, executor, analyzer). They live under the iter_ws,
             # which is itself a child of self._workspace. Walk the iter_ws's
-            # children to collect the role boundaries.
+            # children to collect the role deliverables.
             children = collect_child_boundary_deliverables(
                 iter_ws,
                 boundary_filter=lambda name, ws: name
@@ -2584,23 +2532,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     _pti_logger.info(
                         "PTI boundary surfaced %d role deliverable(s) → %s",
                         len(report.copied),
-                        self._workspace.deliverables_dir,
+                        self._workspace.outputs_dir,
                     )
-
-            # Publish PTI's own response (the implementation file) into
-            # final_deliverables/ when configured.
-            if self.publishes_response_as_deliverable:
-                for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
-                    if flag in self.output_mode:
-                        src = self._workspace.output_path(filename)
-                        dst = self._workspace.deliverable_path(filename)
-                        if (
-                            dst is not None
-                            and os.path.isfile(src)
-                            and not os.path.exists(dst)
-                        ):
-                            os.makedirs(os.path.dirname(dst), exist_ok=True)
-                            shutil.copy2(src, dst)
 
     def resolve_output_path(self, runtime_override=None):
         """PTI override: resolve based on output_mode."""

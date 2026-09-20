@@ -1,8 +1,9 @@
 """
 Log collector for capturing logs from Debuggable objects and building execution graphs.
 """
-from typing import List, Dict, Any, Set, Tuple
+
 from collections import defaultdict
+from typing import Any, Dict, List, Set, Tuple
 
 
 class LogCollector:
@@ -35,15 +36,16 @@ class LogCollector:
             log_data: Log data dictionary from Debuggable.log()
         """
         # Add timestamp if not present
-        if 'timestamp' not in log_data:
+        if "timestamp" not in log_data:
             from datetime import datetime
-            log_data['timestamp'] = datetime.now().isoformat()
+
+            log_data["timestamp"] = datetime.now().isoformat()
 
         # Store the log
         self.logs.append(log_data)
 
         # Organize by debuggable ID
-        node_id = log_data.get('id', 'unknown')
+        node_id = log_data.get("id", "unknown")
         self.log_groups[node_id].append(log_data)
 
         # Track this node ID
@@ -62,30 +64,30 @@ class LogCollector:
         Args:
             log_data: Log data with parent_ids information
         """
-        node_id = log_data.get('id', 'unknown')
-        node_name = log_data.get('name', node_id)
-        log_type = log_data.get('type', '')
+        node_id = log_data.get("id", "unknown")
+        node_name = log_data.get("name", node_id)
+        log_type = log_data.get("type", "")
 
         # Create or update node
         if node_id not in self.graph_nodes:
             self.graph_nodes[node_id] = {
-                'id': node_id,
-                'name': node_name,
-                'label': node_name,  # Keep for compatibility
-                'log_count': 0,
-                'node_type': 'normal'  # Track node type
+                "id": node_id,
+                "name": node_name,
+                "label": node_name,  # Keep for compatibility
+                "log_count": 0,
+                "node_type": "normal",  # Track node type
             }
         else:
             # Update name if this is a real log entry (not just a placeholder from parent_ids)
             # This ensures we use the actual log name instead of the derived placeholder name
-            self.graph_nodes[node_id]['name'] = node_name
-            self.graph_nodes[node_id]['label'] = node_name
+            self.graph_nodes[node_id]["name"] = node_name
+            self.graph_nodes[node_id]["label"] = node_name
 
-        self.graph_nodes[node_id]['log_count'] += 1
+        self.graph_nodes[node_id]["log_count"] += 1
 
         # Extract parent-child relationships
         # ALL entries in parent_ids are valid parents, not just one
-        parent_ids = log_data.get('parent_ids', [])
+        parent_ids = log_data.get("parent_ids", [])
         for parent_id in parent_ids:
             # Add edge (parent -> child), set automatically handles duplicates
             self.graph_edges.add((parent_id, node_id))
@@ -94,34 +96,34 @@ class LogCollector:
             if parent_id not in self.graph_nodes:
                 # Try to derive a reasonable name from the ID
                 # Handle both hyphen and underscore separators
-                if '-' in parent_id:
-                    parent_name = parent_id.split('-')[0]
-                elif '_' in parent_id:
-                    parent_name = parent_id.split('_')[0]
+                if "-" in parent_id:
+                    parent_name = parent_id.split("-")[0]
+                elif "_" in parent_id:
+                    parent_name = parent_id.split("_")[0]
                 else:
                     parent_name = parent_id
 
                 self.graph_nodes[parent_id] = {
-                    'id': parent_id,
-                    'name': parent_name,
-                    'label': parent_name,  # Keep for compatibility
-                    'log_count': 0,
-                    'node_type': 'normal'
+                    "id": parent_id,
+                    "name": parent_name,
+                    "label": parent_name,  # Keep for compatibility
+                    "log_count": 0,
+                    "node_type": "normal",
                 }
 
         # Handle AgentWorkstreamCompleted - create exit node
-        if log_type == 'AgentWorkstreamCompleted':
+        if log_type == "AgentWorkstreamCompleted":
             # Create a symbolic exit node
             exit_node_id = f"{node_id}-exit"
             exit_node_name = "Exit"
 
             if exit_node_id not in self.graph_nodes:
                 self.graph_nodes[exit_node_id] = {
-                    'id': exit_node_id,
-                    'name': exit_node_name,
-                    'label': exit_node_name,
-                    'log_count': 0,
-                    'node_type': 'exit'  # Mark as exit node
+                    "id": exit_node_id,
+                    "name": exit_node_name,
+                    "label": exit_node_name,
+                    "log_count": 0,
+                    "node_type": "exit",  # Mark as exit node
                 }
 
             # Create edge from current node to exit node
@@ -141,20 +143,20 @@ class LogCollector:
         nodes = list(self.graph_nodes.values())
 
         # Convert edges set to list of dicts
-        edges = [{'source': src, 'target': tgt} for src, tgt in self.graph_edges]
+        edges = [{"source": src, "target": tgt} for src, tgt in self.graph_edges]
 
         # Find root nodes (nodes with no incoming edges)
-        nodes_with_parents = {edge['target'] for edge in edges}
-        root_nodes = [node for node in nodes if node['id'] not in nodes_with_parents]
+        nodes_with_parents = {edge["target"] for edge in edges}
+        root_nodes = [node for node in nodes if node["id"] not in nodes_with_parents]
 
         # Find agent node (prefer root with 'Agent' in ID)
         agent_node = None
         for node in root_nodes:
-            if 'Agent' in node['id']:
+            if "Agent" in node["id"]:
                 agent_node = {
-                    'id': node['id'],
-                    'name': node['name'],
-                    'log_count': node['log_count']
+                    "id": node["id"],
+                    "name": node["name"],
+                    "log_count": node["log_count"],
                 }
                 break
 
@@ -162,20 +164,16 @@ class LogCollector:
         if not agent_node and root_nodes:
             node = root_nodes[0]
             agent_node = {
-                'id': node['id'],
-                'name': node['name'],
-                'log_count': node['log_count']
+                "id": node["id"],
+                "name": node["name"],
+                "log_count": node["log_count"],
             }
 
         # Default agent if none found
         if not agent_node:
-            agent_node = {'id': 'Agent_default', 'name': 'Agent', 'log_count': 0}
+            agent_node = {"id": "Agent_default", "name": "Agent", "log_count": 0}
 
-        return {
-            'nodes': nodes,
-            'edges': edges,
-            'agent': agent_node
-        }
+        return {"nodes": nodes, "edges": edges, "agent": agent_node}
 
     def get_logs_for_node(self, node_id: str) -> List[Dict[str, Any]]:
         """
@@ -214,15 +212,15 @@ class LogCollector:
             Dictionary with logs and metadata
         """
         return {
-            'logs': self.logs,
-            'log_groups': dict(self.log_groups),
-            'graph_nodes': self.graph_nodes,
-            'graph_edges': list(self.graph_edges),
-            'graph_structure': self.get_graph_structure()
+            "logs": self.logs,
+            "log_groups": dict(self.log_groups),
+            "graph_nodes": self.graph_nodes,
+            "graph_edges": list(self.graph_edges),
+            "graph_structure": self.get_graph_structure(),
         }
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> 'LogCollector':
+    def from_dict(data: Dict[str, Any]) -> "LogCollector":
         """
         Create a LogCollector from a dictionary.
 
@@ -233,16 +231,18 @@ class LogCollector:
             LogCollector instance
         """
         collector = LogCollector()
-        collector.logs = data.get('logs', [])
-        collector.log_groups = defaultdict(list, data.get('log_groups', {}))
-        collector.graph_nodes = data.get('graph_nodes', {})
-        collector.graph_edges = set(tuple(edge) if isinstance(edge, list) else edge 
-                                     for edge in data.get('graph_edges', []))
+        collector.logs = data.get("logs", [])
+        collector.log_groups = defaultdict(list, data.get("log_groups", {}))
+        collector.graph_nodes = data.get("graph_nodes", {})
+        collector.graph_edges = set(
+            tuple(edge) if isinstance(edge, list) else edge
+            for edge in data.get("graph_edges", [])
+        )
         collector._node_ids = set(collector.log_groups.keys())
         return collector
 
     @staticmethod
-    def from_json_logs(log_path: str, json_file_pattern:str ='*') -> 'LogCollector':
+    def from_json_logs(log_path: str, json_file_pattern: str = "*") -> "LogCollector":
         """
         Create a LogCollector by reading logs from JSON files.
 
@@ -262,25 +262,27 @@ class LogCollector:
             True
         """
         from rich_python_utils.io_utils.json_io import iter_json_objs
-        
+
         collector = LogCollector()
-        
+
         try:
             # iter_json_objs handles both files and directories automatically
-            log_entries = list(iter_json_objs(
-                log_path,
-                use_tqdm=False,
-                verbose=False,
-                json_file_pattern=json_file_pattern
-            ))
-            
+            log_entries = list(
+                iter_json_objs(
+                    log_path,
+                    use_tqdm=False,
+                    verbose=False,
+                    json_file_pattern=json_file_pattern,
+                )
+            )
+
             # Add each log entry - collector will build the graph automatically
             for log_entry in log_entries:
                 collector(log_entry)
-                
+
         except Exception as e:
             print(f"[WARNING] Failed to read logs from {log_path}: {e}")
-        
+
         return collector
 
     def get_log_graph_statistics(self) -> Dict[str, Any]:
@@ -301,12 +303,12 @@ class LogCollector:
             1
         """
         graph_structure = self.get_graph_structure()
-        nodes = graph_structure.get('nodes', [])
-        edges = graph_structure.get('edges', [])
-        agent = graph_structure.get('agent', {})
+        nodes = graph_structure.get("nodes", [])
+        edges = graph_structure.get("edges", [])
+        agent = graph_structure.get("agent", {})
 
         # Calculate total log count
-        total_log_count = sum(node.get('log_count', 0) for node in nodes)
+        total_log_count = sum(node.get("log_count", 0) for node in nodes)
 
         # Calculate max depth (simple BFS-based depth calculation)
         max_depth = 0
@@ -314,13 +316,13 @@ class LogCollector:
             # Build adjacency list
             children = {}
             for edge in edges:
-                src = edge['source']
+                src = edge["source"]
                 if src not in children:
                     children[src] = []
-                children[src].append(edge['target'])
+                children[src].append(edge["target"])
 
             # BFS from agent node
-            agent_id = agent.get('id')
+            agent_id = agent.get("id")
             if agent_id:
                 queue = [(agent_id, 0)]
                 visited = set()
@@ -337,10 +339,10 @@ class LogCollector:
                         queue.append((child, depth + 1))
 
         return {
-            'node_count': len(nodes),
-            'edge_count': len(edges),
-            'total_log_count': total_log_count,
-            'max_depth': max_depth,
-            'agent_id': agent.get('id', 'unknown'),
-            'agent_name': agent.get('name', 'unknown')
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "total_log_count": total_log_count,
+            "max_depth": max_depth,
+            "agent_id": agent.get("id", "unknown"),
+            "agent_name": agent.get("name", "unknown"),
         }

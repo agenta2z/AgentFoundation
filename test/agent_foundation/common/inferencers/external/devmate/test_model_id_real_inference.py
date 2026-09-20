@@ -77,7 +77,8 @@ def _assert_real_inference_works(test: unittest.TestCase, model_id: str) -> None
         f"Devmate's ModelName enum doesn't accept. Output: {output[:300]!r}",
     )
     test.assertGreater(
-        len(output), 0,
+        len(output),
+        0,
         f"Empty response for model_id={model_id!r}; expected the model "
         f"to actually run and emit output. Got: {output!r}",
     )
@@ -100,6 +101,7 @@ class ClaudeModelsRealInferenceTest(unittest.TestCase):
 def _make_test_method(model_name_label: str, model_id_value: str):
     def _test(self: ClaudeModelsRealInferenceTest) -> None:
         _assert_real_inference_works(self, model_id_value)
+
     _test.__name__ = f"test_real_inference_{model_name_label.lower()}"
     _test.__doc__ = (
         f"Verify devmate accepts ClaudeModels.{model_name_label} "
@@ -129,7 +131,8 @@ class DefaultModelRealInferenceTest(unittest.TestCase):
         )
         # The default should be ``claude-opus-4.7-1m``; verify before sending.
         self.assertEqual(
-            inferencer.model_name, "claude-opus-4.7-1m",
+            inferencer.model_name,
+            "claude-opus-4.7-1m",
             f"Default model_name drifted: {inferencer.model_name!r}",
         )
         response = inferencer(_PROMPT)

@@ -1,5 +1,3 @@
-
-
 """Callable protocols for ConversationalInferencer pluggability.
 
 These protocols define the interfaces that server-layer components implement
@@ -52,6 +50,45 @@ class HubAwareToolExecutor(ToolExecutorCallable, Protocol):
         proposals_data: dict[str, Any],
         custom_queries: list[str] | None = None,
         group_by: str = "batch",
+        auto_implement: bool = True,
+    ) -> str: ...
+
+    async def open_experiment_hub(
+        self,
+        proposals_data: dict[str, Any],
+        selected_proposal_ids: list[str] | None = None,
+        pre_select_top_n: int = 5,
+        initial_view: str = "selection",
+    ) -> str:
+        """Open (or idempotently focus) the hub as a shell seeded with proposals.
+
+        The "skip detailed selection, go straight to the hub" path. Returns the
+        hub/dashboard id.
+        """
+        ...
+
+
+@runtime_checkable
+class DashboardAwareToolExecutor(ToolExecutorCallable, Protocol):
+    """Generic capability Protocol for executors that can open a Dashboard subtab.
+
+    The generic ``--<dashboard>`` convention maps a Conversation tool's
+    ``tool.metadata.open_dashboard == "<dashboard_id>"`` onto a call of
+    ``open_dashboard(dashboard_id, seed)``. ``HubAwareToolExecutor`` is the
+    experiment-hub-specific specialization; a host that implements this generic
+    method supports *any* Dashboard tool. Framework code narrows via
+    ``isinstance(executor, DashboardAwareToolExecutor)`` and degrades gracefully
+    when unsatisfied.
+
+    Mock gotcha (same as HubAwareToolExecutor): a bare ``Mock()`` lies about
+    satisfying this Protocol; tests MUST use ``MagicMock(spec=ToolExecutorCallable)``
+    so ``open_dashboard`` is genuinely absent for the negative case.
+    """
+
+    async def open_dashboard(
+        self,
+        dashboard_id: str,
+        seed: dict[str, Any] | None = None,
     ) -> str: ...
 
 

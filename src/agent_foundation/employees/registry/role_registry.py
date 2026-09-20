@@ -59,11 +59,21 @@ class RoleRegistry:
                     try:
                         role = AIEmployeeRole.from_yaml(role_yaml)
                         self._roles[role.id] = role
-                        logger.debug("[RoleRegistry] Loaded role '%s' from %s", role.id, role_yaml)
+                        logger.debug(
+                            "[RoleRegistry] Loaded role '%s' from %s",
+                            role.id,
+                            role_yaml,
+                        )
                     except Exception as e:
-                        logger.warning("[RoleRegistry] Failed to load %s: %s", role_yaml, e)
-        logger.info("[RoleRegistry] Loaded %d roles from %s (+%d extra dirs)",
-                    len(self._roles), self._roles_dir, len(self._extra_dirs))
+                        logger.warning(
+                            "[RoleRegistry] Failed to load %s: %s", role_yaml, e
+                        )
+        logger.info(
+            "[RoleRegistry] Loaded %d roles from %s (+%d extra dirs)",
+            len(self._roles),
+            self._roles_dir,
+            len(self._extra_dirs),
+        )
 
     # ---------------------------------------------------------------------------
     # Public API
@@ -78,7 +88,9 @@ class RoleRegistry:
         """Get a role by id. Raises KeyError if not found."""
         role = self.get(role_id)
         if role is None:
-            raise KeyError(f"Role not found: '{role_id}'. Available: {list(self._roles.keys())}")
+            raise KeyError(
+                f"Role not found: '{role_id}'. Available: {list(self._roles.keys())}"
+            )
         return role
 
     def list_all(self, status: RoleStatus | None = None) -> list[AIEmployeeRole]:
@@ -114,7 +126,9 @@ class RoleRegistry:
                 role_dir = self._roles_dir / role.id
                 role_dir.mkdir(parents=True, exist_ok=True)
                 role.to_yaml(role_dir / "role.yaml")
-        logger.info("[RoleRegistry] Registered role '%s' (status=%s)", role.id, role.status)
+        logger.info(
+            "[RoleRegistry] Registered role '%s' (status=%s)", role.id, role.status
+        )
 
     def update(self, role: AIEmployeeRole, save: bool = True) -> None:
         """Update an existing role (e.g. after role_setup upgrades status to active)."""

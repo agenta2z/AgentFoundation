@@ -6,6 +6,7 @@ populates the corresponding stores in a KnowledgeBase instance.
 
 Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 9.1, 9.2, 9.3, 9.4
 """
+
 import json
 import logging
 from typing import Any, Dict, List
@@ -17,8 +18,8 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
     GraphEdge,
+    GraphNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,7 @@ class KnowledgeDataLoader:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except FileNotFoundError:
-            raise FileNotFoundError(
-                f"Knowledge data file not found: {file_path}"
-            )
+            raise FileNotFoundError(f"Knowledge data file not found: {file_path}")
         except json.JSONDecodeError as e:
             raise ValueError(
                 f"Knowledge data file is not valid JSON ({file_path}): {e}"
@@ -71,13 +70,9 @@ class KnowledgeDataLoader:
             )
 
         # Load each section
-        metadata_count = KnowledgeDataLoader._load_metadata(
-            kb, data["metadata"]
-        )
+        metadata_count = KnowledgeDataLoader._load_metadata(kb, data["metadata"])
         pieces_count = KnowledgeDataLoader._load_pieces(kb, data["pieces"])
-        node_count, edge_count = KnowledgeDataLoader._load_graph(
-            kb, data["graph"]
-        )
+        node_count, edge_count = KnowledgeDataLoader._load_graph(kb, data["graph"])
 
         return {
             "metadata": metadata_count,
@@ -87,9 +82,7 @@ class KnowledgeDataLoader:
         }
 
     @staticmethod
-    def _load_metadata(
-        kb: KnowledgeBase, metadata_section: Dict[str, Any]
-    ) -> int:
+    def _load_metadata(kb: KnowledgeBase, metadata_section: Dict[str, Any]) -> int:
         """Load metadata entries. Each key is an entity_id mapped to properties.
 
         Expected format:
@@ -118,9 +111,7 @@ class KnowledgeDataLoader:
                 kb.metadata_store.save_metadata(metadata)
                 count += 1
             except Exception as e:
-                logger.warning(
-                    "Skipping metadata entry '%s': %s", entity_id, e
-                )
+                logger.warning("Skipping metadata entry '%s': %s", entity_id, e)
         return count
 
     @staticmethod
@@ -167,9 +158,7 @@ class KnowledgeDataLoader:
         return count
 
     @staticmethod
-    def _load_graph(
-        kb: KnowledgeBase, graph_section: Dict[str, Any]
-    ) -> tuple:
+    def _load_graph(kb: KnowledgeBase, graph_section: Dict[str, Any]) -> tuple:
         """Load graph nodes and edges.
 
         Expected format:

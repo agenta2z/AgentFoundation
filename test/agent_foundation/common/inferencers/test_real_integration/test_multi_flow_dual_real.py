@@ -21,7 +21,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     DualInferencerResponse,
@@ -29,12 +28,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
     MultiFlowDualInferencer,
 )
+
 # Reuse the conftest's CLI-availability skip markers.
-from .conftest import (  # noqa: E402
-    DEFAULT_TIMEOUT,
-    KIRO_AVAILABLE,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, KIRO_AVAILABLE, skip_claude  # noqa: E402
 
 # Kiro is only required when MFDUAL_REAL_NO_KIRO != "1".
 skip_kiro_unless_bypassed = pytest.mark.skipif(
@@ -118,7 +114,9 @@ Output STRICTLY in this format:
 
 
 def _parse_decision_stop(state, result):
-    m = re.search(r"<Decision>\s*(stop|continue)\s*</Decision>", str(result), re.IGNORECASE)
+    m = re.search(
+        r"<Decision>\s*(stop|continue)\s*</Decision>", str(result), re.IGNORECASE
+    )
     return m and m.group(1).lower() == "stop"
 
 
@@ -144,10 +142,18 @@ def _parse_finalplan_tag(s):
 #       ~25+ LLM calls, $15-30+, 45-90 min. Pre-release validation.
 _PROFILE = os.environ.get("MFDUAL_REAL_PROFILE", "shallow").lower()
 _PROFILES = {
-    "shallow": {"max_dynamic_steps": 2, "max_iterations": 1, "max_consensus_attempts": 1,
-                "min_response_len": 200},
-    "deep":    {"max_dynamic_steps": 6, "max_iterations": 3, "max_consensus_attempts": 2,
-                "min_response_len": 500},
+    "shallow": {
+        "max_dynamic_steps": 2,
+        "max_iterations": 1,
+        "max_consensus_attempts": 1,
+        "min_response_len": 200,
+    },
+    "deep": {
+        "max_dynamic_steps": 6,
+        "max_iterations": 3,
+        "max_consensus_attempts": 2,
+        "min_response_len": 500,
+    },
 }
 
 
@@ -168,8 +174,10 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
     are unavailable.
     """
     if _PROFILE not in _PROFILES:
-        pytest.skip(f"unknown MFDUAL_REAL_PROFILE={_PROFILE!r}; "
-                    f"expected one of {sorted(_PROFILES)}")
+        pytest.skip(
+            f"unknown MFDUAL_REAL_PROFILE={_PROFILE!r}; "
+            f"expected one of {sorted(_PROFILES)}"
+        )
     p = _PROFILES[_PROFILE]
     print(f"\n[mfdual-real] profile={_PROFILE} {p}")
 
@@ -203,7 +211,9 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
             idle_timeout_seconds=600,
             resume_with_saved_results=True,
         )
-        print("[mfdual-real] MFDUAL_REAL_NO_KIRO=1 -> using Claude opus instead of Kiro")
+        print(
+            "[mfdual-real] MFDUAL_REAL_NO_KIRO=1 -> using Claude opus instead of Kiro"
+        )
     else:
         kiro = KiroCliInferencer(
             target_path=str(OPENSTARTUP_PATH),
@@ -276,12 +286,10 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
         multi_flow_followup_prompt=MULTIFLOW_FOLLOWUP_W_DECISION_TEMPLATE,
         multi_flow_winner_parser=_parse_winner_tag,
         multi_flow_response_parser=_parse_finalplan_tag,
-
         # Round 7 rule-based dispatch
-        review_default=kiro,                  # default reviewer
-        review_priority_pool=[claude],        # if Kiro wins, swap to Claude
-        fixer_strategy="winner",              # fixer = winning flow's CLI
-
+        review_default=kiro,  # default reviewer
+        review_priority_pool=[claude],  # if Kiro wins, swap to Claude
+        fixer_strategy="winner",  # fixer = winning flow's CLI
         consensus_config=ConsensusConfig(
             max_iterations=p["max_iterations"],
             max_consensus_attempts=p["max_consensus_attempts"],
@@ -290,9 +298,7 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
     )
 
     async with mfdi:
-        result = await mfdi.ainfer(
-            "Document the OpenStartup codebase architecture"
-        )
+        result = await mfdi.ainfer("Document the OpenStartup codebase architecture")
 
     # ----- Loose shape assertions (real LLM output is non-deterministic) -----
     assert isinstance(result, DualInferencerResponse)
@@ -331,10 +337,14 @@ async def test_multi_flow_dual_documents_openstartup(tmp_path):
     workspace_root = tmp_path / "mfdi_workspace"
     assert workspace_root.exists(), f"workspace root missing: {workspace_root}"
     checkpoint_artifacts = list((workspace_root / "checkpoints").rglob("*"))
-    children_artifacts = list((workspace_root / "children").rglob("*")) \
-        if (workspace_root / "children").exists() else []
-    artifact_count = len([p for p in checkpoint_artifacts if p.is_file()]) \
-        + len([p for p in children_artifacts if p.is_file()])
+    children_artifacts = (
+        list((workspace_root / "children").rglob("*"))
+        if (workspace_root / "children").exists()
+        else []
+    )
+    artifact_count = len([p for p in checkpoint_artifacts if p.is_file()]) + len(
+        [p for p in children_artifacts if p.is_file()]
+    )
     assert artifact_count > 0, (
         f"expected workspace to contain at least 1 artifact file under "
         f"checkpoints/ or children/, got 0 (workspace={workspace_root})"

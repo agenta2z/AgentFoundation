@@ -181,7 +181,7 @@ async def main_async(args):
     response_c = await send_and_print(
         inf_c,
         "What is the secret word? Reply with just the word if you know it, "
-        'or say "I don\'t know any secret word" if you don\'t.',
+        "or say \"I don't know any secret word\" if you don't.",
         label="Session C -- New (no prior context)",
     )
 
@@ -203,13 +203,21 @@ async def main_async(args):
     c_no_secrets = "banana" not in c_lower and "dragon" not in c_lower
 
     print(f"  Session A recall 'banana':     {'PASS' if a_has_banana else 'FAIL'}")
-    print(f"  Session A no cross-leak:       {'PASS' if a_no_dragon else 'FAIL (leaked dragon)'}")
+    print(
+        f"  Session A no cross-leak:       {'PASS' if a_no_dragon else 'FAIL (leaked dragon)'}"
+    )
     print(f"  Session B recall 'dragon':     {'PASS' if b_has_dragon else 'FAIL'}")
-    print(f"  Session B no cross-leak:       {'PASS' if b_no_banana else 'FAIL (leaked banana)'}")
-    print(f"  Session C no secret knowledge: {'PASS' if c_no_secrets else 'UNEXPECTED (knew a secret)'}")
+    print(
+        f"  Session B no cross-leak:       {'PASS' if b_no_banana else 'FAIL (leaked banana)'}"
+    )
+    print(
+        f"  Session C no secret knowledge: {'PASS' if c_no_secrets else 'UNEXPECTED (knew a secret)'}"
+    )
     print()
 
-    all_pass = a_has_banana and a_no_dragon and b_has_dragon and b_no_banana and c_no_secrets
+    all_pass = (
+        a_has_banana and a_no_dragon and b_has_dragon and b_no_banana and c_no_secrets
+    )
     if all_pass:
         print("  ALL CHECKS PASSED -- Session isolation and multi-turn work correctly!")
     else:
@@ -226,12 +234,14 @@ def main():
         description="Devmate SDK -- Multi-Turn Session & Isolation Demo"
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="claude-sonnet-4-5",
         help="Devmate SDK model (default: claude-sonnet-4-5)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default=os.path.expanduser("~/fbsource"),
         help="Target path — the agent's operating directory (default: ~/fbsource)",
     )

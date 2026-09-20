@@ -11,6 +11,7 @@ and every value is str.
 
 **Validates: Requirements 2.2, 2.5, 3.3**
 """
+
 import sys
 from pathlib import Path
 
@@ -26,20 +27,15 @@ _spu_src = Path(__file__).resolve().parents[3] / "SciencePythonUtils" / "src"
 if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
-from hypothesis import given, settings, strategies as st
-
-from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
-    MemoryKeyValueService,
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
 )
-from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
-    MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
-)
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
-    GraphEdge,
+from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
@@ -47,15 +43,19 @@ from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter impor
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from hypothesis import given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
 )
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-    KnowledgeType,
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
+)
+from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
+    MemoryKeyValueService,
+)
+from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
+    MemoryRetrievalService,
 )
 
 

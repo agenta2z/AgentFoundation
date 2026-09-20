@@ -76,7 +76,11 @@ class RovoChatAPIError(RovoChatError):
         super().__init__(message, details)
 
     def __str__(self) -> str:
-        base = f"[HTTP {self.status_code}] {self.message}" if self.status_code else self.message
+        base = (
+            f"[HTTP {self.status_code}] {self.message}"
+            if self.status_code
+            else self.message
+        )
         if self.details:
             return f"{base} | details={self.details}"
         return base

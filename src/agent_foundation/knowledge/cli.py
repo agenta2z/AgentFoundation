@@ -77,7 +77,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Knowledge CLI")
     parser.add_argument("command", choices=["add", "search", "list", "clear"])
     parser.add_argument("text", nargs="?", default="")
-    parser.add_argument("--entity-id", default=None, help="Scope operations to an entity")
+    parser.add_argument(
+        "--entity-id", default=None, help="Scope operations to an entity"
+    )
     parser.add_argument("--domain", default=None, help="Filter search by domain")
     return parser
 
@@ -119,8 +121,7 @@ def main(argv: Optional[list] = None) -> None:
         elif args.command == "list":
             pieces = kb.piece_store.list_all(entity_id=args.entity_id)
             items = [
-                {"piece_id": p.piece_id, "content": p.content[:200]}
-                for p in pieces
+                {"piece_id": p.piece_id, "content": p.content[:200]} for p in pieces
             ]
             print(json.dumps({"ok": True, "items": items}))
 

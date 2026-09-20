@@ -8,11 +8,12 @@ Usage:
     import resolve_path  # Must be first import
     from agent_foundation.automation.schema.action_metadata import ActionTypeMetadata
 """
+
 import sys
 from pathlib import Path
 
 # Configuration
-PIVOT_FOLDER_NAME = 'test'  # The folder name we're inside of
+PIVOT_FOLDER_NAME = "test"  # The folder name we're inside of
 
 # Get absolute path to this file
 current_file = Path(__file__).resolve()

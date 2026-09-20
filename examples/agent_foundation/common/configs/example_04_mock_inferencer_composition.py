@@ -75,13 +75,8 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
         sys.path.insert(0, _p)
 
 from attr import attrib, attrs
-
-from rich_python_utils.config_utils import (
-    instantiate,
-    load_config,
-    register,
-)
 from omegaconf import OmegaConf
+from rich_python_utils.config_utils import instantiate, load_config, register
 
 warnings.filterwarnings("ignore")
 
@@ -89,6 +84,7 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # Mock inferencer classes (simulate LLM behavior with canned responses)
 # ---------------------------------------------------------------------------
+
 
 @register("MockLLM", category="inferencer")
 @attrs
@@ -100,6 +96,7 @@ class MockLLM:
     - _secret_key with underscore-stripping (init param = 'secret_key')
     - _call_count with init=False (internal state, filtered from YAML)
     """
+
     model_name: str = attrib(default="mock-model")
     response_prefix: str = attrib(default="")
     _secret_key: str = attrib(default="demo-key-123")
@@ -120,6 +117,7 @@ class ReviewerInferencer:
 
     Demonstrates nested composition: this inferencer CONTAINS another inferencer.
     """
+
     base: Any = attrib(default=None)
     review_prompt: str = attrib(default="Please review")
 
@@ -141,6 +139,7 @@ class ChainInferencer:
 
     Demonstrates list-based composition from YAML.
     """
+
     steps: list = attrib(factory=list)
 
     def infer(self, prompt: str) -> str:
@@ -257,20 +256,29 @@ secret_key: my-api-key-xyz
         cfg = load_config(str(yaml_path))
         llm = instantiate(cfg)
         print(f"  Config with secret_key: 'my-api-key-xyz'")
-        print(f"  obj._secret_key = {llm._secret_key!r}  (underscore auto-stripped in YAML)")
+        print(
+            f"  obj._secret_key = {llm._secret_key!r}  (underscore auto-stripped in YAML)"
+        )
 
         # init=False filtering: _call_count would be rejected
         print()
         import logging
-        logging.basicConfig(level=logging.WARNING, format="  %(levelname)s: %(message)s")
 
-        cfg = OmegaConf.create({
-            "_target_": f"{__name__}.MockLLM",
-            "model_name": "test",
-            "_call_count": 999,  # init=False field — will be filtered with warning
-        })
+        logging.basicConfig(
+            level=logging.WARNING, format="  %(levelname)s: %(message)s"
+        )
+
+        cfg = OmegaConf.create(
+            {
+                "_target_": f"{__name__}.MockLLM",
+                "model_name": "test",
+                "_call_count": 999,  # init=False field — will be filtered with warning
+            }
+        )
         llm = instantiate(cfg)
-        print(f"  obj._call_count = {llm._call_count}  (init=False field was filtered, default 0 used)")
+        print(
+            f"  obj._call_count = {llm._call_count}  (init=False field was filtered, default 0 used)"
+        )
 
     # ── Summary ──────────────────────────────────────────────
     print(f"\n{'=' * 60}")

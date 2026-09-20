@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 
 @attrs

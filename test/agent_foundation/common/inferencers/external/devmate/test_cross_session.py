@@ -162,7 +162,8 @@ async def test_cross_session_cli():
     # (current). ``str(...)`` works for both: dict's str() is unhelpful but
     # TerminalInferencerResponse.__str__ returns the cleaned output text.
     output_a2 = (
-        result_a2.get("output", "") if isinstance(result_a2, dict)
+        result_a2.get("output", "")
+        if isinstance(result_a2, dict)
         else getattr(result_a2, "output", "") or str(result_a2)
     )
     print(f"    ✓ Response: {output_a2[:200]}...")
@@ -179,7 +180,8 @@ async def test_cross_session_cli():
     )
     print(f"    ✓ Time: {time.time() - start:.2f}s")
     output_b2 = (
-        result_b2.get("output", "") if isinstance(result_b2, dict)
+        result_b2.get("output", "")
+        if isinstance(result_b2, dict)
         else getattr(result_b2, "output", "") or str(result_b2)
     )
     print(f"    ✓ Response: {output_b2[:200]}...")
@@ -324,7 +326,9 @@ async def run_all_tests():
 
     results["DevmateSDKInferencer"] = await _run_test_safely(test_cross_session_sdk)
     results["DevmateCliInferencer"] = await _run_test_safely(test_cross_session_cli)
-    results["ClaudeCodeSdkInferencer"] = await _run_test_safely(test_cross_session_claude)
+    results["ClaudeCodeSdkInferencer"] = await _run_test_safely(
+        test_cross_session_claude
+    )
 
     return results
 

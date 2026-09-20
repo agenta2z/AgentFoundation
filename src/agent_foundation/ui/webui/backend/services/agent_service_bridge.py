@@ -1,5 +1,3 @@
-
-
 """AgentServiceBridge — thin bridge between WebSocket and file queue.
 
 Zero business logic. Translates between the WebSocket protocol
@@ -14,9 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
-from agent_foundation.ui.interactive_base import (
-    InteractionFlags,
-)
+from agent_foundation.ui.interactive_base import InteractionFlags
 from rich_python_utils.service_utils.client.queue_client_base import QueueClientBase
 
 logger = logging.getLogger(__name__)
@@ -54,7 +50,9 @@ class AgentServiceBridge(QueueClientBase):
         await self.poll_responses(send)
 
     async def stream_from_workspace(
-        self, workspace_path: str, send: SendCallback,
+        self,
+        workspace_path: str,
+        send: SendCallback,
         task_id: str | None = None,
     ) -> str:
         """Tail inferencer cache files and stream tokens to the client.
@@ -67,8 +65,12 @@ class AgentServiceBridge(QueueClientBase):
         Returns:
             The accumulated full text for use in message_end.
         """
-        from rankevolve.src.common.streaming.file_tailer import WorkspaceStreamTailer  # TODO: migrate from rankevolve.src.common.streaming.file_tailer
-        from rankevolve.src.common.workspace.layout import get_cache_dir  # TODO: migrate from rankevolve.src.common.workspace.layout
+        from rankevolve.src.common.streaming.file_tailer import (  # TODO: migrate from rankevolve.src.common.streaming.file_tailer
+            WorkspaceStreamTailer,
+        )
+        from rankevolve.src.common.workspace.layout import (  # TODO: migrate from rankevolve.src.common.workspace.layout
+            get_cache_dir,
+        )
 
         cache_dir = get_cache_dir(workspace_path)
 
@@ -107,7 +109,9 @@ class AgentServiceBridge(QueueClientBase):
         Returns:
             The accumulated full text for use in message_end.
         """
-        from rankevolve.src.common.streaming.file_tailer import WorkspaceStreamTailer  # TODO: migrate from rankevolve.src.common.streaming.file_tailer
+        from rankevolve.src.common.streaming.file_tailer import (  # TODO: migrate from rankevolve.src.common.streaming.file_tailer
+            WorkspaceStreamTailer,
+        )
 
         tailer = WorkspaceStreamTailer(
             cache_folder,
@@ -139,7 +143,9 @@ class AgentServiceBridge(QueueClientBase):
         tailer_task: asyncio.Task[str] | None = None  # conversation tailer
         task_tailer_task: asyncio.Task[str] | None = None  # background task tailer
         task_tailer_obj: Any | None = None  # background task's WorkspaceStreamTailer
-        has_active_task = False  # True after task_status:starting, until completed/error
+        has_active_task = (
+            False  # True after task_status:starting, until completed/error
+        )
         conversation_done = False  # True after stream_end/TurnCompleted
 
         while True:
@@ -167,8 +173,11 @@ class AgentServiceBridge(QueueClientBase):
 
             logger.info(
                 "poll_responses: msg_type=%s flag=%s tailer=%s task_tailer=%s keys=%s",
-                msg_type, flag, tailer_task is not None,
-                task_tailer_task is not None, list(resp.keys()),
+                msg_type,
+                flag,
+                tailer_task is not None,
+                task_tailer_task is not None,
+                list(resp.keys()),
             )
 
             if msg_type == "token_batch":
@@ -200,8 +209,8 @@ class AgentServiceBridge(QueueClientBase):
                     if self._active_tailer is not None:
                         self._active_tailer.stop()
                     final_from_tailer = await tailer_task
-                    end_msg["final_content"] = (
-                        final_from_tailer or resp.get("final_content", "")
+                    end_msg["final_content"] = final_from_tailer or resp.get(
+                        "final_content", ""
                     )
                 tailer_task = None
                 self._active_tailer = None
@@ -273,15 +282,13 @@ class AgentServiceBridge(QueueClientBase):
 
                 # Launch workspace tailer when task starts with a workspace
                 workspace = resp.get("workspace")
-                if (
-                    workspace
-                    and status == "starting"
-                    and task_tailer_task is None
-                ):
+                if workspace and status == "starting" and task_tailer_task is None:
                     has_active_task = True
                     task_tailer_task = asyncio.create_task(
                         self.stream_from_workspace(
-                            workspace, send, task_id=resp.get("task_id"),
+                            workspace,
+                            send,
+                            task_id=resp.get("task_id"),
                         )
                     )
                     # Save ref so we can stop it independently

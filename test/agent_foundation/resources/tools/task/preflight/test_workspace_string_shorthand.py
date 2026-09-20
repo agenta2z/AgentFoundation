@@ -21,11 +21,12 @@ What this test verifies:
        flags.
     3. Both ``self.workspace`` and ``self._workspace`` end up as the same
        ``InferencerWorkspace`` instance after post-init.
-    4. Default flags on the constructed workspace are preserved
-       (``use_final_deliverables_folder=False`` by default).
+    4. The constructed workspace exposes the two-axis ``outputs/`` layout and
+       carries no retired ``use_final_deliverables_folder`` attrib (Part 2).
 
 These run without LLM calls; expected runtime < 5s each.
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -46,6 +47,7 @@ def _make_minimal_lwi(workspace_arg):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
+
     return LinearWorkflowInferencer(
         step_configs=[],
         workspace=workspace_arg,
@@ -80,11 +82,8 @@ def test_string_shorthand_equivalent_to_explicit_form(tmp_ws):
 
     # Same root
     assert inf_string.workspace.root == inf_explicit.workspace.root
-    # Same default flag value (use_final_deliverables_folder)
-    assert (
-        inf_string.workspace.use_final_deliverables_folder
-        == inf_explicit.workspace.use_final_deliverables_folder
-    )
+    # Same resolved outputs/ layout (the two-axis deliverable set)
+    assert inf_string.workspace.outputs_dir == inf_explicit.workspace.outputs_dir
 
 
 def test_string_shorthand_syncs_to_underscore_workspace(tmp_ws):
@@ -100,15 +99,18 @@ def test_string_shorthand_syncs_to_underscore_workspace(tmp_ws):
     assert inf._workspace.root == tmp_ws
 
 
-def test_string_shorthand_preserves_default_flags(tmp_ws):
-    """Preflight 4: Default workspace flags are unset (use_final_deliverables_folder=False)."""
+def test_string_shorthand_uses_two_axis_outputs_layout(tmp_ws):
+    """Preflight 4: The shorthand-built workspace uses the two-axis ``outputs/``
+    layout and carries NO retired ``use_final_deliverables_folder`` attrib (Part 2)."""
     inf = _make_minimal_lwi(tmp_ws)
 
-    assert inf.workspace.use_final_deliverables_folder is False, (
-        "String shorthand should produce a workspace with default flags "
-        "(use_final_deliverables_folder=False); use the explicit "
-        "InferencerWorkspace(root=..., use_final_deliverables_folder=True) "
-        "form when you need flags."
+    assert Path(inf.workspace.outputs_dir).name == "outputs", (
+        "String shorthand should produce a workspace whose deliverable set is "
+        f"outputs/; got outputs_dir={inf.workspace.outputs_dir!r}."
+    )
+    assert not hasattr(inf.workspace, "use_final_deliverables_folder"), (
+        "Retired attrib `use_final_deliverables_folder` reappeared; Part 2 "
+        "removed it (outputs/ IS the deliverable set)."
     )
 
 
@@ -119,15 +121,15 @@ def test_explicit_workspace_object_pass_through(tmp_ws):
         InferencerWorkspace,
     )
 
-    explicit_ws = InferencerWorkspace(root=tmp_ws, use_final_deliverables_folder=True)
+    explicit_ws = InferencerWorkspace(root=tmp_ws)
     inf = _make_minimal_lwi(explicit_ws)
 
     assert inf.workspace is explicit_ws, (
         "Explicit InferencerWorkspace should pass through unchanged "
         "(no re-construction)."
     )
-    assert inf.workspace.use_final_deliverables_folder is True, (
-        "Flags on the explicit workspace must be preserved."
+    assert inf.workspace.root == tmp_ws, (
+        "The explicit workspace's root must be preserved."
     )
 
 

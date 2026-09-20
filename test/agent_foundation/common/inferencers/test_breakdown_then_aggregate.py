@@ -1,26 +1,38 @@
-
-
 """Tests for BreakdownThenAggregateInferencer.
 
 Phase 7: Tests covering basic diamond functionality, parse_numbered_list,
 error handling, and resumability.
 """
 
+import json
 import os
-import pickle
 import shutil
 import tempfile
 import unittest
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
     parse_numbered_list,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from attr import attrib, attrs
 from rich_python_utils.common_utils.function_helper import FallbackMode
+
+
+def _write_promoted_breakdown(ws, descriptions):
+    """Write the promoted breakdown fence the resume path reads.
+
+    ``checkpoints/breakdown/decomposed_subtasks.json`` is exactly what
+    ``_promote_child_checkpoints`` publishes and ``_load_promoted_breakdown``
+    reads — the generic mechanism that retires the hand-rolled
+    ``breakdown_result.json``.
+    """
+    path = ws.checkpoint_path(os.path.join("breakdown", "decomposed_subtasks.json"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"subtasks": [{"description": d} for d in descriptions]}, f)
+    return path
 
 
 @attrs
@@ -91,7 +103,11 @@ class TestBasicDiamondFunctionality(unittest.TestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=worker_inferencers,
             aggregator_inferencer=aggregator,
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
+            # Inline worker results into the aggregator's input so the
+            # template-less MockInferencer observes them directly; the default
+            # (True) routes them to the aggregator's template_extra_feed instead.
+            inject_upstream_artifacts_to_aggregator=False,
         )
 
         result = bta.infer("original question")
@@ -305,7 +321,7 @@ class TestResumability(unittest.TestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=crashing_factory,
             aggregator_inferencer=None,
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             resume_with_saved_results=False,
             # FallbackMode.NEVER: no _infer_recovery call, so _infer (and breakdown)
             # runs exactly once. Default ON_FIRST_FAILURE would re-call _infer via
@@ -318,6 +334,15 @@ class TestResumability(unittest.TestCase):
             bta.infer("question")
 
         self.assertEqual(breakdown_call_count[0], 1, "Breakdown ran once in first run")
+
+        # The legacy numbered-list breakdown carries no expected_extraction, so run 1
+        # never emitted the register's decomposed_subtasks.json to promote. Seed the
+        # promoted checkpoint a register-configured breakdown would have published, so
+        # resume rebuilds the fan-out from it (read side of the mechanism; the
+        # write/promote side is covered by test_bta_checkpoint_promotion).
+        _write_promoted_breakdown(
+            InferencerWorkspace(root=self.tmpdir), ["W1", "W2", "W3"]
+        )
 
         # --- Second run: resume, breakdown should be skipped (loaded from checkpoint) ---
         run2_worker_calls = [0, 0, 0]
@@ -333,7 +358,7 @@ class TestResumability(unittest.TestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=resuming_factory,
             aggregator_inferencer=None,
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             resume_with_saved_results=True,
         )
 
@@ -341,17 +366,17 @@ class TestResumability(unittest.TestCase):
 
         # Breakdown should NOT run again — loaded from checkpoint
         self.assertEqual(
-            breakdown_call_count[0], 1,
-            "Breakdown should not re-run on resume (loaded from checkpoint)"
+            breakdown_call_count[0],
+            1,
+            "Breakdown should not re-run on resume (loaded from checkpoint)",
         )
         # All workers re-execute (by design: worker nodes have enable_result_save=False)
         for i in range(3):
             self.assertEqual(
-                run2_worker_calls[i], 1,
-                f"Worker {i} should execute on resume (workers manage own checkpoints)"
+                run2_worker_calls[i],
+                1,
+                f"Worker {i} should execute on resume (workers manage own checkpoints)",
             )
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +459,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
     async def test_unlimited_concurrency_by_default(self):
         """Without max_concurrency, all workers should run concurrently."""
         n_workers = 6
-        queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
+        queries = "\n".join(f"{i + 1}. Q{i + 1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
         factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
@@ -458,7 +483,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         """With max_concurrency=2 and 6 workers, at most 2 should run at once."""
         n_workers = 6
         max_conc = 2
-        queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
+        queries = "\n".join(f"{i + 1}. Q{i + 1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
         factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
@@ -487,7 +512,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
     async def test_max_concurrency_1_runs_sequentially(self):
         """With max_concurrency=1, workers should run one at a time."""
         n_workers = 4
-        queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
+        queries = "\n".join(f"{i + 1}. Q{i + 1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
         factory, tracker = self._make_async_worker_inferencers(delay=0.05)
 
@@ -513,7 +538,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
 
         n_workers = 8
         max_conc = 3
-        queries = "\n".join(f"{i+1}. Q{i+1}" for i in range(n_workers))
+        queries = "\n".join(f"{i + 1}. Q{i + 1}" for i in range(n_workers))
         breakdown = AsyncMockInferencer(response=queries)
         completed = []
 
@@ -557,7 +582,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=factory,
             aggregator_inferencer=aggregator,
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             max_concurrency=2,
         )
 
@@ -566,7 +591,6 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "aggregated")
         # All 3 workers should have been created and executed
         self.assertEqual(len(worker_inferencers_calls), 3)
-
 
     async def test_sliding_window_not_batched(self):
         """Verify max_concurrency uses sliding window, not batch-and-wait.
@@ -593,11 +617,11 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         def factory(sub_query, index):
             async def _response(inp):
                 if index == 0:
-                    await asyncio.sleep(0.01)   # Fast: 10ms
+                    await asyncio.sleep(0.01)  # Fast: 10ms
                 elif index == 1:
-                    await asyncio.sleep(0.15)   # Slow: 150ms
+                    await asyncio.sleep(0.15)  # Slow: 150ms
                 else:
-                    await asyncio.sleep(0.05)   # Medium: 50ms
+                    await asyncio.sleep(0.05)  # Medium: 50ms
                 completion_order.append(index)
                 return f"result_{index}"
 
@@ -658,7 +682,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=factory,
             aggregator_inferencer=aggregator,
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             max_concurrency=1,
         )
         result = await bta.ainfer("question")
@@ -673,7 +697,7 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
             breakdown_inferencer=AsyncMockInferencer(response=queries),
             worker_inferencers=factory,
             aggregator_inferencer=AsyncMockInferencer(response="aggregated2"),
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             max_concurrency=2,
         )
         result2 = await bta2.ainfer("question")
@@ -729,14 +753,20 @@ class TestPredefinedSubQueries(unittest.TestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=factory,
             aggregator_inferencer=MockInferencer(response=agg_fn),
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             predefined_sub_queries=["Q_alpha", "Q_beta", "Q_gamma"],
+            # Inline worker results into the aggregator's input so the
+            # template-less MockInferencer observes them directly; the default
+            # (True) routes them to the aggregator's template_extra_feed instead.
+            inject_upstream_artifacts_to_aggregator=False,
         )
 
         result = bta.infer("original question")
 
         # breakdown_inferencer must NOT be called
-        self.assertEqual(breakdown._call_count, 0, "breakdown_inferencer should not be called")
+        self.assertEqual(
+            breakdown._call_count, 0, "breakdown_inferencer should not be called"
+        )
         # Workers must receive the predefined queries, not LLM output
         self.assertEqual(factory.received_queries, ["Q_alpha", "Q_beta", "Q_gamma"])
         # Aggregator receives results from the 3 predefined workers
@@ -848,14 +878,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
     # ── Test F: checkpoint wins over predefined ────────────────────────────────
 
     def test_checkpoint_wins_over_predefined_sub_queries(self):
-        """Test F: saved checkpoint takes priority over predefined_sub_queries."""
-        import json
-
-        # Write a fake breakdown checkpoint
-        ckpt_path = os.path.join(self.tmpdir, "breakdown_result.json")
-        with open(ckpt_path, "w") as f:
-            json.dump({"sub_queries": ["CKPT_Q1", "CKPT_Q2"], "raw_output": ""}, f)
-
+        """Test F: a promoted breakdown checkpoint takes priority over predefined_sub_queries."""
         breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
         factory = self._make_worker_inferencers()
 
@@ -867,12 +890,20 @@ class TestPredefinedSubQueries(unittest.TestCase):
             resume_with_saved_results=True,
             predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
         )
+        ws = InferencerWorkspace(root=self.tmpdir)
+        ws.ensure_dirs()
+        bta._workspace = ws
+        _write_promoted_breakdown(ws, ["CKPT_Q1", "CKPT_Q2"])
 
         bta.infer("question")
 
-        # Checkpoint sub_queries should be used, not predefined ones
-        self.assertEqual(factory.received_queries, ["CKPT_Q1", "CKPT_Q2"])
-        # Neither breakdown nor predefined should override checkpoint
+        # The promoted checkpoint wins over predefined_sub_queries; the register
+        # derives each worker query from the fence as "**Description**: <desc>".
+        self.assertEqual(
+            factory.received_queries,
+            ["**Description**: CKPT_Q1", "**Description**: CKPT_Q2"],
+        )
+        # Neither breakdown nor predefined should override the promoted checkpoint.
         self.assertEqual(breakdown._call_count, 0)
 
     # ── Test G: breakdown_only=True with predefined → warning, proceeds ────────
@@ -1041,13 +1072,15 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
             breakdown_inferencer=breakdown,
             worker_inferencers=factory,
             aggregator_inferencer=AsyncMockInferencer(response="aggregated"),
-            checkpoint_dir=self.tmpdir,
+            workspace=InferencerWorkspace(root=self.tmpdir),
             predefined_sub_queries=["async_Q1", "async_Q2"],
         )
 
         result = await bta.ainfer("question")
 
-        self.assertEqual(breakdown._call_count, 0, "breakdown should not be called in async path")
+        self.assertEqual(
+            breakdown._call_count, 0, "breakdown should not be called in async path"
+        )
         self.assertEqual(factory.received_queries, ["async_Q1", "async_Q2"])
         self.assertIn("aggregated", str(result))
 
@@ -1084,13 +1117,7 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("breakdown_inferencer", str(ctx.exception))
 
     async def test_ainfer_checkpoint_wins_over_predefined(self):
-        """Checkpoint takes priority over predefined_sub_queries in async path."""
-        import json
-
-        ckpt_path = os.path.join(self.tmpdir, "breakdown_result.json")
-        with open(ckpt_path, "w") as f:
-            json.dump({"sub_queries": ["CKPT_Q1"], "raw_output": ""}, f)
-
+        """A promoted breakdown checkpoint takes priority over predefined in async path."""
         factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
@@ -1101,10 +1128,14 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
             resume_with_saved_results=True,
             predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
         )
+        ws = InferencerWorkspace(root=self.tmpdir)
+        ws.ensure_dirs()
+        bta._workspace = ws
+        _write_promoted_breakdown(ws, ["CKPT_Q1"])
 
         await bta.ainfer("question")
 
-        self.assertEqual(factory.received_queries, ["CKPT_Q1"])
+        self.assertEqual(factory.received_queries, ["**Description**: CKPT_Q1"])
 
     async def test_ainfer_breakdown_only_warning_proceeds(self):
         """breakdown_only=True is ignored with warning in async path."""
@@ -1150,6 +1181,7 @@ class TestPostMortemFixes(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
+
         agg = MockInferencer(response="agg")
         bta = BreakdownThenAggregateInferencer(
             predefined_sub_queries=["q1", "q2"],
@@ -1165,6 +1197,7 @@ class TestPostMortemFixes(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
+
         bta = BreakdownThenAggregateInferencer(
             predefined_sub_queries=["q1"],
             worker_inferencers=lambda i: MockInferencer(response=f"w{i}"),
@@ -1179,6 +1212,7 @@ class TestPostMortemFixes(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             TRANSIENT_RETRY_EXCEPTIONS,
         )
+
         self.assertIn(TimeoutError, TRANSIENT_RETRY_EXCEPTIONS)
         self.assertIn(ConnectionError, TRANSIENT_RETRY_EXCEPTIONS)
         self.assertIn(OSError, TRANSIENT_RETRY_EXCEPTIONS)

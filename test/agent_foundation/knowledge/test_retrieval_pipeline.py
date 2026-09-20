@@ -8,6 +8,7 @@ once and retrieve_pieces/retrieve_search_graph N times.
 
 Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 14.1, 14.2, 14.3
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,16 +27,21 @@ if _rpu_src.exists() and str(_rpu_src) not in sys.path:
 
 import pytest
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
-    AgenticRetrievalResult, PostProcessor, QueryExpander,
-    RetrievalPipeline, SubQuery,
+    AgenticRetrievalResult,
+    PostProcessor,
+    QueryExpander,
+    RetrievalPipeline,
+    SubQuery,
 )
 
 
 def _make_piece(piece_id, info_type="context"):
-    return KnowledgePiece(content=f"Content {piece_id}", piece_id=piece_id, info_type=info_type)
+    return KnowledgePiece(
+        content=f"Content {piece_id}", piece_id=piece_id, info_type=info_type
+    )
 
 
 def _make_result(num_pieces=2, metadata=None, graph_context=None):
@@ -53,7 +59,9 @@ class RecordingPP(PostProcessor):
         self.return_value = return_value
 
     def process(self, results, query="", sub_queries=None, **kwargs):
-        self.calls.append(dict(results=results, query=query, sub_queries=sub_queries, kwargs=kwargs))
+        self.calls.append(
+            dict(results=results, query=query, sub_queries=sub_queries, kwargs=kwargs)
+        )
         return self.return_value
 
 
@@ -75,8 +83,13 @@ class FailingPP(PostProcessor):
         raise ValueError("Post-processor failed")
 
 
-def _mock_kb(retrieve_result=None, metadata=(None, None), identity_ctx=None,
-             pieces_side=None, search_side=None):
+def _mock_kb(
+    retrieve_result=None,
+    metadata=(None, None),
+    identity_ctx=None,
+    pieces_side=None,
+    search_side=None,
+):
     kb = MagicMock()
     kb.retrieve.return_value = retrieve_result or _make_result()
     kb.retrieve_metadata.return_value = metadata
@@ -158,7 +171,9 @@ class TestMultiQueryPath:
         sqs = [SubQuery(query="sq1"), SubQuery(query="sq2")]
         kb = _mock_kb(pieces_side=[[], []], search_side=[[], []])
         pp = RecordingPP(AgenticRetrievalResult())
-        pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=10)
+        pipe = RetrievalPipeline(
+            kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=10
+        )
         pipe.execute("q", entity_id="user:1")
         assert kb.retrieve_pieces.call_count == 2
         assert kb.retrieve_search_graph.call_count == 2
@@ -167,7 +182,9 @@ class TestMultiQueryPath:
         sqs = [SubQuery(query="sq1", domain="testing", tags=["t1"])]
         kb = _mock_kb(pieces_side=[[]], search_side=[[]])
         pp = RecordingPP(AgenticRetrievalResult())
-        pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=7)
+        pipe = RetrievalPipeline(
+            kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=7
+        )
         pipe.execute("q", entity_id="user:1", spaces=["main"])
         kw = kb.retrieve_pieces.call_args.kwargs
         assert kw["query"] == "sq1"
@@ -180,10 +197,27 @@ class TestMultiQueryPath:
         sqs = [SubQuery(query="sq1"), SubQuery(query="sq2")]
         p1, p2 = _make_piece("p1"), _make_piece("p2")
         meta = EntityMetadata(entity_id="u", entity_type="user", properties={"k": "v"})
-        id_ctx = [{"target_node_id": "n1", "relation_type": "IDENTITY", "depth": 0, "score": 1.0, "target_label": ""}]
-        search_ctx = [{"target_node_id": "s1", "relation_type": "SEARCH_HIT", "depth": 0, "score": 0.7, "target_label": ""}]
+        id_ctx = [
+            {
+                "target_node_id": "n1",
+                "relation_type": "IDENTITY",
+                "depth": 0,
+                "score": 1.0,
+                "target_label": "",
+            }
+        ]
+        search_ctx = [
+            {
+                "target_node_id": "s1",
+                "relation_type": "SEARCH_HIT",
+                "depth": 0,
+                "score": 0.7,
+                "target_label": "",
+            }
+        ]
         kb = _mock_kb(
-            metadata=(meta, None), identity_ctx=id_ctx,
+            metadata=(meta, None),
+            identity_ctx=id_ctx,
             pieces_side=[[(p1, 0.9)], [(p2, 0.8)]],
             search_side=[search_ctx, []],
         )
@@ -226,7 +260,15 @@ class TestMultiQueryPath:
 
     def test_graph_context_is_copied_per_result(self):
         sqs = [SubQuery(query="sq1"), SubQuery(query="sq2")]
-        id_ctx = [{"target_node_id": "n1", "relation_type": "IDENTITY", "depth": 0, "score": 1.0, "target_label": ""}]
+        id_ctx = [
+            {
+                "target_node_id": "n1",
+                "relation_type": "IDENTITY",
+                "depth": 0,
+                "score": 1.0,
+                "target_label": "",
+            }
+        ]
         kb = _mock_kb(identity_ctx=id_ctx, pieces_side=[[], []], search_side=[[], []])
         pp = RecordingPP(AgenticRetrievalResult())
         pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp)
@@ -255,8 +297,11 @@ class TestFallbackLogic:
                 return first_out if call_count[0] == 1 else final_out
 
         pipe = RetrievalPipeline(
-            kb=kb, expander=FixedExpander(sqs),
-            post_processor=TrackingPP(), min_results=5, top_k=10,
+            kb=kb,
+            expander=FixedExpander(sqs),
+            post_processor=TrackingPP(),
+            min_results=5,
+            top_k=10,
         )
         out = pipe.execute("q", entity_id="user:1")
         kb.retrieve.assert_called_once()
@@ -287,7 +332,9 @@ class TestFallbackLogic:
     def test_needs_fallback_checks_attribute(self):
         pipe = RetrievalPipeline(kb=MagicMock(), post_processor=RecordingPP())
         assert pipe._needs_fallback(AgenticRetrievalResult(needs_fallback=True)) is True
-        assert pipe._needs_fallback(AgenticRetrievalResult(needs_fallback=False)) is False
+        assert (
+            pipe._needs_fallback(AgenticRetrievalResult(needs_fallback=False)) is False
+        )
         assert pipe._needs_fallback("string") is False
         assert pipe._needs_fallback({"dict": "out"}) is False
         assert pipe._needs_fallback(None) is False
@@ -295,7 +342,9 @@ class TestFallbackLogic:
     def test_fallback_passes_is_fallback_to_pp(self):
         sqs = [SubQuery(query="sq1")]
         fallback_result = _make_result(num_pieces=5)
-        kb = _mock_kb(retrieve_result=fallback_result, pieces_side=[[]], search_side=[[]])
+        kb = _mock_kb(
+            retrieve_result=fallback_result, pieces_side=[[]], search_side=[[]]
+        )
         call_args = []
 
         class TrackingPP(PostProcessor):
@@ -306,8 +355,11 @@ class TestFallbackLogic:
                 return AgenticRetrievalResult(needs_fallback=False, used_fallback=True)
 
         pipe = RetrievalPipeline(
-            kb=kb, expander=FixedExpander(sqs),
-            post_processor=TrackingPP(), min_results=5, top_k=10,
+            kb=kb,
+            expander=FixedExpander(sqs),
+            post_processor=TrackingPP(),
+            min_results=5,
+            top_k=10,
         )
         pipe.execute("q", entity_id="user:1")
         assert len(call_args) == 2
@@ -324,7 +376,9 @@ class TestErrorHandling:
 
     def test_expander_failure_propagates(self):
         kb = _mock_kb()
-        pipe = RetrievalPipeline(kb=kb, expander=FailingExpander(), post_processor=RecordingPP())
+        pipe = RetrievalPipeline(
+            kb=kb, expander=FailingExpander(), post_processor=RecordingPP()
+        )
         with pytest.raises(RuntimeError, match="Expander failed"):
             pipe.execute("q")
 
@@ -337,7 +391,9 @@ class TestErrorHandling:
     def test_pp_error_is_re_raised_multi_query(self):
         sqs = [SubQuery(query="sq1")]
         kb = _mock_kb(pieces_side=[[]], search_side=[[]])
-        pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=FailingPP())
+        pipe = RetrievalPipeline(
+            kb=kb, expander=FixedExpander(sqs), post_processor=FailingPP()
+        )
         with pytest.raises(ValueError, match="Post-processor failed"):
             pipe.execute("q")
 
@@ -362,7 +418,9 @@ class TestCallCountVerification:
 
     def test_five_sub_queries(self):
         sqs = [SubQuery(query=f"sq{i}") for i in range(5)]
-        kb = _mock_kb(pieces_side=[[] for _ in range(5)], search_side=[[] for _ in range(5)])
+        kb = _mock_kb(
+            pieces_side=[[] for _ in range(5)], search_side=[[] for _ in range(5)]
+        )
         pp = RecordingPP(AgenticRetrievalResult())
         pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp)
         pipe.execute("q")
@@ -378,12 +436,20 @@ class TestCallCountVerification:
         ]
         kb = _mock_kb(pieces_side=[[], []], search_side=[[], []])
         pp = RecordingPP(AgenticRetrievalResult())
-        pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=15)
+        pipe = RetrievalPipeline(
+            kb=kb, expander=FixedExpander(sqs), post_processor=pp, top_k=15
+        )
         pipe.execute("q", entity_id="user:1", spaces=["main"])
         kw0 = kb.retrieve_pieces.call_args_list[0].kwargs
-        assert kw0["query"] == "alpha" and kw0["domain"] == "d1" and kw0["tags"] == ["t1"]
+        assert (
+            kw0["query"] == "alpha" and kw0["domain"] == "d1" and kw0["tags"] == ["t1"]
+        )
         kw1 = kb.retrieve_pieces.call_args_list[1].kwargs
-        assert kw1["query"] == "beta" and kw1["domain"] == "d2" and kw1["tags"] == ["t2", "t3"]
+        assert (
+            kw1["query"] == "beta"
+            and kw1["domain"] == "d2"
+            and kw1["tags"] == ["t2", "t3"]
+        )
         assert kb.retrieve_search_graph.call_args_list[0].kwargs["query"] == "alpha"
         assert kb.retrieve_search_graph.call_args_list[1].kwargs["query"] == "beta"
 
@@ -394,7 +460,9 @@ class TestCallCountVerification:
         pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp)
         pipe.execute("q", entity_id="user:1", spaces=["main"], include_global=False)
         kb.retrieve_metadata.assert_called_once_with(
-            entity_id="user:1", include_global=False, spaces=["main"],
+            entity_id="user:1",
+            include_global=False,
+            spaces=["main"],
         )
 
     def test_l3b_receives_entity_id_and_spaces(self):
@@ -404,5 +472,6 @@ class TestCallCountVerification:
         pipe = RetrievalPipeline(kb=kb, expander=FixedExpander(sqs), post_processor=pp)
         pipe.execute("q", entity_id="user:1", spaces=["main"])
         kb.retrieve_identity_graph.assert_called_once_with(
-            entity_id="user:1", spaces=["main"],
+            entity_id="user:1",
+            spaces=["main"],
         )

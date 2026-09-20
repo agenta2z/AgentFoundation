@@ -13,9 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.automation.meta_agent.evaluator import EvaluationResult
 from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
@@ -26,6 +23,7 @@ from agent_foundation.automation.meta_agent.models import (
     ValidationResults,
 )
 from agent_foundation.automation.meta_agent.pipeline import MetaAgentPipeline
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +62,9 @@ def trace_steps(draw, min_size: int = 1, max_size: int = 5) -> list[TraceStep]:
 
 
 @st.composite
-def execution_traces(draw, min_count: int = 1, max_count: int = 4) -> list[ExecutionTrace]:
+def execution_traces(
+    draw, min_count: int = 1, max_count: int = 4
+) -> list[ExecutionTrace]:
     """Generate a list of ExecutionTraces with unique IDs."""
     count = draw(st.integers(min_value=min_count, max_value=max_count))
     traces = []
@@ -88,7 +88,9 @@ def execution_traces(draw, min_count: int = 1, max_count: int = 4) -> list[Execu
 
 def _make_pipeline(validate: bool = False, target_converter=None) -> MetaAgentPipeline:
     """Create a pipeline with default config and mock agent/executor."""
-    config = PipelineConfig(run_count=2, validate=validate, target_converter=target_converter)
+    config = PipelineConfig(
+        run_count=2, validate=validate, target_converter=target_converter
+    )
     return MetaAgentPipeline(
         agent=MagicMock(name="agent"),
         action_executor=MagicMock(name="executor"),
@@ -99,9 +101,7 @@ def _make_pipeline(validate: bool = False, target_converter=None) -> MetaAgentPi
 def _mock_successful_pipeline(traces: list[ExecutionTrace]):
     """Return a dict of patch targets and their mock return values for a
     successful pipeline run."""
-    eval_results = [
-        EvaluationResult(trace_id=t.trace_id, passed=True) for t in traces
-    ]
+    eval_results = [EvaluationResult(trace_id=t.trace_id, passed=True) for t in traces]
 
     mock_graph = MagicMock(name="graph")
     mock_report = MagicMock(spec=SynthesisReport, name="report")
@@ -239,7 +239,9 @@ def test_failure_failed_stage_names_the_stage(
     mock_converter = None
     if failing_stage == "target_conversion":
         mock_converter = MagicMock()
-        mock_converter.convert_all.side_effect = RuntimeError(f"fail at {failing_stage}")
+        mock_converter.convert_all.side_effect = RuntimeError(
+            f"fail at {failing_stage}"
+        )
 
     pipeline = _make_pipeline(validate=True, target_converter=mock_converter)
 
@@ -258,7 +260,9 @@ def test_failure_failed_stage_names_the_stage(
         MockEvaluator.return_value.evaluate.return_value = mocks["eval_results"]
         MockNorm.return_value.normalize.return_value = mocks["traces"]
         MockSynth.return_value.synthesize.return_value = mocks["synth_result"]
-        MockValidator.return_value.validate.return_value = MagicMock(spec=ValidationResults)
+        MockValidator.return_value.validate.return_value = MagicMock(
+            spec=ValidationResults
+        )
 
         # Inject failure at the chosen stage
         error = RuntimeError(f"fail at {failing_stage}")
@@ -292,10 +296,15 @@ def test_failure_failed_stage_names_the_stage(
 @settings(max_examples=50, deadline=None)
 @given(
     traces=execution_traces(min_count=1, max_count=4),
-    failing_stage=st.sampled_from([
-        "normalization", "target_conversion", "alignment",
-        "extraction", "synthesis",
-    ]),
+    failing_stage=st.sampled_from(
+        [
+            "normalization",
+            "target_conversion",
+            "alignment",
+            "extraction",
+            "synthesis",
+        ]
+    ),
 )
 def test_failure_traces_contain_pre_failure_data(
     traces: list[ExecutionTrace],
@@ -315,7 +324,9 @@ def test_failure_traces_contain_pre_failure_data(
     mock_converter = None
     if failing_stage == "target_conversion":
         mock_converter = MagicMock()
-        mock_converter.convert_all.side_effect = RuntimeError(f"fail at {failing_stage}")
+        mock_converter.convert_all.side_effect = RuntimeError(
+            f"fail at {failing_stage}"
+        )
 
     pipeline = _make_pipeline(validate=False, target_converter=mock_converter)
 

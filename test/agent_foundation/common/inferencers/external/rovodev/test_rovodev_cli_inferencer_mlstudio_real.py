@@ -37,7 +37,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
     RovoDevCliInferencer,
 )
@@ -61,12 +60,8 @@ DEFAULT_TIMEOUT = 900  # 15 minutes — deep-dive tasks can take time
 
 # Local path to the ML Studio checkout. Falls back to the path used in the
 # interactive RovoDev session (workspace atlassian_packages/ml-studio).
-_DEFAULT_MLSTUDIO_PATH = os.path.expanduser(
-    "~/MyProjects/atlassian_packages/ml-studio"
-)
-MLSTUDIO_LOCAL_PATH: str = os.environ.get(
-    "MLSTUDIO_LOCAL_PATH", _DEFAULT_MLSTUDIO_PATH
-)
+_DEFAULT_MLSTUDIO_PATH = os.path.expanduser("~/MyProjects/atlassian_packages/ml-studio")
+MLSTUDIO_LOCAL_PATH: str = os.environ.get("MLSTUDIO_LOCAL_PATH", _DEFAULT_MLSTUDIO_PATH)
 
 # Bitbucket workspace + repo slug for MCP-based browsing
 BITBUCKET_WORKSPACE = "atlassian"
@@ -75,71 +70,73 @@ BITBUCKET_REPO = "ml-studio"
 # JSON output schema that structures the agent's report into typed fields.
 # This forces the agent to produce machine-readable output that we can assert
 # on precisely, rather than grepping free-form markdown.
-REPORT_OUTPUT_SCHEMA = json.dumps({
-    "type": "object",
-    "required": [
-        "title",
-        "platform_summary",
-        "module_team_namespaces",
-        "library_team_namespaces",
-        "workflow_areas",
-        "platform_sdk_highlights",
-        "cicd_pipeline_highlights",
-        "ai_integration_highlights",
-        "total_module_teams_count",
-        "total_library_packages_count",
-        "total_workflow_yaml_files_estimate",
-    ],
-    "properties": {
-        "title": {
-            "type": "string",
-            "description": "Short title for the report",
+REPORT_OUTPUT_SCHEMA = json.dumps(
+    {
+        "type": "object",
+        "required": [
+            "title",
+            "platform_summary",
+            "module_team_namespaces",
+            "library_team_namespaces",
+            "workflow_areas",
+            "platform_sdk_highlights",
+            "cicd_pipeline_highlights",
+            "ai_integration_highlights",
+            "total_module_teams_count",
+            "total_library_packages_count",
+            "total_workflow_yaml_files_estimate",
+        ],
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Short title for the report",
+            },
+            "platform_summary": {
+                "type": "string",
+                "description": "2-3 sentence description of what ML Studio is",
+            },
+            "module_team_namespaces": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of team namespace names found under modules/src/",
+            },
+            "library_team_namespaces": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of team namespace names found under libraries/src/",
+            },
+            "workflow_areas": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of workflow areas found under workflows/src/",
+            },
+            "platform_sdk_highlights": {
+                "type": "string",
+                "description": "Key capabilities of the ml-studio-sdk library",
+            },
+            "cicd_pipeline_highlights": {
+                "type": "string",
+                "description": "Key pipeline steps and features in bitbucket-pipelines.yml",
+            },
+            "ai_integration_highlights": {
+                "type": "string",
+                "description": "AI/LLM integration highlights (AI Gateway, fine-tuning, agents, etc.)",
+            },
+            "total_module_teams_count": {
+                "type": "integer",
+                "description": "Total number of team namespaces in modules/src/",
+            },
+            "total_library_packages_count": {
+                "type": "integer",
+                "description": "Total number of individual library packages in libraries/src/",
+            },
+            "total_workflow_yaml_files_estimate": {
+                "type": "integer",
+                "description": "Estimated total number of workflow YAML files in workflows/src/",
+            },
         },
-        "platform_summary": {
-            "type": "string",
-            "description": "2-3 sentence description of what ML Studio is",
-        },
-        "module_team_namespaces": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "List of team namespace names found under modules/src/",
-        },
-        "library_team_namespaces": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "List of team namespace names found under libraries/src/",
-        },
-        "workflow_areas": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "List of workflow areas found under workflows/src/",
-        },
-        "platform_sdk_highlights": {
-            "type": "string",
-            "description": "Key capabilities of the ml-studio-sdk library",
-        },
-        "cicd_pipeline_highlights": {
-            "type": "string",
-            "description": "Key pipeline steps and features in bitbucket-pipelines.yml",
-        },
-        "ai_integration_highlights": {
-            "type": "string",
-            "description": "AI/LLM integration highlights (AI Gateway, fine-tuning, agents, etc.)",
-        },
-        "total_module_teams_count": {
-            "type": "integer",
-            "description": "Total number of team namespaces in modules/src/",
-        },
-        "total_library_packages_count": {
-            "type": "integer",
-            "description": "Total number of individual library packages in libraries/src/",
-        },
-        "total_workflow_yaml_files_estimate": {
-            "type": "integer",
-            "description": "Estimated total number of workflow YAML files in workflows/src/",
-        },
-    },
-})
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +144,9 @@ REPORT_OUTPUT_SCHEMA = json.dumps({
 # ---------------------------------------------------------------------------
 
 
-def _make_inferencer(working_dir: str, output_file: str | None = None) -> RovoDevCliInferencer:
+def _make_inferencer(
+    working_dir: str, output_file: str | None = None
+) -> RovoDevCliInferencer:
     """Create a RovoDevCliInferencer pointed at the ML Studio working dir."""
     return RovoDevCliInferencer(
         target_path=working_dir,
@@ -155,7 +154,7 @@ def _make_inferencer(working_dir: str, output_file: str | None = None) -> RovoDe
         output_schema=REPORT_OUTPUT_SCHEMA,
         idle_timeout_seconds=DEFAULT_TIMEOUT,
         tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
-        yolo=True,          # skip tool confirmations for programmatic use
+        yolo=True,  # skip tool confirmations for programmatic use
         enable_legacy=True,  # legacy mode: reliable --output-file capture
     )
 
@@ -286,8 +285,9 @@ class TestRovoDevMLStudioDeepDive:
         # --- Structural checks ---
         assert "title" in report, "Report must have a title"
         assert "platform_summary" in report, "Report must have platform_summary"
-        assert len(report.get("platform_summary", "")) > 50, \
+        assert len(report.get("platform_summary", "")) > 50, (
             "platform_summary should be a meaningful description (>50 chars)"
+        )
 
         # --- Module teams ---
         module_teams = report.get("module_team_namespaces", [])
@@ -298,7 +298,13 @@ class TestRovoDevMLStudioDeepDive:
         )
         # Spot-check a few well-known team namespaces
         module_teams_lower = [t.lower() for t in module_teams]
-        for expected in ["search_relevance", "confluence_ai", "jira_ai", "loom_ai", "ml_platform"]:
+        for expected in [
+            "search_relevance",
+            "confluence_ai",
+            "jira_ai",
+            "loom_ai",
+            "ml_platform",
+        ]:
             assert any(expected in t for t in module_teams_lower), (
                 f"Expected to find '{expected}' in module team namespaces.\n"
                 f"Teams found: {module_teams}"
@@ -328,23 +334,34 @@ class TestRovoDevMLStudioDeepDive:
 
         # --- SDK highlights ---
         sdk_highlights = report.get("platform_sdk_highlights", "")
-        assert len(sdk_highlights) > 50, \
+        assert len(sdk_highlights) > 50, (
             "platform_sdk_highlights should be meaningful (>50 chars)"
+        )
         # The ml-studio-sdk provides MLflow, ASAP, secrets, data_classification, Tecton
         sdk_lower = sdk_highlights.lower()
-        assert any(kw in sdk_lower for kw in ["mlflow", "asap", "secret", "classification", "tecton", "databricks"]), (
-            f"SDK highlights should mention key capabilities.\nGot: {sdk_highlights}"
-        )
+        assert any(
+            kw in sdk_lower
+            for kw in [
+                "mlflow",
+                "asap",
+                "secret",
+                "classification",
+                "tecton",
+                "databricks",
+            ]
+        ), f"SDK highlights should mention key capabilities.\nGot: {sdk_highlights}"
 
         # --- CI/CD highlights ---
         cicd_highlights = report.get("cicd_pipeline_highlights", "")
-        assert len(cicd_highlights) > 50, \
+        assert len(cicd_highlights) > 50, (
             "cicd_pipeline_highlights should be meaningful (>50 chars)"
+        )
 
         # --- AI integration ---
         ai_highlights = report.get("ai_integration_highlights", "")
-        assert len(ai_highlights) > 50, \
+        assert len(ai_highlights) > 50, (
             "ai_integration_highlights should be meaningful (>50 chars)"
+        )
 
         # --- Counts ---
         total_module_teams = report.get("total_module_teams_count", 0)
@@ -385,21 +402,23 @@ class TestRovoDevMLStudioDeepDive:
         )
 
         # Use a simpler output schema for this focused test
-        inferencer.output_schema = json.dumps({
-            "type": "object",
-            "required": ["namespaces", "count"],
-            "properties": {
-                "namespaces": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "All team namespace names under modules/src/",
+        inferencer.output_schema = json.dumps(
+            {
+                "type": "object",
+                "required": ["namespaces", "count"],
+                "properties": {
+                    "namespaces": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "All team namespace names under modules/src/",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Total count of namespaces",
+                    },
                 },
-                "count": {
-                    "type": "integer",
-                    "description": "Total count of namespaces",
-                },
-            },
-        })
+            }
+        )
 
         result = inferencer(prompt)
         assert result.success, (
@@ -414,16 +433,21 @@ class TestRovoDevMLStudioDeepDive:
             f"Expected >=20 module namespaces enumerated, got {len(namespaces)}.\n"
             f"Namespaces: {namespaces}"
         )
-        assert count >= 20, (
-            f"Expected count >= 20, got {count}"
-        )
+        assert count >= 20, f"Expected count >= 20, got {count}"
 
         # Verify known namespaces are present
         ns_lower = [n.lower() for n in namespaces]
         for expected in [
-            "search_relevance", "confluence_ai", "jira_ai",
-            "loom_ai", "knowledge_graph", "ml_platform", "core_ml",
-            "canary_analysis", "csm_ai", "devai_autoreview",
+            "search_relevance",
+            "confluence_ai",
+            "jira_ai",
+            "loom_ai",
+            "knowledge_graph",
+            "ml_platform",
+            "core_ml",
+            "canary_analysis",
+            "csm_ai",
+            "devai_autoreview",
         ]:
             assert any(expected in n for n in ns_lower), (
                 f"Expected namespace '{expected}' not found.\n"
@@ -448,24 +472,26 @@ class TestRovoDevMLStudioDeepDive:
             "Return a JSON object mapping each team namespace to its list of library package names."
         )
 
-        inferencer.output_schema = json.dumps({
-            "type": "object",
-            "required": ["libraries_by_team", "total_packages"],
-            "properties": {
-                "libraries_by_team": {
-                    "type": "object",
-                    "description": "Map of team_namespace -> [library_package_names]",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"},
+        inferencer.output_schema = json.dumps(
+            {
+                "type": "object",
+                "required": ["libraries_by_team", "total_packages"],
+                "properties": {
+                    "libraries_by_team": {
+                        "type": "object",
+                        "description": "Map of team_namespace -> [library_package_names]",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "total_packages": {
+                        "type": "integer",
+                        "description": "Total number of library packages discovered",
                     },
                 },
-                "total_packages": {
-                    "type": "integer",
-                    "description": "Total number of library packages discovered",
-                },
-            },
-        })
+            }
+        )
 
         result = inferencer(prompt)
         assert result.success, (
@@ -497,7 +523,9 @@ class TestRovoDevMLStudioDeepDive:
             f"ml_platform libs: {ml_platform_libs}"
         )
 
-        print(f"\n✅ Discovered {total_packages} library packages across {len(libs_by_team)} teams")
+        print(
+            f"\n✅ Discovered {total_packages} library packages across {len(libs_by_team)} teams"
+        )
         for team, libs in sorted(libs_by_team.items()):
             print(f"   {team}: {libs}")
 
@@ -516,22 +544,24 @@ class TestRovoDevMLStudioDeepDive:
             "Return structured JSON with fields: summary, top_level_dirs, sample_module_teams."
         )
 
-        inferencer.output_schema = json.dumps({
-            "type": "object",
-            "required": ["summary", "top_level_dirs", "sample_module_teams"],
-            "properties": {
-                "summary": {"type": "string"},
-                "top_level_dirs": {
-                    "type": "array",
-                    "items": {"type": "string"},
+        inferencer.output_schema = json.dumps(
+            {
+                "type": "object",
+                "required": ["summary", "top_level_dirs", "sample_module_teams"],
+                "properties": {
+                    "summary": {"type": "string"},
+                    "top_level_dirs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "sample_module_teams": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 5,
+                    },
                 },
-                "sample_module_teams": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 5,
-                },
-            },
-        })
+            }
+        )
 
         result = await inferencer.ainfer(prompt)
 
@@ -541,11 +571,14 @@ class TestRovoDevMLStudioDeepDive:
 
         report = _parse_report(result)
 
-        assert len(report.get("summary", "")) > 30, \
+        assert len(report.get("summary", "")) > 30, (
             "Async report summary should be meaningful"
-        assert len(report.get("top_level_dirs", [])) >= 3, \
+        )
+        assert len(report.get("top_level_dirs", [])) >= 3, (
             "Should identify at least 3 top-level dirs (modules, libraries, workflows)"
-        assert len(report.get("sample_module_teams", [])) >= 5, \
+        )
+        assert len(report.get("sample_module_teams", [])) >= 5, (
             "Should name at least 5 module team namespaces"
+        )
 
         print(f"\n✅ Async report: {report.get('summary', '')[:200]}")

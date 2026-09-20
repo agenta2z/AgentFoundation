@@ -18,24 +18,23 @@ ctx tree) instead of the shared child instance. These tests prove:
   * the legacy / no-ctx path still writes the instance dict (byte-identical).
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
-    TemplatedInferencerBase,
-    _resolve_ctx_feed_override,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: E501
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
     mint_root,
+    RunContext,
 )
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    _resolve_ctx_feed_override,
+    TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
+    TemplatedInferencerBase,
+)
+from attr import attrs
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +62,9 @@ class _FeedLeaf(TemplatedInferencerBase):
         # Satisfy ``_render_prompt``'s "must name a template" guard.
         self.template_root_space = "plan"
 
-    def _infer(self, inference_input, inference_config=None, **kwargs):  # pragma: no cover
+    def _infer(
+        self, inference_input, inference_config=None, **kwargs
+    ):  # pragma: no cover
         return inference_input
 
 
@@ -214,8 +215,12 @@ def test_followup_latest_step_value_wins():
 
     tok = enter_run(flow_ctx)
     try:
-        mfi._publish_child_template_feed(followup, None, {"upstream_artifacts": "STEP1"})
-        mfi._publish_child_template_feed(followup, None, {"upstream_artifacts": "STEP2"})
+        mfi._publish_child_template_feed(
+            followup, None, {"upstream_artifacts": "STEP1"}
+        )
+        mfi._publish_child_template_feed(
+            followup, None, {"upstream_artifacts": "STEP2"}
+        )
     finally:
         exit_run(tok)
 
@@ -255,8 +260,12 @@ def test_two_concurrent_ctxs_do_not_bleed_feed():
         exit_run(tok)
 
     # Each ctx holds its OWN aggregator-feed override; no cross-talk.
-    override_a = ctx_a.child("aggregator").handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE)
-    override_b = ctx_b.child("aggregator").handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE)
+    override_a = ctx_a.child("aggregator").handles.get(
+        TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE
+    )
+    override_b = ctx_b.child("aggregator").handles.get(
+        TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE
+    )
     assert "A_plan_0" in override_a["upstream_artifacts"]
     assert "B_plan_0" in override_b["upstream_artifacts"]
     assert "B_plan_0" not in override_a["upstream_artifacts"]

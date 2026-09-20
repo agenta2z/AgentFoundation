@@ -59,7 +59,10 @@ class TestDualPropagatesProposeError(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises((RuntimeError, Exception)) as ctx:
             await dual._ainfer("request")
         # Original failure context should be visible somewhere
-        self.assertIn("failed", str(ctx.exception).lower() + str(ctx.exception.__cause__ or "").lower())
+        self.assertIn(
+            "failed",
+            str(ctx.exception).lower() + str(ctx.exception.__cause__ or "").lower(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +115,8 @@ class TestBTAWorkerRaiseDoesNotBlock(unittest.TestCase):
             # Exception path: ensure it carries traceable context
             err_text = str(e) + str(e.__cause__ or "")
             self.assertTrue(
-                "failed" in err_text.lower() or "worker" in err_text.lower()
+                "failed" in err_text.lower()
+                or "worker" in err_text.lower()
                 or "exception" in err_text.lower(),
                 f"Exception should carry worker context, got: {e}",
             )

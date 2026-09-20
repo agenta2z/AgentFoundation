@@ -6,6 +6,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 8.3**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,8 +21,6 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.agentic_retriever import (
     AgenticRetriever,
     SubQuery,
@@ -29,6 +28,7 @@ from agent_foundation.knowledge.retrieval.agentic_retriever import (
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -50,14 +50,11 @@ def sub_query_results(draw):
           (one list per sub-query, representing what the KB returns for each)
     """
     # Generate a pool of unique piece IDs
-    all_ids = draw(
-        st.lists(_piece_id_strategy, min_size=1, max_size=10, unique=True)
-    )
+    all_ids = draw(st.lists(_piece_id_strategy, min_size=1, max_size=10, unique=True))
     assume(len(all_ids) >= 1)
 
     pieces = {
-        pid: KnowledgePiece(content=f"content_{pid}", piece_id=pid)
-        for pid in all_ids
+        pid: KnowledgePiece(content=f"content_{pid}", piece_id=pid) for pid in all_ids
     }
 
     # Generate 1-4 sub-queries
@@ -68,7 +65,9 @@ def sub_query_results(draw):
 
     for _ in range(num_sub_queries):
         weight = draw(
-            st.floats(min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False)
+            st.floats(
+                min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False
+            )
         )
         sq = SubQuery(query="test_query", weight=weight)
         sub_queries.append(sq)
@@ -87,8 +86,10 @@ def sub_query_results(draw):
         for pid in chosen_ids:
             score = draw(
                 st.floats(
-                    min_value=0.0, max_value=1.0,
-                    allow_nan=False, allow_infinity=False,
+                    min_value=0.0,
+                    max_value=1.0,
+                    allow_nan=False,
+                    allow_infinity=False,
                 )
             )
             piece_scores.append((pieces[pid], score))
@@ -163,7 +164,10 @@ class TestAgenticRetrieverScoreAggregation:
     **Validates: Requirements 8.3**
     """
 
-    @given(data=sub_query_results(), strategy=st.sampled_from(["max", "sum", "weighted_sum"]))
+    @given(
+        data=sub_query_results(),
+        strategy=st.sampled_from(["max", "sum", "weighted_sum"]),
+    )
     @settings(max_examples=100)
     def test_aggregated_scores_match_expected(self, data, strategy):
         """Aggregated scores match manually computed expected values for all strategies.
@@ -285,13 +289,18 @@ class TestAgenticRetrieverScoreAggregation:
         )
         result = retriever.retrieve("test")
 
-        expected = _compute_expected_scores(sub_queries, per_subquery_pieces, "weighted_sum")
+        expected = _compute_expected_scores(
+            sub_queries, per_subquery_pieces, "weighted_sum"
+        )
 
         for sp in result.pieces:
             pid = sp.piece.piece_id
             assert abs(sp.score - expected[pid]) < 1e-9
 
-    @given(data=sub_query_results(), strategy=st.sampled_from(["max", "sum", "weighted_sum"]))
+    @given(
+        data=sub_query_results(),
+        strategy=st.sampled_from(["max", "sum", "weighted_sum"]),
+    )
     @settings(max_examples=100)
     def test_results_sorted_descending(self, data, strategy):
         """Aggregated results are sorted by descending score.

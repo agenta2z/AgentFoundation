@@ -6,6 +6,7 @@ find_by_content_hash(content_hash, entity_id) method with a default
 linear-scan implementation that searches for a piece matching the given
 content hash.
 """
+
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -16,14 +17,11 @@ if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from agent_foundation.knowledge.retrieval.stores.pieces.base import (
-    KnowledgePieceStore,
-)
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 
 
 class InMemoryPieceStore(KnowledgePieceStore):
@@ -119,7 +117,9 @@ class TestFindByContentHash:
         store.add(global_piece)
         store.add(entity_piece)
         # Should find the global one first
-        found = store.find_by_content_hash(global_piece.content_hash, entity_id="user-1")
+        found = store.find_by_content_hash(
+            global_piece.content_hash, entity_id="user-1"
+        )
         assert found.piece_id == global_piece.piece_id
 
     def test_entity_id_none_only_scans_global(self):

@@ -4,6 +4,7 @@
 emitted by ``task_execute`` with a tool-name-suffixed copy, so multi-bridge SOPs
 can address each workspace individually from the SOP body via Jinja.
 """
+
 import asyncio
 
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
@@ -37,7 +38,8 @@ def test_emits_suffixed_key_alongside_generic(monkeypatch):
         "research_propose",
         monkeypatch,
         ToolExecutionResult(
-            result="done", context_updates={"workspace_path": "/tmp/foo", "success": True}
+            result="done",
+            context_updates={"workspace_path": "/tmp/foo", "success": True},
         ),
     )
     assert result.context_updates["workspace_path"] == "/tmp/foo"

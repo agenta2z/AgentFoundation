@@ -9,16 +9,15 @@ max_iterations=-1 (unbounded) + soft_max_iterations together.
 import tempfile
 from pathlib import Path
 
-from attr import attrs
-
 import agent_foundation
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-    ConversationalInferencer,
+    _AGENT_ROLE,
     _CONTINUE_AFTER_TOOLS,
     _USER_ROLE,
-    _AGENT_ROLE,
+    ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 @attrs(slots=False)
@@ -32,7 +31,9 @@ class _MockBase(InferencerBase):
 
 class TestSoftMaxIterationsPrompt:
     def test_instruction_present_and_value_rendered_when_set(self):
-        ci = ConversationalInferencer(base_inferencer=_MockBase(), soft_max_iterations=30)
+        ci = ConversationalInferencer(
+            base_inferencer=_MockBase(), soft_max_iterations=30
+        )
         rendered = ci._render_prompt("hello")
         # Merged into the Decision Procedure as a step (no standalone section).
         assert "Avoid unproductive loops" in rendered
@@ -46,7 +47,9 @@ class TestSoftMaxIterationsPrompt:
         assert "Avoid unproductive loops" not in rendered
 
     def test_feed_carries_soft_max_iterations(self):
-        ci = ConversationalInferencer(base_inferencer=_MockBase(), soft_max_iterations=12)
+        ci = ConversationalInferencer(
+            base_inferencer=_MockBase(), soft_max_iterations=12
+        )
         ci._render_prompt("hello")
         assert ci._last_template_feed.get("soft_max_iterations") == 12
 
@@ -69,7 +72,9 @@ class TestCurrentTurnRole:
         assert f"<{_USER_ROLE}>{_CONTINUE_AFTER_TOOLS}" not in rendered
 
     def test_decision_procedure_references_role_variables(self):
-        ci = ConversationalInferencer(base_inferencer=_MockBase(), soft_max_iterations=5)
+        ci = ConversationalInferencer(
+            base_inferencer=_MockBase(), soft_max_iterations=5
+        )
         rendered = ci._render_prompt("hi")
         # 1a/1b reference the injected role labels, not hardcoded strings.
         assert f"role `{_USER_ROLE}`" in rendered
@@ -118,7 +123,10 @@ class TestSoftMaxIterationsConfig:
 
         cfg = (
             Path(agent_foundation.__file__).parent
-            / "resources" / "configs" / "conversational" / "default.yaml"
+            / "resources"
+            / "configs"
+            / "conversational"
+            / "default.yaml"
         )
         ci = _ci_host.build_ci_from_config(
             cfg,
@@ -126,14 +134,17 @@ class TestSoftMaxIterationsConfig:
             backend_dir=cfg.parent / "base_inferencer",
             target_path=tempfile.mkdtemp(),
         )
-        assert ci.max_iterations == -1          # hard cap removed (unbounded)
-        assert ci.soft_max_iterations == 30     # soft self-governance threshold
+        assert ci.max_iterations == -1  # hard cap removed (unbounded)
+        assert ci.soft_max_iterations == 30  # soft self-governance threshold
 
 
 def _default_cfg_path():
     return (
         Path(agent_foundation.__file__).parent
-        / "resources" / "configs" / "conversational" / "default.yaml"
+        / "resources"
+        / "configs"
+        / "conversational"
+        / "default.yaml"
     )
 
 
@@ -180,7 +191,6 @@ class TestInjectedBasePath:
 
     def test_backend_and_base_inferencer_are_mutually_exclusive(self):
         import pytest
-
         from agent_foundation.resources.tools import _ci_host
 
         with pytest.raises(ValueError, match="mutually exclusive"):

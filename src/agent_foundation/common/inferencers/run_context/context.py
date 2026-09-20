@@ -29,7 +29,14 @@ from .store import CreatorKey, NodeRunState, RunStateStore
 class RunContext:
     """Immutable-identity per-run context.  Descendants are produced only via ``child``."""
 
-    __slots__ = ("path", "workspace", "runtime", "_store", "_handle_store", "legacy_mint")
+    __slots__ = (
+        "path",
+        "workspace",
+        "runtime",
+        "_store",
+        "_handle_store",
+        "legacy_mint",
+    )
 
     def __init__(
         self,
@@ -72,7 +79,9 @@ class RunContext:
             workspace=workspace,
             runtime=runtime if runtime is not None else RuntimeBindings(),
             store=store if store is not None else RunStateStore(),
-            handle_store=handle_store if handle_store is not None else LiveHandleStore(),
+            handle_store=handle_store
+            if handle_store is not None
+            else LiveHandleStore(),
             legacy_mint=legacy_mint,
         )
 

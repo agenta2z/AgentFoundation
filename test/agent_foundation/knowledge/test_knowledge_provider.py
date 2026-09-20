@@ -1,14 +1,11 @@
 """Unit tests for BudgetAwareKnowledgeProvider."""
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.knowledge_provider import (
     BudgetAwareKnowledgeProvider,
     CONTEXT_BUDGET,
 )
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-)
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
 
 
@@ -107,10 +104,7 @@ class TestBudgetAwareKnowledgeProvider:
 
     def test_per_type_budget_enforcement(self):
         # Create many context pieces that exceed the context budget of 3000 tokens
-        pieces = [
-            _make_scored("X" * 4000, info_type="context")
-            for _ in range(10)
-        ]
+        pieces = [_make_scored("X" * 4000, info_type="context") for _ in range(10)]
         result = self.provider.format_knowledge(pieces, 100000)
         # The context section should respect its 3000 token budget
         context_tokens = len(result) // 4
@@ -133,8 +127,6 @@ class TestBudgetAwareKnowledgeProvider:
         assert result == ""
 
     def test_skills_without_summary_uses_content_prefix(self):
-        pieces = [
-            _make_scored("Full content of the skill.", info_type="skills")
-        ]
+        pieces = [_make_scored("Full content of the skill.", info_type="skills")]
         result = self.provider.format_knowledge(pieces, 5000)
         assert "Full content of the skill." in result

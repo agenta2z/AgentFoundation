@@ -12,6 +12,7 @@ Feature: knowledge-space-restructuring
 
 **Validates: Requirements 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.10, 1.11**
 """
+
 import hashlib
 import sys
 from pathlib import Path
@@ -25,12 +26,11 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from hypothesis import given, settings, strategies as st
 
 # Import strategies from conftest
 _test_dir = Path(__file__).resolve().parent
@@ -246,7 +246,11 @@ class TestContentHashDeterminism:
         assert piece.content_hash == expected_hash
 
     @given(
-        words=st.lists(st.text(min_size=1, max_size=20).filter(lambda s: s.strip()), min_size=1, max_size=10),
+        words=st.lists(
+            st.text(min_size=1, max_size=20).filter(lambda s: s.strip()),
+            min_size=1,
+            max_size=10,
+        ),
         extra_spaces=st.lists(
             st.text(
                 alphabet=st.sampled_from([" ", "\t", "\n", "\r"]),

@@ -34,11 +34,14 @@ Expected terminal output:
 
     === Mode: CONTINUE ===
     Recovery prompt sent to model:
-      "The previous response was interrupted...
-       ---BEGIN PARTIAL OUTPUT---
+      "Your previous response was interrupted partway through...
+       ===BEGIN INPUT===
+       Tell me a story
+       ===END INPUT===
+       ===BEGIN PARTIAL RESPONSE===
+       Here is the previous partial response:
        Once upon a time, in a land
-       ---END PARTIAL OUTPUT---
-       Continue from where the response was interrupted..."
+       ===END PARTIAL RESPONSE==="
     Model continuation: "far, far away, there lived a dragon."
     Final result: "Once upon a time, in a land far, far away, there lived a dragon."
     (Note: partial + continuation concatenated)
@@ -46,10 +49,13 @@ Expected terminal output:
     === Mode: REFERENCE ===
     Recovery prompt sent to model:
       "A previous attempt was interrupted...
-       ---BEGIN PARTIAL (REFERENCE ONLY)---
+       ===BEGIN INPUT===
+       Tell me a story
+       ===END INPUT===
+       ===BEGIN PARTIAL RESPONSE===
+       Here is the previous partial response for your reference:
        Once upon a time, in a land
-       ---END PARTIAL---
-       The task is: Tell me a story"
+       ===END PARTIAL RESPONSE==="
     Final result: "Once upon a time, in a magical kingdom, a brave knight..."
     (Note: only the new response — no concatenation)
 
@@ -69,31 +75,31 @@ import tempfile
 
 # --- Path setup ---
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_agent_root = os.path.normpath(os.path.join(_script_dir, "..", "..", "..", "..", "..", ".."))
+_agent_root = os.path.normpath(
+    os.path.join(_script_dir, "..", "..", "..", "..", "..", "..")
+)
 for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
     _p = os.path.normpath(os.path.join(_agent_root, _sub))
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 
+from contextvars import copy_context
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
-from contextvars import copy_context
-
+from agent_foundation.common.inferencers.inferencer_base import _current_fallback_state
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    _read_partial_from_cache,
     FallbackInferMode,
     StreamingInferencerBase,
-    _read_partial_from_cache,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    _current_fallback_state,
-)
+from attr import attrib, attrs
 from rich_python_utils.common_utils.function_helper import FallbackMode
 
 
 # ---------------------------------------------------------------------------
 # Mock streaming inferencer that crashes mid-stream
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class StoryInferencer(StreamingInferencerBase):
@@ -107,7 +113,9 @@ class StoryInferencer(StreamingInferencerBase):
     reads the cache and sends an augmented prompt to the model.
     """
 
-    _chunks_before_crash: list = attrib(factory=lambda: ["Once upon ", "a time, ", "in a land "])
+    _chunks_before_crash: list = attrib(
+        factory=lambda: ["Once upon ", "a time, ", "in a land "]
+    )
     _recovery_responses: dict = attrib(factory=dict)
     _call_count: int = attrib(default=0, init=False, repr=False)
     _recovery_prompts_received: list = attrib(factory=list, init=False, repr=False)
@@ -151,6 +159,7 @@ class StoryInferencer(StreamingInferencerBase):
 # Demo
 # ---------------------------------------------------------------------------
 
+
 def separator(title: str):
     print(f"\n{'=' * 3} {title} {'=' * 3}")
 
@@ -174,22 +183,26 @@ async def demo_mode(mode: FallbackInferMode, cache_dir: str):
     # Show what the recovery system did
     if mode == FallbackInferMode.CONTINUE:
         print(f"  Strategy: CONTINUE — concatenates partial + continuation")
-        print(f"  Partial cached: \"{inf._chunks_before_crash[0]}...\"")
+        print(f'  Partial cached: "{inf._chunks_before_crash[0]}..."')
         if inf._recovery_prompts_received:
-            print(f"  Recovery prompt excerpt: \"{inf._recovery_prompts_received[-1][:80]}...\"")
-        print(f"  Final result: \"{result}\"")
+            print(
+                f'  Recovery prompt excerpt: "{inf._recovery_prompts_received[-1][:80]}..."'
+            )
+        print(f'  Final result: "{result}"')
         print(f"  (partial was prepended to the model's continuation)")
 
     elif mode == FallbackInferMode.REFERENCE:
         print(f"  Strategy: REFERENCE — show partial as context, get fresh response")
         if inf._recovery_prompts_received:
-            print(f"  Recovery prompt excerpt: \"{inf._recovery_prompts_received[-1][:80]}...\"")
-        print(f"  Final result: \"{result}\"")
+            print(
+                f'  Recovery prompt excerpt: "{inf._recovery_prompts_received[-1][:80]}..."'
+            )
+        print(f'  Final result: "{result}"')
         print(f"  (only the new response — no concatenation)")
 
     elif mode == FallbackInferMode.RESTART:
         print(f"  Strategy: RESTART — ignore cache, retry with original prompt")
-        print(f"  Final result: \"{result}\"")
+        print(f'  Final result: "{result}"')
         print(f"  (completely fresh response, cache was not used)")
 
     return result
@@ -203,7 +216,9 @@ async def main():
     print("The system caches each chunk as it arrives. On recovery, it reads the")
     print("cache and constructs a recovery prompt based on the configured mode.")
     print()
-    print("Chunks that were streamed before crash: ['Once upon ', 'a time, ', 'in a land ']")
+    print(
+        "Chunks that were streamed before crash: ['Once upon ', 'a time, ', 'in a land ']"
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Demo each mode
@@ -215,7 +230,9 @@ async def main():
     separator("Summary")
     print("  CONTINUE  — Best when partial output is valid and can be extended.")
     print("               Returns: cached_partial + model_continuation")
-    print("  REFERENCE — Best for structured output (JSON/XML) where concatenation is risky.")
+    print(
+        "  REFERENCE — Best for structured output (JSON/XML) where concatenation is risky."
+    )
     print("               Returns: fresh_complete_response")
     print("  RESTART   — Best when partial output is unreliable or not useful.")
     print("               Returns: fresh_complete_response (cache ignored)")
@@ -223,5 +240,6 @@ async def main():
 
 if __name__ == "__main__":
     import warnings
+
     warnings.filterwarnings("ignore")
     asyncio.run(main())

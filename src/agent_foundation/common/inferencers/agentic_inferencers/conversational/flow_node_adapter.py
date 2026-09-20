@@ -21,8 +21,6 @@ import tempfile
 from typing import Any, Callable, ClassVar, Optional
 
 import attr
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
     AgenticDynamicContext,
     AgenticResult,
@@ -35,6 +33,7 @@ from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
 from agent_foundation.ui.interactive_base import InteractiveBase
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +125,7 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
     )
     fallback_inferencer: Optional[InferencerBase] = attrib(default=None)
     session_timeout: Optional[float] = attrib(default=None)
-    empty_predicate: Callable[[Any], bool] = attrib(
-        default=_default_empty_predicate
-    )
+    empty_predicate: Callable[[Any], bool] = attrib(default=_default_empty_predicate)
     reset_between_invocations: bool = attrib(default=True)
     interactive: Optional[InteractiveBase] = attrib(default=None)
 
@@ -220,18 +217,23 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
                 logger.warning(
                     "[ConversationalFlowNodeAdapter] checkpoint %s has unsupported "
                     "schema_version %s — treating as absent",
-                    path, data.get("schema_version"),
+                    path,
+                    data.get("schema_version"),
                 )
                 return None
             return data
         except (json.JSONDecodeError, OSError, ValueError) as e:
             logger.warning(
                 "[ConversationalFlowNodeAdapter] failed to load checkpoint %s: %s — "
-                "treating as absent (fresh session)", path, e,
+                "treating as absent (fresh session)",
+                path,
+                e,
             )
             return None
 
-    def _load_dynamic_context(self, session_dir: str) -> Optional[AgenticDynamicContext]:
+    def _load_dynamic_context(
+        self, session_dir: str
+    ) -> Optional[AgenticDynamicContext]:
         """Load dynamic_context.json if it exists, else None.
 
         Returns None on any read/parse error (corrupted file treated as absent).
@@ -245,7 +247,9 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
         except (json.JSONDecodeError, OSError, ValueError, KeyError, TypeError) as e:
             logger.warning(
                 "[ConversationalFlowNodeAdapter] failed to load dynamic_context %s: %s — "
-                "treating as absent", path, e,
+                "treating as absent",
+                path,
+                e,
             )
             return None
 
@@ -258,7 +262,9 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.debug("[ConversationalFlowNodeAdapter] diagnostic log write failed: %s", e)
+            logger.debug(
+                "[ConversationalFlowNodeAdapter] diagnostic log write failed: %s", e
+            )
 
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
         """Route to run_agentic_loop with fallback and checkpoint/resume support.
@@ -300,7 +306,8 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
                     else:
                         logger.info(
                             "[ConversationalFlowNodeAdapter] session %s already completed, "
-                            "returning cached result", self.session_id,
+                            "returning cached result",
+                            self.session_id,
                         )
                         # completion_result is always JSON-encoded on write
                         # (json.dumps), so json.loads is the symmetric decode.
@@ -328,7 +335,8 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
 
                     logger.info(
                         "[ConversationalFlowNodeAdapter] resuming session %s from turn %d",
-                        self.session_id, resume_turn_number,
+                        self.session_id,
+                        resume_turn_number,
                     )
 
         # Reset conversational state to prevent leakage between invocations
@@ -347,15 +355,18 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
                 # A crash between the two leaves dyn_ctx stale by one turn — the
                 # worst case is a slightly stale _compressed_history, but no
                 # duplicated actions on resume.
-                self._write_checkpoint_atomic(session_dir, {
-                    "schema_version": 1,
-                    "session_id": self.session_id,
-                    "initial_content": rendered_task,
-                    "status": "in_progress",
-                    "turn_number": turn_number,
-                    "messages": self.conversational_inferencer.get_messages(),
-                    "completion_result": None,
-                })
+                self._write_checkpoint_atomic(
+                    session_dir,
+                    {
+                        "schema_version": 1,
+                        "session_id": self.session_id,
+                        "initial_content": rendered_task,
+                        "status": "in_progress",
+                        "turn_number": turn_number,
+                        "messages": self.conversational_inferencer.get_messages(),
+                        "completion_result": None,
+                    },
+                )
                 self._write_dynamic_context(session_dir)
 
                 # Diagnostic logs — extract from new messages added this turn
@@ -367,17 +378,25 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
                     role = msg.get("role", "")
                     content_text = msg.get("content", "")
                     if role == "assistant":
-                        self._append_diagnostic_log(session_dir, "llm_calls.jsonl", {
-                            "turn": turn_number,
-                            "role": role,
-                            "raw_response_length": len(content_text),
-                        })
+                        self._append_diagnostic_log(
+                            session_dir,
+                            "llm_calls.jsonl",
+                            {
+                                "turn": turn_number,
+                                "role": role,
+                                "raw_response_length": len(content_text),
+                            },
+                        )
                     elif role == "user" and "[Tool Result:" in content_text:
-                        self._append_diagnostic_log(session_dir, "tool_calls.jsonl", {
-                            "turn": turn_number,
-                            "role": role,
-                            "content_length": len(content_text),
-                        })
+                        self._append_diagnostic_log(
+                            session_dir,
+                            "tool_calls.jsonl",
+                            {
+                                "turn": turn_number,
+                                "role": role,
+                                "content_length": len(content_text),
+                            },
+                        )
 
         try:
             content = resume_content if resuming else rendered_task
@@ -420,15 +439,18 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
 
             # Write completed checkpoint
             if session_dir is not None:
-                self._write_checkpoint_atomic(session_dir, {
-                    "schema_version": 1,
-                    "session_id": self.session_id,
-                    "initial_content": rendered_task,
-                    "status": "completed",
-                    "turn_number": result.iterations_used,
-                    "messages": self.conversational_inferencer.get_messages(),
-                    "completion_result": json.dumps(extracted, default=str),
-                })
+                self._write_checkpoint_atomic(
+                    session_dir,
+                    {
+                        "schema_version": 1,
+                        "session_id": self.session_id,
+                        "initial_content": rendered_task,
+                        "status": "completed",
+                        "turn_number": result.iterations_used,
+                        "messages": self.conversational_inferencer.get_messages(),
+                        "completion_result": json.dumps(extracted, default=str),
+                    },
+                )
                 self._write_dynamic_context(session_dir)
 
             return extracted
@@ -447,8 +469,9 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
             )
             # Filter adapter-specific kwargs before forwarding to fallback
             # (plain LLM inferencers don't expect 'interactive')
-            fallback_kwargs = {k: v for k, v in kwargs.items()
-                               if k not in ("interactive",)}
+            fallback_kwargs = {
+                k: v for k, v in kwargs.items() if k not in ("interactive",)
+            }
             return await self.fallback_inferencer.ainfer(
                 rendered_task,
                 inference_config,

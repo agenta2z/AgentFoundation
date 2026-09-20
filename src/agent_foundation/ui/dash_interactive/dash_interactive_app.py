@@ -7,13 +7,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 import dash
 import dash_bootstrap_components as dbc
+from agent_foundation.ui.dash_interactive.components.chat_history import ChatHistoryList
+from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
 from dash import dcc, html
 from dash.dependencies import ALL, Input, Output, State
-
-from agent_foundation.ui.dash_interactive.components.chat_history import (
-    ChatHistoryList,
-)
-from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
 
 
 class DashInteractiveApp:
@@ -329,17 +326,17 @@ class DashInteractiveApp:
         ssl_context = None
         if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
             ssl_context = (ssl_cert, ssl_key)
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Starting {self.title} (HTTPS)")
             print(f"Server running at: https://{hostname}:{self.port}")
             print(f"SSL certificates: {ssl_cert}")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
         else:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Starting {self.title}")
             print(f"Server running at: http://localhost:{self.port}")
             print(f"WARNING: SSL certificates not found at {ssl_cert}")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
 
         # Disable reloader - it doesn't work with Buck2 PAR files
         self.app.run(

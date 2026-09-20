@@ -1,18 +1,24 @@
-from collections import defaultdict
-from typing import Mapping, List, Any, Union
-
-from attr import attrs, attrib
 import random
+from collections import defaultdict
+from typing import Any, List, Mapping, Union
 
-from agent_foundation.common.simulators.context_simulators.context_simulator_base import ContextSimulatorBase
-from rich_python_utils.io_utils.json_io import iter_all_json_objs_from_all_sub_dirs, DEFAULT_JSON_FILE_PATTERN
+from agent_foundation.common.simulators.context_simulators.context_simulator_base import (
+    ContextSimulatorBase,
+)
+from attr import attrib, attrs
+from rich_python_utils.io_utils.json_io import (
+    DEFAULT_JSON_FILE_PATTERN,
+    iter_all_json_objs_from_all_sub_dirs,
+)
 
 
-def read_context_pool(input_path: str, file_pattern=DEFAULT_JSON_FILE_PATTERN) -> Mapping[str, List[str]]:
+def read_context_pool(
+    input_path: str, file_pattern=DEFAULT_JSON_FILE_PATTERN
+) -> Mapping[str, List[str]]:
     context_pool = defaultdict(list)
     for jobj in iter_all_json_objs_from_all_sub_dirs(input_path, pattern=file_pattern):
-        context_name = jobj['name']
-        context_content = jobj['content']
+        context_name = jobj["name"]
+        context_content = jobj["content"]
         context_pool[context_name].append(context_content)
     return context_pool
 
@@ -32,5 +38,7 @@ class ContextPoolSimulator(ContextSimulatorBase):
     def __call__(self, data, existing_context) -> Mapping[str, Any]:
         simulated_contexts = {}
         for context_name in self.enabled_contexts:
-            simulated_contexts[context_name] = random.choice(self.context_pool[context_name])
+            simulated_contexts[context_name] = random.choice(
+                self.context_pool[context_name]
+            )
         return simulated_contexts

@@ -9,6 +9,7 @@ Provides reusable strategies for generating random instances of:
 
 Used by property-based tests across the knowledge module.
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,22 +28,21 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import strategies as st
-
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgeType,
-    KnowledgePiece,
-)
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
+)
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from hypothesis import strategies as st
 from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
     GraphEdge,
+    GraphNode,
 )
 from rich_python_utils.service_utils.retrieval_service.document import Document
 from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
     RetrievalServiceBase,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
 
 
 # ── Shared helper strategies ─────────────────────────────────────────────────
@@ -138,14 +138,43 @@ def knowledge_piece_strategy(draw, include_new_fields=False):
     )
 
     if include_new_fields:
-        _domain_strategy = st.sampled_from(["general", "model_optimization", "data_engineering", "testing", "debugging"])
+        _domain_strategy = st.sampled_from(
+            [
+                "general",
+                "model_optimization",
+                "data_engineering",
+                "testing",
+                "debugging",
+            ]
+        )
         _space_strategy = st.sampled_from(["main", "personal", "developmental"])
-        _merge_strategy_values = st.sampled_from([None, "auto-merge-on-ingest", "suggestion-on-ingest", "post-ingestion-auto", "manual-only"])
-        _suggestion_status_values = st.sampled_from([None, "pending", "approved", "rejected", "expired"])
-        _validation_status_values = st.sampled_from(["not_validated", "pending", "passed", "failed"])
+        _merge_strategy_values = st.sampled_from(
+            [
+                None,
+                "auto-merge-on-ingest",
+                "suggestion-on-ingest",
+                "post-ingestion-auto",
+                "manual-only",
+            ]
+        )
+        _suggestion_status_values = st.sampled_from(
+            [None, "pending", "approved", "rejected", "expired"]
+        )
+        _validation_status_values = st.sampled_from(
+            ["not_validated", "pending", "passed", "failed"]
+        )
         _embedding_strategy = st.one_of(
             st.none(),
-            st.lists(st.floats(allow_nan=False, allow_infinity=False, min_value=-10.0, max_value=10.0), min_size=3, max_size=8),
+            st.lists(
+                st.floats(
+                    allow_nan=False,
+                    allow_infinity=False,
+                    min_value=-10.0,
+                    max_value=10.0,
+                ),
+                min_size=3,
+                max_size=8,
+            ),
         )
 
         kwargs.update(
@@ -160,7 +189,9 @@ def knowledge_piece_strategy(draw, include_new_fields=False):
             merge_suggestion_reason=draw(st.one_of(st.none(), st.text(max_size=50))),
             suggestion_status=draw(_suggestion_status_values),
             validation_status=draw(_validation_status_values),
-            validation_issues=draw(st.lists(st.text(min_size=1, max_size=30), max_size=3)),
+            validation_issues=draw(
+                st.lists(st.text(min_size=1, max_size=30), max_size=3)
+            ),
             supersedes=draw(st.one_of(st.none(), _identifier_text)),
             is_active=draw(st.booleans()),
             version=draw(st.integers(min_value=1, max_value=100)),
@@ -169,7 +200,6 @@ def knowledge_piece_strategy(draw, include_new_fields=False):
         # content_hash is auto-computed, so we don't set it explicitly
 
     return KnowledgePiece(**kwargs)
-
 
 
 # ── EntityMetadata strategy ──────────────────────────────────────────────────
@@ -201,9 +231,11 @@ def entity_metadata_strategy(draw, include_spaces=False):
 
     if include_spaces:
         _space_strategy = st.sampled_from(["main", "personal", "developmental"])
-        spaces = draw(st.lists(_space_strategy, min_size=1, max_size=3).map(
-            lambda xs: list(dict.fromkeys(xs))  # deduplicate, preserve order
-        ))
+        spaces = draw(
+            st.lists(_space_strategy, min_size=1, max_size=3).map(
+                lambda xs: list(dict.fromkeys(xs))  # deduplicate, preserve order
+            )
+        )
         kwargs["spaces"] = spaces
 
     return EntityMetadata(**kwargs)
@@ -286,7 +318,8 @@ class InMemoryEntityGraphStore(EntityGraphStore):
         if node_id in self._nodes:
             del self._nodes[node_id]
             self._edges = [
-                e for e in self._edges
+                e
+                for e in self._edges
                 if e.source_id != node_id and e.target_id != node_id
             ]
             return True
@@ -295,7 +328,9 @@ class InMemoryEntityGraphStore(EntityGraphStore):
     def add_relation(self, relation: GraphEdge, **kwargs) -> None:
         self._edges.append(relation)
 
-    def get_relations(self, node_id: str, relation_type=None, direction="outgoing", **kwargs) -> List[GraphEdge]:
+    def get_relations(
+        self, node_id: str, relation_type=None, direction="outgoing", **kwargs
+    ) -> List[GraphEdge]:
         results = []
         for e in self._edges:
             if direction in ("outgoing", "both") and e.source_id == node_id:
@@ -306,14 +341,22 @@ class InMemoryEntityGraphStore(EntityGraphStore):
                     results.append(e)
         return results
 
-    def remove_relation(self, source_id: str, target_id: str, relation_type: str, **kwargs) -> bool:
+    def remove_relation(
+        self, source_id: str, target_id: str, relation_type: str, **kwargs
+    ) -> bool:
         for i, e in enumerate(self._edges):
-            if e.source_id == source_id and e.target_id == target_id and e.edge_type == relation_type:
+            if (
+                e.source_id == source_id
+                and e.target_id == target_id
+                and e.edge_type == relation_type
+            ):
                 self._edges.pop(i)
                 return True
         return False
 
-    def get_neighbors(self, node_id: str, relation_type=None, depth=1, **kwargs) -> List[Tuple[GraphNode, int]]:
+    def get_neighbors(
+        self, node_id: str, relation_type=None, depth=1, **kwargs
+    ) -> List[Tuple[GraphNode, int]]:
         results = []
         visited = {node_id}
         current_level = {node_id}
@@ -333,7 +376,9 @@ class InMemoryEntityGraphStore(EntityGraphStore):
             current_level = next_level
         return results
 
-    def list_nodes(self, node_type=None, include_inactive=False, **kwargs) -> List[GraphNode]:
+    def list_nodes(
+        self, node_type=None, include_inactive=False, **kwargs
+    ) -> List[GraphNode]:
         nodes = list(self._nodes.values())
         if not include_inactive:
             nodes = [n for n in nodes if n.is_active]
@@ -364,7 +409,9 @@ class InMemoryRetrievalService(RetrievalServiceBase):
         self._docs[ns][doc.doc_id] = doc
         return doc.doc_id
 
-    def get_by_id(self, doc_id: str, namespace: Optional[str] = None) -> Optional[Document]:
+    def get_by_id(
+        self, doc_id: str, namespace: Optional[str] = None
+    ) -> Optional[Document]:
         ns = self._ns(namespace)
         return self._docs.get(ns, {}).get(doc_id)
 
@@ -382,7 +429,9 @@ class InMemoryRetrievalService(RetrievalServiceBase):
             return True
         return False
 
-    def search(self, query: str, filters=None, namespace=None, top_k=5) -> List[Tuple[Document, float]]:
+    def search(
+        self, query: str, filters=None, namespace=None, top_k=5
+    ) -> List[Tuple[Document, float]]:
         ns = self._ns(namespace)
         docs = list(self._docs.get(ns, {}).values())
         if filters:

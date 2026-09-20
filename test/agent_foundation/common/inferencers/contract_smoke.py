@@ -25,6 +25,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
         TerminalInferencerBase,
     )
+
     tib_target = attr.fields(TerminalInferencerBase).target_path
     assert tib_target.default is None, (
         f"TIB target_path default should be None, got {tib_target.default!r} — "
@@ -40,6 +41,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_sdk_inferencer import (
         ClaudeCodeSdkInferencer,
     )
+
     cc = {f.name for f in attr.fields(ClaudeCodeSdkInferencer)}
     assert "root_folder" not in cc
     assert "target_path" in cc
@@ -49,6 +51,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer import (
         DevmateCliInferencer,
     )
+
     dc = {f.name for f in attr.fields(DevmateCliInferencer)}
     assert "repo_path" not in dc
     assert "target_path" in dc
@@ -59,6 +62,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.devmate_sdk_inferencer import (
         DevmateSDKInferencer,
     )
+
     ds = {f.name for f in attr.fields(DevmateSDKInferencer)}
     assert "root_folder" not in ds
     assert "target_path" in ds
@@ -78,6 +82,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_serve_inferencer import (
         RovoDevServeInferencer,
     )
+
     rs = {f.name for f in attr.fields(RovoDevServeInferencer)}
     assert "working_dir" not in rs
     assert "target_path" in rs
@@ -88,6 +93,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.tool_inferencers.tool_as_inferencer import (
         ToolAsInferencer,
     )
+
     ta = {f.name for f in attr.fields(ToolAsInferencer)}
     assert "cwd" not in ta
     assert "target_path" in ta
@@ -97,12 +103,14 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.kiro.kiro_cli_inferencer import (
         KiroCliInferencer,
     )
+
     assert attr.fields(KiroCliInferencer).has_local_access.default is True
     print("OK: KiroCli has_local_access=True (leak fixed)")
 
     # 9. Legacy ClaudeCodeInferencer deleted
     try:
         import importlib
+
         importlib.import_module(
             "agent_foundation.common.inferencers.agentic_inferencers."
             "external.claude_code.claude_code_inferencer"
@@ -116,6 +124,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.agentic_inferencers.external.devmate import (
         common as devmate_common,
     )
+
     assert not hasattr(devmate_common, "get_source_repo_root")
     assert hasattr(devmate_common, "_detect_fbsource_root_for")
     print("OK: get_source_repo_root → _detect_fbsource_root_for")
@@ -124,6 +133,7 @@ def main() -> int:
     from agent_foundation.common.inferencers.inferencer_workspace import (
         InferencerWorkspace,
     )
+
     inf_a = ClaudeCodeSdkInferencer(target_path="/a")
     assert inf_a.effective_cwd == "/a"
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -131,10 +141,13 @@ def main() -> int:
         assert inf_ws.effective_cwd == tmpdir
     inf_default = ClaudeCodeSdkInferencer()
     assert inf_default.effective_cwd == os.getcwd()
-    print("OK: effective_cwd fallback chain works (target_path > workspace.root > os.getcwd())")
+    print(
+        "OK: effective_cwd fallback chain works (target_path > workspace.root > os.getcwd())"
+    )
 
     # 12. DevmateCli ~/fbsource default + no cd_script
     from unittest.mock import patch
+
     with patch(
         "agent_foundation.common.inferencers.agentic_inferencers"
         ".external.devmate.devmate_cli_inferencer.sync_config_to_target"

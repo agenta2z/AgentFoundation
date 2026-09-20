@@ -17,13 +17,14 @@ Two execution paths:
 
 Requirements: 7.1, 7.2, 7.3, 7.5, 14.1, 14.2, 14.3, 14.4
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from attr import attrib, attrs
 
@@ -223,9 +224,10 @@ class RetrievalPipeline:
         **kwargs: Any,
     ) -> Any:
         """Multi-query path: L1/L3b once, L2/L3a per sub-query."""
+        from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+
         # Deferred import to avoid circular dependency
         from agent_foundation.knowledge.retrieval.graph_walk import merge_graph_contexts
-        from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
 
         spaces = kwargs.get("spaces")
         include_global = kwargs.get("include_global", True)
@@ -314,7 +316,8 @@ class RetrievalPipeline:
                 **kwargs,
             )
             output = self.post_processor.process(
-                [fallback_result] + (results if isinstance(results, list) else [results]),
+                [fallback_result]
+                + (results if isinstance(results, list) else [results]),
                 query=query,
                 sub_queries=sub_queries,
                 is_fallback=True,

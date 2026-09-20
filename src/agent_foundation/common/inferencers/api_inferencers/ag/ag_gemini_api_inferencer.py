@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator, Iterable, Optional, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.apis.ag.ai_gateway_gemini_llm import (
     AIGatewayGeminiModels,
     generate_text as ai_gateway_generate_text,
@@ -25,6 +23,7 @@ from agent_foundation.apis.ag.gateway_mode import DEFAULT_PROXIMITY_PORT
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -110,19 +109,21 @@ class AgGeminiApiInferencer(StreamingInferencerBase):
         self._messages_override = messages
 
     def _apply_defaults(self, args: dict) -> dict:
-        args.setdefault('max_new_tokens', self.max_tokens)
-        args.setdefault('temperature', self.temperature)
+        args.setdefault("max_new_tokens", self.max_tokens)
+        args.setdefault("temperature", self.temperature)
         if self.top_p is not None:
-            args.setdefault('top_p', self.top_p)
+            args.setdefault("top_p", self.top_p)
         if self.seed is not None:
-            args.setdefault('seed', self.seed)
+            args.setdefault("seed", self.seed)
         if self.system_prompt:
-            args.setdefault('system', self.system_prompt)
+            args.setdefault("system", self.system_prompt)
         if self.reasoning_effort:
-            args.setdefault('reasoning_effort', self.reasoning_effort)
+            args.setdefault("reasoning_effort", self.reasoning_effort)
         return args
 
-    def _infer(self, inference_input: str, inference_config: Any = None, **_inference_args) -> str:
+    def _infer(
+        self, inference_input: str, inference_config: Any = None, **_inference_args
+    ) -> str:
         self._apply_defaults(_inference_args)
         return ai_gateway_generate_text(
             inference_input,
@@ -133,7 +134,9 @@ class AgGeminiApiInferencer(StreamingInferencerBase):
             **_inference_args,
         )
 
-    async def _ainfer(self, inference_input: Any, inference_config: Any = None, **_inference_args) -> str:
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ) -> str:
         self._apply_defaults(_inference_args)
         response = await ai_gateway_generate_text_async(
             inference_input,

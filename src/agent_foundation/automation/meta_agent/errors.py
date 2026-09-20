@@ -58,16 +58,20 @@ class TraceEvaluationError(MetaAgentError):
 
     def __init__(self, trace_id: str, message: str):
         self.trace_id = trace_id
-        super().__init__(
-            f"Trace evaluation failed for trace '{trace_id}': {message}"
-        )
+        super().__init__(f"Trace evaluation failed for trace '{trace_id}': {message}")
 
 
 class InsufficientSuccessTracesError(MetaAgentError):
     """Raised when too few traces pass evaluation to proceed with the pipeline."""
 
-    def __init__(self, required: int, actual: int, total: int,
-                 traces=None, evaluation_results=None):
+    def __init__(
+        self,
+        required: int,
+        actual: int,
+        total: int,
+        traces=None,
+        evaluation_results=None,
+    ):
         self.required = required
         self.actual = actual
         self.total = total

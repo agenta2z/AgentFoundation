@@ -14,10 +14,10 @@ Public API:
 from pathlib import Path
 from typing import List, Optional
 
-from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 from rich_python_utils.string_utils.formatting.handlebars_format import (
     format_template as handlebars_template_format,
 )
+from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 _TEMPLATES_DIR = str(Path(__file__).resolve().parent)
 

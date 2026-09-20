@@ -10,8 +10,14 @@ dispatcher needs zero changes.
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects.apply_context_updates import (
     ApplyContextUpdates,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects.dashboard_directive import (
+    DashboardDirectiveEffect,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects.override_next_action_tool_args import (
     OverrideNextActionToolArgs,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects.publish_session_variables import (
+    PublishSessionVariablesEffect,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects.set_prompt_variable import (
     SetPromptVariable,
@@ -22,7 +28,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.effe
 
 __all__ = [
     "ApplyContextUpdates",
+    "DashboardDirectiveEffect",
     "OverrideNextActionToolArgs",
+    "PublishSessionVariablesEffect",
     "SetPromptVariable",
     "SetTurnVariables",
 ]

@@ -42,15 +42,19 @@ def _make_mock_inferencer(response=None, side_effect=None):
 def _review_json(approved: bool, severity: str = "COSMETIC", issues=None) -> str:
     """Standard review-response JSON envelope."""
     if issues is None:
-        issues = ([] if approved else [
-            {
-                "severity": severity,
-                "category": "test",
-                "description": "Test issue",
-                "location": "N/A",
-                "suggestion": "Fix it",
-            }
-        ])
+        issues = (
+            []
+            if approved
+            else [
+                {
+                    "severity": severity,
+                    "category": "test",
+                    "description": "Test issue",
+                    "location": "N/A",
+                    "suggestion": "Fix it",
+                }
+            ]
+        )
     review = {
         "approved": approved,
         "severity": severity,
@@ -71,16 +75,22 @@ class TestTwoAgentMode(unittest.IsolatedAsyncioTestCase):
     async def test_two_agent_mode_uses_base_as_fixer(self):
         """Without fixer_inferencer, base_inferencer is invoked for both
         propose and fix steps."""
-        base = _make_mock_inferencer(side_effect=[
-            "initial proposal",          # propose
-            "fixed proposal",            # fix (base used as fixer)
-        ])
+        base = _make_mock_inferencer(
+            side_effect=[
+                "initial proposal",  # propose
+                "fixed proposal",  # fix (base used as fixer)
+            ]
+        )
         dual = DualInferencer(
             base_inferencer=base,
-            review_inferencer=_make_mock_inferencer(side_effect=[
-                _review_json(approved=False, severity="MAJOR"),  # 1st review: reject
-                _review_json(approved=True),                     # 2nd review: approve
-            ]),
+            review_inferencer=_make_mock_inferencer(
+                side_effect=[
+                    _review_json(
+                        approved=False, severity="MAJOR"
+                    ),  # 1st review: reject
+                    _review_json(approved=True),  # 2nd review: approve
+                ]
+            ),
             # NB: no fixer_inferencer
             consensus_config=ConsensusConfig(
                 max_iterations=3,
@@ -133,10 +143,14 @@ class TestSeverityThreshold(unittest.IsolatedAsyncioTestCase):
         fixer = _make_mock_inferencer("fixed")
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer("proposal"),
-            review_inferencer=_make_mock_inferencer(side_effect=[
-                _review_json(approved=False, severity="MAJOR"),  # MAJOR > COSMETIC → fix
-                _review_json(approved=True),
-            ]),
+            review_inferencer=_make_mock_inferencer(
+                side_effect=[
+                    _review_json(
+                        approved=False, severity="MAJOR"
+                    ),  # MAJOR > COSMETIC → fix
+                    _review_json(approved=True),
+                ]
+            ),
             fixer_inferencer=fixer,
             consensus_config=ConsensusConfig(
                 max_iterations=3,
@@ -184,10 +198,12 @@ class TestCounterFeedbackPropagation(unittest.IsolatedAsyncioTestCase):
 
         # Fixer emits a unique marker in its counter-feedback envelope
         UNIQUE_MARKER = "COUNTER-FEEDBACK-MARKER-XYZ-12345"
-        fixer_response = json.dumps({
-            "items": [{"reasoning": UNIQUE_MARKER}],
-            "summary": "see items",
-        })
+        fixer_response = json.dumps(
+            {
+                "items": [{"reasoning": UNIQUE_MARKER}],
+                "summary": "see items",
+            }
+        )
 
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer("initial proposal"),
@@ -206,7 +222,8 @@ class TestCounterFeedbackPropagation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(captured_review_inputs), 2)
         # Second review prompt should contain the counter-feedback marker
         self.assertIn(
-            UNIQUE_MARKER, captured_review_inputs[1],
+            UNIQUE_MARKER,
+            captured_review_inputs[1],
             "Counter-feedback content from fixer should appear in next review's prompt",
         )
 
@@ -224,19 +241,24 @@ class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
         fixer = _make_mock_inferencer("fixed proposal")
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer("proposal"),
-            review_inferencer=_make_mock_inferencer(side_effect=[
-                _review_json(
-                    approved=True, severity="COSMETIC",
-                    issues=[{
-                        "severity": "MAJOR",
-                        "category": "logic",
-                        "description": "Wrong classification",
-                        "location": "line 10",
-                        "suggestion": "Reclassify",
-                    }],
-                ),
-                _review_json(approved=True),
-            ]),
+            review_inferencer=_make_mock_inferencer(
+                side_effect=[
+                    _review_json(
+                        approved=True,
+                        severity="COSMETIC",
+                        issues=[
+                            {
+                                "severity": "MAJOR",
+                                "category": "logic",
+                                "description": "Wrong classification",
+                                "location": "line 10",
+                                "suggestion": "Reclassify",
+                            }
+                        ],
+                    ),
+                    _review_json(approved=True),
+                ]
+            ),
             fixer_inferencer=fixer,
             consensus_config=ConsensusConfig(
                 max_iterations=3,
@@ -256,14 +278,17 @@ class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
             base_inferencer=_make_mock_inferencer("proposal"),
             review_inferencer=_make_mock_inferencer(
                 _review_json(
-                    approved=True, severity="COSMETIC",
-                    issues=[{
-                        "severity": "COSMETIC",
-                        "category": "style",
-                        "description": "Typo",
-                        "location": "line 5",
-                        "suggestion": "Fix typo",
-                    }],
+                    approved=True,
+                    severity="COSMETIC",
+                    issues=[
+                        {
+                            "severity": "COSMETIC",
+                            "category": "style",
+                            "description": "Typo",
+                            "location": "line 5",
+                            "suggestion": "Fix typo",
+                        }
+                    ],
                 ),
             ),
             fixer_inferencer=fixer,
@@ -333,10 +358,12 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
         fixer = _make_mock_inferencer("fixed")
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer("proposal"),
-            review_inferencer=_make_mock_inferencer(side_effect=[
-                _review_json(approved=False, severity="4", issues=[]),
-                _review_json(approved=True, issues=[]),
-            ]),
+            review_inferencer=_make_mock_inferencer(
+                side_effect=[
+                    _review_json(approved=False, severity="4", issues=[]),
+                    _review_json(approved=True, issues=[]),
+                ]
+            ),
             fixer_inferencer=fixer,
             consensus_config=ConsensusConfig(
                 severity_levels=("0", "1", "2", "3", "4", "5"),
@@ -358,8 +385,8 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
                 _review_json(approved=False, severity="LOW", issues=[]),
             ),
             consensus_config=ConsensusConfig(
-                severity_levels=('LOW', 'MEDIUM', 'HIGH'),
-                consensus_threshold='LOW',
+                severity_levels=("LOW", "MEDIUM", "HIGH"),
+                consensus_threshold="LOW",
                 max_iterations=3,
             ),
         )
@@ -373,19 +400,24 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
         fixer = _make_mock_inferencer("fixed")
         dual = DualInferencer(
             base_inferencer=_make_mock_inferencer("proposal"),
-            review_inferencer=_make_mock_inferencer(side_effect=[
-                _review_json(
-                    approved=True, severity="COSMETIC",
-                    issues=[{
-                        "severity": "UNKNOWN_LEVEL",
-                        "category": "test",
-                        "description": "Test",
-                        "location": "N/A",
-                        "suggestion": "N/A",
-                    }],
-                ),
-                _review_json(approved=True, issues=[]),
-            ]),
+            review_inferencer=_make_mock_inferencer(
+                side_effect=[
+                    _review_json(
+                        approved=True,
+                        severity="COSMETIC",
+                        issues=[
+                            {
+                                "severity": "UNKNOWN_LEVEL",
+                                "category": "test",
+                                "description": "Test",
+                                "location": "N/A",
+                                "suggestion": "N/A",
+                            }
+                        ],
+                    ),
+                    _review_json(approved=True, issues=[]),
+                ]
+            ),
             fixer_inferencer=fixer,
             consensus_config=ConsensusConfig(max_iterations=3),
         )
@@ -415,13 +447,13 @@ class TestSeverityBackwardCompat(unittest.TestCase):
         config = ConsensusConfig()
         self.assertEqual(
             config.severity_levels,
-            ('NONE', 'COSMETIC', 'MINOR', 'MAJOR', 'CRITICAL'),
+            ("NONE", "COSMETIC", "MINOR", "MAJOR", "CRITICAL"),
         )
 
     def test_invalid_threshold_raises(self):
         """consensus_threshold not in severity_levels raises ValueError."""
         with self.assertRaises(ValueError):
-            ConsensusConfig(consensus_threshold='INVALID')
+            ConsensusConfig(consensus_threshold="INVALID")
 
 
 if __name__ == "__main__":

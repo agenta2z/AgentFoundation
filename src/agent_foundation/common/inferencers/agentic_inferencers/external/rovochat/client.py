@@ -37,13 +37,13 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.a
     RovoChatAuth,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.common import (
+    build_adf_message,
     CONVERSATION_PATH,
+    extract_text_from_event,
     GATEWAY_CONVERSATION_PATH,
     GATEWAY_MESSAGE_STREAM_PATH,
-    MESSAGE_STREAM_PATH,
-    build_adf_message,
-    extract_text_from_event,
     is_terminal_event,
+    MESSAGE_STREAM_PATH,
     parse_ndjson_line,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.exceptions import (
@@ -118,12 +118,18 @@ class RovoChatClient:
 
     def _conversation_url(self) -> str:
         """Return the conversation creation URL based on gateway mode."""
-        path = GATEWAY_CONVERSATION_PATH if self.config.use_gateway else CONVERSATION_PATH
+        path = (
+            GATEWAY_CONVERSATION_PATH if self.config.use_gateway else CONVERSATION_PATH
+        )
         return f"{self.config.base_url}{path}"
 
     def _message_stream_url(self, conversation_id: str) -> str:
         """Return the message stream URL based on gateway mode."""
-        template = GATEWAY_MESSAGE_STREAM_PATH if self.config.use_gateway else MESSAGE_STREAM_PATH
+        template = (
+            GATEWAY_MESSAGE_STREAM_PATH
+            if self.config.use_gateway
+            else MESSAGE_STREAM_PATH
+        )
         path = template.format(conversation_id=conversation_id)
         return f"{self.config.base_url}{path}"
 
@@ -326,7 +332,8 @@ class RovoChatClient:
                     if response.status_code >= 400:
                         error_body = await response.aread()
                         _check_response_status_raw(
-                            response.status_code, error_body.decode("utf-8", errors="replace")
+                            response.status_code,
+                            error_body.decode("utf-8", errors="replace"),
                         )
 
                     # Stream NDJSON lines
@@ -354,9 +361,7 @@ class RovoChatClient:
         except (RovoChatConnectionError, RovoChatTimeoutError):
             raise
         except Exception as e:
-            raise RovoChatConnectionError(
-                f"HTTP error sending message: {e}"
-            ) from e
+            raise RovoChatConnectionError(f"HTTP error sending message: {e}") from e
 
     async def send_message(
         self,

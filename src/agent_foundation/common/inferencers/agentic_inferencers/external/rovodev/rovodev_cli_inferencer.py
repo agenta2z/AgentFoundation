@@ -30,36 +30,35 @@ Usage::
     result = inf("What is 2+2?")
 """
 
+import contextvars
 import json
 import logging
 import os
-import contextvars
 import shlex
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterator, List, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
-    clean_env_for_subprocess,
-    ensure_session_metadata,
-    extract_json_from_output,
-    find_latest_session_id,
     ACLI_BINARY,
     ACLI_SUBCOMMAND,
+    clean_env_for_subprocess,
     DEFAULT_IDLE_TIMEOUT,
     DEFAULT_TOOL_USE_IDLE_TIMEOUT,
-    RovoDevNotFoundError,
+    ensure_session_metadata,
+    extract_json_from_output,
     find_acli_binary,
+    find_latest_session_id,
+    RovoDevNotFoundError,
     strip_ansi_codes,
 )
+from agent_foundation.common.inferencers.run_context import bridge_entrypoint
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
-from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -70,7 +69,9 @@ _current_output_file: contextvars.ContextVar[str | None] = contextvars.ContextVa
 
 # Schema auto-injected in non-legacy mode to capture clean LLM output as JSON.
 # This preserves XML tags that would otherwise be eaten by Rich TUI rendering.
-_NON_LEGACY_OUTPUT_SCHEMA = '{"type":"object","properties":{"response":{"type":"string"}}}'
+_NON_LEGACY_OUTPUT_SCHEMA = (
+    '{"type":"object","properties":{"response":{"type":"string"}}}'
+)
 
 
 @attrs
@@ -123,7 +124,9 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     xid: Optional[str] = attrib(default=None)
     output_schema: Optional[str] = attrib(default=None)
     output_file: Optional[str] = attrib(default=None)
-    raw_output_to_file: bool = attrib(default=True)  # Always capture clean LLM output via --output-file
+    raw_output_to_file: bool = attrib(
+        default=True
+    )  # Always capture clean LLM output via --output-file
     agent_mode: Optional[str] = attrib(default=None)
     jira: Optional[str] = attrib(default=None)
     extra_cli_args: Optional[List[str]] = attrib(default=None)
@@ -199,11 +202,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         if not mid:
             return  # no-op: keep current config_override default
         try:
-            base = (
-                json.loads(self.config_override)
-                if self.config_override
-                else {}
-            )
+            base = json.loads(self.config_override) if self.config_override else {}
             if not isinstance(base, dict):
                 base = {}
         except (json.JSONDecodeError, TypeError):
@@ -361,9 +360,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         session_id = kwargs.get("session_id")
         is_resume = kwargs.get("resume", False)
         if is_resume:
-            session_args = self._build_session_args(
-                session_id or "", is_resume
-            )
+            session_args = self._build_session_args(session_id or "", is_resume)
             if session_args:
                 parts.append(session_args)
 
@@ -395,7 +392,9 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             # Non-legacy: auto-inject --output-schema for clean output capture
             # when user hasn't set their own schema and raw_output_to_file is on.
             if not self.output_schema and self.raw_output_to_file:
-                parts.extend(["--output-schema", shlex.quote(_NON_LEGACY_OUTPUT_SCHEMA)])
+                parts.extend(
+                    ["--output-schema", shlex.quote(_NON_LEGACY_OUTPUT_SCHEMA)]
+                )
                 kwargs["_auto_output_schema"] = True
 
             # config_override works in both legacy and non-legacy modes; see above.
@@ -425,7 +424,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         return " ".join(parts)
 
     def parse_output(
-        self, stdout: str, stderr: str, return_code: int,
+        self,
+        stdout: str,
+        stderr: str,
+        return_code: int,
         output_file_path: Optional[str] = None,
     ) -> dict:
         """Parse CLI output.
@@ -460,12 +462,18 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 output = strip_ansi_codes(stdout).strip()
         else:
             # Legacy mode: try output file first, then ANSI-stripped stdout
-            effective_output_file = output_file_path or _current_output_file.get(None) or self.output_file
+            effective_output_file = (
+                output_file_path or _current_output_file.get(None) or self.output_file
+            )
             if effective_output_file and Path(effective_output_file).exists():
                 try:
-                    output = Path(effective_output_file).read_text(encoding="utf-8").strip()
+                    output = (
+                        Path(effective_output_file).read_text(encoding="utf-8").strip()
+                    )
                 except OSError:
-                    logger.warning("Failed to read output file: %s", effective_output_file)
+                    logger.warning(
+                        "Failed to read output file: %s", effective_output_file
+                    )
                     output = strip_ansi_codes(stdout).strip()
             else:
                 output = strip_ansi_codes(stdout).strip()
@@ -507,7 +515,9 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             env=env,
         )
         result_dict = self.parse_output(
-            result.stdout, result.stderr, result.returncode,
+            result.stdout,
+            result.stderr,
+            result.returncode,
             output_file_path=auto_output_file,
         )
 
@@ -573,7 +583,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                                 logger.info(
                                     "[%s] output file ready after %.1fs (%d chars)",
                                     self.__class__.__name__,
-                                    _time.monotonic() - start, len(content),
+                                    _time.monotonic() - start,
+                                    len(content),
                                 )
                                 break
                         except OSError:
@@ -582,7 +593,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 else:
                     logger.warning(
                         "[%s] output file %s still empty after %.0fs — killing",
-                        self.__class__.__name__, output_path,
+                        self.__class__.__name__,
+                        output_path,
                         _time.monotonic() - start,
                     )
         await super()._safe_process_cleanup(process, timeout)
@@ -612,13 +624,17 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                         self._last_clean_output = content
                         logger.debug(
                             "[%s] _get_clean_output_for_cache: read %d chars from %s",
-                            self.__class__.__name__, len(content), p,
+                            self.__class__.__name__,
+                            len(content),
+                            p,
                         )
                         return content
                 except OSError as e:
                     logger.warning(
                         "[%s] _get_clean_output_for_cache: failed to read %s: %s",
-                        self.__class__.__name__, p, e,
+                        self.__class__.__name__,
+                        p,
+                        e,
                     )
         return None
 
@@ -641,7 +657,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             if content:
                 logger.debug(
                     "[%s] get_final_output: returning %d chars from _last_clean_output",
-                    self.__class__.__name__, len(content),
+                    self.__class__.__name__,
+                    len(content),
                 )
                 return content
         else:
@@ -660,7 +677,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 except Exception as e:
                     logger.warning(
                         "[%s] get_final_output: failed to extract non-legacy output: %s",
-                        self.__class__.__name__, e,
+                        self.__class__.__name__,
+                        e,
                     )
         return None
 
@@ -725,7 +743,11 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             auto_output_file = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
             kwargs["output_file"] = auto_output_file
             _current_output_file.set(auto_output_file)
-            logger.info("[%s] ainfer_streaming --output-file: %s", self.__class__.__name__, auto_output_file)
+            logger.info(
+                "[%s] ainfer_streaming --output-file: %s",
+                self.__class__.__name__,
+                auto_output_file,
+            )
 
         # Handle session context
         new_session = kwargs.pop("new_session", False)
@@ -743,7 +765,9 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         try:
             # Delegate to base class streaming pipeline
-            async for chunk in super().ainfer_streaming(inference_input, inference_config, **kwargs):
+            async for chunk in super().ainfer_streaming(
+                inference_input, inference_config, **kwargs
+            ):
                 yield chunk
         finally:
             # _last_clean_output is already set by _get_clean_output_for_cache()
@@ -839,9 +863,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         # returns a TerminalInferencerResponse (clean output + raw noisy)
         # when _last_clean_output is available, so the base-class logging at
         # InferencerBase.__ainfer_single_impl logs the correct clean output.
-        result = await self._ainfer_single(
-            inference_input, inference_config, **kwargs
-        )
+        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
         if not isinstance(result, TerminalInferencerResponse):
             clean_output = self.get_final_output() or ""
             result = TerminalInferencerResponse(
@@ -857,9 +879,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         if session_id_found:
             self.active_session_id = session_id_found
             self.log_debug(f"Captured session ID: {session_id_found}", "Async")
-            ensure_session_metadata(
-                session_id_found, workspace_path=self.effective_cwd
-            )
+            ensure_session_metadata(session_id_found, workspace_path=self.effective_cwd)
 
         # Note: temp output file cleanup is handled by ainfer_streaming() itself
         # (it creates, reads, and deletes its own auto_output_file in its finally block).
@@ -901,15 +921,11 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["resume"] = is_resume and session_id is not None
 
         # Route through _infer_single for retry/preprocessing/timeout
-        result = self._infer_single(
-            inference_input, inference_config, **kwargs
-        )
+        result = self._infer_single(inference_input, inference_config, **kwargs)
 
         # Extract the real session ID from the sessions directory.
         if getattr(result, "success", False):
-            session_id_found = find_latest_session_id(
-                workspace_path=self.effective_cwd
-            )
+            session_id_found = find_latest_session_id(workspace_path=self.effective_cwd)
             if session_id_found:
                 self.active_session_id = session_id_found
                 self.log_debug(f"Captured session ID: {session_id_found}", "Sync")

@@ -13,19 +13,20 @@ return exactly N ExecutionTrace objects, including traces from failed runs
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.collector import TraceCollector
 from agent_foundation.automation.meta_agent.models import ExecutionTrace
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
 # Mock agent
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MockAgentResult:
     """Simulates an agent run result."""
+
     session_dir: Optional[str] = None
 
 
@@ -50,6 +51,7 @@ class MockAgent:
 
 # Run count: N >= 1, capped to keep tests fast
 run_count_st = st.integers(min_value=1, max_value=50)
+
 
 # Failure indices: a subset of [0, N) to simulate partial/full failures
 def fail_indices_st(n: int) -> st.SearchStrategy[Set[int]]:
@@ -86,9 +88,7 @@ class TestTraceCountProperty:
         collector = TraceCollector(agent=agent)
         traces = collector.collect("test task", run_count=n)
 
-        assert len(traces) == n, (
-            f"Expected {n} traces, got {len(traces)}"
-        )
+        assert len(traces) == n, f"Expected {n} traces, got {len(traces)}"
         for trace in traces:
             assert isinstance(trace, ExecutionTrace)
 
@@ -108,8 +108,7 @@ class TestTraceCountProperty:
         traces = collector.collect("test task", run_count=n)
 
         assert len(traces) == n, (
-            f"Expected {n} traces, got {len(traces)} "
-            f"(fail_on={fail_on})"
+            f"Expected {n} traces, got {len(traces)} (fail_on={fail_on})"
         )
 
         # Failed runs must have success=False
@@ -133,9 +132,7 @@ class TestTraceCountProperty:
         collector = TraceCollector(agent=agent)
         traces = collector.collect("test task", run_count=n)
 
-        assert len(traces) == n, (
-            f"Expected {n} traces when all fail, got {len(traces)}"
-        )
+        assert len(traces) == n, f"Expected {n} traces when all fail, got {len(traces)}"
         for trace in traces:
             assert trace.success is False
 
@@ -150,6 +147,4 @@ class TestTraceCountProperty:
         traces = collector.collect("test task", run_count=n)
 
         ids = [t.trace_id for t in traces]
-        assert len(set(ids)) == n, (
-            f"Expected {n} unique trace IDs, got {len(set(ids))}"
-        )
+        assert len(set(ids)) == n, f"Expected {n} unique trace IDs, got {len(set(ids))}"

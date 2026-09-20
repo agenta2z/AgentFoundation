@@ -5,6 +5,7 @@ isolation by binding the real methods onto a lightweight stub ``self`` (the full
 inferencer needs a large constructor; these methods only touch ``_workspace`` and
 ``aggregator_inferencer``).
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer as _BTA,
 )

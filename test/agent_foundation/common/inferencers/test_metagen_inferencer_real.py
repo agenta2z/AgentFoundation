@@ -1,5 +1,3 @@
-
-
 """Real E2E integration test for MetagenApiInferencer (sync + async).
 
 Tests the MetaGen API inferencer with dialog_completion mode for Claude models.
@@ -18,9 +16,9 @@ import time
 
 
 def test_sync(inferencer, query: str) -> str:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("TEST: Sync infer()")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Model:  {inferencer.model_id}")
     print(f"  Key:    {inferencer.secret_key[:20]}...")
     print(f"  Query:  {query}")
@@ -37,9 +35,9 @@ def test_sync(inferencer, query: str) -> str:
 
 
 async def test_async(inferencer, query: str) -> str:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("TEST: Async ainfer()")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Model:  {inferencer.model_id}")
     print(f"  Key:    {inferencer.secret_key[:20]}...")
     print(f"  Query:  {query}")
@@ -56,14 +54,12 @@ async def test_async(inferencer, query: str) -> str:
 
 
 async def test_parallel_async(inferencer, queries: list) -> list:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TEST: Parallel async ainfer() x{len(queries)}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     t0 = time.time()
-    results = await asyncio.gather(
-        *[inferencer.ainfer(q) for q in queries]
-    )
+    results = await asyncio.gather(*[inferencer.ainfer(q) for q in queries])
     elapsed = time.time() - t0
 
     for i, (q, r) in enumerate(zip(queries, results)):
@@ -71,7 +67,7 @@ async def test_parallel_async(inferencer, queries: list) -> list:
         print(f"      A: {r[:200]}")
         assert isinstance(r, str) and len(r) > 5, f"Bad result [{i}]: {r!r}"
 
-    print(f"\n  Total time: {elapsed:.1f}s (avg {elapsed/len(queries):.1f}s/query)")
+    print(f"\n  Total time: {elapsed:.1f}s (avg {elapsed / len(queries):.1f}s/query)")
     print(f"\n  PARALLEL ASYNC PASS")
     return results
 
@@ -79,11 +75,14 @@ async def test_parallel_async(inferencer, queries: list) -> list:
 def main():
     parser = argparse.ArgumentParser(description="MetaGen API Inferencer E2E Test")
     parser.add_argument(
-        "--mode", choices=["sync", "async", "parallel", "all"], default="all",
+        "--mode",
+        choices=["sync", "async", "parallel", "all"],
+        default="all",
         help="Which test to run (default: all)",
     )
     parser.add_argument(
-        "--query", default="What is Python? Answer in one sentence.",
+        "--query",
+        default="What is Python? Answer in one sentence.",
         help="Query for sync/async tests",
     )
     args = parser.parse_args()
@@ -111,9 +110,9 @@ def main():
         ]
         asyncio.run(test_parallel_async(inferencer, parallel_queries))
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("ALL TESTS PASSED")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":

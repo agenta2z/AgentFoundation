@@ -2,14 +2,11 @@ import json
 from typing import Any, Dict, Union
 
 import requests
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.inference_args import (
-    CommonLlmInferenceArgs,
-)
+from agent_foundation.common.inferencers.inference_args import CommonLlmInferenceArgs
 from agent_foundation.common.inferencers.remote_inferencer_base import (
     RemoteInferencerBase,
 )
+from attr import attrib, attrs
 from rich_python_utils.common_utils import dict_
 
 HTTP_REQUEST_SERVICE_URL_PREFIX = "http://"
@@ -25,6 +22,7 @@ DEFAULT_BODY_PROMPT_FIELD_NAME = "prompt"
 DEFAULT_RESPONSE_FIELD_NAME = "response"
 DEFAULT_SECRET_KEY_FIELD_NAME = "api_key"
 DEFAULT_MODEL_ID_FIELD_NAME = "model"
+
 
 @attrs
 class HttpRequestInferencer(RemoteInferencerBase):

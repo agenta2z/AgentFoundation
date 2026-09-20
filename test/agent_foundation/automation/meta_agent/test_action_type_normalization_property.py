@@ -11,13 +11,12 @@ ActionMetadataRegistry or is flagged as unrecognized.
 **Validates: Requirements 2.1, 2.2, 2.3**
 """
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import TraceStep
 from agent_foundation.automation.meta_agent.normalizer import (
     KNOWN_CANONICAL_TYPES,
     TraceNormalizer,
 )
+from hypothesis import given, settings, strategies as st
 from webaxon.automation.meta_agent.web_normalizer_config import WEB_ACTION_TYPE_MAP
 
 

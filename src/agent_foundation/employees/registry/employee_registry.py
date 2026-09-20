@@ -29,6 +29,7 @@ class EmployeeRegistry:
 
     def __init__(self, employees_dir: Path, role_registry: "RoleRegistry") -> None:
         from agent_foundation.employees.registry.role_registry import RoleRegistry
+
         self._employees_dir = Path(employees_dir)
         self._role_registry = role_registry
         self._employees: dict[str, AIEmployee] = {}
@@ -44,7 +45,10 @@ class EmployeeRegistry:
     def _scan(self) -> None:
         """Scan employees_dir for employee.yaml files and load them."""
         if not self._employees_dir.exists():
-            logger.debug("[EmployeeRegistry] employees_dir does not exist: %s", self._employees_dir)
+            logger.debug(
+                "[EmployeeRegistry] employees_dir does not exist: %s",
+                self._employees_dir,
+            )
             return
         for child in sorted(self._employees_dir.iterdir()):
             employee_yaml = child / "employee.yaml"
@@ -54,7 +58,8 @@ class EmployeeRegistry:
                     self._employees[employee.id] = employee
                     logger.debug(
                         "[EmployeeRegistry] Loaded employee '%s' (role=%s)",
-                        employee.id, employee.role_id,
+                        employee.id,
+                        employee.role_id,
                     )
                 except Exception as e:
                     logger.warning(
@@ -62,7 +67,8 @@ class EmployeeRegistry:
                     )
         logger.info(
             "[EmployeeRegistry] Loaded %d employees from %s",
-            len(self._employees), self._employees_dir,
+            len(self._employees),
+            self._employees_dir,
         )
 
     def _load_employee(self, employee_dir: Path) -> AIEmployee:
@@ -77,7 +83,8 @@ class EmployeeRegistry:
             else:
                 logger.warning(
                     "[EmployeeRegistry] Role '%s' not found for employee '%s'",
-                    employee.role_id, employee.id,
+                    employee.role_id,
+                    employee.id,
                 )
 
         # Load team context if present
@@ -120,10 +127,7 @@ class EmployeeRegistry:
     def list_by_team(self, team_id: str) -> list[AIEmployee]:
         """List all employees deployed to a given team."""
         self._ensure_scanned()
-        return [
-            e for e in self._employees.values()
-            if e.team_id == team_id
-        ]
+        return [e for e in self._employees.values() if e.team_id == team_id]
 
     def list_by_role(self, role_id: str) -> list[AIEmployee]:
         """List all employees of a given role."""
@@ -145,7 +149,9 @@ class EmployeeRegistry:
                     employee.team_context.to_yaml(emp_dir / "team_context.yaml")
         logger.info(
             "[EmployeeRegistry] Registered employee '%s' (role=%s, team=%s)",
-            employee.id, employee.role_id, employee.team_id,
+            employee.id,
+            employee.role_id,
+            employee.team_id,
         )
 
     def invalidate(self) -> None:

@@ -26,12 +26,13 @@ def load_inferencer(config_name: str, overrides: Optional[Dict[str, Any]] = None
     """
     config_path = _YAML_DIR / "inferencers" / f"{config_name}.yaml"
     if not config_path.exists():
-        available = sorted(
-            p.stem for p in (_YAML_DIR / "inferencers").glob("*.yaml")
-        ) if (_YAML_DIR / "inferencers").is_dir() else []
+        available = (
+            sorted(p.stem for p in (_YAML_DIR / "inferencers").glob("*.yaml"))
+            if (_YAML_DIR / "inferencers").is_dir()
+            else []
+        )
         raise FileNotFoundError(
-            f"No inferencer config named {config_name!r}. "
-            f"Available: {available}"
+            f"No inferencer config named {config_name!r}. Available: {available}"
         )
     cfg = load_config(str(config_path), overrides=overrides)
     return instantiate(cfg)
@@ -45,12 +46,13 @@ def load_bta(config_name: str, overrides: Optional[Dict[str, Any]] = None):
     """
     config_path = _YAML_DIR / "bta" / f"{config_name}.yaml"
     if not config_path.exists():
-        available = sorted(
-            p.stem for p in (_YAML_DIR / "bta").glob("*.yaml")
-        ) if (_YAML_DIR / "bta").is_dir() else []
+        available = (
+            sorted(p.stem for p in (_YAML_DIR / "bta").glob("*.yaml"))
+            if (_YAML_DIR / "bta").is_dir()
+            else []
+        )
         raise FileNotFoundError(
-            f"No BTA config named {config_name!r}. "
-            f"Available: {available}"
+            f"No BTA config named {config_name!r}. Available: {available}"
         )
     cfg = load_config(str(config_path), overrides=overrides)
     return instantiate(cfg)
@@ -65,12 +67,13 @@ def load_agent(config_name: str, overrides: Optional[Dict[str, Any]] = None):
     """
     config_path = _YAML_DIR / "agents" / f"{config_name}.yaml"
     if not config_path.exists():
-        available = sorted(
-            p.stem for p in (_YAML_DIR / "agents").glob("*.yaml")
-        ) if (_YAML_DIR / "agents").is_dir() else []
+        available = (
+            sorted(p.stem for p in (_YAML_DIR / "agents").glob("*.yaml"))
+            if (_YAML_DIR / "agents").is_dir()
+            else []
+        )
         raise FileNotFoundError(
-            f"No agent config named {config_name!r}. "
-            f"Available: {available}"
+            f"No agent config named {config_name!r}. Available: {available}"
         )
     cfg = load_config(str(config_path), overrides=overrides)
     return instantiate(cfg)

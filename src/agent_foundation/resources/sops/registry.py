@@ -77,7 +77,9 @@ def load_sop(name: str, base_dir: Path | None = None) -> SOPInfo:
     md_description = "\n".join(desc_lines).strip()[:500]
 
     description = config.get("description") or md_description
-    display_name = config.get("display_name") or name.replace("_", " ").replace("-", " ").title()
+    display_name = (
+        config.get("display_name") or name.replace("_", " ").replace("-", " ").title()
+    )
 
     # Merge keywords/example_requests: sop.config.json primary, SOP.md fallback
     merge = config.get("_merge_with_markdown", False)

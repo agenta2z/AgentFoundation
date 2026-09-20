@@ -18,8 +18,6 @@ import unittest
 from pathlib import Path
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
@@ -27,6 +25,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.temp
     TemplateManagerPromptRenderer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
     TemplateManager,
 )
@@ -83,14 +82,24 @@ class TestRenderPromptNonEmptyInvariant(unittest.TestCase):
         # developer can fix the misconfiguration without instrumenting the
         # lookup chain.
         message = str(cm.exception)
-        self.assertIn("empty", message.lower(),
-                      "Error must explain that the rendered prompt is empty.")
-        self.assertIn("template_key", message,
-                      "Error must include the failing template_key.")
-        self.assertIn("initial", message,
-                      "Error must include the actual failing template key value.")
-        self.assertIn("templates", message,
-                      "Error must guide the reader toward the TemplateManager configuration.")
+        self.assertIn(
+            "empty",
+            message.lower(),
+            "Error must explain that the rendered prompt is empty.",
+        )
+        self.assertIn(
+            "template_key", message, "Error must include the failing template_key."
+        )
+        self.assertIn(
+            "initial",
+            message,
+            "Error must include the actual failing template key value.",
+        )
+        self.assertIn(
+            "templates",
+            message,
+            "Error must guide the reader toward the TemplateManager configuration.",
+        )
 
     def test_passes_when_renderer_produces_non_empty_prompt(self) -> None:
         """Sanity: with the default (working) renderer, no exception is raised."""

@@ -5,11 +5,12 @@ display to render Markdown progressively as tokens arrive from an LLM.
 All Rich imports are deferred to method bodies so this module can be
 imported without pulling Rich into the process.
 """
+
 from __future__ import annotations
 
 from typing import Iterator, Optional
 
-from agent_foundation.ui.cli.theme import ThemeManager, COLORS
+from agent_foundation.ui.cli.theme import COLORS, ThemeManager
 
 
 class StreamingPanel:
@@ -34,8 +35,8 @@ class StreamingPanel:
     # -- context manager protocol -----------------------------------------------
 
     def __enter__(self):
-        from rich.live import Live
         from rich.console import Console
+        from rich.live import Live
         from rich.spinner import Spinner
 
         console = Console(theme=ThemeManager.get_theme())

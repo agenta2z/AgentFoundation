@@ -21,14 +21,14 @@ from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
 from agent_foundation.knowledge.prompt_templates import render_prompt
-from rich_python_utils.service_utils.data_operation_record import (
-    DataOperationRecord,
-    generate_operation_id,
-)
 from agent_foundation.knowledge.retrieval.models.enums import UpdateAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import OperationResult
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +208,7 @@ class KnowledgeUpdater:
             matches = [
                 (p, s)
                 for p, s in matches
-                if p.domain == domain
-                or domain in getattr(p, "secondary_domains", [])
+                if p.domain == domain or domain in getattr(p, "secondary_domains", [])
             ]
 
         results = []
@@ -231,12 +230,14 @@ class KnowledgeUpdater:
                         piece.content, update_instruction
                     )
                     if generated_content is None:
-                        results.append(OperationResult(
-                            success=False,
-                            operation="update",
-                            piece_id=piece.piece_id,
-                            error="Instruction-mode content generation failed",
-                        ))
+                        results.append(
+                            OperationResult(
+                                success=False,
+                                operation="update",
+                                piece_id=piece.piece_id,
+                                error="Instruction-mode content generation failed",
+                            )
+                        )
                         continue
 
                 if generated_content is not None:
@@ -287,7 +288,7 @@ class KnowledgeUpdater:
         if stripped.startswith("```"):
             # Remove opening fence (```json or ```)
             first_newline = stripped.index("\n") if "\n" in stripped else len(stripped)
-            stripped = stripped[first_newline + 1:]
+            stripped = stripped[first_newline + 1 :]
         if stripped.endswith("```"):
             stripped = stripped[:-3]
         return stripped.strip()
@@ -466,17 +467,19 @@ class KnowledgeUpdater:
             )
 
             # ADD record on new piece
-            new_piece.history.append(DataOperationRecord(
-                operation="add",
-                timestamp=now,
-                operation_id=op_id,
-                reason=summary,
-                source="KnowledgeUpdater",
-                details={
-                    "action": action.value,
-                    "supersedes": existing.piece_id,
-                },
-            ))
+            new_piece.history.append(
+                DataOperationRecord(
+                    operation="add",
+                    timestamp=now,
+                    operation_id=op_id,
+                    reason=summary,
+                    source="KnowledgeUpdater",
+                    details={
+                        "action": action.value,
+                        "supersedes": existing.piece_id,
+                    },
+                )
+            )
 
             try:
                 # Add new piece FIRST
@@ -486,17 +489,19 @@ class KnowledgeUpdater:
                 # Deactivate old piece AFTER new is added
                 existing.is_active = False
                 existing.updated_at = now
-                existing.history.append(DataOperationRecord(
-                    operation="delete",
-                    timestamp=now,
-                    operation_id=op_id,
-                    reason=summary,
-                    source="KnowledgeUpdater",
-                    details={
-                        "delete_mode": "soft",
-                        "superseded_by": new_piece_id,
-                    },
-                ))
+                existing.history.append(
+                    DataOperationRecord(
+                        operation="delete",
+                        timestamp=now,
+                        operation_id=op_id,
+                        reason=summary,
+                        source="KnowledgeUpdater",
+                        details={
+                            "delete_mode": "soft",
+                            "superseded_by": new_piece_id,
+                        },
+                    )
+                )
                 self.piece_store.update(existing)
 
             except Exception as e:
@@ -536,16 +541,18 @@ class KnowledgeUpdater:
                     logger.warning("Failed to update embedding: %s", e)
 
             # UPDATE record with content_before/content_after
-            existing.history.append(DataOperationRecord(
-                operation="update",
-                timestamp=now,
-                operation_id=op_id,
-                reason=summary,
-                source="KnowledgeUpdater",
-                content_before=content_before,
-                content_after=new_content,
-                details={"action": action.value},
-            ))
+            existing.history.append(
+                DataOperationRecord(
+                    operation="update",
+                    timestamp=now,
+                    operation_id=op_id,
+                    reason=summary,
+                    source="KnowledgeUpdater",
+                    content_before=content_before,
+                    content_after=new_content,
+                    details={"action": action.value},
+                )
+            )
 
             self.piece_store.update(existing)
             new_piece_id = existing.piece_id

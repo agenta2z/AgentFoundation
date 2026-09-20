@@ -1,0 +1,58 @@
+# Reference script templates for the Implementation Hub setup wizard.
+#
+# Each entry's ``files:`` list points to script snapshots in the sibling
+# ``<id>/`` directory. The setup wizard inlines them into the PTI prompt
+# so the agent has a concrete reference to model the generated script on.
+#
+# Vendoring tradeoff: snapshots rot relative to the source-of-truth scripts
+# they were copied from. The library starts intentionally small (2 generic
+# templates) — pull them out of canonical fbcode locations BEFORE every
+# rollout to keep them fresh, or replace this YAML with a manifest that
+# points to canonical paths read at request time (Section 8 open question).
+
+templates:
+  - id: generic_recurring_flow
+    label: Generic — Recurring flow scheduler
+    description: |
+      Skeleton for an FBLearner recurring training flow scheduled via
+      fbpkg + fblearner_project_push. Use as a starting point when the
+      user's team owns a recurring flow (most cfr_main_mtml / hstu paths).
+      The generated script subclasses or mirrors this pattern; flag
+      overrides are translated to model-config field overrides at the
+      ``CommonRecurringFlowConfig`` boundary.
+    files:
+      - submit_job.py
+      - notes.md
+
+  - id: generic_maas_launcher
+    label: Generic — MaaS one-shot launcher
+    description: |
+      One-shot ``app-layer main fire-app`` launcher for a MaaS-config
+      driven training run. Use when the user's reference command starts
+      with ``app-layer main fire-app -d <config>`` rather than a recurring
+      flow. The generated script wraps the same fire-app invocation and
+      threads ``--enable-flags`` overrides through the config provider.
+    files:
+      - submit_job.py
+      - notes.md
+
+  - id: generative_recommenders_local
+    label: Generative Recommenders — Local devgpu (buck2 run)
+    description: |
+      Mode B (Local subprocess) runner: single-script wrapper around
+      ``buck2 run @mode/opt //generative_recommenders/github:main`` for
+      HSTU + SASRec gin configs on ml-20m / ml-1m / amzn-books on the
+      current devgpu. Inlines the free-GPU picker + master-port picker
+      logic from /data/users/zgchen/fbsource/fbcode/scripts/zgchen/hstu/
+      {find_free_gpu,launch_training}.py so it satisfies the single-
+      ``submit.py``-under-``outputs/`` runtime constraint of
+      ``buck_run_auto``. ``enable_flags`` map to ``<name> = True``
+      bindings written into a per-attempt gin overlay file (since
+      ``main.py`` calls single-file ``gin.parse_config_file``). Use
+      Path A (UploadExistingRunnerModal) to deploy as-is; Path B
+      (template picker) triggers PTI to regenerate, which is NOT what
+      you want for this known-good runner.
+    files:
+      - submit_job.py
+      - launch.json
+      - notes.md

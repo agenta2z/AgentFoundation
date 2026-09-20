@@ -22,11 +22,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.template_constants import KEY_FOLLOWUP
 from agent_foundation.common.inferencers.template_defaults import (
     FOLLOWUP_TEMPLATE_DEFAULTS,
     REVIEW_TEMPLATE_DEFAULTS,
 )
-from agent_foundation.common.inferencers.template_constants import KEY_FOLLOWUP
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
@@ -44,11 +44,13 @@ class _RecordingTemplateManager:
         self.default_template = ""
 
     def __call__(self, key, *, active_template_root_space=None, **feed):
-        self.calls.append({
-            "key": key,
-            "active_template_root_space": active_template_root_space,
-            "feed": dict(feed),
-        })
+        self.calls.append(
+            {
+                "key": key,
+                "active_template_root_space": active_template_root_space,
+                "feed": dict(feed),
+            }
+        )
         return self.return_value.format(key=key, feed=feed)
 
     def get_raw_template(self, key, **kwargs):

@@ -13,6 +13,7 @@ Marked with ``@pytest.mark.e2e`` so they can be skipped in CI:
     pytest -m "not e2e"      # skip e2e tests
     pytest -m e2e            # run only e2e tests
 """
+
 import os
 import sys
 from pathlib import Path
@@ -35,13 +36,15 @@ if _test_knowledge_dir not in sys.path:
     sys.path.insert(0, _test_knowledge_dir)
 
 import pytest
-
-from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
-from agent_foundation.knowledge.retrieval.knowledge_consolidator import KnowledgeConsolidator
-from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
-from agent_foundation.apis.claude_llm import generate_text, ClaudeModels
-
 from _grocery_kb_helpers import load_grocery_kb, QUERY, USER_ENTITY_ID
+from agent_foundation.apis.claude_llm import ClaudeModels, generate_text
+from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
+    KnowledgeConsolidator,
+)
+from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
+from agent_foundation.knowledge.retrieval.post_processors import (
+    GroupedDictPostProcessor,
+)
 
 
 # ── Skip if no API key ──────────────────────────────────────────────────────
@@ -125,7 +128,15 @@ class TestRealLLMRetrieval:
 
         consolidated = output["consolidated_knowledge"].lower()
         # The procedure mentions login, cart, coupons, pricing - at least one should appear
-        procedure_keywords = ["login", "cart", "coupon", "price", "pricing", "checkout", "member"]
+        procedure_keywords = [
+            "login",
+            "cart",
+            "coupon",
+            "price",
+            "pricing",
+            "checkout",
+            "member",
+        ]
         found = [kw for kw in procedure_keywords if kw in consolidated]
         assert len(found) >= 1, (
             f"Expected at least one of {procedure_keywords} in consolidated output "
@@ -178,6 +189,6 @@ class TestRealLLMRetrieval:
         consolidated2 = output2.get("consolidated_knowledge", "")
 
         # At least one should mention the relevant store
-        assert "safeway" in consolidated1.lower() or "whole foods" in consolidated2.lower(), (
-            "Expected query-specific content in consolidated outputs"
-        )
+        assert (
+            "safeway" in consolidated1.lower() or "whole foods" in consolidated2.lower()
+        ), "Expected query-specific content in consolidated outputs"

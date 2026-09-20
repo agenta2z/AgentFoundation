@@ -15,12 +15,15 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_foundation.automation.meta_agent.evaluator import EvaluationResult
-    from agent_foundation.automation.meta_agent.target_converter import TargetConverterBase
+    from agent_foundation.automation.meta_agent.target_converter import (
+        TargetConverterBase,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Trace Models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TraceActionResult:
@@ -111,7 +114,11 @@ class TraceStep:
     def from_dict(cls, data: Dict[str, Any]) -> "TraceStep":
         """Deserialize from a JSON-compatible dict."""
         result_data = data.get("result")
-        result = TraceActionResult.from_dict(result_data) if result_data is not None else None
+        result = (
+            TraceActionResult.from_dict(result_data)
+            if result_data is not None
+            else None
+        )
 
         ts_raw = data.get("timestamp")
         timestamp = datetime.fromisoformat(ts_raw) if ts_raw is not None else None
@@ -182,7 +189,9 @@ class ExecutionTrace:
         steps = [TraceStep.from_dict(s) for s in data.get("steps", [])]
 
         start_raw = data.get("start_time")
-        start_time = datetime.fromisoformat(start_raw) if start_raw is not None else None
+        start_time = (
+            datetime.fromisoformat(start_raw) if start_raw is not None else None
+        )
 
         end_raw = data.get("end_time")
         end_time = datetime.fromisoformat(end_raw) if end_raw is not None else None
@@ -205,6 +214,7 @@ class ExecutionTrace:
 # ---------------------------------------------------------------------------
 # Alignment Models
 # ---------------------------------------------------------------------------
+
 
 class AlignmentType(Enum):
     """Classification of an aligned position across traces."""
@@ -240,6 +250,7 @@ class AlignedTraceSet:
 # Pattern Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LoopPattern:
     """A detected loop pattern in the aligned traces."""
@@ -265,8 +276,8 @@ class BranchPattern:
 class ParameterizableInfo:
     """Info about a parameterizable step's template variables."""
 
-    variable_args: Dict[str, str]   # arg_key -> template_variable_name
-    constant_args: Dict[str, Any]   # arg_key -> constant_value
+    variable_args: Dict[str, str]  # arg_key -> template_variable_name
+    constant_args: Dict[str, Any]  # arg_key -> constant_value
 
 
 @dataclass
@@ -286,6 +297,7 @@ class ExtractedPatterns:
 # ---------------------------------------------------------------------------
 # Synthesis Models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SynthesisReport:
@@ -344,6 +356,7 @@ class SynthesisReport:
 # Validation Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ValidationResult:
     """Result of validating a single execution."""
@@ -379,6 +392,7 @@ class ValidationResults:
 # Pipeline Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PipelineConfig:
     """Configuration for the meta agent pipeline.
@@ -411,7 +425,9 @@ class PipelineResult:
     synthesis_report: Optional[SynthesisReport] = None
     validation_results: Optional[ValidationResults] = None
     traces: List[ExecutionTrace] = field(default_factory=list)
-    evaluation_results: List[Any] = field(default_factory=list)  # List[EvaluationResult]
+    evaluation_results: List[Any] = field(
+        default_factory=list
+    )  # List[EvaluationResult]
     python_script: Optional[str] = None
     error: Optional[str] = None
     failed_stage: Optional[str] = None

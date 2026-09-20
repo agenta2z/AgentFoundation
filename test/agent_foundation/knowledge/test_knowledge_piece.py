@@ -12,6 +12,7 @@ Tests cover:
 
 Requirements: 1.1, 1.2, 1.4, 1.5, 1.6
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -26,10 +27,9 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgeType,
     KnowledgePiece,
+    KnowledgeType,
 )
 
 
@@ -125,7 +125,9 @@ class TestTagNormalization:
 
     def test_tags_stripped(self):
         """Tags are stripped of leading/trailing whitespace."""
-        piece = KnowledgePiece(content="Test", tags=["  food  ", " grocery", "shopping "])
+        piece = KnowledgePiece(
+            content="Test", tags=["  food  ", " grocery", "shopping "]
+        )
         assert piece.tags == ["food", "grocery", "shopping"]
 
     def test_empty_tags_removed(self):
@@ -299,7 +301,10 @@ class TestEmbeddingText:
             content="Prefers organic eggs",
             embedding_text="User xinli prefers organic eggs for grocery shopping",
         )
-        assert piece.embedding_text == "User xinli prefers organic eggs for grocery shopping"
+        assert (
+            piece.embedding_text
+            == "User xinli prefers organic eggs for grocery shopping"
+        )
 
     def test_embedding_text_in_to_dict(self):
         """embedding_text is included in to_dict output."""
@@ -451,19 +456,23 @@ class TestSpacesFromDict:
 
     def test_from_dict_with_spaces(self):
         """from_dict reads spaces when present. (Req 1.7)"""
-        piece = KnowledgePiece.from_dict({
-            "content": "Test",
-            "spaces": ["personal", "main"],
-        })
+        piece = KnowledgePiece.from_dict(
+            {
+                "content": "Test",
+                "spaces": ["personal", "main"],
+            }
+        )
         assert piece.spaces == ["personal", "main"]
         assert piece.space == "personal"
 
     def test_from_dict_without_spaces_derives_from_space(self):
         """from_dict derives spaces from space when spaces absent. (Req 1.6)"""
-        piece = KnowledgePiece.from_dict({
-            "content": "Test",
-            "space": "developmental",
-        })
+        piece = KnowledgePiece.from_dict(
+            {
+                "content": "Test",
+                "space": "developmental",
+            }
+        )
         assert piece.spaces == ["developmental"]
         assert piece.space == "developmental"
 
@@ -475,22 +484,26 @@ class TestSpacesFromDict:
 
     def test_from_dict_both_present_spaces_wins(self):
         """When both space and spaces present, spaces wins. (Req 1.7)"""
-        piece = KnowledgePiece.from_dict({
-            "content": "Test",
-            "space": "developmental",
-            "spaces": ["personal", "main"],
-        })
+        piece = KnowledgePiece.from_dict(
+            {
+                "content": "Test",
+                "space": "developmental",
+                "spaces": ["personal", "main"],
+            }
+        )
         assert piece.spaces == ["personal", "main"]
         assert piece.space == "personal"
 
     def test_from_dict_suggestion_fields(self):
         """from_dict reads suggestion fields with None defaults."""
-        piece = KnowledgePiece.from_dict({
-            "content": "Test",
-            "pending_space_suggestions": ["personal"],
-            "space_suggestion_reasons": ["user entity"],
-            "space_suggestion_status": "pending",
-        })
+        piece = KnowledgePiece.from_dict(
+            {
+                "content": "Test",
+                "pending_space_suggestions": ["personal"],
+                "space_suggestion_reasons": ["user entity"],
+                "space_suggestion_status": "pending",
+            }
+        )
         assert piece.pending_space_suggestions == ["personal"]
         assert piece.space_suggestion_reasons == ["user entity"]
         assert piece.space_suggestion_status == "pending"

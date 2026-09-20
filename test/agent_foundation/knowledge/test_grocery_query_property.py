@@ -13,6 +13,7 @@ provider(query)["instructions"] should contain the grocery shopping procedure.
 
 **Validates: Requirements 6.3**
 """
+
 import sys
 from pathlib import Path
 
@@ -28,16 +29,15 @@ _spu_src = Path(__file__).resolve().parents[3] / "SciencePythonUtils" / "src"
 if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
-from hypothesis import given, settings, strategies as st
-
-from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
-    MemoryKeyValueService,
+from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.post_processors import (
+    GroupedDictPostProcessor,
 )
-from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
-    MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
+from agent_foundation.knowledge.retrieval.provider import _default_formatter
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
@@ -45,14 +45,16 @@ from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter impor
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from hypothesis import given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
-from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
-from agent_foundation.knowledge.retrieval.provider import _default_formatter
+from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
+    MemoryKeyValueService,
+)
+from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
+    MemoryRetrievalService,
+)
 
 
 # ── Path to grocery data file ────────────────────────────────────────────────
@@ -112,6 +114,7 @@ _STORE_MEMBERSHIP_MARKERS = {
 
 
 # ── Hypothesis strategy for grocery queries ──────────────────────────────────
+
 
 @st.composite
 def grocery_query_strategy(draw):

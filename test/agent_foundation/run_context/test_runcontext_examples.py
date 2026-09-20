@@ -19,8 +19,14 @@ _EXAMPLES_DIR = os.path.abspath(
                 "agent_foundation.common.inferencers.inferencer_base", fromlist=["x"]
             ).__file__
         ),
-        "..", "..", "..", "..",
-        "examples", "agent_foundation", "common", "inferencers",
+        "..",
+        "..",
+        "..",
+        "..",
+        "examples",
+        "agent_foundation",
+        "common",
+        "inferencers",
     )
 )
 

@@ -18,6 +18,7 @@ Fix locations:
   • dual_inferencer.py:448-494 — fail-safe `_record_round_audit`
   • multi_flow_dual_inferencer.py:625-629 — always-log dispatch (Fix #4)
 """
+
 from __future__ import annotations
 
 import json
@@ -31,12 +32,16 @@ import pytest
 # Helpers
 # -------------------------------------------------------------------------
 
-def _ws(tmp, name="dual_root", use_fdl=True):
+
+def _ws(tmp, name="dual_root"):
     """Create a workspace under tmp_path/<name>/ with full layout."""
-    from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+    from agent_foundation.common.inferencers.inferencer_workspace import (
+        InferencerWorkspace,
+    )
+
     root = os.path.join(str(tmp), name)
     os.makedirs(root, exist_ok=True)
-    w = InferencerWorkspace(root=root, use_final_deliverables_folder=use_fdl)
+    w = InferencerWorkspace(root=root)
     w.ensure_dirs()
     # children_dir is created on demand — touch it now
     os.makedirs(w.children_dir, exist_ok=True)
@@ -78,13 +83,14 @@ def _make_dual_with_audit(parent_ws, child_ws, enable_round_audit=True):
 # Attribute presence
 # -------------------------------------------------------------------------
 
+
 @pytest.mark.preflight
 def test_RA1_enable_round_audit_attr_exists():
     """RA1: DualInferencer declares `enable_round_audit` defaulting to True."""
+    import attr
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
         DualInferencer,
     )
-    import attr
 
     fields = {f.name: f for f in attr.fields(DualInferencer)}
     assert "enable_round_audit" in fields, (
@@ -114,6 +120,7 @@ def test_RA2_record_round_audit_method_exists():
 # Functional: log file written + content shape
 # -------------------------------------------------------------------------
 
+
 @pytest.mark.preflight
 def test_RA3_audit_writes_jsonl_entry(tmp_path):
     """RA3: A single _record_round_audit call appends one valid JSONL line."""
@@ -122,7 +129,9 @@ def test_RA3_audit_writes_jsonl_entry(tmp_path):
     dual, child_inf = _make_dual_with_audit(parent, child)
 
     dual._record_round_audit(
-        round_idx=1, phase="propose", inferencer=child_inf,
+        round_idx=1,
+        phase="propose",
+        inferencer=child_inf,
     )
 
     log_path = os.path.join(parent.outputs_dir, "round_log.jsonl")
@@ -136,13 +145,20 @@ def test_RA3_audit_writes_jsonl_entry(tmp_path):
     assert len(lines) == 1, f"Expected exactly 1 JSONL line, got {len(lines)}"
 
     entry = json.loads(lines[0])
-    for key in ("round", "phase", "inferencer_class",
-                "inferencer_workspace", "timestamp"):
+    for key in (
+        "round",
+        "phase",
+        "inferencer_class",
+        "inferencer_workspace",
+        "timestamp",
+    ):
         assert key in entry, f"Missing required key {key!r} in entry: {entry}"
     assert entry["round"] == 1
     assert entry["phase"] == "propose"
-    assert entry["inferencer_class"].endswith("ChildStub") or \
-           "Stub" in entry["inferencer_class"]
+    assert (
+        entry["inferencer_class"].endswith("ChildStub")
+        or "Stub" in entry["inferencer_class"]
+    )
     assert entry["inferencer_workspace"].startswith(child.root)
 
 
@@ -154,7 +170,9 @@ def test_RA4_extra_kwargs_merged_into_entry(tmp_path):
     dual, child_inf = _make_dual_with_audit(parent, child)
 
     dual._record_round_audit(
-        round_idx=2, phase="review_dispatch", inferencer=child_inf,
+        round_idx=2,
+        phase="review_dispatch",
+        inferencer=child_inf,
         extra={"mfdual_dispatch": {"winner_idx": 1, "ranking": [1, 0, 2]}},
     )
 
@@ -177,8 +195,13 @@ def test_RA5_multiple_calls_append(tmp_path):
     child = _ws(tmp_path, "child")
     dual, child_inf = _make_dual_with_audit(parent, child)
 
-    for round_idx, phase in [(1, "propose"), (1, "review"), (1, "fix"),
-                             (2, "review"), (2, "fix")]:
+    for round_idx, phase in [
+        (1, "propose"),
+        (1, "review"),
+        (1, "fix"),
+        (2, "review"),
+        (2, "fix"),
+    ]:
         dual._record_round_audit(round_idx, phase, child_inf)
 
     log_path = os.path.join(parent.outputs_dir, "round_log.jsonl")
@@ -195,6 +218,7 @@ def test_RA5_multiple_calls_append(tmp_path):
 # -------------------------------------------------------------------------
 # Navigation symlinks (or pointer file fallback)
 # -------------------------------------------------------------------------
+
 
 @pytest.mark.preflight
 def test_RA6_navigation_symlink_or_pointer_created(tmp_path):
@@ -224,6 +248,7 @@ def test_RA6_navigation_symlink_or_pointer_created(tmp_path):
 # Toggle: disabled → no log, no nav
 # -------------------------------------------------------------------------
 
+
 @pytest.mark.preflight
 def test_RA7_disabled_audit_writes_nothing(tmp_path):
     """RA7: With `enable_round_audit=False`, nothing is written."""
@@ -247,6 +272,7 @@ def test_RA7_disabled_audit_writes_nothing(tmp_path):
 # Fail-safe: audit failures do NOT crash the run
 # -------------------------------------------------------------------------
 
+
 @pytest.mark.preflight
 def test_RA8_failsafe_audit_swallows_exceptions(tmp_path, monkeypatch):
     """RA8: When the audit internals raise (e.g., disk full), the call returns
@@ -259,6 +285,7 @@ def test_RA8_failsafe_audit_swallows_exceptions(tmp_path, monkeypatch):
     # Force a write failure by replacing `open` at the target module level
     # with one that raises OSError for the round_log.jsonl path.
     import builtins
+
     real_open = builtins.open
 
     def _hostile_open(path, *a, **kw):
@@ -275,6 +302,7 @@ def test_RA8_failsafe_audit_swallows_exceptions(tmp_path, monkeypatch):
 # -------------------------------------------------------------------------
 # No-workspace / no-child-workspace safety
 # -------------------------------------------------------------------------
+
 
 @pytest.mark.preflight
 def test_RA9_no_parent_workspace_is_noop(tmp_path):

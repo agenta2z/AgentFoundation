@@ -14,6 +14,7 @@ Covers the consolidation refactor:
 * Dual continues to propagate via the inherited base mechanism (no
   regression).
 """
+
 from __future__ import annotations
 
 import os
@@ -44,6 +45,7 @@ def _make_workspace(root: str):
     from agent_foundation.common.inferencers.inferencer_workspace import (
         InferencerWorkspace,
     )
+
     ws = InferencerWorkspace(root=root)
     ws.ensure_dirs()
     return ws
@@ -78,6 +80,7 @@ def test_lwi_workspace_root_field_rename_kwarg_works(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
+
     lwi = LinearWorkflowInferencer(workspace=InferencerWorkspace(root=tmp_ws_root))
     assert lwi._workspace.root == tmp_ws_root
     assert lwi._workspace is not None
@@ -94,6 +97,7 @@ def test_lwi_workspace_path_kwarg_raises_typeerror(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
+
     with pytest.raises(TypeError):
         LinearWorkflowInferencer(workspace_path=tmp_ws_root)
 
@@ -112,6 +116,7 @@ def test_pti_constructs_without_workspace_root_when_analysis_disabled():
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
         PlanThenImplementInferencer,
     )
+
     pti = PlanThenImplementInferencer(
         planner_inferencer=_make_minimal_inferencer(),
         executor_inferencer=_make_minimal_inferencer(),
@@ -138,6 +143,7 @@ def test_pti_ainfer_fallback_uses_propagated_workspace(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
         PlanThenImplementInferencer,
     )
+
     pti = PlanThenImplementInferencer(
         planner_inferencer=_make_minimal_inferencer(),
         executor_inferencer=_make_minimal_inferencer(),
@@ -166,6 +172,7 @@ def test_pti_ainfer_fallback_resume_workspace_wins(tmp_ws_root, tmp_path):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
         PlanThenImplementInferencer,
     )
+
     resume_path = str(tmp_path / "resume_ws")
     config_path = str(tmp_path / "config_ws")
     propagated_path = str(tmp_path / "propagated_ws")
@@ -195,7 +202,9 @@ def test_pti_ainfer_fallback_resume_workspace_wins(tmp_ws_root, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_aggregator_workspace(tmp_ws_root):
+def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_aggregator_workspace(
+    tmp_ws_root,
+):
     """BTA should NOT create a duplicate attr-slot workspace for
     ``aggregator_inferencer`` at construction time; the runtime graph later
     assigns the canonical ``children/aggregator/`` workspace when the
@@ -250,7 +259,9 @@ def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_
     assert aggregator._workspace is not None, (
         "Runtime graph wiring should assign aggregator._workspace."
     )
-    assert aggregator._workspace.root.endswith(os.path.join("children", "aggregator")), (
+    assert aggregator._workspace.root.endswith(
+        os.path.join("children", "aggregator")
+    ), (
         f"Expected runtime aggregator workspace to end with children/aggregator, got: {aggregator._workspace.root!r}"
     )
     assert "aggregator_inferencer" not in aggregator._workspace.root, (
@@ -277,6 +288,7 @@ def test_pti_propagates_to_children_at_construction(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
         PlanThenImplementInferencer,
     )
+
     planner = _make_minimal_inferencer()
     executor = _make_minimal_inferencer()
     pti = PlanThenImplementInferencer(
@@ -314,16 +326,23 @@ def test_multiflow_propagation_delegates_flow_configs_to_lwi(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
         MultiFlowInferencer,
     )
+
     flow0_init = _make_minimal_inferencer()
     flow0_follow = _make_minimal_inferencer()
     flow1_init = _make_minimal_inferencer()
     flow1_follow = _make_minimal_inferencer()
     mfi = MultiFlowInferencer(
         flow_configs=[
-            {"input": "q0", "initial_inferencer": flow0_init,
-             "followup_inferencer": flow0_follow},
-            {"input": "q1", "initial_inferencer": flow1_init,
-             "followup_inferencer": flow1_follow},
+            {
+                "input": "q0",
+                "initial_inferencer": flow0_init,
+                "followup_inferencer": flow0_follow,
+            },
+            {
+                "input": "q1",
+                "initial_inferencer": flow1_init,
+                "followup_inferencer": flow1_follow,
+            },
         ],
         disable_aggregator=True,  # this test exercises workspace propagation, not aggregation
     )
@@ -360,6 +379,7 @@ def test_multiflow_propagation_does_not_touch_flow_configs(tmp_ws_root, tmp_path
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
         MultiFlowInferencer,
     )
+
     pre_assigned_path = str(tmp_path / "pre_assigned")
     pre_assigned_ws = _make_workspace(pre_assigned_path)
 
@@ -368,8 +388,11 @@ def test_multiflow_propagation_does_not_touch_flow_configs(tmp_ws_root, tmp_path
     flow0_follow = _make_minimal_inferencer()  # not pre-assigned
     mfi = MultiFlowInferencer(
         flow_configs=[
-            {"input": "q0", "initial_inferencer": flow0_init,
-             "followup_inferencer": flow0_follow},
+            {
+                "input": "q0",
+                "initial_inferencer": flow0_init,
+                "followup_inferencer": flow0_follow,
+            },
         ],
         disable_aggregator=True,  # this test exercises workspace propagation, not aggregation
     )
@@ -394,6 +417,7 @@ def test_dual_propagates_to_base_review_fixer(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
         DualInferencer,
     )
+
     base = _make_minimal_inferencer()
     review = _make_minimal_inferencer()
     fixer = _make_minimal_inferencer()
@@ -406,9 +430,9 @@ def test_dual_propagates_to_base_review_fixer(tmp_ws_root):
     assert dual._workspace is not None
     # Dual now uses semantic names: base→propose, review/fixer get per-round at runtime
     assert base._workspace is not None, "base_inferencer not propagated"
-    assert base._workspace.root.replace("\\", "/").endswith(
-        "/children/propose"
-    ), f"base_inferencer got unexpected root: {base._workspace.root}"
+    assert base._workspace.root.replace("\\", "/").endswith("/children/propose"), (
+        f"base_inferencer got unexpected root: {base._workspace.root}"
+    )
     # review and fixer are in _workspace_propagation_skip — they get
     # per-round workspaces at runtime, not at construction time
     assert review._workspace is None, (
@@ -438,6 +462,7 @@ def test_full_topology_propagation_through_dual_pti(tmp_ws_root):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
         PlanThenImplementInferencer,
     )
+
     planner = _make_minimal_inferencer()
     executor = _make_minimal_inferencer()
     pti = PlanThenImplementInferencer(
@@ -508,21 +533,22 @@ def test_lwi_hierarchical_propagation_assigns_initial_and_round01(tmp_ws_root):
         "ANOMALY 7 REGRESSION: initial_inferencer has no workspace — "
         "_propagate_workspace_to_children override not firing"
     )
-    assert initial._workspace.root.replace("\\", "/").endswith(
-        "/children/initial"
-    ), f"Expected children/initial, got: {initial._workspace.root}"
+    assert initial._workspace.root.replace("\\", "/").endswith("/children/initial"), (
+        f"Expected children/initial, got: {initial._workspace.root}"
+    )
 
     # followup_inferencer gets children/round01/
     assert followup._workspace is not None, (
         "ANOMALY 7 REGRESSION: followup_inferencer has no workspace — "
         "this is the EXACT bug that caused hollow output.md"
     )
-    assert followup._workspace.root.replace("\\", "/").endswith(
-        "/children/round01"
-    ), f"Expected children/round01, got: {followup._workspace.root}"
+    assert followup._workspace.root.replace("\\", "/").endswith("/children/round01"), (
+        f"Expected children/round01, got: {followup._workspace.root}"
+    )
 
     # Directories actually exist on disk
     import os
+
     assert os.path.isdir(initial._workspace.root), (
         f"initial/ directory not created: {initial._workspace.root}"
     )
@@ -573,10 +599,11 @@ def test_lwi_no_orphan_default_followup_dir(tmp_ws_root):
     ``_workspace_propagation_skip`` contains both attr names, so the base
     walker skips them.  Only the LWI override creates semantic names.
     """
+    import os
+
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
-    import os
 
     initial = _make_minimal_inferencer()
     followup = _make_minimal_inferencer()
@@ -619,10 +646,11 @@ def test_lwi_raises_when_initial_workspace_blocked(tmp_ws_root):
     as review_inferencer, got Dual-level workspace, and flow_1 silently
     lost its initial/ directory.
     """
+    import os
+
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
-    import os
 
     initial = _make_minimal_inferencer()
     followup = _make_minimal_inferencer()
@@ -640,6 +668,7 @@ def test_lwi_raises_when_initial_workspace_blocked(tmp_ws_root):
     # LWI propagation should detect the workspace is OUTSIDE the LWI tree
     # and log a warning (not raise — the workspace exists, just wrong parent)
     import logging
+
     with pytest.raises(Exception) if False else _no_raise():
         lwi = LinearWorkflowInferencer(
             dynamic_mode=True,
@@ -657,8 +686,10 @@ def test_lwi_raises_when_initial_workspace_blocked(tmp_ws_root):
 
 class _no_raise:
     """Context manager that doesn't raise — used as a no-op alternative to pytest.raises."""
+
     def __enter__(self):
         return self
+
     def __exit__(self, *args):
         return False
 
@@ -680,17 +711,23 @@ def test_lwi_raises_runtime_error_when_initial_has_no_workspace(tmp_ws_root):
 
     # Monkey-patch _workspace_propagation_skip to include initial (simulates
     # a broken config where initial is skipped but no one else assigns it)
-    broken_skip = frozenset({
-        "default_initial_inferencer",
-        "default_followup_inferencer",
-    })
+    broken_skip = frozenset(
+        {
+            "default_initial_inferencer",
+            "default_followup_inferencer",
+        }
+    )
 
     class _BrokenLWI(LinearWorkflowInferencer):
         _workspace_propagation_skip = broken_skip
+
         def _propagate_workspace_to_children(self, parent_workspace):
             # Skip the LWI override entirely — go straight to base walker
             # which will skip both children (they're in the skip set)
-            from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+            from agent_foundation.common.inferencers.inferencer_base import (
+                InferencerBase,
+            )
+
             InferencerBase._propagate_workspace_to_children(self, parent_workspace)
             # Now run the validation from LWI
             for inf, child_name in (
@@ -733,10 +770,11 @@ def test_mfdual_reviewer_match_second_does_not_steal_flow_workspace(tmp_ws_root)
     dynamic dispatch is enabled, so the instance stays workspace-free until
     flow_1's LWI propagation assigns flow_1/children/initial/.
     """
+    import os
+
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
     )
-    import os
 
     flow0_init = _make_minimal_inferencer()
     flow0_follow = _make_minimal_inferencer()
@@ -746,10 +784,16 @@ def test_mfdual_reviewer_match_second_does_not_steal_flow_workspace(tmp_ws_root)
 
     mfdual = MultiFlowDualInferencer(
         flow_configs=[
-            {"input": "query_0", "initial_inferencer": flow0_init,
-             "followup_inferencer": flow0_follow},
-            {"input": "query_1", "initial_inferencer": flow1_init,
-             "followup_inferencer": flow1_follow},
+            {
+                "input": "query_0",
+                "initial_inferencer": flow0_init,
+                "followup_inferencer": flow0_follow,
+            },
+            {
+                "input": "query_1",
+                "initial_inferencer": flow1_init,
+                "followup_inferencer": flow1_follow,
+            },
         ],
         multi_flow_aggregator_inferencer=aggregator,
         reviewer_strategy="runner_up",
@@ -795,10 +839,11 @@ def test_lwi_surfaces_last_child_output(tmp_ws_root):
     artifact via resolve_canonical_output_path — not just the <Response>
     summary.
     """
+    import os
+
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
         LinearWorkflowInferencer,
     )
-    import os
 
     initial = _make_minimal_inferencer()
     followup = _make_minimal_inferencer()
@@ -840,8 +885,9 @@ def test_lwi_surfaces_last_child_output(tmp_ws_root):
     from agent_foundation.common.inferencers.inferencer_workspace import (
         resolve_canonical_output_path,
     )
-    resolved = resolve_canonical_output_path(
-        lwi._workspace, filename="output.md"
+
+    resolved = resolve_canonical_output_path(lwi._workspace, filename="output.md")
+    assert resolved is not None, (
+        "resolve_canonical_output_path should find the surfaced output"
     )
-    assert resolved is not None, "resolve_canonical_output_path should find the surfaced output"
     assert resolved == own_output or resolved.endswith("output.md")

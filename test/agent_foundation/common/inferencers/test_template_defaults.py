@@ -13,7 +13,6 @@ Covers:
 from __future__ import annotations
 
 import pytest
-
 from agent_foundation.common.inferencers.template_constants import (
     FIELD_TEMPLATE_EXTRA_FEED,
     FIELD_TEMPLATE_KEY,
@@ -27,6 +26,8 @@ from agent_foundation.common.inferencers.template_constants import (
     VARIANT_AGGREGATION,
 )
 from agent_foundation.common.inferencers.template_defaults import (
+    _aggregation_applicable,
+    _resolve_attrib_default,
     AGGREGATION_DEFAULTS,
     BREAKDOWN_TEMPLATE_DEFAULTS,
     ConditionalTemplateDefaults,
@@ -35,8 +36,6 @@ from agent_foundation.common.inferencers.template_defaults import (
     InferencerTemplateDefaults,
     InferencerTemplateVersionDefaults,
     REVIEW_TEMPLATE_DEFAULTS,
-    _aggregation_applicable,
-    _resolve_attrib_default,
 )
 
 
@@ -226,8 +225,7 @@ class TestResolveAttribDefault:
         # the auto-constructed MultiFlow so wrapper templates can consume the
         # {{ upstream_artifacts }} slot). Differs from MultiFlow's default False.
         assert (
-            _resolve_attrib_default(target, "inject_upstream_artifacts", False)
-            is True
+            _resolve_attrib_default(target, "inject_upstream_artifacts", False) is True
         )
         del MultiFlowDualInferencer  # silence unused-import linter
 
@@ -325,10 +323,7 @@ class TestAggregationApplicable:
 
 class TestModuleConstants:
     def test_breakdown_constant_shape(self):
-        assert (
-            BREAKDOWN_TEMPLATE_DEFAULTS.template_root_space
-            == SPACE_TASK_BREAKDOWN
-        )
+        assert BREAKDOWN_TEMPLATE_DEFAULTS.template_root_space == SPACE_TASK_BREAKDOWN
         assert BREAKDOWN_TEMPLATE_DEFAULTS.template_key is None
         assert BREAKDOWN_TEMPLATE_DEFAULTS.template_variables == {}
 
@@ -382,6 +377,7 @@ class TestReviewFollowupDefaults:
     def test_followup_default_template_key_is_followup(self):
         """FOLLOWUP_TEMPLATE_DEFAULTS has template_key='followup'."""
         from agent_foundation.common.inferencers.template_constants import KEY_FOLLOWUP
+
         assert FOLLOWUP_TEMPLATE_DEFAULTS.template_key == KEY_FOLLOWUP
 
 

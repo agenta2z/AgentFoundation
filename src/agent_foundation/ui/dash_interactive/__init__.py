@@ -9,4 +9,4 @@ This package provides modular Dash components for:
 
 from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
 
-__all__ = ['DashInteractiveApp']
+__all__ = ["DashInteractiveApp"]

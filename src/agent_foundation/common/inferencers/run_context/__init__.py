@@ -28,18 +28,18 @@ from .bridge import (
 from .context import RunContext
 from .handles import LiveHandles, LiveHandleStore
 from .state import (
-    STATE_REGISTRY,
     BTAState,
+    decode_state,
     DualState,
+    encode_state,
     InferencerStateBase,
     LinearWorkflowState,
     MFDualState,
     MultiFlowAttemptState,
     MultiFlowState,
-    RoleState,
-    decode_state,
-    encode_state,
     register_state,
+    RoleState,
+    STATE_REGISTRY,
 )
 from .store import CollisionError, NodeRunState, RunStateStore
 

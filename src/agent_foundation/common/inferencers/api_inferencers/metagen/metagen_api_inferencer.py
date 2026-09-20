@@ -1,9 +1,6 @@
-from attr import attrs
-
 from agent_foundation.apis.metagen import load_model_to_key_map, MetaGenModels
-from agent_foundation.common.inferencers.api_inferencer_base import (
-    ApiInferencerBase,
-)
+from agent_foundation.common.inferencers.api_inferencer_base import ApiInferencerBase
+from attr import attrs
 
 
 @attrs

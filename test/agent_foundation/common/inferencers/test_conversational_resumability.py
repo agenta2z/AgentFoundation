@@ -22,7 +22,6 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
     AgenticResult,
 )
@@ -106,7 +105,9 @@ class TestCompletionResultTypeRoundTrip(unittest.IsolatedAsyncioTestCase):
         )
         # If somehow run_agentic_loop is invoked, fail loudly — Level 1 should short-circuit
         adapter.conversational_inferencer.run_agentic_loop = AsyncMock(
-            side_effect=AssertionError("run_agentic_loop should NOT be called for completed status"),
+            side_effect=AssertionError(
+                "run_agentic_loop should NOT be called for completed status"
+            ),
         )
         return await adapter._ainfer("task")
 
@@ -152,7 +153,9 @@ class TestCompletionResultTypeRoundTrip(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_dict(self):
         """Real dict completion_result preserves type."""
-        result = await self._resume_with_stored_value(self._tmp_path, {"k": "v", "n": 42})
+        result = await self._resume_with_stored_value(
+            self._tmp_path, {"k": "v", "n": 42}
+        )
         self.assertEqual(result, {"k": "v", "n": 42})
         self.assertIsInstance(result, dict)
 
@@ -279,13 +282,16 @@ class TestAtomicWrite(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=str(self._tmp_path),
             session_id=session_id,
         )
-        adapter._write_checkpoint_atomic(session_dir, {
-            "schema_version": 1,
-            "session_id": session_id,
-            "status": "in_progress",
-            "turn_number": 1,
-            "messages": [],
-        })
+        adapter._write_checkpoint_atomic(
+            session_dir,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "status": "in_progress",
+                "turn_number": 1,
+                "messages": [],
+            },
+        )
         # No leftover tmp files
         files = os.listdir(session_dir)
         tmp_files = [f for f in files if f.startswith(".checkpoint_")]
@@ -317,17 +323,18 @@ def test_serialize_pause_state_sanitizes_non_json_prior_context():
     """§2.8/J7: a stray non-JSON value in the loosely-typed prior_context (e.g. a
     callable) is DROPPED on serialize (with a warning), so the pause blob always
     round-trips through Tier-1 to_json; JSON-safe values survive untouched."""
+    import json
+
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
         ConversationalInferencer,
     )
-    import json
 
     ci = ConversationalInferencer.__new__(ConversationalInferencer)
     ci.__dict__["prior_context"] = {
-        "model_name": "claude",        # JSON-safe -> kept
-        "count": 7,                    # JSON-safe -> kept
-        "callback": lambda x: x,       # NOT JSON -> dropped
-        "handle": object(),            # NOT JSON -> dropped
+        "model_name": "claude",  # JSON-safe -> kept
+        "count": 7,  # JSON-safe -> kept
+        "callback": lambda x: x,  # NOT JSON -> dropped
+        "handle": object(),  # NOT JSON -> dropped
     }
     safe = ci._json_safe_prior_context()
     assert safe == {"model_name": "claude", "count": 7}

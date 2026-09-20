@@ -34,14 +34,25 @@ class MultipleChoiceHandler(ConversationToolHandler):
         tool: ConversationTool,
         ctx: HandlerContext,
     ) -> InputModeConfig:
+        # Mirrors inline `_choice_option_from` — preserves description AND
+        # serialized composite `input` spec.
         options = [
-            ChoiceOption(label=c.label, value=c.value, description=c.description)
+            ChoiceOption(
+                label=c.label,
+                value=c.value,
+                description=getattr(c, "description", "") or "",
+                input=c.input.to_dict()
+                if getattr(c, "has_input", False) and c.input is not None
+                else None,
+            )
             for c in tool.choices
         ]
         return multiple_choices(
             options,
             allow_custom=tool.allow_custom,
             prompt=tool.prompt,
+            show_select_all=tool.show_select_all,
+            select_all_text=tool.select_all_text,
         )
 
     async def handle_response(
@@ -51,11 +62,7 @@ class MultipleChoiceHandler(ConversationToolHandler):
         ctx: HandlerContext,
     ) -> HandlerResult:
         if isinstance(response, dict):
-            text = (
-                response.get("content")
-                or response.get("custom_text")
-                or ""
-            )
+            text = response.get("content") or response.get("custom_text") or ""
         else:
             text = str(response)
 

@@ -248,9 +248,7 @@ class IngestionDebugSession:
         logger.debug("Saved response: %s", path.name)
         return path
 
-    def save_structured(
-        self, doc_id: str, chunk_idx: int, data: dict
-    ) -> Path:
+    def save_structured(self, doc_id: str, chunk_idx: int, data: dict) -> Path:
         """Save parsed structured JSON from LLM response.
 
         Args:

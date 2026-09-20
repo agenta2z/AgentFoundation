@@ -11,6 +11,7 @@ This demonstrates:
 
 Run this script and navigate to http://localhost:8050 to see the UI.
 """
+
 import sys
 from functools import partial
 from pathlib import Path
@@ -27,18 +28,20 @@ for path in [rich_python_utils_src, agent_foundation_src]:
     if path.exists() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
+    DashInteractiveAppWithLogs,
+)
 from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
-from rich_python_utils.io_utils.json_io import write_json, iter_json_objs
-from rich_python_utils.datetime_utils.common import timestamp
 
 # Import mock agent components from separate module
 from mock_agent import (
-    MockInteractive,
+    ComplexAgent,
     ComplexAgentReasoner,
+    MockInteractive,
     TrackingActor,
-    ComplexAgent
 )
+from rich_python_utils.datetime_utils.common import timestamp
+from rich_python_utils.io_utils.json_io import iter_json_objs, write_json
 
 # No longer need log_graph_construction - everything is in LogCollector now
 
@@ -47,7 +50,8 @@ from mock_agent import (
 _recent_log_collectors = {}
 _latest_log_collector = None  # Store the most recent log_collector for easy access
 _latest_log_file_path = None  # Store the path to the latest log file
-_runtime_dir = Path(__file__).parent / '_runtime'  # Directory for storing log files
+_runtime_dir = Path(__file__).parent / "_runtime"  # Directory for storing log files
+
 
 def execute_complex_agent_with_logs(user_input: str) -> tuple[str, str]:
     """
@@ -64,16 +68,12 @@ def execute_complex_agent_with_logs(user_input: str) -> tuple[str, str]:
         Tuple of (log_folder_path, agent_id)
     """
     # Create a timestamped log folder
-    log_name = f'agent_{timestamp()}'
-    log_path = _runtime_dir / log_name / 'logs'
+    log_name = f"agent_{timestamp()}"
+    log_path = _runtime_dir / log_name / "logs"
 
     # Create write_json logger with 'space' parameter
     # This will create separate JSON files for each debuggable ID
-    json_logger = partial(
-        write_json,
-        file_path=str(log_path),
-        append=True
-    )
+    json_logger = partial(write_json, file_path=str(log_path), append=True)
 
     # Create mock components
     reasoner = ComplexAgentReasoner()
@@ -90,7 +90,7 @@ def execute_complex_agent_with_logs(user_input: str) -> tuple[str, str]:
         always_add_logging_based_logger=False,  # Only use JSON logger
         debug_mode=True,  # Enable debug mode for more logs
         branching_agent_start_as_new=True,  # Each branch starts fresh
-        only_keep_parent_debuggable_ids=True  # Only store parent IDs, not objects
+        only_keep_parent_debuggable_ids=True,  # Only store parent IDs, not objects
     )
 
     # Get agent ID before execution
@@ -121,6 +121,7 @@ def smart_agent_handler(message: str) -> str:
         Response message
     """
     import datetime
+
     global _latest_log_collector, _latest_log_file_path
 
     # Execute real Agent and get log folder path + agent ID
@@ -135,7 +136,7 @@ def smart_agent_handler(message: str) -> str:
     _latest_log_file_path = log_folder_path
 
     # Also store with a timestamp key for history
-    timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     session_key = f"agent_{timestamp_str}"
     _recent_log_collectors[session_key] = log_collector
 
@@ -152,16 +153,16 @@ def smart_agent_handler(message: str) -> str:
     stats = log_collector.get_log_graph_statistics()
 
     # Count JSON files in the folder
-    json_file_count = len(list(Path(log_folder_path).glob('*.json')))
+    json_file_count = len(list(Path(log_folder_path).glob("*.json")))
 
-    response = f"""Processed your message: "{message[:100]}{'...' if len(message) > 100 else ''}"
+    response = f"""Processed your message: "{message[:100]}{"..." if len(message) > 100 else ""}"
 
 **Real Agent Execution Summary:**
-- Agent: {stats['agent_name']} (ID: {agent_id})
-- Execution graph nodes: {stats['node_count']}
-- Execution graph edges: {stats['edge_count']}
-- Max graph depth: {stats['max_depth']}
-- Total log entries: {num_logs} ({stats['total_log_count']} in graph nodes)
+- Agent: {stats["agent_name"]} (ID: {agent_id})
+- Execution graph nodes: {stats["node_count"]}
+- Execution graph edges: {stats["edge_count"]}
+- Max graph depth: {stats["max_depth"]}
+- Total log entries: {num_logs} ({stats["total_log_count"]} in graph nodes)
 - JSON files created: {json_file_count} (one per debuggable)
 - Session: {session_key}
 - Log folder: {Path(log_folder_path).name}
@@ -204,23 +205,24 @@ def main():
     """Run the log debugging demo with real Agent execution."""
     # Create the app
     app = DashInteractiveAppWithLogs(
-        title="Real Agent Log Debugging Demo",
-        port=8050,
-        debug=True
+        title="Real Agent Log Debugging Demo", port=8050, debug=True
     )
 
     # Set custom message handler
     app.set_message_handler(smart_agent_handler)
 
-    # Add custom callback to auto-load logs when switching to Log Debugging tab
-    from dash.dependencies import Input, Output, State
     import dash
 
+    # Add custom callback to auto-load logs when switching to Log Debugging tab
+    from dash.dependencies import Input, Output, State
+
     @app.app.callback(
-        Output('log-data-store', 'data', allow_duplicate=True),  # Allow duplicate output
-        [Input('main-panel-log-btn', 'n_clicks')],
-        [State('log-data-store', 'data')],
-        prevent_initial_call=True
+        Output(
+            "log-data-store", "data", allow_duplicate=True
+        ),  # Allow duplicate output
+        [Input("main-panel-log-btn", "n_clicks")],
+        [State("log-data-store", "data")],
+        prevent_initial_call=True,
     )
     def auto_load_agent_logs_on_tab_switch(log_btn_clicks, current_data):
         """Automatically load Agent logs when switching to Log Debugging tab."""
@@ -229,16 +231,20 @@ def main():
         if log_btn_clicks and _latest_log_collector:
             # Get graph structure from log collector
             graph_structure = _latest_log_collector.get_graph_structure()
-            
+
             # Return graph structure built from parent_ids in logs
             return {
-                'graph_data': {  # Use 'graph_data' key instead of 'hierarchy'
-                    'nodes': graph_structure['nodes'],
-                    'edges': graph_structure['edges'],
-                    'agent': graph_structure['agent'],  # Required by UI
-                    'log_file': Path(_latest_log_file_path).name if _latest_log_file_path else 'unknown'
+                "graph_data": {  # Use 'graph_data' key instead of 'hierarchy'
+                    "nodes": graph_structure["nodes"],
+                    "edges": graph_structure["edges"],
+                    "agent": graph_structure["agent"],  # Required by UI
+                    "log_file": Path(_latest_log_file_path).name
+                    if _latest_log_file_path
+                    else "unknown",
                 },
-                'log_groups': {k: v for k, v in _latest_log_collector.log_groups.items()}
+                "log_groups": {
+                    k: v for k, v in _latest_log_collector.log_groups.items()
+                },
             }
 
         # Return existing data if no new logs
@@ -294,5 +300,5 @@ NEW ARCHITECTURE:
     app.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -4,10 +4,10 @@ Focus: the hardened containment check that replaces string ``startswith`` with
 ``Path.resolve().relative_to(...)`` — exercised directly against the helper,
 independent of any web framework.
 """
+
 from __future__ import annotations
 
 import pytest
-
 from agent_foundation.common.workspace.path_completion import (
     complete_path,
     PathContainmentError,

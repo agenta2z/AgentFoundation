@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Formats ToolDefinition objects into docstring-like API markdown.
@@ -17,13 +16,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from attr import attrs, attrib
-
 from agent_foundation.resources.tools.models import (
     ParameterDef,
     SubcommandDef,
     ToolDefinition,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 

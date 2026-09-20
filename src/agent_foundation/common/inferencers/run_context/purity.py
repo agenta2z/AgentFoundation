@@ -39,7 +39,9 @@ def snapshot_vars(obj: Any) -> dict[str, Any]:
     return out
 
 
-def diff_vars(before: dict[str, Any], after: dict[str, Any], allow: frozenset[str]) -> PurityDelta:
+def diff_vars(
+    before: dict[str, Any], after: dict[str, Any], allow: frozenset[str]
+) -> PurityDelta:
     added: dict[str, Any] = {}
     changed: dict[str, tuple[Any, Any]] = {}
     for key, val in after.items():
@@ -53,7 +55,9 @@ def diff_vars(before: dict[str, Any], after: dict[str, Any], allow: frozenset[st
 
 
 @contextlib.contextmanager
-def purity_snapshot(obj: Any, *, allow: Iterable[str] = ()) -> Iterator[list[PurityDelta]]:
+def purity_snapshot(
+    obj: Any, *, allow: Iterable[str] = ()
+) -> Iterator[list[PurityDelta]]:
     """Context manager asserting ``obj``'s instance ``__dict__`` did not change.
 
     Yields a one-element list that, on exit, holds the :class:`PurityDelta`.

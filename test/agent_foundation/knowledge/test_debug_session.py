@@ -6,11 +6,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.debug_session import (
-    IngestionDebugSession,
     get_ingestion_runtime_dir,
     get_knowledge_base_dir,
+    IngestionDebugSession,
     list_all_ingestion_sessions,
 )
 
@@ -78,7 +77,9 @@ class TestIngestionDebugSession:
     """Tests for IngestionDebugSession."""
 
     def test_creates_subdirectories(self, tmp_path):
-        session = IngestionDebugSession(runtime_dir=tmp_path / "session", enable_file_logging=False)
+        session = IngestionDebugSession(
+            runtime_dir=tmp_path / "session", enable_file_logging=False
+        )
         assert (tmp_path / "session" / "chunks").is_dir()
         assert (tmp_path / "session" / "prompts").is_dir()
         assert (tmp_path / "session" / "responses").is_dir()
@@ -172,7 +173,9 @@ class TestIngestionDebugSession:
         assert " " not in path.name
 
     def test_context_manager(self, tmp_path):
-        with IngestionDebugSession(runtime_dir=tmp_path, enable_file_logging=False) as session:
+        with IngestionDebugSession(
+            runtime_dir=tmp_path, enable_file_logging=False
+        ) as session:
             session.save_chunk("doc1", 0, "test")
             assert len(session.get_files_saved()) == 1
 

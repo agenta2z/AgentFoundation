@@ -27,7 +27,7 @@ A phased workflow for systematically optimizing ML model architectures: from cod
 
 Outcome: picking "Auto discover" sets `workflow_modeling_artifacts_mode` = "auto_discover" (and leaves `workflow_modeling_artifacts_path` unset); picking "Specify paths" sets `workflow_modeling_artifacts_mode` = "manual_paths" and binds the chosen path(s) to `workflow_modeling_artifacts_path`.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - clarification
 - single_choice
 
@@ -40,7 +40,7 @@ Outcome: picking "Auto discover" sets `workflow_modeling_artifacts_mode` = "auto
 - Efficiency Optimization — reduce training/inference cost — memory footprint, latency, throughput, and computational efficiency
 - Holistic Improvement — systematically evaluate all dimensions — architecture, efficiency, quality, and robustness — for balanced gains
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - single_choice
 
 ## Phase 1 -- Codebase & Data Investigation
@@ -53,15 +53,15 @@ Main codebase is at `{{ workflow_target_path }}`. Codebase is related to modelin
 {% if workflow_modeling_artifacts_mode == "manual_paths" %}The user specified the modeling artifacts at: `{{ workflow_modeling_artifacts_path }}` — prioritize these locations in the investigation into modeling artifacts.{% else %}Auto-discover the modeling-related artifacts under above codebase.{% endif %}
 
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - understand-codebase
 
-### Phase 1b -- Codebase Documentation Review
+### Phase 1b -- Codebase & Data Documentation Review
 [__depends on__ Phase 1]
 
 [__requires user input__] Present the codebase & modeling artifacts investigation outcome to the user for review. Use a `confirmation` conversation tool with the `view` parameter pointing to the generated documentation. Summarize key architectural findings and invite the user to review the full documentation via the "View Documentation" button. Only proceed to the next phase after the user confirms they are satisfied.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - confirmation
 
 ## Phase 2 -- Research & Proposal
@@ -71,28 +71,24 @@ Main codebase is at `{{ workflow_target_path }}`. Codebase is related to modelin
 
 The research goal should be derived from the chosen strategy and the findings from Phase 1. The `--docs-path` and `--workflow-target-path` arguments are auto-populated from prior phase outputs if not explicitly provided.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - research-propose <goal> --docs <reference_documentation>
 
 ### Phase 2b -- Proposal Review & Selection
 [__depends on__ Phase 2]
 
-[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `proposal_selection` conversation tool (or a `confirmation` tool if `proposal_selection` is unavailable). Pass the tool argument `proposals_path = {{ workspace_path__research_propose }}/outputs/proposals.json` — this is the `proposals.json` that research-propose writes (the BTA INVARIANT location), and `workspace_path__research_propose` is published into the workflow context by the bridge dispatcher when Phase 2 runs. The user reviews the proposals (ID, title, impact, complexity, dependencies) and selects which to advance to Phase 3. The output variable MUST be named `selected_proposal_ids` for this conversation tool — Phase 3 consumes it by that name.
+[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `proposal-selection` conversation tool with `experiment-hub` flag and `proposals-path = {{ research_propose__proposals_path }}`.
 
-**Tools**[__must__]:
-- proposal_selection
+Handoff contract: the widget's "Go To Experiment Hub" button **opens** the Experiment Hub (seeded with the proposals) but does **not** advance the workflow — this phase stays active while the user reviews inside the hub. The user reviews/selects and **confirms inside the hub**; that in-hub confirm both launches implementation and advances this phase (2b → 3). Do **not** narrate the hub opening or emit any follow-up tool after presenting this widget — the hub owns the next step.
 
-## Phase 3 -- Implementation, Experiment & Analysis
-[__depends on__ Phase 2b; __branch__]
+**Tools**[__required__]:
+- proposal-selection --experiment-hub --proposals-path {{ research_propose__proposals_path }}
 
-For each selected proposal from Phase 2b, plan and implement the proposed changes, run experiments to validate, and analyze results to identify bottlenecks and improvement opportunities. Invoke the `task` tool with:
-- `--use-proposal {{ workspace_path__research_propose }}/outputs/proposals.json` (the proposals produced in Phase 2)
-- `--proposal-ids {{ selected_proposal_ids }}` (the Phase 2b selection, comma-joined, e.g. `P1,P3`)
+## Phase 3 -- Implementation, Experiment & Analysis [__depends on__ Phase 2b; __branch__] : `experiment_hub_evolution`
 
-The `task` tool inlines the selected proposals into its plan, implements the changes, runs experiments to validate, and records results.
+The Experiment Hub (opened and confirmed in Phase 2b) now **owns** implementation, experimentation, and analysis for the selected proposals. It runs the implement → experiment → analyze cycle as a live dashboard, driven by the user; the conversation stays in sync but does **not** drive the work.
 
-**Tools**[__must__]:
-- task
+Do **not** narrate this phase and do **not** emit any `task` (or other) tool call here — the hub is the sole owner of the implementation cycle. This phase completes only when the user clicks the hub's "Done — summarize & evolve" control, which the host maps to this phase's declared output `experiment_hub_evolution` (advancing 3 → 3b). Simply wait for that signal.
 
 ## Phase 3b -- Summary & Evolve
 [__depends on__ Phase 3; __goto__ Phase 2 __afterwards__ __if__ `continue`]

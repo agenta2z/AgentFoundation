@@ -1,0 +1,9 @@
+{
+  "launcher": "buck_run_auto",
+  "script_args": [
+    "--enable-flags", "${ENABLE_FLAGS}",
+    "--experiment-name", "${EXP_NAME}",
+    "--app-layer-version", "${APP_LAYER_VERSION}"
+  ],
+  "cwd": "${CODEBASE_ROOT}"
+}

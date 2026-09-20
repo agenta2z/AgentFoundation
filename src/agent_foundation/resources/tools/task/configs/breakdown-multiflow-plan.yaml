@@ -49,8 +49,13 @@
 # every key here is overridable by ``<env_prefix>__<KEY>`` in upper case, e.g.
 # ``TASK__NUM_FLOWS``, ``TASK__PLAN_MAX_BREAKDOWN``, ``TASK__ENABLE_DEEP_MODE``.
 # Values are coerced to each key's type (int/bool/str). Lists accept a single
-# var — ``TASK__FLOW_INFERENCERS=DevmateCLI,MetamateSDK`` (comma) or
-# ``["DevmateCLI","MetamateSDK"]`` (JSON). ``env_prefix`` defaults to the
+# var — ``TASK__FLOW_INFERENCERS=ClaudeCodeCLI,CodexCLI,DevmateCLI`` (comma) or
+# ``["ClaudeCodeCLI","CodexCLI","DevmateCLI"]`` (JSON) — names must match the
+# registered aliases in ``common/configs/registered_targets.py``. Prefer the
+# explicit CLI/SDK variants (``ClaudeCodeCLI``/``ClaudeCodeSDK``,
+# ``CodexCLI``/``CodexSDK``, ``DevmateCLI``/``DevmateSDK``,
+# ``MetamateCLI``/``MetamateSDK``); bare ``Devmate``/``Metamate`` still resolve
+# but are deprecated. ``env_prefix`` defaults to the
 # parent-of-``configs`` folder name if omitted. CLI ``--override`` still wins.
 _params:
   env_prefix: TASK
@@ -69,6 +74,17 @@ _params:
   # to the count: longer list is truncated, shorter is padded with its first
   # element (so e.g. num_flows=5 + a 1-item list runs 5 identical flows).
   num_flows: ${len:${_params.flow_inferencers}}
+  # K-of-N flow quorum for the MFDual workers: minimum flows that must succeed
+  # per worker to aggregate + proceed (others become filtered sentinels rather
+  # than sinking the worker). Default 0 = no quorum (historical: any one flow's
+  # failure aborts the worker). Override via ``TASK__MIN_SUCCESSFUL_FLOWS`` /
+  # ``RESEARCH_PROPOSE__MIN_SUCCESSFUL_FLOWS``. E.g. 2 (of 3) tolerates one flow
+  # (a flaky or no-local-access inferencer) failing without losing the whole run.
+  min_successful_flows: 1
+  # U4-B: BTA worker quorum — min workers that must succeed for the propose to
+  # proceed (on surviving workers); a below-threshold run fails LOUD instead of
+  # silently degrading to a synthetic-aggregation stub. 0 = disabled (historical).
+  min_successful_workers: 1
   plan_max_breakdown: 3
   flow_max_dynamic_steps: 3
   consensus_max_iterations: 3
@@ -77,7 +93,7 @@ _params:
   enable_deep_mode: true
   enable_elegant_mode: true
   guardrail_model_tier: default       # output guardrail judge tier (max/default/lite)
-  aggregator_max_retry: 3             # aggregator retry budget (guardrail RESTART consumes retries)
+  aggregator_max_retry: 3             # aggregator retry budget (guardrail RETRY/UPDATE consumes retries)
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
@@ -129,7 +145,6 @@ _template_root_space: plan
 workspace:
   _target_: InferencerWorkspace
   root: ${_params.workspace_root}
-  use_final_deliverables_folder: true
 templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
 
 base_inferencer:
@@ -137,6 +152,9 @@ base_inferencer:
   name: plan_bta
   breakdown_format: json_subtasks
   max_breakdown: ${_params.plan_max_breakdown}
+  # U4-B: contain failed workers as filtered sentinels (proceed on survivors)
+  # rather than letting one worker sink the whole propose; unmet quorum fails LOUD.
+  min_successful_workers: ${_params.min_successful_workers}
 
   breakdown_inferencer:
     _target_: ${_params.main_inferencer}
@@ -148,6 +166,10 @@ base_inferencer:
     reviewer_strategy: ${_params.reviewer_strategy}
     fixer_strategy: ${_params.fixer_strategy}
     visible_flows: all
+    # K-of-N flow quorum (see _params.min_successful_flows): tolerate up to
+    # (num_flows - min_successful_flows) flow failures per worker — failed flows
+    # become filtered sentinels instead of aborting the worker/run.
+    min_successful_flows: ${_params.min_successful_flows}
     max_retry: 3
 
     # Mode flags cascaded to flow leaves via template_extra_feed (outside _repeat_
@@ -162,12 +184,20 @@ base_inferencer:
         iteration_judgment: true
         initial_inferencer:
           _target_: ${_params.flow_inferencers}
+          # Per-attempt hang cap (async streaming leaf): bounds a hung dm attempt
+          # (0-output-but-alive) WITHOUT a top-level `_total_timeout_seconds` — that,
+          # being an InferencerBase attrib, cascades to the outer Dual/BTA/MFDual and
+          # would cap the whole propose run. A per-node key binds ONLY on this leaf.
+          # Value > the legit tool-use idle budget (5400s) so healthy long dm turns
+          # aren't cut, but bounds a true hang. Applies to all flows via `_repeat_`.
+          attempt_timeout_seconds: 7200
           max_retry: ${_params.aggregator_max_retry}
           output_guardrail_inferencer:
             _target_: ${_params.main_inferencer}
             model_tier: ${_params.guardrail_model_tier}
         followup_inferencer:
           _target_: ${_params.flow_inferencers}
+          attempt_timeout_seconds: 7200  # per-attempt hang cap (see initial_inferencer)
           max_retry: ${_params.aggregator_max_retry}
           output_guardrail_inferencer:
             _target_: ${_params.main_inferencer}
@@ -175,15 +205,18 @@ base_inferencer:
 
     multi_flow_aggregator_inferencer:
       _target_: ${_params.main_inferencer}
-      output_is_deliverable: true
       max_retry: ${_params.aggregator_max_retry}
+      # Emitter-side self-validation of the control fence this aggregator emits in its
+      # <Response> (winner_pick; consumed cross-node by MFDual's winner_parser).
+      # Observability only — consumption/routing stays in flow_parsers.parse_winner_tag.
+      expected_extraction:
+        - {label: winner_pick, source: response, kind: control}
       output_guardrail_inferencer:
         _target_: ${_params.main_inferencer}
         model_tier: ${_params.guardrail_model_tier}
 
   aggregator_inferencer:
     _target_: ${_params.main_inferencer}
-    output_is_deliverable: true
     max_retry: ${_params.aggregator_max_retry}
     output_guardrail_inferencer:
       _target_: ${_params.main_inferencer}
@@ -208,8 +241,3 @@ review_inferencer:
 # header comment. We declare it as a leaf for the lightweight-fixer reason.
 fixer_inferencer:
   _target_: ${_params.main_inferencer}
-  output_is_deliverable: true       # self-promotes output.md → fixer/outputs/final_deliverables/
-                                    # DualInferencer._finalize_response() will then
-                                    # surface it upward to Dual's own final_deliverables/
-                                    # via the has_deliverables workspace-state check
-                                    # (no is_deliverable_boundary flag needed on leaves).

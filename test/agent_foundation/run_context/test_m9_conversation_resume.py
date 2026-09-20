@@ -3,10 +3,7 @@ resume (D7/§2.8); Tier-3 multi-turn continuity (V7)."""
 
 import json
 
-from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    RunStateStore,
-)
+from agent_foundation.common.inferencers.run_context import RunContext, RunStateStore
 
 
 def test_conversational_pause_state_round_trips_through_tier1():
@@ -88,9 +85,9 @@ def test_rehydrate_from_resumed_store_wires_restore_into_the_run():
         ConversationalInferencer,
     )
     from agent_foundation.common.inferencers.run_context import (
-        RunContext,
         enter_run,
         exit_run,
+        RunContext,
     )
 
     ci = ConversationalInferencer.__new__(ConversationalInferencer)
@@ -117,9 +114,9 @@ def test_rehydrate_is_noop_without_a_conversation_blob():
         ConversationalInferencer,
     )
     from agent_foundation.common.inferencers.run_context import (
-        RunContext,
         enter_run,
         exit_run,
+        RunContext,
     )
 
     ci = ConversationalInferencer.__new__(ConversationalInferencer)

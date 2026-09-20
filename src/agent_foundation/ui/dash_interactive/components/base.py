@@ -1,9 +1,11 @@
 """
 Base component class for building modular Dash UI components.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-from dash import html, dcc
+
+from dash import dcc, html
 
 
 class BaseComponent(ABC):

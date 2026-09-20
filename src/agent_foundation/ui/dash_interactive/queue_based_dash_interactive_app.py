@@ -6,12 +6,15 @@ responses from a shared queue service instead of per-session queues. This is use
 when you have a separate service managing agents and you want the UI to poll for
 responses from a shared response queue.
 """
-from typing import Callable, Optional, Tuple
-import time
-import dash
-from dash.dependencies import Input, Output, State
 
-from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import DashInteractiveAppWithLogs
+import time
+from typing import Callable, Optional, Tuple
+
+import dash
+from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
+    DashInteractiveAppWithLogs,
+)
+from dash.dependencies import Input, Output, State
 
 
 class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
@@ -52,7 +55,7 @@ class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
         response_checker: Optional[Callable[[], Tuple]] = None,
         special_waiting_message: str = "__WAITING_FOR_RESPONSE__",
         custom_monitor_tabs: list = None,
-        custom_main_tabs: list = None
+        custom_main_tabs: list = None,
     ):
         """
         Initialize the queue-based Dash app.
@@ -68,7 +71,14 @@ class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
             custom_monitor_tabs: Optional list of custom monitor tab dicts with 'id', 'label', 'content'
             custom_main_tabs: Optional list of custom main tab dicts with 'id', 'label', 'content'
         """
-        super().__init__(title, port, debug, message_handler, custom_monitor_tabs=custom_monitor_tabs, custom_main_tabs=custom_main_tabs)
+        super().__init__(
+            title,
+            port,
+            debug,
+            message_handler,
+            custom_monitor_tabs=custom_monitor_tabs,
+            custom_main_tabs=custom_main_tabs,
+        )
         self.response_checker = response_checker
         self.special_waiting_message = special_waiting_message
         self._last_visibility_timestamp = 0
@@ -94,19 +104,20 @@ class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
 
     def _register_polling_callback(self):
         """Register custom polling callback that polls from shared queue."""
+
         @self.app.callback(
-            Output('messages-store', 'data', allow_duplicate=True),
+            Output("messages-store", "data", allow_duplicate=True),
+            [Input("response-poll-interval", "n_intervals")],
             [
-                Input('response-poll-interval', 'n_intervals')
+                State("current-session-store", "data"),
+                State("messages-store", "data"),
+                State("page-visibility-store", "data"),
             ],
-            [
-                State('current-session-store', 'data'),
-                State('messages-store', 'data'),
-                State('page-visibility-store', 'data')
-            ],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
-        def poll_and_refresh_messages(n_intervals, session_id, messages_store, visibility_data):
+        def poll_and_refresh_messages(
+            n_intervals, session_id, messages_store, visibility_data
+        ):
             """Poll for queue responses and update messages store.
 
             The UI will automatically re-render when messages_store changes due to the
@@ -131,29 +142,33 @@ class QueueBasedDashInteractiveApp(DashInteractiveAppWithLogs):
                 messages = list(messages_store_copy[response_session_id])
 
                 # Replace the last message if it's the "waiting" placeholder
-                if messages and messages[-1].get('role') == 'assistant':
-                    last_content = messages[-1].get('content', '')
+                if messages and messages[-1].get("role") == "assistant":
+                    last_content = messages[-1].get("content", "")
                     if last_content == self.special_waiting_message:
                         # Replace placeholder with actual response
                         messages[-1] = {
-                            'role': 'assistant',
-                            'content': response,
-                            'timestamp': time.strftime('%H:%M:%S')
+                            "role": "assistant",
+                            "content": response,
+                            "timestamp": time.strftime("%H:%M:%S"),
                         }
                     else:
                         # Add as new message
-                        messages.append({
-                            'role': 'assistant',
-                            'content': response,
-                            'timestamp': time.strftime('%H:%M:%S')
-                        })
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": response,
+                                "timestamp": time.strftime("%H:%M:%S"),
+                            }
+                        )
                 else:
                     # Add new assistant message
-                    messages.append({
-                        'role': 'assistant',
-                        'content': response,
-                        'timestamp': time.strftime('%H:%M:%S')
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response,
+                            "timestamp": time.strftime("%H:%M:%S"),
+                        }
+                    )
 
                 # Update the copy with modified messages
                 messages_store_copy[response_session_id] = messages

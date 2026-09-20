@@ -90,21 +90,37 @@ def build_ci_from_config(
     cfg = OmegaConf.to_container(cfg, resolve=True)
 
     if backend:
-        bdir = Path(backend_dir) if backend_dir else config_path.parent / "base_inferencer"
+        bdir = (
+            Path(backend_dir) if backend_dir else config_path.parent / "base_inferencer"
+        )
         backend_path = bdir / f"{backend}.yaml"
         if not backend_path.exists():
             available = (
-                ", ".join(p.stem for p in bdir.glob("*.yaml")) if bdir.is_dir() else "(none)"
+                ", ".join(p.stem for p in bdir.glob("*.yaml"))
+                if bdir.is_dir()
+                else "(none)"
             )
             raise ValueError(f"Unknown backend '{backend}'. Available: {available}")
         cfg["base_inferencer"] = OmegaConf.to_container(
-            OmegaConf.load(str(backend_path)), resolve=True,
+            OmegaConf.load(str(backend_path)),
+            resolve=True,
         )
 
     if inject_base:
         # Drop the YAML base node and build the CI wrapper as a partial, then
         # call it with the live base. Live attrs objects can't round-trip
         # through OmegaConf, so they MUST be passed as plain Python kwargs.
+        #
+        # CRITICAL: pass tool_registry / tool_executor / interactive as
+        # CONSTRUCTOR kwargs (not post-hoc `ci.x = ...` assignment). The CI's
+        # `__attrs_post_init__` builds child collaborators (DashboardCoordinator,
+        # SOPController) that CAPTURE REFERENCES to `self.tool_registry` at
+        # post-init time. If we set `ci.tool_registry = new_dict` AFTER
+        # construction, that only rebinds the attribute name on the CI —
+        # coordinators still hold the ORIGINAL default `{}` reference, so
+        # e.g. `normalize_directives` sees an empty dashboard set and silently
+        # no-ops (breaking the "Go To Experiment Hub" button label handoff and
+        # any other dashboard sugar-flag routing).
         cfg.pop("base_inferencer", None)
         cfg["_partial_"] = True
         ctor_kwargs: dict = {"base_inferencer": base_inferencer}
@@ -116,6 +132,12 @@ def build_ci_from_config(
             ctor_kwargs["allowed_sops"] = list(allowed_sops)
         if disallowed_sops is not None:
             ctor_kwargs["disallowed_sops"] = list(disallowed_sops)
+        if tool_registry is not None:
+            ctor_kwargs["tool_registry"] = tool_registry
+        if tool_executor is not None:
+            ctor_kwargs["tool_executor"] = tool_executor
+        if interactive is not None:
+            ctor_kwargs["interactive"] = interactive
         ci_partial = instantiate(OmegaConf.create(cfg))
         ci = ci_partial(**ctor_kwargs)
     else:
@@ -130,13 +152,18 @@ def build_ci_from_config(
         if isinstance(bi, dict):
             bi["target_path"] = str(target_path) if target_path else str(Path.cwd())
         ci = instantiate(OmegaConf.create(cfg))
+        # Non-inject_base path: the CI is fully instantiated from YAML above,
+        # so the below post-hoc assignments have the SAME reference-vs-rebind
+        # hazard for coordinators. Callers on this path that need dashboard
+        # sugar-flag routing MUST provide tool_registry via the YAML config
+        # (so it's set at construction time), not via this post-hoc rebind.
+        if tool_registry:
+            ci.tool_registry = tool_registry
+        if tool_executor:
+            ci.tool_executor = tool_executor
+        if interactive is not None:
+            ci.interactive = interactive
 
-    if tool_registry:
-        ci.tool_registry = tool_registry
-    if tool_executor:
-        ci.tool_executor = tool_executor
-    if interactive is not None:
-        ci.interactive = interactive
     # prompt_renderer / extra_sop_dirs were already passed to the partial ctor in
     # the inject_base path; set them here for the YAML-built-base path.
     if prompt_renderer is not None and not inject_base:
@@ -181,7 +208,9 @@ def make_tool_executor(
         for tools_root in search_dirs:
             tool_json_path = Path(tools_root) / tool_name / "tool.json"
             if not tool_json_path.exists():
-                tool_json_path = Path(tools_root) / tool_name.replace("-", "_") / "tool.json"
+                tool_json_path = (
+                    Path(tools_root) / tool_name.replace("-", "_") / "tool.json"
+                )
             if tool_json_path.exists():
                 meta = _json.loads(tool_json_path.read_text())
                 executor_ref = meta.get("executor", "")
@@ -192,10 +221,15 @@ def make_tool_executor(
                     return await func(arguments, session_context)
                 derived_from = meta.get("derived_from")
                 if derived_from:
-                    from agent_foundation.resources.tools.registry import derived_tool_execute
+                    from agent_foundation.resources.tools.registry import (
+                        derived_tool_execute,
+                    )
+
                     return await derived_tool_execute(
-                        arguments, session_context,
-                        derived_from=derived_from, tool_name=tool_name,
+                        arguments,
+                        session_context,
+                        derived_from=derived_from,
+                        tool_name=tool_name,
                     )
         return _TER(result=f"Unknown tool: {tool_name}")
 

@@ -10,10 +10,7 @@ import statistics
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Set
 
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
 
 
 # Known canonical action types that don't need mapping.
@@ -86,9 +83,7 @@ class TraceNormalizer:
         normalized: List[ExecutionTrace] = []
         for trace in traces:
             new_steps = [self.normalize_step(step) for step in trace.steps]
-            normalized.append(
-                replace(trace, steps=new_steps)
-            )
+            normalized.append(replace(trace, steps=new_steps))
 
         # Second pass: normalize wait durations across all traces
         self._normalize_wait_durations(normalized)
@@ -154,9 +149,7 @@ class TraceNormalizer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _normalize_wait_durations(
-        self, traces: List[ExecutionTrace]
-    ) -> None:
+    def _normalize_wait_durations(self, traces: List[ExecutionTrace]) -> None:
         """
         Normalize wait durations to the median across all traces.
 

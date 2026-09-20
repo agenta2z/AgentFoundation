@@ -18,11 +18,9 @@ import shlex
 from types import SimpleNamespace as NS
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate import (
+    common,
     MetamateCliInferencer,
     MetamateSDKInferencer,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate import (
-    common,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
@@ -32,6 +30,7 @@ _DELIM = "-" * 72
 
 
 # ── CLI: construct_command ────────────────────────────────────────────────
+
 
 def test_cli_construct_command_basic():
     cli = MetamateCliInferencer(api_key="key123")
@@ -71,10 +70,19 @@ def test_cli_construct_command_shell_quotes_untrusted_values():
 
 # ── CLI: parse_output ─────────────────────────────────────────────────────
 
+
 def test_cli_parse_output_extracts_response_block():
     stdout = "\n".join(
-        ["[polling] ...", _DELIM, "RESPONSE", _DELIM,
-         "The answer is 4.", "Second line.", _DELIM, "metadata: ignore"]
+        [
+            "[polling] ...",
+            _DELIM,
+            "RESPONSE",
+            _DELIM,
+            "The answer is 4.",
+            "Second line.",
+            _DELIM,
+            "metadata: ignore",
+        ]
     )
     resp = MetamateCliInferencer().parse_output(stdout, "", 0)
     assert resp.output == "The answer is 4.\nSecond line."
@@ -101,11 +109,14 @@ def test_cli_sync_subprocess_timeout_floor():
     assert MetamateCliInferencer().timeout == max(
         common.DEFAULT_TIMEOUT, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
     )
-    assert MetamateCliInferencer(timeout_seconds=3600).timeout == 3600  # >= server budget
+    assert (
+        MetamateCliInferencer(timeout_seconds=3600).timeout == 3600
+    )  # >= server budget
     assert MetamateCliInferencer(timeout=42).timeout == 42  # explicit wins
 
 
 # ── SDK: session + option handling ────────────────────────────────────────
+
 
 def test_sdk_reset_session_clears_conversation_state():
     # C: reset_session must clear the MetaMate-specific conversation handles,
@@ -137,9 +148,12 @@ def test_sdk_defaults():
 
 # ── common.parse_assistant_text (getattr duck-typing) ─────────────────────
 
+
 def _assistant_bridge(block_uuid: str, content) -> list:
     """Build a minimal [message, block] bridge_outputs list for one ASSISTANT block."""
-    message_out = NS(message=NS(role="ASSISTANT", block_uuids=[block_uuid], status="COMPLETED"))
+    message_out = NS(
+        message=NS(role="ASSISTANT", block_uuids=[block_uuid], status="COMPLETED")
+    )
     block_out = NS(block=NS(uuid=block_uuid, content=content))
     return [message_out, block_out]
 
@@ -169,7 +183,12 @@ def test_parse_assistant_text_inline_reasoning_content():
 
 def test_parse_assistant_text_code_interpreter():
     ci = _assistant_bridge(
-        "b6", NS(code_interpreter=NS(code="print(1)", language="python", output="1", summary="ran"))
+        "b6",
+        NS(
+            code_interpreter=NS(
+                code="print(1)", language="python", output="1", summary="ran"
+            )
+        ),
     )
     out = common.parse_assistant_text(ci)
     assert "```python\nprint(1)\n```" in out and "1" in out and "ran" in out
@@ -178,14 +197,23 @@ def test_parse_assistant_text_code_interpreter():
 def test_parse_assistant_text_excludes_non_assistant_blocks():
     # A USER message's block must be ignored.
     user_msg = NS(message=NS(role="USER", block_uuids=["ub"], status="COMPLETED"))
-    user_block = NS(block=NS(uuid="ub", content=NS(markdown=NS(value="user said this"))))
+    user_block = NS(
+        block=NS(uuid="ub", content=NS(markdown=NS(value="user said this")))
+    )
     assert common.parse_assistant_text([user_msg, user_block]) == ""
 
 
 # ── common: status + continuation helpers ─────────────────────────────────
 
+
 def test_get_assistant_message_status():
-    outs = [NS(message=NS(role="ASSISTANT", status="MessageStatus.COMPLETED", block_uuids=[]))]
+    outs = [
+        NS(
+            message=NS(
+                role="ASSISTANT", status="MessageStatus.COMPLETED", block_uuids=[]
+            )
+        )
+    ]
     assert common.get_assistant_message_status(outs) == "COMPLETED"
     assert common.get_assistant_message_status([NS(message=None)]) is None
 
@@ -193,7 +221,10 @@ def test_get_assistant_message_status():
 def test_needs_continuation():
     assert common.needs_continuation("Should I proceed with the research?") is True
     assert common.needs_continuation("Which one are you interested in?") is True
-    assert common.needs_continuation("Here is the complete answer with all details.") is False
+    assert (
+        common.needs_continuation("Here is the complete answer with all details.")
+        is False
+    )
     assert common.needs_continuation("") is False
 
 

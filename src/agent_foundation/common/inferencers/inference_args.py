@@ -1,7 +1,6 @@
 from typing import List, Optional
 
-from attr import attrs, attrib
-
+from attr import attrib, attrs
 
 
 @attrs(slots=True)
@@ -40,6 +39,7 @@ class CommonLlmInferenceArgs:
         >>> dict_(args,ignore_none_values=True)
         {'temperature': 0.7, 'max_tokens': 150, 'top_p': 0.95, 'top_k': 40, 'stop_sequences': ['<|endoftext|>']}
     """
+
     temperature: float = attrib(default=1.0)
     max_tokens: Optional[int] = attrib(default=2000)
     max_new_tokens: int = attrib(default=None)

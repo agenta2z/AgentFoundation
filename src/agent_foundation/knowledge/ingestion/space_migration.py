@@ -16,9 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
-from agent_foundation.knowledge.ingestion.space_classifier import (
-    SpaceClassifier,
-)
+from agent_foundation.knowledge.ingestion.space_classifier import SpaceClassifier
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -111,9 +109,7 @@ class SpaceMigrationUtility:
 
         return report
 
-    def _migrate_pieces_for_scope(
-        self, entity_id, report: MigrationReport
-    ) -> None:
+    def _migrate_pieces_for_scope(self, entity_id, report: MigrationReport) -> None:
         """Classify and update pieces for a single entity scope.
 
         Args:
@@ -197,9 +193,7 @@ class SpaceMigrationUtility:
         for entity_id in orphaned_scopes:
             self._migrate_pieces_for_scope(entity_id, report)
 
-    def _migrate_metadata(
-        self, entity_ids: List[str], report: MigrationReport
-    ) -> None:
+    def _migrate_metadata(self, entity_ids: List[str], report: MigrationReport) -> None:
         """Classify and update metadata entries.
 
         Args:

@@ -7,6 +7,8 @@ normalizes and aligns them, extracts common patterns, and synthesizes an
 ActionGraph using the existing fluent API.
 """
 
+from agent_foundation.automation.meta_agent.aligner import TraceAligner
+from agent_foundation.automation.meta_agent.collector import TraceCollector
 from agent_foundation.automation.meta_agent.errors import (
     GraphSynthesisError,
     InsufficientSuccessTracesError,
@@ -18,54 +20,11 @@ from agent_foundation.automation.meta_agent.errors import (
     TraceEvaluationError,
     TraceNormalizationError,
 )
-from agent_foundation.automation.meta_agent.collector import (
-    TraceCollector,
-)
-from agent_foundation.automation.meta_agent.normalizer import (
-    TraceNormalizer,
-)
-from agent_foundation.automation.meta_agent.synthetic_data import (
-    SyntheticDataProvider,
-)
-from agent_foundation.automation.meta_agent.aligner import (
-    TraceAligner,
-)
-from agent_foundation.automation.meta_agent.target_converter import (
-    TargetConverterBase,
-    TargetSpec,
-    TargetSpecWithFallback,
-)
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    PatternExtractor,
-)
 from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationResult,
     EvaluationRule,
     EvaluationStrategy,
     TraceEvaluator,
-)
-from agent_foundation.automation.meta_agent.synthesizer import (
-    ActionDecision,
-    GraphSynthesizer,
-    HybridSynthesizer,
-    LLMSynthesizer,
-    RuleBasedSynthesizer,
-    SynthesisResult,
-    SynthesisStrategy,
-)
-from agent_foundation.automation.meta_agent.validator import (
-    GraphValidator,
-)
-from agent_foundation.automation.meta_agent.pipeline import (
-    MetaAgentPipeline,
-)
-from agent_foundation.automation.meta_agent.prompt_templates import (
-    DEFAULT_PROMPT_TEMPLATES,
-    EVALUATION_TEMPLATE_KEY,
-    SYNTHESIS_TEMPLATE_KEY,
-    build_evaluation_feed,
-    build_synthesis_feed,
-    create_prompt_formatter,
 )
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
@@ -81,6 +40,33 @@ from agent_foundation.automation.meta_agent.models import (
     ValidationResult,
     ValidationResults,
 )
+from agent_foundation.automation.meta_agent.normalizer import TraceNormalizer
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
+from agent_foundation.automation.meta_agent.pipeline import MetaAgentPipeline
+from agent_foundation.automation.meta_agent.prompt_templates import (
+    build_evaluation_feed,
+    build_synthesis_feed,
+    create_prompt_formatter,
+    DEFAULT_PROMPT_TEMPLATES,
+    EVALUATION_TEMPLATE_KEY,
+    SYNTHESIS_TEMPLATE_KEY,
+)
+from agent_foundation.automation.meta_agent.synthesizer import (
+    ActionDecision,
+    GraphSynthesizer,
+    HybridSynthesizer,
+    LLMSynthesizer,
+    RuleBasedSynthesizer,
+    SynthesisResult,
+    SynthesisStrategy,
+)
+from agent_foundation.automation.meta_agent.synthetic_data import SyntheticDataProvider
+from agent_foundation.automation.meta_agent.target_converter import (
+    TargetConverterBase,
+    TargetSpec,
+    TargetSpecWithFallback,
+)
+from agent_foundation.automation.meta_agent.validator import GraphValidator
 
 __all__ = [
     "ActionDecision",

@@ -11,20 +11,19 @@ loop here — see test_round_lifecycle.py for the integration coverage):
 """
 
 import pytest
-
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
-    GroupValidationError,
-    group_and_validate,
-    primary_output_key,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
     display_text,
     parse_conversation_response,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
+    group_and_validate,
+    GroupValidationError,
+    primary_output_key,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
+    coerce_parallel_group,
     ConversationTool,
     ConversationToolType,
-    coerce_parallel_group,
 )
 
 

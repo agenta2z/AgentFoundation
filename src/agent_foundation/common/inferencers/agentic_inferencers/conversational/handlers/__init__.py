@@ -20,6 +20,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.hand
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.handlers.multiple_choice import (
     MultipleChoiceHandler,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handlers.proposal_selection import (
+    ProposalSelectionHandler,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.handlers.single_choice import (
     SingleChoiceHandler,
 )
@@ -29,7 +32,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.hand
 
 
 def default_registry() -> ConversationToolHandlerRegistry:
-    """Build the framework-default registry of the 5 generic handlers.
+    """Build the framework-default registry of the 6 generic handlers.
 
     Domain-specific handlers should be registered by downstream consumers
     via `reg.register(...)` after calling this factory.
@@ -39,5 +42,6 @@ def default_registry() -> ConversationToolHandlerRegistry:
     reg.register(SingleChoiceHandler())
     reg.register(MultipleChoiceHandler())
     reg.register(ConfirmationHandler())
+    reg.register(ProposalSelectionHandler())
     reg.register(ToolArgumentFormHandler())
     return reg

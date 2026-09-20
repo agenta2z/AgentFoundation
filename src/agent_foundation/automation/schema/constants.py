@@ -25,6 +25,7 @@ from .common import TargetStrategy
 # Enums
 # =============================================================================
 
+
 class ActionMemoryMode(str, Enum):
     """
     Memory capture modes for UI automation actions.
@@ -37,9 +38,10 @@ class ActionMemoryMode(str, Enum):
     - TARGET: Capture target element only (localized capture)
     - NONE: No memory capture (default for most actions)
     """
-    FULL = 'full'      # Capture full UI state
-    TARGET = 'target'  # Capture target element only
-    NONE = 'none'      # No memory capture
+
+    FULL = "full"  # Capture full UI state
+    TARGET = "target"  # Capture target element only
+    NONE = "none"  # No memory capture
 
 
 # =============================================================================
@@ -48,28 +50,32 @@ class ActionMemoryMode(str, Enum):
 
 # Generic UI action name constants
 # These provide a standard vocabulary for common UI automation actions
-ACTION_NAME_CLICK = 'click'
-ACTION_NAME_INPUT_TEXT = 'input_text'
-ACTION_NAME_APPEND_TEXT = 'append_text'
-ACTION_NAME_SCROLL = 'scroll'
-ACTION_NAME_SCROLL_UP_TO_ELEMENT = 'scroll_up_to_element'
-ACTION_NAME_VISIT_URL = 'visit_url'
-ACTION_NAME_WAIT = 'wait'
-ACTION_NAME_NO_OP = 'no_op'  # No actual operation; may capture latest state in action results
-ACTION_NAME_INPUT_AND_SUBMIT = 'input_and_submit'  # Composite action
+ACTION_NAME_CLICK = "click"
+ACTION_NAME_INPUT_TEXT = "input_text"
+ACTION_NAME_APPEND_TEXT = "append_text"
+ACTION_NAME_SCROLL = "scroll"
+ACTION_NAME_SCROLL_UP_TO_ELEMENT = "scroll_up_to_element"
+ACTION_NAME_VISIT_URL = "visit_url"
+ACTION_NAME_WAIT = "wait"
+ACTION_NAME_NO_OP = (
+    "no_op"  # No actual operation; may capture latest state in action results
+)
+ACTION_NAME_INPUT_AND_SUBMIT = "input_and_submit"  # Composite action
 
 
 # =============================================================================
 # Composite Action Models (needed for default actions)
 # =============================================================================
 
+
 class CompositeActionStep(BaseModel):
     """Step in a composite action sequence."""
+
     action: str  # Sub-action type
     element_index: int  # Which resolved element to use (must be >= 0)
     arg_prefix: str  # Prefix for extracting arguments
-    
-    @field_validator('element_index')
+
+    @field_validator("element_index")
     @classmethod
     def validate_element_index(cls, v):
         """Validate that element_index is non-negative."""
@@ -80,6 +86,7 @@ class CompositeActionStep(BaseModel):
 
 class CompositeActionConfig(BaseModel):
     """Configuration for composite actions."""
+
     mode: str = "sequential"  # Currently only "sequential" supported
     steps: List[CompositeActionStep]
 
@@ -88,21 +95,22 @@ class CompositeActionConfig(BaseModel):
 # Default Action Configurations
 # =============================================================================
 
+
 def get_default_actions():
     """
     Get the default action metadata configurations.
-    
+
     This is the authoritative source of truth for default action configurations.
     Returns a list of ActionTypeMetadata instances.
-    
+
     Note: This function imports ActionTypeMetadata locally to avoid circular imports.
-    
+
     Returns:
         List of ActionTypeMetadata instances for all default actions.
     """
     # Import here to avoid circular dependency
     from agent_foundation.automation.schema.action_metadata import ActionTypeMetadata
-    
+
     return [
         ActionTypeMetadata(
             name=ACTION_NAME_CLICK,
@@ -110,7 +118,7 @@ def get_default_actions():
             requires_target=True,
             description="Click on a UI element",
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_INPUT_TEXT,
@@ -122,7 +130,7 @@ def get_default_actions():
             description="Input text into a field",
             allow_attachments=True,
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_APPEND_TEXT,
@@ -134,7 +142,7 @@ def get_default_actions():
             description="Append text to existing field content",
             allow_attachments=True,
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_VISIT_URL,
@@ -144,7 +152,7 @@ def get_default_actions():
             # NONE/NONE: Navigation replaces page content entirely, so capturing
             # memory before/after doesn't make sense - the page is completely new
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_SCROLL,
@@ -155,7 +163,7 @@ def get_default_actions():
             description="Scroll an element or page",
             allow_follow_up=True,
             base_memory_mode=ActionMemoryMode.TARGET,
-            incremental_change_mode=ActionMemoryMode.TARGET
+            incremental_change_mode=ActionMemoryMode.TARGET,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_SCROLL_UP_TO_ELEMENT,
@@ -164,7 +172,7 @@ def get_default_actions():
             description="Scroll page until element is visible",
             allow_follow_up=True,
             base_memory_mode=ActionMemoryMode.TARGET,
-            incremental_change_mode=ActionMemoryMode.TARGET
+            incremental_change_mode=ActionMemoryMode.TARGET,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_WAIT,
@@ -175,7 +183,7 @@ def get_default_actions():
             arg_types={"seconds": "float"},
             description="Wait for a specified duration",
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         ActionTypeMetadata(
             name=ACTION_NAME_NO_OP,
@@ -183,7 +191,7 @@ def get_default_actions():
             requires_target=False,
             description="No actual operation; may capture latest state in action results",
             base_memory_mode=ActionMemoryMode.NONE,
-            incremental_change_mode=ActionMemoryMode.NONE
+            incremental_change_mode=ActionMemoryMode.NONE,
         ),
         # Composite action: input_and_submit
         ActionTypeMetadata(
@@ -201,16 +209,12 @@ def get_default_actions():
                 mode="sequential",
                 steps=[
                     CompositeActionStep(
-                        action="input_text",
-                        element_index=0,
-                        arg_prefix="input_text_"
+                        action="input_text", element_index=0, arg_prefix="input_text_"
                     ),
                     CompositeActionStep(
-                        action="click",
-                        element_index=1,
-                        arg_prefix="click_"
-                    )
-                ]
-            )
+                        action="click", element_index=1, arg_prefix="click_"
+                    ),
+                ],
+            ),
         ),
     ]

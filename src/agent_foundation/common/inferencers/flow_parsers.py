@@ -22,11 +22,16 @@ These exist as YAML-instantiable callables via the alias registry — see
 ``agent_foundation.common.configs.registered_targets`` for ``WinnerParser``,
 ``DecisionStopParser``, ``FinalPlanParser``, ``RankingParser`` aliases.
 """
+
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, List, Optional
+
+from agent_foundation.common.response_parsers.json_block import (  # noqa: F401
+    extract_json_block as _extract_json_block,
+    JSON_FENCE_TEMPLATE as _JSON_FENCE_TEMPLATE,
+)
 
 
 # Legacy XML tag patterns (fallback path for older outputs / fixtures).
@@ -34,27 +39,7 @@ _WINNER_RE = re.compile(r"<Winner>\s*flow_(\d+)\s*</Winner>", re.IGNORECASE)
 _DECISION_RE = re.compile(r"<Decision>\s*([\s\S]*?)\s*</Decision>", re.IGNORECASE)
 _FINALPLAN_RE = re.compile(r"<FinalPlan>([\s\S]*?)</FinalPlan>", re.IGNORECASE)
 
-# Matches ```json <label> ... ``` (label may be followed by extra text on
-# the fence line; we capture the body between the fences).
-_JSON_FENCE_TEMPLATE = r"```json\s+{label}\b[^\n]*\n([\s\S]*?)\n\s*```"
-
 _STOP_TOKENS = {"stop", "done", "halt"}
-
-
-def _extract_json_block(s: str, label: str) -> Optional[dict]:
-    """Find ```json <label> ... ``` and parse the body as JSON.
-
-    Returns the decoded dict, or ``None`` if the block is absent or invalid.
-    """
-    pattern = re.compile(_JSON_FENCE_TEMPLATE.format(label=re.escape(label)))
-    m = pattern.search(s)
-    if not m:
-        return None
-    try:
-        decoded = json.loads(m.group(1))
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return decoded if isinstance(decoded, dict) else None
 
 
 def parse_winner_tag(s: Any) -> Optional[int]:
@@ -199,8 +184,16 @@ def make_ranking_parser():
 
 # Severity ordering for the "never downgrade" merge semantics (§3 Part B).
 _SEVERITY_ORDER = {
-    "info": 0, "nit": 0, "low": 1, "minor": 1, "medium": 2, "moderate": 2,
-    "high": 3, "major": 3, "critical": 4, "blocker": 4,
+    "info": 0,
+    "nit": 0,
+    "low": 1,
+    "minor": 1,
+    "medium": 2,
+    "moderate": 2,
+    "high": 3,
+    "major": 3,
+    "critical": 4,
+    "blocker": 4,
 }
 
 
@@ -228,7 +221,10 @@ def merge_reviews(parsed_reviews: List[Any]) -> dict:
         for issue in issues:
             if not isinstance(issue, dict):
                 continue
-            key = (str(issue.get("location", "")), _normalize_desc(issue.get("description")))
+            key = (
+                str(issue.get("location", "")),
+                _normalize_desc(issue.get("description")),
+            )
             sev = str(issue.get("severity", "medium")).lower()
             if key in by_key:
                 existing = by_key[key]
@@ -236,7 +232,9 @@ def merge_reviews(parsed_reviews: List[Any]) -> dict:
                 if _SEVERITY_ORDER.get(sev, 2) > _SEVERITY_ORDER.get(
                     str(existing.get("severity", "medium")).lower(), 2
                 ):
-                    existing["severity"] = issue.get("severity", existing.get("severity"))
+                    existing["severity"] = issue.get(
+                        "severity", existing.get("severity")
+                    )
             else:
                 merged = dict(issue)
                 merged["agreement_count"] = 1

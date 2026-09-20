@@ -45,13 +45,21 @@ class InMemoryPieceStore(KnowledgePieceStore):
         del self._pieces[piece_id]
         return True
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
+    def search(
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
+        spaces=None,
+    ):
         return []
 
-    def list_all(self, entity_id=None, knowledge_type=None, spaces=None) -> List[KnowledgePiece]:
-        return [
-            p for p in self._pieces.values() if p.entity_id == entity_id
-        ]
+    def list_all(
+        self, entity_id=None, knowledge_type=None, spaces=None
+    ) -> List[KnowledgePiece]:
+        return [p for p in self._pieces.values() if p.entity_id == entity_id]
 
 
 def _make_piece(

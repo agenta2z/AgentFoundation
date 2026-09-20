@@ -44,12 +44,9 @@ Coverage
 import os
 from pathlib import Path
 
-import pytest
-
 import agent_foundation.resources as _af_res
-from rich_python_utils.string_utils.formatting.template_manager import (
-    TemplateManager,
-)
+import pytest
+from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 
 AF_TEMPLATES_ROOT = Path(_af_res.__file__).parent / "prompt_templates"
@@ -90,28 +87,48 @@ class TestSharedVariableFilesExist:
     """The shared variable files under _variables/context/ must exist."""
 
     def test_user_request_with_task_preamble_file_exists(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "context" / "user_request_with_task_preamble.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "context"
+            / "user_request_with_task_preamble.jinja2"
+        )
         assert path.is_file(), f"Missing: {path}"
 
     def test_user_request_with_task_preamble_has_required_content(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "context" / "user_request_with_task_preamble.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "context"
+            / "user_request_with_task_preamble.jinja2"
+        )
         content = path.read_text(encoding="utf-8")
         assert "{{ task_preamble }}" in content, (
             "Source-of-truth variable should render task_preamble"
         )
-        assert "{{ input }}" in content, (
-            "Source-of-truth variable should render input"
-        )
+        assert "{{ input }}" in content, "Source-of-truth variable should render input"
         assert "Original User Request" in content, (
             "Source-of-truth variable should label the input section"
         )
 
     def test_session_local_paths_file_exists(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "context" / "session" / "local_paths.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "context"
+            / "session"
+            / "local_paths.jinja2"
+        )
         assert path.is_file(), f"Missing: {path}"
 
     def test_session_local_paths_has_required_content(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "context" / "session" / "local_paths.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "context"
+            / "session"
+            / "local_paths.jinja2"
+        )
         content = path.read_text(encoding="utf-8")
         assert "has_local_access" in content, (
             "local_paths must be guarded by has_local_access"
@@ -163,7 +180,7 @@ class TestConsumerTemplatesUseSharedVariables:
                     pytest.fail(
                         f"{space}/main/{template_key}.jinja2 has inline "
                         f"{{{{ task_preamble }}}} ... {{{{ input }}}} at lines "
-                        f"{p+1}, {i+1} — should use the shared variable instead"
+                        f"{p + 1}, {i + 1} — should use the shared variable instead"
                     )
 
 
@@ -262,8 +279,7 @@ class TestEndToEndRendering:
             "from rendered output"
         )
         assert SENTINEL_INPUT in rendered, (
-            f"{space}/{template_key}: input sentinel missing from "
-            "rendered output"
+            f"{space}/{template_key}: input sentinel missing from rendered output"
         )
         assert "Original User Request" in rendered, (
             f"{space}/{template_key}: '## Original User Request' "
@@ -310,9 +326,7 @@ class TestLocalPathsHasLocalAccessGuard:
             "has_local_access=True"
         )
 
-    def test_hidden_when_has_local_access_false(
-        self, tm: TemplateManager
-    ) -> None:
+    def test_hidden_when_has_local_access_false(self, tm: TemplateManager) -> None:
         rendered = tm(
             template_key="initial",
             active_template_root_space="plan",
@@ -326,9 +340,7 @@ class TestLocalPathsHasLocalAccessGuard:
             "(API inferencer can't use shell paths)"
         )
 
-    def test_hidden_when_has_local_access_undefined(
-        self, tm: TemplateManager
-    ) -> None:
+    def test_hidden_when_has_local_access_undefined(self, tm: TemplateManager) -> None:
         """Safety net: legacy callers that never set has_local_access
         should get the empty/safe default (no path leakage)."""
         rendered = tm(

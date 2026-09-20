@@ -77,8 +77,15 @@ def resolve_metamate_client_cls(use_standalone: Optional[bool] = None) -> Type[A
 
         mod = import_module(module_path)
     except ImportError as e:
+        # U2d: raise a TYPED dependency error (not a generic RuntimeError) so the
+        # retry runner classifies it non-retryable. Call-time import avoids any
+        # module-load cycle (inferencer_base is always loaded by this point).
+        from agent_foundation.common.inferencers.inferencer_base import (
+            MissingDependencyError,
+        )
+
         flavor = "standalone" if use_standalone else "upstream"
-        raise RuntimeError(
+        raise MissingDependencyError(
             f"MetaMate {flavor} client not available: {e}. "
             f"Ensure the binary's Buck deps include "
             f"{'//metamate_standalone:metamate_standalone' if use_standalone else '//msl/metamate/cli:metamate_graphql'}."

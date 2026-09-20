@@ -14,6 +14,7 @@ class TestHelpersImport(unittest.TestCase):
             MockInferencer,
             SequentialMockInferencer,
         )
+
         m = MockInferencer(response="hello")
         self.assertEqual(m._infer("any"), "hello")
 
@@ -26,25 +27,27 @@ class TestHelpersImport(unittest.TestCase):
 
     def test_factories_import(self):
         from test.agent_foundation.common.inferencers._helpers.factories import (
-            _make_mock_inferencer,
-            _make_sequential_mock,
-            _make_lwi,
-            _make_dual,
-            _make_pti,
             _make_bta,
+            _make_dual,
+            _make_lwi,
             _make_mfi,
+            _make_mock_inferencer,
+            _make_pti,
+            _make_sequential_mock,
         )
+
         # smoke construction
         mock = _make_mock_inferencer("x")
         self.assertEqual(mock._infer("a"), "x")
 
     def test_realistic_responses_import(self):
         from test.agent_foundation.common.inferencers._helpers.realistic_responses import (
-            DUAL_REVIEW_RESPONSE_MAJOR,
-            DUAL_REVIEW_RESPONSE_COSMETIC,
             BTA_BREAKDOWN_NUMBERED,
+            DUAL_REVIEW_RESPONSE_COSMETIC,
+            DUAL_REVIEW_RESPONSE_MAJOR,
             PTI_PLAN_OUTPUT,
         )
+
         self.assertIn("MAJOR", DUAL_REVIEW_RESPONSE_MAJOR)
         self.assertIn("COSMETIC", DUAL_REVIEW_RESPONSE_COSMETIC)
         self.assertIn("Research", BTA_BREAKDOWN_NUMBERED)

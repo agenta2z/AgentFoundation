@@ -67,7 +67,9 @@ def _make_piece(**kwargs) -> KnowledgePiece:
     return KnowledgePiece(**defaults)
 
 
-def _make_candidate(piece_id: str = "existing-1", similarity: float = 0.9) -> MergeCandidate:
+def _make_candidate(
+    piece_id: str = "existing-1", similarity: float = 0.9
+) -> MergeCandidate:
     return MergeCandidate(
         piece_id=piece_id,
         similarity=similarity,
@@ -78,12 +80,14 @@ def _make_candidate(piece_id: str = "existing-1", similarity: float = 0.9) -> Me
 
 def _fake_llm_fn(prompt: str) -> str:
     """Returns a valid merge JSON response."""
-    return json.dumps({
-        "merged_content": "merged result",
-        "merged_domain": "general",
-        "merged_tags": ["tag1", "tag2"],
-        "merge_notes": "Combined both pieces",
-    })
+    return json.dumps(
+        {
+            "merged_content": "merged result",
+            "merged_domain": "general",
+            "merged_tags": ["tag1", "tag2"],
+            "merge_notes": "Combined both pieces",
+        }
+    )
 
 
 # ── MergeStrategyConfig tests ──
@@ -92,11 +96,25 @@ def _fake_llm_fn(prompt: str) -> str:
 class TestMergeStrategyConfig:
     def test_defaults(self):
         config = MergeStrategyConfig()
-        assert config.default_by_type[KnowledgeType.Fact] == MergeStrategy.AUTO_MERGE_ON_INGEST
-        assert config.default_by_type[KnowledgeType.Procedure] == MergeStrategy.MANUAL_ONLY
-        assert config.default_by_type[KnowledgeType.Instruction] == MergeStrategy.SUGGESTION_ON_INGEST
-        assert config.default_by_type[KnowledgeType.Episodic] == MergeStrategy.POST_INGESTION_AUTO
-        assert config.default_by_type[KnowledgeType.Example] == MergeStrategy.SUGGESTION_ON_INGEST
+        assert (
+            config.default_by_type[KnowledgeType.Fact]
+            == MergeStrategy.AUTO_MERGE_ON_INGEST
+        )
+        assert (
+            config.default_by_type[KnowledgeType.Procedure] == MergeStrategy.MANUAL_ONLY
+        )
+        assert (
+            config.default_by_type[KnowledgeType.Instruction]
+            == MergeStrategy.SUGGESTION_ON_INGEST
+        )
+        assert (
+            config.default_by_type[KnowledgeType.Episodic]
+            == MergeStrategy.POST_INGESTION_AUTO
+        )
+        assert (
+            config.default_by_type[KnowledgeType.Example]
+            == MergeStrategy.SUGGESTION_ON_INGEST
+        )
         assert config.allow_override is True
         assert config.suggestion_expiry_days == 30
 
@@ -165,7 +183,9 @@ class TestAutoMerge:
         store = InMemoryPieceStore([existing])
         manager = MergeStrategyManager(piece_store=store, llm_fn=_fake_llm_fn)
 
-        new_piece = _make_piece(content="new content", knowledge_type=KnowledgeType.Fact)
+        new_piece = _make_piece(
+            content="new content", knowledge_type=KnowledgeType.Fact
+        )
         candidate = _make_candidate(piece_id="existing-1")
         result = manager.apply_strategy(new_piece, [candidate])
 
@@ -291,7 +311,9 @@ class TestPostIngestionStrategies:
     def test_post_ingestion_suggestion_defers(self):
         store = InMemoryPieceStore()
         config = MergeStrategyConfig(
-            default_by_type={KnowledgeType.Fact: MergeStrategy.POST_INGESTION_SUGGESTION}
+            default_by_type={
+                KnowledgeType.Fact: MergeStrategy.POST_INGESTION_SUGGESTION
+            }
         )
         manager = MergeStrategyManager(piece_store=store, config=config)
 

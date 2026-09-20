@@ -23,14 +23,12 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from attr import attrs
-
-from rich_python_utils.path_utils import AllowedPath, PathAccess
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     TerminalInferencerBase,
 )
+from attr import attrs
+from rich_python_utils.path_utils import AllowedPath, PathAccess
 
 
 @attrs
@@ -40,8 +38,15 @@ class _ConcreteInferencer(TerminalInferencerBase):
     def construct_command(self, inference_input: Any, **kwargs: Any) -> List[str]:
         return ["echo", str(inference_input)]
 
-    def parse_output(self, stdout: str, stderr: str, return_code: int) -> Dict[str, Any]:
-        return {"output": stdout, "stderr": stderr, "return_code": return_code, "success": return_code == 0}
+    def parse_output(
+        self, stdout: str, stderr: str, return_code: int
+    ) -> Dict[str, Any]:
+        return {
+            "output": stdout,
+            "stderr": stderr,
+            "return_code": return_code,
+            "success": return_code == 0,
+        }
 
 
 @attrs
@@ -50,10 +55,14 @@ class _MinimalNonTerminalInferencer(InferencerBase):
     is at the right level (orchestrators / API inferencers can use it too).
     """
 
-    def _infer(self, inference_input: Any, inference_config: Any = None, **kwargs: Any) -> Any:
+    def _infer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
         return None  # not actually executed in these tests
 
-    async def _ainfer(self, inference_input: Any, inference_config: Any = None, **kwargs: Any) -> Any:
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
         return None  # not actually executed in these tests
 
 
@@ -121,14 +130,18 @@ class TestEffectiveAllowedPathsAutoInclude:
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
 
-        inf = _ConcreteInferencer()  # target_path None → cwd falls through to workspace.root
+        inf = (
+            _ConcreteInferencer()
+        )  # target_path None → cwd falls through to workspace.root
         inf._workspace = _ws_mock(str(ws_dir))
 
         assert inf.effective_cwd == str(ws_dir)
         paths = [ap.path for ap in inf.effective_allowed_paths]
         assert paths == [str(ws_dir.resolve())]
 
-    def test_workspace_root_auto_included_even_when_equal_to_target_path(self, tmp_path):
+    def test_workspace_root_auto_included_even_when_equal_to_target_path(
+        self, tmp_path
+    ):
         # Same dir set as both target_path and workspace.root → workspace.root
         # is still auto-included (no comparison; harmless redundancy).
         same = tmp_path / "same"
@@ -157,7 +170,9 @@ class TestEffectiveAllowedPathsAutoInclude:
         inf._workspace = _ws_mock(str(task_tree))
 
         paths = inf.effective_allowed_paths
-        assert len(paths) == 1, f"expected 1 entry, got {[(p.path, p.access) for p in paths]}"
+        assert len(paths) == 1, (
+            f"expected 1 entry, got {[(p.path, p.access) for p in paths]}"
+        )
         # The user's entry wins (READ), auto-include is skipped.
         assert paths[0].access == PathAccess.READ
 
@@ -172,7 +187,9 @@ class TestEffectiveAllowedPathsDedup:
         inf = _ConcreteInferencer(
             additional_allowed_paths=[
                 AllowedPath(str(target)),
-                AllowedPath(str(target) + "/."),  # same resolved path, different spelling
+                AllowedPath(
+                    str(target) + "/."
+                ),  # same resolved path, different spelling
                 AllowedPath(str(target)),  # exact duplicate
             ]
         )

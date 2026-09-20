@@ -10,46 +10,56 @@ Locks the novel logic added for path/composite inputs:
 import json
 
 import pytest
-
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
-    ChoiceItem,
-    ConversationTool,
-    InputFieldSpec,
-    canonicalize_tool_data,
-    normalize_tool_type,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
     decode_tool_bindings,
     finalize_input_value,
     is_contained,
     render_templated_fields,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
+    canonicalize_tool_data,
+    ChoiceItem,
+    ConversationTool,
+    InputFieldSpec,
+    normalize_tool_type,
+)
 
 
 # --- canonicalisation -------------------------------------------------------
 
 
-@pytest.mark.parametrize("name,expected", [
-    ("single-choice", "single_choice"),
-    ("single choice", "single_choice"),
-    ("single_choices", "single_choice"),
-    ("multiple-choice", "multiple_choice"),
-    ("clarification", "clarification"),
-])
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("single-choice", "single_choice"),
+        ("single choice", "single_choice"),
+        ("single_choices", "single_choice"),
+        ("multiple-choice", "multiple_choice"),
+        ("clarification", "clarification"),
+    ],
+)
 def test_normalize_tool_type(name, expected):
     assert normalize_tool_type(name) == expected
 
 
 def test_canonicalize_hyphen_keys_and_output_coercion():
-    data = canonicalize_tool_data({
-        "name": "single-choice",
-        "arguments": {
-            "expected-input-type": "path",
-            "allow-multiple-input": True,
-            "choices": [{"label": "x", "value": "x", "input": {"expected-input-type": "path"}}],
-        },
-        "output": "var_x",
-    })
+    data = canonicalize_tool_data(
+        {
+            "name": "single-choice",
+            "arguments": {
+                "expected-input-type": "path",
+                "allow-multiple-input": True,
+                "choices": [
+                    {
+                        "label": "x",
+                        "value": "x",
+                        "input": {"expected-input-type": "path"},
+                    }
+                ],
+            },
+            "output": "var_x",
+        }
+    )
     args = data["arguments"]
     assert args["expected_input_type"] == "path"
     assert args["allow_multiple_input"] is True
@@ -58,7 +68,9 @@ def test_canonicalize_hyphen_keys_and_output_coercion():
 
 
 def test_underscore_wins_over_hyphen():
-    d = canonicalize_tool_data({"arguments": {"expected-input-type": "path", "expected_input_type": "url"}})
+    d = canonicalize_tool_data(
+        {"arguments": {"expected-input-type": "path", "expected_input_type": "url"}}
+    )
     assert d["arguments"]["expected_input_type"] == "url"
 
 
@@ -67,13 +79,20 @@ def test_canonicalize_choices_json_string_coerced_to_list():
     `for c in choices` iterates CHARACTERS (one bogus 1-char option per char —
     the "every-character-is-a-button" widget bug). It must be parsed to a list.
     """
-    choices_str = json.dumps([
-        {"label": "Auto discover", "value": "auto_discover"},
-        {"label": "Specify paths", "value": "manual_paths"},
-    ])
+    choices_str = json.dumps(
+        [
+            {"label": "Auto discover", "value": "auto_discover"},
+            {"label": "Specify paths", "value": "manual_paths"},
+        ]
+    )
     # In arguments (ToolsToInvoke shape)
-    d = canonicalize_tool_data({"name": "single_choice", "arguments": {"choices": choices_str}})
-    assert [c["label"] for c in d["arguments"]["choices"]] == ["Auto discover", "Specify paths"]
+    d = canonicalize_tool_data(
+        {"name": "single_choice", "arguments": {"choices": choices_str}}
+    )
+    assert [c["label"] for c in d["arguments"]["choices"]] == [
+        "Auto discover",
+        "Specify paths",
+    ]
     # Flat / legacy shape
     d2 = canonicalize_tool_data({"tool_type": "single_choice", "choices": choices_str})
     assert [c["label"] for c in d2["choices"]] == ["Auto discover", "Specify paths"]
@@ -88,14 +107,21 @@ def test_choices_json_string_builds_real_choiceitems():
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
         parse_conversation_response,
     )
-    choices_str = json.dumps([
-        {"label": "Auto discover", "value": "auto_discover"},
-        {"label": "Specify paths", "value": "manual_paths"},
-    ])
-    line = json.dumps({
-        "type": "conversation", "name": "single_choice",
-        "arguments": {"prompt": "How?", "choices": choices_str}, "output": ["mode"],
-    })
+
+    choices_str = json.dumps(
+        [
+            {"label": "Auto discover", "value": "auto_discover"},
+            {"label": "Specify paths", "value": "manual_paths"},
+        ]
+    )
+    line = json.dumps(
+        {
+            "type": "conversation",
+            "name": "single_choice",
+            "arguments": {"prompt": "How?", "choices": choices_str},
+            "output": ["mode"],
+        }
+    )
     resp = "preamble\n\n```json ToolsToInvoke\n" + line + "\n```"
     tool = parse_conversation_response(resp).conversation_tool
     assert [c.label for c in tool.choices] == ["Auto discover", "Specify paths"]
@@ -111,18 +137,37 @@ def test_choiceitem_label_only_backward_compat():
 
 
 def test_choiceitem_with_input_round_trip():
-    c = ChoiceItem("Manual", "manual", input=InputFieldSpec(
-        name="p", expected_input_type="path", allow_multiple_input=True, serialization="json"))
+    c = ChoiceItem(
+        "Manual",
+        "manual",
+        input=InputFieldSpec(
+            name="p",
+            expected_input_type="path",
+            allow_multiple_input=True,
+            serialization="json",
+        ),
+    )
     assert c.has_input
     assert ChoiceItem.from_dict(c.to_dict()).to_dict() == c.to_dict()
 
 
 def test_conversation_tool_round_trip_with_typed_fields():
     t = ConversationTool(
-        tool_type="single_choice", prompt="p", allow_custom=False,
-        choices=[ChoiceItem("Auto", "auto"), ChoiceItem("Manual", "manual",
-                 input=InputFieldSpec(name="p", expected_input_type="path", allow_multiple_input=True))],
-        output_vars=["mode"])
+        tool_type="single_choice",
+        prompt="p",
+        allow_custom=False,
+        choices=[
+            ChoiceItem("Auto", "auto"),
+            ChoiceItem(
+                "Manual",
+                "manual",
+                input=InputFieldSpec(
+                    name="p", expected_input_type="path", allow_multiple_input=True
+                ),
+            ),
+        ],
+        output_vars=["mode"],
+    )
     assert ConversationTool.from_dict(t.to_dict()).to_dict() == t.to_dict()
 
 
@@ -130,22 +175,40 @@ def test_conversation_tool_round_trip_with_typed_fields():
 
 
 def test_finalize_single_path_rejoin():
-    assert finalize_input_value("data/x", expected_input_type="path", prefix="/root") == "/root/data/x"
+    assert (
+        finalize_input_value("data/x", expected_input_type="path", prefix="/root")
+        == "/root/data/x"
+    )
 
 
 def test_finalize_absolute_and_tilde_passthrough():
-    assert finalize_input_value("/abs", expected_input_type="path", prefix="/root") == "/abs"
-    assert finalize_input_value("~/h", expected_input_type="path", prefix="/root") == "~/h"
+    assert (
+        finalize_input_value("/abs", expected_input_type="path", prefix="/root")
+        == "/abs"
+    )
+    assert (
+        finalize_input_value("~/h", expected_input_type="path", prefix="/root") == "~/h"
+    )
 
 
 def test_finalize_multi_default_is_json_array_string():
-    out = finalize_input_value(["a", "b"], expected_input_type="path", prefix="/root", allow_multiple_input=True)
+    out = finalize_input_value(
+        ["a", "b"],
+        expected_input_type="path",
+        prefix="/root",
+        allow_multiple_input=True,
+    )
     assert json.loads(out) == ["/root/a", "/root/b"]
     assert out != "['/root/a', '/root/b']"  # never str(list)
 
 
 def test_finalize_multi_comma_serialization():
-    assert finalize_input_value(["a", "b"], allow_multiple_input=True, serialization="comma") == "a,b"
+    assert (
+        finalize_input_value(
+            ["a", "b"], allow_multiple_input=True, serialization="comma"
+        )
+        == "a,b"
+    )
 
 
 def test_finalize_unwraps_content_envelope():
@@ -154,10 +217,23 @@ def test_finalize_unwraps_content_envelope():
 
 def test_finalize_traversal_rejected_and_in_root_ok():
     with pytest.raises(ValueError):
-        finalize_input_value("../../out", expected_input_type="path", prefix="/root/sub",
-                             session_root="/root", validate=True)
-    assert finalize_input_value("data", expected_input_type="path", prefix="/root",
-                                session_root="/root", validate=True) == "/root/data"
+        finalize_input_value(
+            "../../out",
+            expected_input_type="path",
+            prefix="/root/sub",
+            session_root="/root",
+            validate=True,
+        )
+    assert (
+        finalize_input_value(
+            "data",
+            expected_input_type="path",
+            prefix="/root",
+            session_root="/root",
+            validate=True,
+        )
+        == "/root/data"
+    )
 
 
 def test_is_contained_blocks_sibling_prefix():
@@ -169,39 +245,66 @@ def test_is_contained_blocks_sibling_prefix():
 
 
 def _composite_tool():
-    return ConversationTool(tool_type="single_choice", output_vars=["mode"], choices=[
-        ChoiceItem("Auto", "auto_discover"),
-        ChoiceItem("Manual", "manual_paths", input=InputFieldSpec(
-            name="paths", expected_input_type="path", allow_multiple_input=True, prefix="/root", serialization="json")),
-    ])
+    return ConversationTool(
+        tool_type="single_choice",
+        output_vars=["mode"],
+        choices=[
+            ChoiceItem("Auto", "auto_discover"),
+            ChoiceItem(
+                "Manual",
+                "manual_paths",
+                input=InputFieldSpec(
+                    name="paths",
+                    expected_input_type="path",
+                    allow_multiple_input=True,
+                    prefix="/root",
+                    serialization="json",
+                ),
+            ),
+        ],
+    )
 
 
 def test_decode_composite_binds_two_vars():
-    b = decode_tool_bindings(_composite_tool(), {"choice_index": 1, "inputs": {"paths": ["a", "b"]}})
+    b = decode_tool_bindings(
+        _composite_tool(), {"choice_index": 1, "inputs": {"paths": ["a", "b"]}}
+    )
     assert b["mode"] == "manual_paths"
     assert json.loads(b["paths"]) == ["/root/a", "/root/b"]
 
 
 def test_decode_auto_choice_binds_mode_only():
-    assert decode_tool_bindings(_composite_tool(), {"choice_index": 0}) == {"mode": "auto_discover"}
+    assert decode_tool_bindings(_composite_tool(), {"choice_index": 0}) == {
+        "mode": "auto_discover"
+    }
 
 
 def test_decode_proposal_selection_comma_join():
     t = ConversationTool(tool_type="proposal_selection", output_vars=["ids"])
-    assert decode_tool_bindings(t, {"selected_proposals": ["P1", "P3"]}) == {"ids": "P1,P3"}
+    assert decode_tool_bindings(t, {"selected_proposals": ["P1", "P3"]}) == {
+        "ids": "P1,P3"
+    }
 
 
 def test_decode_multiple_choice_selections_comma_join():
-    t = ConversationTool(tool_type="multiple_choice", output_vars=["picks"],
-                         choices=[ChoiceItem("A", "a"), ChoiceItem("B", "b"), ChoiceItem("C", "c")])
-    b = decode_tool_bindings(t, {"selections": [{"choice_index": 0}, {"choice_index": 2}]})
+    t = ConversationTool(
+        tool_type="multiple_choice",
+        output_vars=["picks"],
+        choices=[ChoiceItem("A", "a"), ChoiceItem("B", "b"), ChoiceItem("C", "c")],
+    )
+    b = decode_tool_bindings(
+        t, {"selections": [{"choice_index": 0}, {"choice_index": 2}]}
+    )
     assert b == {"picks": "a,c"}
 
 
 def test_decode_legacy_aliasing_preserved_for_multi_output_vars():
     # A non-composite clarification with two output vars binds the SAME value to both.
     t = ConversationTool(tool_type="clarification", output_vars=["v1", "v2"])
-    assert decode_tool_bindings(t, {"content": "hello"}) == {"v1": "hello", "v2": "hello"}
+    assert decode_tool_bindings(t, {"content": "hello"}) == {
+        "v1": "hello",
+        "v2": "hello",
+    }
 
 
 def test_decode_compound_skips_untouched_tool_no_clobber():
@@ -210,6 +313,7 @@ def test_decode_compound_skips_untouched_tool_no_clobber():
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
         decode_compound_bindings,
     )
+
     t1 = ConversationTool(tool_type="clarification", output_vars=["a"])
     t2 = ConversationTool(tool_type="clarification", output_vars=["b"])
     # Only t1's key present; t2 untouched.
@@ -217,7 +321,9 @@ def test_decode_compound_skips_untouched_tool_no_clobber():
     assert out == {"a": "x"}
     assert "b" not in out  # not clobbered with ""
     # present-but-empty still binds (user explicitly cleared).
-    out2 = decode_compound_bindings([t1, t2], {"a": {"content": "x"}, "b": {"content": ""}})
+    out2 = decode_compound_bindings(
+        [t1, t2], {"a": {"content": "x"}, "b": {"content": ""}}
+    )
     assert out2 == {"a": "x", "b": ""}
 
 
@@ -225,10 +331,21 @@ def test_decode_compound_skips_untouched_tool_no_clobber():
 
 
 def test_render_resolves_templated_prefix():
-    t = ConversationTool(tool_type="clarification", expected_input_type="path",
-                         prefix="{{ session_root_path }}",
-                         choices=[ChoiceItem("M", "m", input=InputFieldSpec(name="p", prefix="{{ session_root_path }}"))])
-    render_templated_fields(t, lambda s: s.replace("{{ session_root_path }}", "/resolved"))
+    t = ConversationTool(
+        tool_type="clarification",
+        expected_input_type="path",
+        prefix="{{ session_root_path }}",
+        choices=[
+            ChoiceItem(
+                "M",
+                "m",
+                input=InputFieldSpec(name="p", prefix="{{ session_root_path }}"),
+            )
+        ],
+    )
+    render_templated_fields(
+        t, lambda s: s.replace("{{ session_root_path }}", "/resolved")
+    )
     assert t.prefix == "/resolved"
     assert t.choices[0].input.prefix == "/resolved"
 

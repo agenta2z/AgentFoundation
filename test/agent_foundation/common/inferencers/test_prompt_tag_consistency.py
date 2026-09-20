@@ -11,10 +11,10 @@ import unittest
 from pathlib import Path
 
 from agent_foundation.common.inferencers.constants.prompt_tags import (
-    TAG_PLAN_FOLLOWUP_ARTIFACT,
-    TAG_PLAN_REVIEW_ARTIFACT,
     TAG_IMPL_FOLLOWUP_ARTIFACT,
     TAG_IMPL_REVIEW_ARTIFACT,
+    TAG_PLAN_FOLLOWUP_ARTIFACT,
+    TAG_PLAN_REVIEW_ARTIFACT,
 )
 
 # Resolve prompt_templates root relative to the source tree.

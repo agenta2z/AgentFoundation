@@ -16,8 +16,6 @@ import shutil
 import tempfile
 import unittest
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     DualInferencerResponse,
@@ -38,6 +36,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 
 # Inline Jinja fixtures for tests that need to exercise the aggregator-prompt
@@ -123,8 +122,13 @@ def _reject(desc: str = "x") -> str:
                 "approved": False,
                 "severity": "MAJOR",
                 "issues": [
-                    {"severity": "MAJOR", "category": "logic",
-                     "description": desc, "location": "n/a", "suggestion": "fix"}
+                    {
+                        "severity": "MAJOR",
+                        "category": "logic",
+                        "description": desc,
+                        "location": "n/a",
+                        "suggestion": "fix",
+                    }
                 ],
                 "reasoning": "rejected",
             }
@@ -294,9 +298,7 @@ class TestT2AttrForwarding(unittest.TestCase):
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
         )
-        self.assertEqual(
-            mfdi.flow_configs[0]["initial_prompt"], "class_level_initial"
-        )
+        self.assertEqual(mfdi.flow_configs[0]["initial_prompt"], "class_level_initial")
         # Per-flow override preserved
         self.assertEqual(mfdi.flow_configs[1]["initial_prompt"], "custom_for_flow_1")
 
@@ -372,10 +374,12 @@ class TestT3EquivalenceToHandWired(unittest.TestCase):
 
     def _run_both_and_compare(self, *, review_first: bool):
         hand_dual, _, hand_rev, hand_fix, hand_agg = _build_hand_wired(
-            workspace_dir=self.hand_dir, review_first=review_first,
+            workspace_dir=self.hand_dir,
+            review_first=review_first,
         )
         conv_mfdi, conv_rev, conv_fix, conv_agg = _build_convenience(
-            workspace_dir=self.conv_dir, review_first=review_first,
+            workspace_dir=self.conv_dir,
+            review_first=review_first,
         )
         hand_result = hand_dual.infer("master")
         conv_result = conv_mfdi.infer("master")
@@ -539,8 +543,7 @@ class TestT9EdgeCases(unittest.TestCase):
 
 def _aggregator_text_with_winner(integrated: str, winner_idx: int) -> str:
     return (
-        f"<FinalPlan>\n{integrated}\n</FinalPlan>"
-        f"\n<Winner>flow_{winner_idx}</Winner>"
+        f"<FinalPlan>\n{integrated}\n</FinalPlan>\n<Winner>flow_{winner_idx}</Winner>"
     )
 
 
@@ -624,23 +627,33 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
         # Build flows where flow_1's inferencer == review_default → avoidance fires.
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
-        agg = _Scripted(script=[_aggregator_text_with_winner("integrated", winner_idx=1)])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=1)]
+        )
         reviewer_fallback = _Scripted(script=[_approve()])
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default=flow1_inf,                # SAME as winner → avoidance
+            review_default=flow1_inf,  # SAME as winner → avoidance
             review_priority_pool=[reviewer_fallback],
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
@@ -655,23 +668,33 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
     def test_review_default_no_avoidance_when_winner_differs(self):
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
-        agg = _Scripted(script=[_aggregator_text_with_winner("integrated", winner_idx=0)])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=0)]
+        )
         reviewer_default = _Scripted(script=[_approve()])
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default=reviewer_default,         # NOT same as winner
+            review_default=reviewer_default,  # NOT same as winner
             review_priority_pool=[_Scripted(script=[])],  # never picked
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
@@ -683,23 +706,33 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
     def test_review_default_winner_avoidance_pool_empty_uses_default(self):
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
-        agg = _Scripted(script=[_aggregator_text_with_winner("integrated", winner_idx=1)])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=1)]
+        )
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default=flow1_inf,                # SAME as winner
-            review_priority_pool=[],                 # empty → fall back to default
+            review_default=flow1_inf,  # SAME as winner
+            review_priority_pool=[],  # empty → fall back to default
             review_inferencer=None,
             # IMPORTANT: provide review_inferencer that mocks an approval response
             # because the default reviewer (flow1_inf) only emits "plan_1" once.
@@ -717,24 +750,34 @@ class TestT8RuleBasedAvoidance(unittest.TestCase):
     def test_fixer_match_winner_sets_fixer_to_winner_inferencer(self):
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
-        agg = _Scripted(script=[_aggregator_text_with_winner("integrated", winner_idx=0)])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=0)]
+        )
         reviewer = _Scripted(script=[_approve()])
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
             review_inferencer=reviewer,
-            fixer_strategy="winner",                 # winner → fixer
+            fixer_strategy="winner",  # winner → fixer
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
         )
@@ -757,23 +800,33 @@ class TestT9AliasDispatch(unittest.TestCase):
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
         kiro_inst = _Scripted(script=[_approve()])
-        agg = _Scripted(script=[_aggregator_text_with_winner("integrated", winner_idx=0)])
+        agg = _Scripted(
+            script=[_aggregator_text_with_winner("integrated", winner_idx=0)]
+        )
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             inferencer_pool={"Kiro": kiro_inst, "Claude": _Scripted(script=[])},
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default="Kiro",                   # alias → resolves to kiro_inst
+            review_default="Kiro",  # alias → resolves to kiro_inst
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -787,18 +840,30 @@ class TestT9AliasDispatch(unittest.TestCase):
         flow1_inf = _Scripted(script=["plan_1"])
         kiro_inst = _Scripted(script=[])
         claude_inst = _Scripted(script=[_approve()])
-        agg = _Scripted(script=[
-            _aggregator_text_with_alias("integrated", winner_idx=0, reviewer="Claude")
-        ])
+        agg = _Scripted(
+            script=[
+                _aggregator_text_with_alias(
+                    "integrated", winner_idx=0, reviewer="Claude"
+                )
+            ]
+        )
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             inferencer_pool={"Kiro": kiro_inst, "Claude": claude_inst},
             multi_flow_aggregator_inferencer=agg,
@@ -806,7 +871,7 @@ class TestT9AliasDispatch(unittest.TestCase):
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_reviewer_alias_parser=_parse_reviewer_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default="Kiro",                   # rule-based default
+            review_default="Kiro",  # rule-based default
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -819,26 +884,38 @@ class TestT9AliasDispatch(unittest.TestCase):
         flow0_inf = _Scripted(script=["plan_0"])
         flow1_inf = _Scripted(script=["plan_1"])
         kiro_inst = _Scripted(script=[_approve()])
-        agg = _Scripted(script=[
-            _aggregator_text_with_alias("integrated", winner_idx=0, reviewer="MysteryAgent")
-        ])
+        agg = _Scripted(
+            script=[
+                _aggregator_text_with_alias(
+                    "integrated", winner_idx=0, reviewer="MysteryAgent"
+                )
+            ]
+        )
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
-            inferencer_pool={"Kiro": kiro_inst},     # no MysteryAgent
+            inferencer_pool={"Kiro": kiro_inst},  # no MysteryAgent
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
             multi_flow_winner_parser=_parse_winner_tag,
             multi_flow_reviewer_alias_parser=_parse_reviewer_tag,
             multi_flow_response_parser=_parse_finalplan,
-            review_default="Kiro",                   # fallback rule
+            review_default="Kiro",  # fallback rule
             fixer_inferencer=_Scripted(script=[]),
             consensus_config=ConsensusConfig(max_iterations=1),
             checkpoint_dir=self.tmp,
@@ -868,12 +945,20 @@ class TestT10AconnectWalk(unittest.TestCase):
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[_aggregator_text("x")]),
             inferencer_pool={"A": pool_a, "B": pool_b},
@@ -887,8 +972,7 @@ class TestT10AconnectWalk(unittest.TestCase):
         # Dedup by identity (the iterator dedups internally)
         ids = {id(c) for c in cands}
         for inf in (flow0_inf, flow1_inf, pool_a, pool_b, priority, review_def, fixer):
-            self.assertIn(id(inf), ids,
-                          f"_iter_child_inferencers missing {inf!r}")
+            self.assertIn(id(inf), ids, f"_iter_child_inferencers missing {inf!r}")
 
 
 class TestT11DispatchRecomputesPerCall(unittest.TestCase):
@@ -912,16 +996,24 @@ class TestT11DispatchRecomputesPerCall(unittest.TestCase):
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_winner_parser=_parse_winner_tag,
-            review_default=flow1_inf,                # default = flow1
+            review_default=flow1_inf,  # default = flow1
             review_priority_pool=[flow0_inf],
             fixer_strategy="winner",
             consensus_config=ConsensusConfig(max_iterations=1),
@@ -933,19 +1025,19 @@ class TestT11DispatchRecomputesPerCall(unittest.TestCase):
         # Simulate "attempt 1" — winner = flow_0 (NOT same as review_default)
         mfi._last_winner_idx = 0
         mfdi._select_reviewer_and_fixer()
-        self.assertIs(mfdi.review_inferencer, flow1_inf)   # default (no avoidance)
-        self.assertIs(mfdi.fixer_inferencer, flow0_inf)    # winner
+        self.assertIs(mfdi.review_inferencer, flow1_inf)  # default (no avoidance)
+        self.assertIs(mfdi.fixer_inferencer, flow0_inf)  # winner
 
         # Simulate "attempt 2" — winner = flow_1 (== review_default → avoidance)
         mfi._last_winner_idx = 1
         mfdi._select_reviewer_and_fixer()
-        self.assertIs(mfdi.review_inferencer, flow0_inf)   # priority pool fallback
-        self.assertIs(mfdi.fixer_inferencer, flow1_inf)    # winner
+        self.assertIs(mfdi.review_inferencer, flow0_inf)  # priority pool fallback
+        self.assertIs(mfdi.fixer_inferencer, flow1_inf)  # winner
 
         # Simulate "attempt 3" — winner reset to flow_0 again
         mfi._last_winner_idx = 0
         mfdi._select_reviewer_and_fixer()
-        self.assertIs(mfdi.review_inferencer, flow1_inf)   # back to default
+        self.assertIs(mfdi.review_inferencer, flow1_inf)  # back to default
         self.assertIs(mfdi.fixer_inferencer, flow0_inf)
 
 
@@ -969,6 +1061,7 @@ class TestPostMortemFixes(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
             DualInferencer,
         )
+
         base = _Scripted(script=[])
         reviewer = _Scripted(script=[])
         # fixer aliased to base — must dedup
@@ -990,6 +1083,7 @@ class TestPostMortemFixes(unittest.TestCase):
         """Fix 5: warning fires when review_default is set but winner_idx
         is None (e.g., aggregator output has no <Winner> tag)."""
         import logging
+
         flow0_inf = _Scripted(script=[])
         flow1_inf = _Scripted(script=[])
         review_def = _Scripted(script=[])
@@ -997,14 +1091,24 @@ class TestPostMortemFixes(unittest.TestCase):
 
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
-            multi_flow_aggregator_inferencer=_Scripted(script=[_aggregator_text("plain")]),
+            multi_flow_aggregator_inferencer=_Scripted(
+                script=[_aggregator_text("plain")]
+            ),
             review_default=review_def,
             review_priority_pool=[priority],
             fixer_strategy="winner",
@@ -1046,8 +1150,7 @@ def _aggregator_text_with_winner_and_ranking(
 def _aggregator_text_with_ranking(integrated: str, ranking: list) -> str:
     ranking_json = json.dumps({"ranking": ranking, "reason": "test"})
     return (
-        f"<FinalPlan>\n{integrated}\n</FinalPlan>\n"
-        f"```json ranking\n{ranking_json}\n```"
+        f"<FinalPlan>\n{integrated}\n</FinalPlan>\n```json ranking\n{ranking_json}\n```"
     )
 
 
@@ -1065,12 +1168,20 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         flow1_inf = _Scripted(script=["plan_1"])
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             reviewer_strategy="runner_up",
@@ -1107,12 +1218,20 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         )
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
@@ -1131,19 +1250,33 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         flow1_inf = _Scripted(script=["plan_1"])
         flow2_inf = _Scripted(script=["plan_2"])
         agg = _Scripted(
-            script=[_aggregator_text_with_winner_and_ranking("integrated", 2, [2, 0, 1])]
+            script=[
+                _aggregator_text_with_winner_and_ranking("integrated", 2, [2, 0, 1])
+            ]
         )
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t2", "initial_inferencer": flow2_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t2",
+                    "initial_inferencer": flow2_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
@@ -1165,12 +1298,20 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         )
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
@@ -1193,12 +1334,20 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         )
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=agg,
             multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
@@ -1218,12 +1367,20 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
         flow1_inf = _Scripted(script=["plan_1"])
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             reviewer_strategy="runner_up",
@@ -1246,15 +1403,24 @@ class TestT12ReviewerMatchSecond(unittest.TestCase):
 
     def test_shared_instance_warns(self):
         import logging
+
         shared = _Scripted(script=["plan"])
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": shared,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": shared,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": shared,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": shared,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             reviewer_strategy="runner_up",
@@ -1282,20 +1448,24 @@ class TestT12Parser(unittest.TestCase):
 
     def test_json_block(self):
         from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+
         text = 'Some text\n```json ranking\n{"ranking": [2, 0, 1], "reason": "ok"}\n```\nmore'
         self.assertEqual(parse_ranking_tag(text), [2, 0, 1])
 
     def test_none_when_absent(self):
         from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+
         self.assertIsNone(parse_ranking_tag("no ranking here"))
 
     def test_non_string(self):
         from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+
         self.assertIsNone(parse_ranking_tag(42))
         self.assertIsNone(parse_ranking_tag(None))
 
     def test_bool_indices_excluded(self):
         from agent_foundation.common.inferencers.flow_parsers import parse_ranking_tag
+
         text = '```json ranking\n{"ranking": [true, 0, 1]}\n```'
         self.assertEqual(parse_ranking_tag(text), [0, 1])
 
@@ -1326,12 +1496,20 @@ class TestFix1ReviewerIdentityGuard(unittest.TestCase):
         flow1_inf = _Scripted(script=["plan_1"])
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             multi_flow_aggregator_inferencer=_Scripted(script=[]),
             review_inferencer=None,
@@ -1366,135 +1544,17 @@ class TestFix1ReviewerIdentityGuard(unittest.TestCase):
 
 
 # ===========================================================================
-# Fix #8 — role-contract inheritance (output_is_deliverable on fixer)
+# Fix #8 — role-contract inheritance — RETIRED in Part 2.
+#
+# ``TestFix8RoleContractInheritance`` (test_winner_as_fixer_inherits_output_is_deliverable,
+# test_alias_dispatched_fixer_inherits_output_is_deliverable,
+# test_output_is_deliverable_resets_on_winner_change) asserted that
+# ``switch_role`` set ``output_is_deliverable=True`` on the fixer. Part 2 retired
+# the ``output_is_deliverable`` flag entirely: promotion is role-based via
+# ``InferencerBase._symlink_child_output`` (the orchestrator promotes its SELECTED
+# canonical child's ``outputs/`` up to its own ``outputs/``), not via a per-instance
+# flag. With no flag to set, these tests have no subject and were removed.
 # ===========================================================================
-
-
-class TestFix8RoleContractInheritance(unittest.TestCase):
-    """Fix #8: when fixer_match_winner assigns the winner as fixer,
-    output_is_deliverable must be set to True on the fixer so downstream
-    deliverable-boundary logic treats the fixer's output as the canonical
-    artifact."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_winner_as_fixer_inherits_output_is_deliverable(self):
-        """After _select_reviewer_and_fixer + _reassign_role_workspace with
-        fixer_match_winner=True, fixer_inferencer.output_is_deliverable must
-        be True (set by switch_role via _reassign_role_workspace)."""
-        flow0_inf = _Scripted(script=["plan_0"])
-        flow1_inf = _Scripted(script=["plan_1"])
-        # Verify both start with the default (False)
-        self.assertFalse(flow0_inf.output_is_deliverable)
-        self.assertFalse(flow1_inf.output_is_deliverable)
-
-        mfdi = MultiFlowDualInferencer(
-            flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-            ],
-            multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            multi_flow_winner_parser=_parse_winner_tag,
-            fixer_strategy="winner",
-            review_inferencer=_Scripted(script=[]),
-            consensus_config=ConsensusConfig(max_iterations=1),
-            checkpoint_dir=self.tmp,
-            workspace=self.tmp,
-        )
-        mfi = mfdi.base_inferencer
-        # Simulate winner = flow_0
-        mfi._last_winner_idx = 0
-        mfdi._select_reviewer_and_fixer()
-        # Mirror _step_propose_impl: call _reassign_role_workspace after dispatch
-        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
-        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
-        self.assertTrue(mfdi.fixer_inferencer.output_is_deliverable)
-
-    def test_alias_dispatched_fixer_inherits_output_is_deliverable(self):
-        """When fixer is assigned via alias dispatch (not fixer_match_winner),
-        output_is_deliverable must also be set to True (via switch_role in
-        _reassign_role_workspace, called from _step_propose_impl)."""
-        flow0_inf = _Scripted(script=["plan_0"])
-        flow1_inf = _Scripted(script=["plan_1"])
-        fixer_inst = _Scripted(script=[])
-        self.assertFalse(fixer_inst.output_is_deliverable)
-
-        agg = _Scripted(script=[
-            _aggregator_text_with_alias("integrated", winner_idx=0, fixer="MyFixer")
-        ])
-        mfdi = MultiFlowDualInferencer(
-            flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-            ],
-            inferencer_pool={"MyFixer": fixer_inst},
-            multi_flow_aggregator_inferencer=agg,
-            multi_flow_aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
-            multi_flow_winner_parser=_parse_winner_tag,
-            multi_flow_fixer_alias_parser=_parse_fixer_tag,
-            multi_flow_response_parser=_parse_finalplan,
-            review_inferencer=_Scripted(script=[_approve()]),
-            consensus_config=ConsensusConfig(max_iterations=1),
-            checkpoint_dir=self.tmp,
-            workspace=self.tmp,
-        )
-        mfdi.infer("master")
-        self.assertIs(mfdi.fixer_inferencer, fixer_inst)
-        self.assertTrue(mfdi.fixer_inferencer.output_is_deliverable)
-
-    def test_output_is_deliverable_resets_on_winner_change(self):
-        """When the winner changes between dispatch calls, the NEW winner
-        gets output_is_deliverable=True (set by switch_role via
-        _reassign_role_workspace). The OLD winner's flag is NOT explicitly
-        cleared (that is by design -- the flag is additive), but the NEW
-        fixer must have it set."""
-        flow0_inf = _Scripted(script=[])
-        flow1_inf = _Scripted(script=[])
-
-        mfdi = MultiFlowDualInferencer(
-            flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-            ],
-            multi_flow_aggregator_inferencer=_Scripted(script=[]),
-            multi_flow_winner_parser=_parse_winner_tag,
-            fixer_strategy="winner",
-            review_inferencer=_Scripted(script=[]),
-            consensus_config=ConsensusConfig(max_iterations=1),
-            checkpoint_dir=self.tmp,
-            workspace=self.tmp,
-        )
-        mfi = mfdi.base_inferencer
-
-        # Round 1: winner = flow_0
-        mfi._last_winner_idx = 0
-        mfdi._select_reviewer_and_fixer()
-        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
-        self.assertIs(mfdi.fixer_inferencer, flow0_inf)
-        self.assertTrue(flow0_inf.output_is_deliverable)
-
-        # Round 2: winner = flow_1
-        mfi._last_winner_idx = 1
-        mfdi._select_reviewer_and_fixer()
-        mfdi._reassign_role_workspace(mfdi.fixer_inferencer, "fixer_inferencer")
-        self.assertIs(mfdi.fixer_inferencer, flow1_inf)
-        self.assertTrue(flow1_inf.output_is_deliverable)
 
 
 # ===========================================================================
@@ -1672,13 +1732,19 @@ class TestSharedInstancePurityUnderRealCtx(unittest.TestCase):
             _Scripted(script=["plan_2"]),
         )
         agg = _Scripted(
-            script=[_aggregator_text_with_winner_and_ranking("integrated", 0, [0, 2, 1])]
+            script=[
+                _aggregator_text_with_winner_and_ranking("integrated", 0, [0, 2, 1])
+            ]
         )
         mfdi = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": f"t{i}", "initial_inferencer": inf,
-                 "followup_inferencer": _Scripted(script=[]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1}
+                {
+                    "input": f"t{i}",
+                    "initial_inferencer": inf,
+                    "followup_inferencer": _Scripted(script=[]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                }
                 for i, inf in enumerate((flow0, flow1, flow2))
             ],
             multi_flow_aggregator_inferencer=agg,
@@ -1703,13 +1769,13 @@ class TestSharedInstancePurityUnderRealCtx(unittest.TestCase):
         # per-run IN THE CONTEXT scratch — it did NOT overwrite the shared instance, which
         # still holds the construction seed (flow1). Under a LEGACY run this would mutate
         # mfdi.review_inferencer to flow2; under a real ctx the instance is untouched.
-        self.assertIs(mfdi.review_inferencer, seed)                       # instance unmutated
-        self.assertIs(root.node().scratch.get("review_inferencer"), flow2)  # runtime pick in ctx
+        self.assertIs(mfdi.review_inferencer, seed)  # instance unmutated
+        self.assertIs(
+            root.node().scratch.get("review_inferencer"), flow2
+        )  # runtime pick in ctx
         # (c) MFI dispatch went to the propose node, NOT the instance backing (non-legacy →
         # no legacy-mint mirror).
-        self.assertIsNone(
-            mfdi.base_inferencer.__dict__.get("_last_winner_idx_backing")
-        )
+        self.assertIsNone(mfdi.base_inferencer.__dict__.get("_last_winner_idx_backing"))
         # (d) Dual per-run runtime fields went to ctx scratch, NOT the instance backing.
         self.assertNotIn("_current_inference_config_backing", mfdi.__dict__)
         self.assertNotIn("_current_attempt_backing", mfdi.__dict__)

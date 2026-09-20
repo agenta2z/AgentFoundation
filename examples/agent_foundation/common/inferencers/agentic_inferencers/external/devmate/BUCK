@@ -6,9 +6,9 @@ oncall("ml_oncall")
 # Run with: buck2 run //_tony_dev/CoreProjects/AgentFoundation/examples/agent_foundation/common/inferencers/agentic_inferencers/external/devmate:example_devmate_cli_streaming
 python_binary(
     name = "example_devmate_cli_streaming",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_streaming.main",
     srcs = ["example_devmate_cli_streaming.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_streaming.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
     ],
@@ -17,9 +17,9 @@ python_binary(
 # Devmate CLI session-resume demo — proves multi-turn memory + session isolation.
 python_binary(
     name = "example_devmate_cli_session_resume",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_session_resume.main",
     srcs = ["example_devmate_cli_session_resume.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_cli_session_resume.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
     ],
@@ -28,9 +28,9 @@ python_binary(
 # Devmate SDK streaming demo — depends on devai.devmate_sdk (Buck-only Meta dep).
 python_binary(
     name = "example_devmate_sdk_streaming",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
     srcs = ["example_devmate_sdk_streaming.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
         "//devai/devmate_sdk/python:devmate_python_sdk",
@@ -40,9 +40,9 @@ python_binary(
 # Devmate SDK session-resume demo — depends on devai.devmate_sdk.
 python_binary(
     name = "example_devmate_sdk_session_resume",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
     srcs = ["example_devmate_sdk_session_resume.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
         "//devai/devmate_sdk/python:devmate_python_sdk",
@@ -59,9 +59,9 @@ python_binary(
 
 python_binary(
     name = "example_devmate_sdk_streaming_via_standalone",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
     srcs = ["example_devmate_sdk_streaming.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_streaming.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
         "//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk",
@@ -70,9 +70,9 @@ python_binary(
 
 python_binary(
     name = "example_devmate_sdk_session_resume_via_standalone",
-    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
     srcs = ["example_devmate_sdk_session_resume.py"],
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate",
+    main_function = "agent_foundation.common.inferencers.agentic_inferencers.external.devmate.example_devmate_sdk_session_resume.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
         "//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk",

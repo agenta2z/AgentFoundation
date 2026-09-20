@@ -22,10 +22,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Ensure registered_targets is loaded for alias resolution.
+import agent_foundation.common.configs.registered_targets  # noqa: F401
 import pytest
-from attr import attrib, attrs
-from omegaconf import OmegaConf
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
 )
@@ -38,14 +37,13 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
+from omegaconf import OmegaConf
 from rich_python_utils.config_utils import instantiate, register_class
-
-# Ensure registered_targets is loaded for alias resolution.
-import agent_foundation.common.configs.registered_targets  # noqa: F401
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +74,7 @@ register_class(
 
 
 # Module path for YAML _target_ strings.
-_MOCK_TARGET = (
-    "test_slot_defaults_real_orchestrators.TemplatedMock"
-)
+_MOCK_TARGET = "test_slot_defaults_real_orchestrators.TemplatedMock"
 
 
 # ---------------------------------------------------------------------------
@@ -88,22 +84,26 @@ _MOCK_TARGET = (
 
 class TestBTASlotDefaults:
     def test_breakdown_root_space_defaulted(self):
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "breakdown_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "breakdown_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         assert isinstance(obj, BreakdownThenAggregateInferencer)
         assert obj.breakdown_inferencer.template_root_space == "task_breakdown"
 
     def test_breakdown_user_root_space_wins(self):
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "breakdown_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_root_space": "custom_space",
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "breakdown_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_root_space": "custom_space",
+                },
+            }
+        )
         obj = instantiate(cfg)
         assert obj.breakdown_inferencer.template_root_space == "custom_space"
 
@@ -112,10 +112,12 @@ class TestBTASlotDefaults:
         # (preamble + instructions + response_format) since Refactor 12+13:
         # version-to-default fallback is safe (Refactor 12) and
         # template_version + None-keyed variables make the YAML clean (Refactor 13).
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "aggregator_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "aggregator_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         assert obj.aggregator_inferencer.template_version == "aggregation"
         assert obj.aggregator_inferencer.template_variables == {
@@ -128,13 +130,15 @@ class TestBTASlotDefaults:
         # Caller supplies task_instructions explicitly — per-key merge:
         # preamble + response_format keep None (expanded via template_version),
         # task_instructions takes the explicit value.
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "aggregator_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_variables": {"task_instructions": "create_role"},
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "aggregator_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_variables": {"task_instructions": "create_role"},
+                },
+            }
+        )
         obj = instantiate(cfg)
         assert obj.aggregator_inferencer.template_version == "aggregation"
         assert obj.aggregator_inferencer.template_variables == {
@@ -144,13 +148,15 @@ class TestBTASlotDefaults:
         }
 
     def test_aggregator_user_overrides_preamble(self):
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "aggregator_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_variables": {"task_preamble": "custom"},
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "aggregator_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_variables": {"task_preamble": "custom"},
+                },
+            }
+        )
         obj = instantiate(cfg)
         # User key wins; default doesn't override; siblings still defaulted.
         assert obj.aggregator_inferencer.template_version == "aggregation"
@@ -165,13 +171,15 @@ class TestBTASlotDefaults:
         # suppresses it from the rendered feed (an empty-string value
         # bypasses both per-key default fill AND template_version fallback).
         # Edge case for callers who want a fully manual aggregator wrapper.
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "aggregator_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_variables": {"task_preamble": ""},
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "aggregator_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_variables": {"task_preamble": ""},
+                },
+            }
+        )
         obj = instantiate(cfg)
         assert obj.aggregator_inferencer.template_variables == {
             "task_preamble": "",
@@ -180,12 +188,14 @@ class TestBTASlotDefaults:
         }
 
     def test_disable_slot_defaults_skips(self):
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "_disable_slot_defaults_": True,
-            "breakdown_inferencer": {"_target_": "TemplatedMock"},
-            "aggregator_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "_disable_slot_defaults_": True,
+                "breakdown_inferencer": {"_target_": "TemplatedMock"},
+                "aggregator_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         # Both defaults skipped → fields stay at attrib defaults.
         assert obj.breakdown_inferencer.template_root_space is None
@@ -200,11 +210,13 @@ class TestBTASlotDefaults:
 
 class TestDualSlotDefaults:
     def test_review_template_key_defaulted(self):
-        cfg = OmegaConf.create({
-            "_target_": "Dual",
-            "base_inferencer": {"_target_": "TemplatedMock"},
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "Dual",
+                "base_inferencer": {"_target_": "TemplatedMock"},
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         assert isinstance(obj, DualInferencer)
         assert obj.review_inferencer.template_key == "review"
@@ -212,14 +224,16 @@ class TestDualSlotDefaults:
         assert obj.base_inferencer.template_key == ""
 
     def test_review_user_key_wins(self):
-        cfg = OmegaConf.create({
-            "_target_": "Dual",
-            "base_inferencer": {"_target_": "TemplatedMock"},
-            "review_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_key": "custom_review",
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "Dual",
+                "base_inferencer": {"_target_": "TemplatedMock"},
+                "review_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_key": "custom_review",
+                },
+            }
+        )
         obj = instantiate(cfg)
         assert obj.review_inferencer.template_key == "custom_review"
 
@@ -236,14 +250,16 @@ class TestWrappingDescent:
         # fixer]). Parent BTA's aggregator preamble-only default descends
         # into the Dual's inner CCCs. Dual's own SLOT_DEFAULTS
         # (review.template_key=review) applies when _walk enters the Dual node.
-        cfg = OmegaConf.create({
-            "_target_": "BTA",
-            "aggregator_inferencer": {
-                "_target_": "Dual",
-                "base_inferencer": {"_target_": "TemplatedMock"},
-                "review_inferencer": {"_target_": "TemplatedMock"},
-            },
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "aggregator_inferencer": {
+                    "_target_": "Dual",
+                    "base_inferencer": {"_target_": "TemplatedMock"},
+                    "review_inferencer": {"_target_": "TemplatedMock"},
+                },
+            }
+        )
         obj = instantiate(cfg)
         agg = obj.aggregator_inferencer
         assert isinstance(agg, DualInferencer)
@@ -300,12 +316,16 @@ class TestMultiFlowConditionalFollowup:
             assert fc["followup_inferencer"].template_variables == {}
 
     def test_followup_default_skipped_when_inject_false(self):
-        obj = instantiate(self._mf_cfg(visible_flows="all", inject_upstream_artifacts=False))
+        obj = instantiate(
+            self._mf_cfg(visible_flows="all", inject_upstream_artifacts=False)
+        )
         for fc in obj.flow_configs:
             assert fc["followup_inferencer"].template_variables == {}
 
     def test_followup_default_applied_when_both_conditions_met(self):
-        obj = instantiate(self._mf_cfg(visible_flows="all", inject_upstream_artifacts=True))
+        obj = instantiate(
+            self._mf_cfg(visible_flows="all", inject_upstream_artifacts=True)
+        )
         for fc in obj.flow_configs:
             assert fc["followup_inferencer"].template_version == "aggregation"
             assert fc["followup_inferencer"].template_variables == {
@@ -323,14 +343,18 @@ class TestMultiFlowConditionalFollowup:
         obj = instantiate(cfg)
         # Flow 0: explicit preamble wins; others remain None (expanded via
         # template_version at render time).
-        assert obj.flow_configs[0]["followup_inferencer"].template_version == "aggregation"
+        assert (
+            obj.flow_configs[0]["followup_inferencer"].template_version == "aggregation"
+        )
         assert obj.flow_configs[0]["followup_inferencer"].template_variables == {
             "task_preamble": "custom_preamble",
             "task_instructions": None,
             "task_response_format": None,
         }
         # Flow 1: full triplet (default), all None values.
-        assert obj.flow_configs[1]["followup_inferencer"].template_version == "aggregation"
+        assert (
+            obj.flow_configs[1]["followup_inferencer"].template_version == "aggregation"
+        )
         assert obj.flow_configs[1]["followup_inferencer"].template_variables == {
             "task_preamble": None,
             "task_instructions": None,
@@ -433,19 +457,22 @@ class TestMFDualSlotDefaults:
         # to True. Both halves are inert without the other, so the toggle
         # keeps them in sync.
         from agent_foundation.common.inferencers.flow_parsers import parse_decision_stop
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "flow_configs": [
-                {
-                    "input": "x",
-                    "iteration_judgment": True,
-                    "max_dynamic_steps": 3,
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "followup_inferencer": {"_target_": "TemplatedMock"},
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        "iteration_judgment": True,
+                        "max_dynamic_steps": 3,
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "followup_inferencer": {"_target_": "TemplatedMock"},
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         fc = obj.flow_configs[0]
         # Half 1: end_condition auto-set to parse_decision_stop.
@@ -462,95 +489,112 @@ class TestMFDualSlotDefaults:
         # If user supplies an explicit end_condition, the toggle's setdefault
         # preserves it. Same for the template flag.
         my_end_condition = lambda state, result: True  # noqa: E731
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "flow_configs": [
-                {
-                    "input": "x",
-                    "iteration_judgment": True,
-                    "max_dynamic_steps": 3,
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "followup_inferencer": {
-                        "_target_": "TemplatedMock",
-                        "template_extra_feed": {"include_iteration_judgment": False},
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        "iteration_judgment": True,
+                        "max_dynamic_steps": 3,
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "followup_inferencer": {
+                            "_target_": "TemplatedMock",
+                            "template_extra_feed": {
+                                "include_iteration_judgment": False
+                            },
+                        },
                     },
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         # Inject the lambda end_condition via direct construction (Hydra
         # can't import lambdas) — but that path bypasses _walk. Easier to
         # verify the explicit user template_extra_feed is preserved instead:
         obj = instantiate(cfg)
         fc = obj.flow_configs[0]
         # User's explicit False survives the toggle's setdefault.
-        assert fc["followup_inferencer"].template_extra_feed[
-            "include_iteration_judgment"
-        ] is False
+        assert (
+            fc["followup_inferencer"].template_extra_feed["include_iteration_judgment"]
+            is False
+        )
 
     def test_winner_pick_toggle_wires_aggregator_template_flag(self):
         # `winner_pick: true` on MFDual auto-sets
         # `include_winner_pick: true` in multi_flow_aggregator_inferencer's
         # template_extra_feed. The default winner_parser (parse_winner_tag,
         # set in Refactor 4) extracts the parsed index from the LLM output.
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "winner_pick": True,
-            "flow_configs": [
-                {
-                    "input": "x",
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-            "multi_flow_aggregator_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "winner_pick": True,
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+                "multi_flow_aggregator_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         assert obj.winner_pick is True
-        assert obj.multi_flow_aggregator_inferencer.template_extra_feed.get(
-            "include_winner_pick"
-        ) is True
+        assert (
+            obj.multi_flow_aggregator_inferencer.template_extra_feed.get(
+                "include_winner_pick"
+            )
+            is True
+        )
 
     def test_winner_pick_user_explicit_false_is_preserved(self):
         # If the user explicitly sets `include_winner_pick: false` on the
         # aggregator, the toggle's setdefault preserves it (deliberate opt-out).
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "winner_pick": True,
-            "flow_configs": [
-                {
-                    "input": "x",
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "winner_pick": True,
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+                "multi_flow_aggregator_inferencer": {
+                    "_target_": "TemplatedMock",
+                    "template_extra_feed": {"include_winner_pick": False},
                 },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-            "multi_flow_aggregator_inferencer": {
-                "_target_": "TemplatedMock",
-                "template_extra_feed": {"include_winner_pick": False},
-            },
-        })
+            }
+        )
         obj = instantiate(cfg)
-        assert obj.multi_flow_aggregator_inferencer.template_extra_feed[
-            "include_winner_pick"
-        ] is False
+        assert (
+            obj.multi_flow_aggregator_inferencer.template_extra_feed[
+                "include_winner_pick"
+            ]
+            is False
+        )
 
     def test_winner_pick_default_false_no_injection(self):
         # Without winner_pick, no injection — the aggregator's
         # template_extra_feed stays empty (or whatever the user set).
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "flow_configs": [
-                {
-                    "input": "x",
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-            "multi_flow_aggregator_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+                "multi_flow_aggregator_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         assert obj.winner_pick is False
         assert "include_winner_pick" not in (
@@ -560,19 +604,21 @@ class TestMFDualSlotDefaults:
     def test_iteration_judgment_false_or_absent_no_op(self):
         # Without iteration_judgment, no auto-wiring happens — flow uses
         # max_dynamic_steps fully, no template flag set.
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "flow_configs": [
-                {
-                    "input": "x",
-                    # iteration_judgment absent (= False)
-                    "max_dynamic_steps": 3,
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "followup_inferencer": {"_target_": "TemplatedMock"},
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "flow_configs": [
+                    {
+                        "input": "x",
+                        # iteration_judgment absent (= False)
+                        "max_dynamic_steps": 3,
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "followup_inferencer": {"_target_": "TemplatedMock"},
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         fc = obj.flow_configs[0]
         # No end_condition added.
@@ -586,16 +632,18 @@ class TestMFDualSlotDefaults:
     def test_input_required_when_propagate_off(self):
         # Without propagate_runtime_input, each flow's "input" must be
         # supplied — MultiFlow's runtime path uses cfg["input"] verbatim.
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "flow_configs": [
-                {  # missing "input"
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "flow_configs": [
+                    {  # missing "input"
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         # Hydra wraps the underlying ValueError; match on message text.
         with pytest.raises(Exception, match="missing required key 'input'"):
             instantiate(cfg)
@@ -609,6 +657,7 @@ class TestMFDualSlotDefaults:
             parse_finalplan_tag,
             parse_winner_tag,
         )
+
         obj = instantiate(self._mfdual_cfg())
         assert obj.multi_flow_winner_parser is parse_winner_tag
         assert obj.multi_flow_response_parser is parse_finalplan_tag
@@ -622,6 +671,7 @@ class TestMFDualSlotDefaults:
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
             MultiFlowDualInferencer,
         )
+
         flow_cfg = lambda: {
             "input": "x",
             "initial_inferencer": TemplatedMock(),
@@ -637,21 +687,23 @@ class TestMFDualSlotDefaults:
     def test_input_optional_when_propagate_on(self):
         # With propagate_runtime_input=True, each cfg["input"] is overwritten
         # at runtime — the YAML can omit it, and the post_init sets a "" sentinel.
-        cfg = OmegaConf.create({
-            "_target_": "MultiFlowDual",
-            "propagate_runtime_input": True,
-            "flow_configs": [
-                {  # NO "input" key
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
-                },
-                {
-                    "initial_inferencer": {"_target_": "TemplatedMock"},
-                    "max_dynamic_steps": 1,
-                },
-            ],
-            "review_inferencer": {"_target_": "TemplatedMock"},
-        })
+        cfg = OmegaConf.create(
+            {
+                "_target_": "MultiFlowDual",
+                "propagate_runtime_input": True,
+                "flow_configs": [
+                    {  # NO "input" key
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                    {
+                        "initial_inferencer": {"_target_": "TemplatedMock"},
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                "review_inferencer": {"_target_": "TemplatedMock"},
+            }
+        )
         obj = instantiate(cfg)
         # Validation passed; placeholder filled with empty string.
         for fc in obj.flow_configs:
@@ -676,9 +728,7 @@ _REAL_YAML = (
 )
 
 
-@pytest.mark.skipif(
-    not _REAL_YAML.exists(), reason=f"YAML not found at {_REAL_YAML}"
-)
+@pytest.mark.skipif(not _REAL_YAML.exists(), reason=f"YAML not found at {_REAL_YAML}")
 class TestRealWorldYAMLParity:
     """Verify the migrated breakdown_multiflow_plan_then_implement.yaml has all
     expected defaults flowing through to the right slots after instantiation.
@@ -857,8 +907,12 @@ class TestRealWorldYAMLParity:
             )
 
         # Independence: each Dual got its own deep-copied ConsensusConfig.
-        instances = [outer.consensus_config, plan_dual.consensus_config,
-                     mfdual.consensus_config, exec_dual.consensus_config]
+        instances = [
+            outer.consensus_config,
+            plan_dual.consensus_config,
+            mfdual.consensus_config,
+            exec_dual.consensus_config,
+        ]
         assert len(set(id(c) for c in instances)) == 4, (
             "each Dual should receive its own deep-copied ConsensusConfig "
             "instance — sharing a single instance would cause action-at-a-"
@@ -873,7 +927,9 @@ class TestRealWorldYAMLParity:
         # planner_inferencer / executor_inferencer are part of the deep-copied
         # subtree, so fixer's leaves also inherit the subtree-default namespace.
         fixer_plan_bta = root.fixer_inferencer.planner_inferencer.base_inferencer
-        assert fixer_plan_bta.breakdown_inferencer.template_root_space == "task_breakdown"
+        assert (
+            fixer_plan_bta.breakdown_inferencer.template_root_space == "task_breakdown"
+        )
         # Mirror of the base plan BTA aggregator: full triplet defaulted via
         # SLOT_DEFAULTS (Refactor 12+13 flip) + template_root_space=plan via
         # Refactor 14 cascade through _inherits_ deep-copy.
@@ -886,7 +942,9 @@ class TestRealWorldYAMLParity:
         assert fixer_plan_bta.aggregator_inferencer.template_root_space == "plan"
         # Verify cascade reaches fixer's exec subtree too.
         fixer_exec_bta = root.fixer_inferencer.executor_inferencer
-        assert fixer_exec_bta.aggregator_inferencer.template_root_space == "implementation"
+        assert (
+            fixer_exec_bta.aggregator_inferencer.template_root_space == "implementation"
+        )
         fixer_exec_dual = fixer_exec_bta.worker_inferencers["__default__"]()
         assert fixer_exec_dual.base_inferencer.template_root_space == "implementation"
         assert fixer_exec_dual.review_inferencer.template_root_space == "implementation"

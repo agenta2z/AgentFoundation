@@ -1,5 +1,3 @@
-
-
 """Plugboard LLM API — standard API module wrapping PlugboardClient.
 
 Provides the same interface as apis/metagen/metagen_llm.py:
@@ -61,9 +59,7 @@ def _build_messages(
                         {"role": "assistant", "content": prompt_or_messages[i + 1]}
                     )
             if len(prompt_or_messages) % 2 == 1:
-                messages.append(
-                    {"role": "user", "content": prompt_or_messages[-1]}
-                )
+                messages.append({"role": "user", "content": prompt_or_messages[-1]})
         elif isinstance(prompt_or_messages[0], dict):
             for msg in prompt_or_messages:
                 role = msg.get("role", "user")
@@ -85,7 +81,7 @@ async def generate_text_streaming(
     prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
     model: str = "",
     max_new_tokens: int = 4096,
-    temperature: float = 0.7,
+    temperature: float | None = 0.7,
     system_prompt: str = "",
     pipeline: str = DEFAULT_PIPELINE,
     model_pipeline_overrides: Dict[str, str] | None = None,
@@ -107,8 +103,7 @@ async def generate_text_streaming(
     Yields:
         str: Text chunks from the streaming response.
     """
-    # TODO: migrate plugboard_client
-    from rankevolve.src.server.llm.plugboard_client import PlugboardClient
+    from agent_foundation.apis.plugboard.plugboard_client import PlugboardClient
 
     messages, system = _build_messages(prompt_or_messages, system_prompt)
     client = PlugboardClient(
@@ -129,7 +124,7 @@ async def generate_text_async(
     prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
     model: str = "",
     max_new_tokens: int = 4096,
-    temperature: float = 0.7,
+    temperature: float | None = 0.7,
     system_prompt: str = "",
     pipeline: str = DEFAULT_PIPELINE,
     model_pipeline_overrides: Dict[str, str] | None = None,
@@ -170,7 +165,7 @@ def generate_text(
     prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
     model: str = "",
     max_new_tokens: int = 4096,
-    temperature: float = 0.7,
+    temperature: float | None = 0.7,
     system_prompt: str = "",
     pipeline: str = DEFAULT_PIPELINE,
     model_pipeline_overrides: Dict[str, str] | None = None,

@@ -1,28 +1,27 @@
 import json
 from pprint import pprint
-from typing import Union, Iterable, Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple, Union
 
 import requests
-
 from rich_python_utils.common_utils import iter_, resolve_environ
 from rich_python_utils.console_utils import hprint_message
 from rich_python_utils.string_utils import join_
 
-ENV_NAME_GOOGLE_SEARCH_APIKEY = 'GOOGLE_SEARCH_APIKEY'
-ENV_NAME_GOOGLE_CSE_ID = 'GOOGLE_CSE_ID'
-API_URL_GOOGLE_SEARCH = 'https://www.googleapis.com/customsearch/v1'
+ENV_NAME_GOOGLE_SEARCH_APIKEY = "GOOGLE_SEARCH_APIKEY"
+ENV_NAME_GOOGLE_CSE_ID = "GOOGLE_CSE_ID"
+API_URL_GOOGLE_SEARCH = "https://www.googleapis.com/customsearch/v1"
 
 
 def google_search(
-        search_term: str,
-        start_date: str = None,
-        end_date: str = None,
-        sites: Union[str, Iterable[str]] = None,
-        api_key: str = None,
-        cse_id: str = None,
-        verbose: bool = True,
-        return_raw_results: bool = False,
-        **extra_constraints
+    search_term: str,
+    start_date: str = None,
+    end_date: str = None,
+    sites: Union[str, Iterable[str]] = None,
+    api_key: str = None,
+    cse_id: str = None,
+    verbose: bool = True,
+    return_raw_results: bool = False,
+    **extra_constraints,
 ) -> Union[Dict, List[Tuple[str, str, str]]]:
     """
     Performs a Google search using the Custom Search JSON API and retrieves search results
@@ -62,20 +61,16 @@ def google_search(
             ("after:" + start_date) if start_date else None,
             ("before:" + end_date) if end_date else None,
             *((("site:" + site) for site in iter_(sites)) if sites else ()),
-            *((f"{k}:{v}" for k, v in extra_constraints.items()))
-        ), sep=' ')
+            *((f"{k}:{v}" for k, v in extra_constraints.items())),
+        ),
+        sep=" ",
+    )
 
     if verbose:
-        hprint_message(
-            'search_term', search_term
-        )
+        hprint_message("search_term", search_term)
 
     # The query parameters
-    params = {
-        'q': search_term,
-        'key': api_key,
-        'cx': cse_id
-    }
+    params = {"q": search_term, "key": api_key, "cx": cse_id}
 
     # Make a GET request to the API
     response = requests.get(API_URL_GOOGLE_SEARCH, params=params)
@@ -86,22 +81,23 @@ def google_search(
     if return_raw_results:
         return search_results
     else:
-        if 'items' in search_results:
+        if "items" in search_results:
             return [
-                (item['link'], item['title'], item['snippet'])
-                for item in search_results['items']
+                (item["link"], item["title"], item["snippet"])
+                for item in search_results["items"]
             ]
         else:
             return []
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from rich_python_utils.common_utils.arg_utils.arg_parse import get_parsed_args
+
     args = get_parsed_args(
-        default_search_term='AAPL stock top stories',
-        default_start_date='',
-        default_end_date='',
-        default_sites='[]',
+        default_search_term="AAPL stock top stories",
+        default_start_date="",
+        default_end_date="",
+        default_sites="[]",
     )
 
     _search_term = args.search_term
@@ -114,6 +110,6 @@ if __name__ == '__main__':
             search_term=_search_term,
             start_date=_start_date,
             end_date=_end_date,
-            sites=_sites
+            sites=_sites,
         )
     )

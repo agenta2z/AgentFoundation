@@ -96,7 +96,9 @@ def send_and_print(inferencer, message, label=""):
     # (devmate wraps the session UUID in OSC8 hyperlink escape codes, which the
     # built-in `r"Session ID:\s*([a-f0-9-]+)"` regex cannot match through).
     if not session_id:
-        session_id = _extract_session_id_fallback(raw_output) or _extract_session_id_fallback(output_text)
+        session_id = _extract_session_id_fallback(
+            raw_output
+        ) or _extract_session_id_fallback(output_text)
 
     body = output_text if success else (error_text or output_text or "Error")
 
@@ -115,12 +117,14 @@ def main():
         description="Devmate CLI — Session Resume & Isolation Demo"
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="claude-sonnet-4.5",
         help="Devmate model name (default: claude-sonnet-4.5)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default=os.path.expanduser("~/fbsource"),
         help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
@@ -219,7 +223,7 @@ def main():
     response_c, _ = send_and_print(
         inf_c,
         "What is the secret word? Reply with just the word if you know it, "
-        'or say "I don\'t know any secret word" if you don\'t.',
+        "or say \"I don't know any secret word\" if you don't.",
         label="Session C — New (no prior context)",
     )
 
@@ -247,11 +251,21 @@ def main():
     # Check Session C (should not know either secret)
     c_no_secrets = "banana" not in response_c_lower and "dragon" not in response_c_lower
 
-    print(f"  Session A recall 'banana':     {'✅ PASS' if a_has_banana else '❌ FAIL'}")
-    print(f"  Session A no cross-leak:       {'✅ PASS' if a_no_dragon else '❌ FAIL (leaked dragon)'}")
-    print(f"  Session B recall 'dragon':     {'✅ PASS' if b_has_dragon else '❌ FAIL'}")
-    print(f"  Session B no cross-leak:       {'✅ PASS' if b_no_banana else '❌ FAIL (leaked banana)'}")
-    print(f"  Session C no secret knowledge: {'✅ PASS' if c_no_secrets else '⚠️  UNEXPECTED (knew a secret)'}")
+    print(
+        f"  Session A recall 'banana':     {'✅ PASS' if a_has_banana else '❌ FAIL'}"
+    )
+    print(
+        f"  Session A no cross-leak:       {'✅ PASS' if a_no_dragon else '❌ FAIL (leaked dragon)'}"
+    )
+    print(
+        f"  Session B recall 'dragon':     {'✅ PASS' if b_has_dragon else '❌ FAIL'}"
+    )
+    print(
+        f"  Session B no cross-leak:       {'✅ PASS' if b_no_banana else '❌ FAIL (leaked banana)'}"
+    )
+    print(
+        f"  Session C no secret knowledge: {'✅ PASS' if c_no_secrets else '⚠️  UNEXPECTED (knew a secret)'}"
+    )
     print()
 
     all_pass = a_pass and b_pass and c_no_secrets

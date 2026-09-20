@@ -106,9 +106,9 @@ class GroupedQueryAttention(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        assert (
-            num_heads % group_size == 0
-        ), f"num_heads ({num_heads}) must be divisible by group_size ({group_size})"
+        assert num_heads % group_size == 0, (
+            f"num_heads ({num_heads}) must be divisible by group_size ({group_size})"
+        )
 
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads

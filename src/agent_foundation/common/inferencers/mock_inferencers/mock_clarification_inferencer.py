@@ -4,8 +4,10 @@ Mock clarification inferencer for testing clarification question flows.
 This module provides a mock inferencer that demonstrates how agents handle
 clarification questions, using a grocery order example.
 """
+
 from typing import Any
-from agent_foundation.agents.agent_response import AgentResponse, AgentAction
+
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse
 
 
 class MockClarificationInferencer:
@@ -43,7 +45,9 @@ class MockClarificationInferencer:
         """Initialize the mock inferencer."""
         self.call_count = 0
 
-    def __call__(self, reasoner_input: Any, reasoner_config: Any = None) -> AgentResponse:
+    def __call__(
+        self, reasoner_input: Any, reasoner_config: Any = None
+    ) -> AgentResponse:
         """
         Process input and return appropriate response based on call count.
 

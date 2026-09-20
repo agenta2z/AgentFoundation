@@ -1,5 +1,3 @@
-
-
 """Automated tests for PlanThenImplementInferencer resume + Workflow checkpoint.
 
 Tests file-based resume detection (backward compat) and native Workflow
@@ -19,9 +17,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ResponseSelectors,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
+    _PHASE_TO_STEP_INDEX,
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
-    _PHASE_TO_STEP_INDEX,
 )
 
 

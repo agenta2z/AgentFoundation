@@ -2,11 +2,14 @@
 workspace to ctx and does NOT mutate the child instance; reads resolve from ctx.
 Byte-identical (instance mutation) without a context."""
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
-from agent_foundation.common.inferencers.run_context import RunContext, enter_run, exit_run
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
+from attr import attrs
 
 
 @attrs
@@ -53,8 +56,12 @@ def test_two_workers_get_isolated_workspaces_under_context():
     root = RunContext.root(workspace=InferencerWorkspace(root="/tmp/run"))
     tok = enter_run(root)
     try:
-        e0 = _orchestrate_like_dual(orch, w0, "worker_0", InferencerWorkspace(root="/tmp/run/w0"))
-        e1 = _orchestrate_like_dual(orch, w1, "worker_1", InferencerWorkspace(root="/tmp/run/w1"))
+        e0 = _orchestrate_like_dual(
+            orch, w0, "worker_0", InferencerWorkspace(root="/tmp/run/w0")
+        )
+        e1 = _orchestrate_like_dual(
+            orch, w1, "worker_1", InferencerWorkspace(root="/tmp/run/w1")
+        )
         assert e0.root == "/tmp/run/w0" and e1.root == "/tmp/run/w1"
         assert w0.__dict__.get("_InferencerBase__workspace") is None  # neither mutated
         assert w1.__dict__.get("_InferencerBase__workspace") is None

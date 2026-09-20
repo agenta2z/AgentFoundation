@@ -1,21 +1,36 @@
 import warnings
-from typing import Callable, List, Iterable, Union, Mapping, Iterator, Sequence
-
-from agent_foundation.common.experiment_management.constants import DIRNAME_SOURCE_DATA, DIRNAME_SAMPLED_DATA
-from rich_python_utils.io_utils.json_io import iter_all_json_objs_from_all_sub_dirs, write_json_objs
 from os import path
+from typing import Callable, Iterable, Iterator, List, Mapping, Sequence, Union
 
-from rich_python_utils.path_utils.common import paths_in_same_directory, get_directory_if_paths_in_same_directory
+from agent_foundation.common.experiment_management.constants import (
+    DIRNAME_SAMPLED_DATA,
+    DIRNAME_SOURCE_DATA,
+)
+from rich_python_utils.io_utils.json_io import (
+    iter_all_json_objs_from_all_sub_dirs,
+    write_json_objs,
+)
+from rich_python_utils.path_utils.common import (
+    get_directory_if_paths_in_same_directory,
+    paths_in_same_directory,
+)
 
 
-def get_source_data_path(input_path_dataspace: Union[str, Sequence[str]], source_data_dir_name: str = DIRNAME_SOURCE_DATA):
+def get_source_data_path(
+    input_path_dataspace: Union[str, Sequence[str]],
+    source_data_dir_name: str = DIRNAME_SOURCE_DATA,
+):
     if not isinstance(input_path_dataspace, str):
         if len(input_path_dataspace) == 1:
             _input_path_data = input_path_dataspace[0]
         else:
-            _input_path_data = get_directory_if_paths_in_same_directory(input_path_dataspace)
+            _input_path_data = get_directory_if_paths_in_same_directory(
+                input_path_dataspace
+            )
             if not _input_path_data:
-                raise ValueError(f"Unable to obtain a unique root dir path from '{input_path_dataspace}'")
+                raise ValueError(
+                    f"Unable to obtain a unique root dir path from '{input_path_dataspace}'"
+                )
     else:
         _input_path_data = input_path_dataspace
 
@@ -30,11 +45,11 @@ def get_source_data_path(input_path_dataspace: Union[str, Sequence[str]], source
 
 
 def solve_dataspace_path(
-        input_path_dataspace: str,
-        data_iter: Callable[[str], Iterator] = iter_all_json_objs_from_all_sub_dirs,
-        sample: Union[str, float, Mapping[str, Callable[[Iterator], Iterator]]] = None,
-        data_writer: Callable[[Iterable, str], None] = write_json_objs,
-        source_data_dir_name: str = DIRNAME_SOURCE_DATA
+    input_path_dataspace: str,
+    data_iter: Callable[[str], Iterator] = iter_all_json_objs_from_all_sub_dirs,
+    sample: Union[str, float, Mapping[str, Callable[[Iterator], Iterator]]] = None,
+    data_writer: Callable[[Iterable, str], None] = write_json_objs,
+    source_data_dir_name: str = DIRNAME_SOURCE_DATA,
 ) -> Union[str, Mapping[str, str]]:
     """
     Determines the appropriate input data path based on the provided data space and sampling requirements.
@@ -72,7 +87,7 @@ def solve_dataspace_path(
     """
     input_source_data = get_source_data_path(
         input_path_dataspace=input_path_dataspace,
-        source_data_dir_name=source_data_dir_name
+        source_data_dir_name=source_data_dir_name,
     )
 
     if isinstance(input_path_dataspace, str) and path.isdir(input_path_dataspace):
@@ -94,24 +109,35 @@ def solve_dataspace_path(
     if not sample or sample == 1:
         return _input_path_dataspace
     else:
-        input_path_sample_data_root = path.join(path.dirname(input_source_data), DIRNAME_SAMPLED_DATA)
+        input_path_sample_data_root = path.join(
+            path.dirname(input_source_data), DIRNAME_SAMPLED_DATA
+        )
         if isinstance(sample, str):
             input_path_sample_data = path.join(input_path_sample_data_root, sample)
             if not path.exists(input_path_sample_data):
-                raise FileNotFoundError(f"sample data '{sample}' does not exist under data space '{input_path_dataspace}")
+                raise FileNotFoundError(
+                    f"sample data '{sample}' does not exist under data space '{input_path_dataspace}"
+                )
             return input_path_sample_data
         elif isinstance(sample, float):
-            input_path_sample_data = path.join(input_path_sample_data_root, str(sample * 100))
+            input_path_sample_data = path.join(
+                input_path_sample_data_root, str(sample * 100)
+            )
             if path.exists(input_path_sample_data):
                 return input_path_sample_data
             else:
                 if data_iter is None:
-                    raise ValueError("'data_iter' must be provided to for data sampling")
+                    raise ValueError(
+                        "'data_iter' must be provided to for data sampling"
+                    )
                 all_data = list(data_iter(_input_path_dataspace))
                 import random
+
                 data_sample = random.sample(all_data, int(len(all_data) * sample))
                 if data_writer is None:
-                    raise ValueError("'data_writer' must be provided to save the sample data")
+                    raise ValueError(
+                        "'data_writer' must be provided to save the sample data"
+                    )
                 data_writer(data_sample, input_path_sample_data)
                 return input_path_sample_data
         elif isinstance(sample, Mapping):
@@ -119,11 +145,13 @@ def solve_dataspace_path(
             if data_iter is None:
                 raise ValueError("'data_iter' must be provided to for data sampling")
             for sample_name, sampler in sample.items():
-                input_path_sample_data = path.join(input_path_sample_data_root, sample_name)
+                input_path_sample_data = path.join(
+                    input_path_sample_data_root, sample_name
+                )
                 if not path.exists(input_path_sample_data):
                     data_writer(
                         sampler(data_iter(_input_path_dataspace)),
-                        input_path_sample_data
+                        input_path_sample_data,
                     )
                     output_samples[sample_name] = input_path_sample_data
             if len(output_samples) == 1:

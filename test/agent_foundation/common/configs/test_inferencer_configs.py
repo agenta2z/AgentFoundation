@@ -2,12 +2,10 @@
 
 from pathlib import Path
 
-import pytest
-
-from rich_python_utils.config_utils import instantiate, load_config
-
 # Importing configs triggers alias registration.
 import agent_foundation.common.configs  # noqa: F401
+import pytest
+from rich_python_utils.config_utils import instantiate, load_config
 
 _YAML_DIR = (
     Path(__file__).resolve().parents[4]
@@ -23,6 +21,7 @@ _YAML_DIR = (
 def load_yaml():
     def _load(relative_path: str, overrides=None):
         return load_config(str(_YAML_DIR / relative_path), overrides=overrides)
+
     return _load
 
 

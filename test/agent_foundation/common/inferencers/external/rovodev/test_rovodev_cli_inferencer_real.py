@@ -15,7 +15,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
     RovoDevCliInferencer,
 )
@@ -36,7 +35,9 @@ def _init_git_repo(path):
     subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-q", "--allow-empty", "-m", "init"],
-        cwd=path, check=True, capture_output=True,
+        cwd=path,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -107,7 +108,9 @@ class TestSessionManagement:
         assert result.success, f"Failed: {result.stderr}"
         assert inferencer.active_session_id is not None
         # Should be a real UUID, not a sentinel
-        assert len(inferencer.active_session_id) > 10, f"Expected UUID, got: {inferencer.active_session_id!r}"
+        assert len(inferencer.active_session_id) > 10, (
+            f"Expected UUID, got: {inferencer.active_session_id!r}"
+        )
 
     def test_restore_flag_in_command(self, inferencer):
         r1 = inferencer.new_session("Say hi and nothing else.")
@@ -149,23 +152,18 @@ class TestRealMultiTurn:
 
         # Turn 1: give the model something to remember
         r1 = inf.new_session(
-            "My favorite color is BLUE. "
-            "Confirm: your favorite color is BLUE."
+            "My favorite color is BLUE. Confirm: your favorite color is BLUE."
         )
         assert r1.success, f"Turn 1 failed (rc={r1.return_code}): {r1.stderr}"
         assert "BLUE" in r1.output.upper(), f"Turn 1 missing BLUE: {r1.output!r}"
         assert inf.active_session_id is not None, f"Expected session ID, got None"
 
         # Turn 2: resume and recall
-        r2 = inf(
-            "What is my favorite color? "
-            "Reply with ONLY the color, nothing else."
-        )
+        r2 = inf("What is my favorite color? Reply with ONLY the color, nothing else.")
         assert r2.success, f"Turn 2 failed (rc={r2.return_code}): {r2.stderr}"
         assert "BLUE" in r2.output.upper(), (
             f"Context recall failed: expected BLUE, got: {r2.output!r}"
         )
-
 
     def test_restore_specific_session_by_id(self, tmp_path):
         """Restore a specific session by UUID, not just the most recent."""
@@ -173,25 +171,33 @@ class TestRealMultiTurn:
 
         out_file = str(tmp_path / "rovodev_output.txt")
         mk = lambda: RovoDevCliInferencer(
-            target_path=str(tmp_path), output_file=out_file,
-            idle_timeout_seconds=DEFAULT_TIMEOUT, tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
+            target_path=str(tmp_path),
+            output_file=out_file,
+            idle_timeout_seconds=DEFAULT_TIMEOUT,
+            tool_use_idle_timeout_seconds=DEFAULT_TIMEOUT,
         )
 
         # Create 3 sessions with different values
         inf_a = mk()
-        r_a = inf_a.new_session("My favorite color is BLUE. Confirm: favorite color is BLUE.")
+        r_a = inf_a.new_session(
+            "My favorite color is BLUE. Confirm: favorite color is BLUE."
+        )
         assert r_a.success, f"Session A failed: {r_a.stderr}"
         sid_a = inf_a.active_session_id
         assert sid_a is not None
 
         inf_b = mk()
-        r_b = inf_b.new_session("My favorite color is GREEN. Confirm: favorite color is GREEN.")
+        r_b = inf_b.new_session(
+            "My favorite color is GREEN. Confirm: favorite color is GREEN."
+        )
         assert r_b.success, f"Session B failed: {r_b.stderr}"
         sid_b = inf_b.active_session_id
         assert sid_b is not None
 
         inf_c = mk()
-        r_c = inf_c.new_session("My favorite color is RED. Confirm: favorite color is RED.")
+        r_c = inf_c.new_session(
+            "My favorite color is RED. Confirm: favorite color is RED."
+        )
         assert r_c.success, f"Session C failed: {r_c.stderr}"
         sid_c = inf_c.active_session_id
         assert sid_c is not None
@@ -232,7 +238,9 @@ class TestRealMultiTurn:
 class TestStreaming:
     def test_infer_streaming_yields_chunks(self, inferencer):
         chunks = list(
-            inferencer.infer_streaming("Count from 1 to 3, each on a new line. Nothing else.")
+            inferencer.infer_streaming(
+                "Count from 1 to 3, each on a new line. Nothing else."
+            )
         )
         non_empty = [c for c in chunks if c.strip()]
         assert len(non_empty) > 0, "Expected at least one non-empty chunk"
@@ -242,7 +250,9 @@ class TestStreaming:
 
 class TestErrorHandling:
     def test_invalid_acli_path_in_command(self, tmp_path):
-        inf = RovoDevCliInferencer(acli_path="/nonexistent/acli", target_path=str(tmp_path))
+        inf = RovoDevCliInferencer(
+            acli_path="/nonexistent/acli", target_path=str(tmp_path)
+        )
         cmd = inf.construct_command("hello")
         assert "/nonexistent/acli" in cmd
 
@@ -270,9 +280,7 @@ class TestNonLegacySingleTurn:
             "<Result><Value>42</Value><Status>ok</Status></Result>"
         )
         assert result.success, f"Failed: {result.stderr}"
-        assert "<Result>" in result.output, (
-            f"XML tags stripped! Got: {result.output!r}"
-        )
+        assert "<Result>" in result.output, f"XML tags stripped! Got: {result.output!r}"
         assert "<Value>42</Value>" in result.output
         assert "<Status>ok</Status>" in result.output
 
@@ -318,17 +326,23 @@ class TestNonLegacySessionRestore:
 
         # Create 3 sessions with different values
         inf_a = mk()
-        r_a = inf_a.new_session("My favorite color is BLUE. Confirm: favorite color is BLUE.")
+        r_a = inf_a.new_session(
+            "My favorite color is BLUE. Confirm: favorite color is BLUE."
+        )
         assert r_a.success, f"Session A failed: {r_a.stderr}"
         sid_a = inf_a.active_session_id
 
         inf_b = mk()
-        r_b = inf_b.new_session("My favorite color is GREEN. Confirm: favorite color is GREEN.")
+        r_b = inf_b.new_session(
+            "My favorite color is GREEN. Confirm: favorite color is GREEN."
+        )
         assert r_b.success, f"Session B failed: {r_b.stderr}"
         sid_b = inf_b.active_session_id
 
         inf_c = mk()
-        r_c = inf_c.new_session("My favorite color is RED. Confirm: favorite color is RED.")
+        r_c = inf_c.new_session(
+            "My favorite color is RED. Confirm: favorite color is RED."
+        )
         assert r_c.success, f"Session C failed: {r_c.stderr}"
         sid_c = inf_c.active_session_id
 
@@ -342,21 +356,27 @@ class TestNonLegacySessionRestore:
         inf_ra.active_session_id = sid_a
         r_ra = inf_ra("What is my favorite color? Reply with ONLY the color.")
         assert r_ra.success
-        assert "BLUE" in r_ra.output.upper(), f"A should recall BLUE, got: {r_ra.output!r}"
+        assert "BLUE" in r_ra.output.upper(), (
+            f"A should recall BLUE, got: {r_ra.output!r}"
+        )
 
         # Restore middle (B)
         inf_rb = mk()
         inf_rb.active_session_id = sid_b
         r_rb = inf_rb("What is my favorite color? Reply with ONLY the color.")
         assert r_rb.success
-        assert "GREEN" in r_rb.output.upper(), f"B should recall GREEN, got: {r_rb.output!r}"
+        assert "GREEN" in r_rb.output.upper(), (
+            f"B should recall GREEN, got: {r_rb.output!r}"
+        )
 
         # Restore newest (C)
         inf_rc = mk()
         inf_rc.active_session_id = sid_c
         r_rc = inf_rc("What is my favorite color? Reply with ONLY the color.")
         assert r_rc.success
-        assert "RED" in r_rc.output.upper(), f"C should recall RED, got: {r_rc.output!r}"
+        assert "RED" in r_rc.output.upper(), (
+            f"C should recall RED, got: {r_rc.output!r}"
+        )
 
     def test_multi_turn_accumulation(self, tmp_path):
         """Multiple turns accumulate context — model remembers all prior turns."""
@@ -412,11 +432,15 @@ class TestNonLegacySessionRestore:
         inf_ra.active_session_id = sid_a
         r_ra = inf_ra("What is my favorite dessert? Reply with ONLY the dessert name.")
         assert r_ra.success, f"Restore A failed: {r_ra.stderr}"
-        assert "TIRAMISU" in r_ra.output.upper(), f"Expected TIRAMISU, got: {r_ra.output!r}"
+        assert "TIRAMISU" in r_ra.output.upper(), (
+            f"Expected TIRAMISU, got: {r_ra.output!r}"
+        )
 
         # Restore B in workspace B
         inf_rb = _make_non_legacy_inferencer(ws_b)
         inf_rb.active_session_id = sid_b
         r_rb = inf_rb("What is my favorite dessert? Reply with ONLY the dessert name.")
         assert r_rb.success, f"Restore B failed: {r_rb.stderr}"
-        assert "CHEESECAKE" in r_rb.output.upper(), f"Expected CHEESECAKE, got: {r_rb.output!r}"
+        assert "CHEESECAKE" in r_rb.output.upper(), (
+            f"Expected CHEESECAKE, got: {r_rb.output!r}"
+        )

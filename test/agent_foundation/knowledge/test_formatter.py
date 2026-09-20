@@ -13,6 +13,7 @@ Tests cover:
 
 Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
 """
+
 import sys
 from pathlib import Path
 
@@ -26,7 +27,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
@@ -122,7 +122,9 @@ class TestRetrievalResult:
         assert result.pieces == []
         assert result.graph_context == []
 
-    def test_with_all_fields(self, sample_metadata, sample_pieces, sample_graph_context):
+    def test_with_all_fields(
+        self, sample_metadata, sample_pieces, sample_graph_context
+    ):
         """RetrievalResult can hold all three layers of data."""
         result = RetrievalResult(
             metadata=sample_metadata,
@@ -475,7 +477,9 @@ class TestFormatterGraphContext:
 class TestFormatterCombinedSections:
     """Tests for combined output with multiple sections."""
 
-    def test_full_output_matches_example(self, formatter, sample_metadata, sample_pieces, sample_graph_context):
+    def test_full_output_matches_example(
+        self, formatter, sample_metadata, sample_pieces, sample_graph_context
+    ):
         """Full output matches the design document example format."""
         result = RetrievalResult(
             metadata=sample_metadata,
@@ -548,7 +552,9 @@ class TestFormatterCombinedSections:
 class TestFormatterDeterminism:
     """Tests for deterministic output."""
 
-    def test_same_input_same_output(self, formatter, sample_metadata, sample_pieces, sample_graph_context):
+    def test_same_input_same_output(
+        self, formatter, sample_metadata, sample_pieces, sample_graph_context
+    ):
         """Formatting the same result multiple times produces identical output."""
         result = RetrievalResult(
             metadata=sample_metadata,

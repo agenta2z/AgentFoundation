@@ -6,13 +6,11 @@ Uses Hypothesis to verify correctness properties across randomized inputs.
 from unittest.mock import MagicMock
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
+from hypothesis import given, settings, strategies as st
 
 
 def _make_mock_inferencer():

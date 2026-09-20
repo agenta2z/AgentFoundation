@@ -1050,7 +1050,13 @@ function App() {
           <AppHeader title="RankEvolve" />
           <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             <SessionSidebar />
-            <Box sx={{ flex: 1, overflow: 'hidden' }}>
+            {/* Establish an explicit flex-column context so AgentChatPanel's
+                internal flex layout (scroll box grows, input pins to bottom)
+                gets a definite parent height to resolve against. Without
+                `display: flex` + `flexDirection: column` here, AgentChatPanel's
+                `height: 100%` (line 288) can fail to compute in some browsers
+                when the parent only relies on flex cross-axis stretch. */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
               <AgentChatPanel />
             </Box>
           </Box>

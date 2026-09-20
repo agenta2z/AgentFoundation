@@ -12,13 +12,12 @@ from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
     ACLI_BINARY,
-    RovoDevNotFoundError,
     extract_json_from_output,
     find_acli_binary,
     find_available_port,
+    RovoDevNotFoundError,
     strip_ansi_codes,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
@@ -121,7 +120,9 @@ class TestConstructCommand:
 
     def test_restore_flag_on_resume(self, inferencer):
         """--restore added when resume=True."""
-        cmd = inferencer.construct_command("Hello", resume=True, session_id="test-session-uuid")
+        cmd = inferencer.construct_command(
+            "Hello", resume=True, session_id="test-session-uuid"
+        )
         assert "--restore" in cmd
 
     def test_no_restore_without_resume(self, inferencer):
@@ -216,17 +217,29 @@ class TestSessionManagement:
         result = inferencer._build_session_args("real-session-id-123", True)
         assert "--restore" in result
         assert "real-session-id-123" in result
+
     def test_build_session_args_empty_id_resume(self, inferencer):
         """Returns just --restore when session_id is empty."""
         result = inferencer._build_session_args("", True)
         assert result == "--restore"
+
     @pytest.mark.asyncio
     async def test_ainfer_sets_active_session_on_success(self, inferencer):
         """active_session_id set to 'active' after successful inference."""
         mock_result = MagicMock()
         mock_result.success = True
-        with patch.object(inferencer, "_ainfer_single", new_callable=AsyncMock, return_value=mock_result), \
-             patch("agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id", return_value="test-session-uuid"):
+        with (
+            patch.object(
+                inferencer,
+                "_ainfer_single",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
+                return_value="test-session-uuid",
+            ),
+        ):
             await inferencer.ainfer("Hello")
         assert inferencer.active_session_id == "test-session-uuid"
 
@@ -235,7 +248,12 @@ class TestSessionManagement:
         """active_session_id not set on failed inference."""
         mock_result = MagicMock()
         mock_result.success = False
-        with patch.object(inferencer, "_ainfer_single", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            inferencer,
+            "_ainfer_single",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
             await inferencer.ainfer("Hello")
         assert inferencer.active_session_id is None
 
@@ -245,8 +263,18 @@ class TestSessionManagement:
         inferencer.active_session_id = "old-session-id"
         mock_result = MagicMock()
         mock_result.success = True
-        with patch.object(inferencer, "_ainfer_single", new_callable=AsyncMock, return_value=mock_result), \
-             patch("agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id", return_value="new-session-uuid"):
+        with (
+            patch.object(
+                inferencer,
+                "_ainfer_single",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
+                return_value="new-session-uuid",
+            ),
+        ):
             await inferencer.ainfer("Hello", new_session=True)
         # Should be set to "active" again after successful call
         assert inferencer.active_session_id == "new-session-uuid"
@@ -274,8 +302,13 @@ class TestSessionManagement:
         """Sync infer() sets active_session_id on success."""
         mock_result = MagicMock()
         mock_result.success = True
-        with patch.object(inferencer, "_infer_single", return_value=mock_result), \
-             patch("agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id", return_value="test-session-uuid"):
+        with (
+            patch.object(inferencer, "_infer_single", return_value=mock_result),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
+                return_value="test-session-uuid",
+            ),
+        ):
             inferencer.infer("Hello")
         assert inferencer.active_session_id == "test-session-uuid"
 
@@ -390,6 +423,7 @@ class TestRegistration:
         from agent_foundation.common.inferencers.agentic_inferencers import (
             RovoDevCliInferencer,
         )
+
         assert RovoDevCliInferencer is not None
 
     def test_serve_inferencer_importable(self):
@@ -397,11 +431,13 @@ class TestRegistration:
         from agent_foundation.common.inferencers.agentic_inferencers import (
             RovoDevServeInferencer,
         )
+
         assert RovoDevServeInferencer is not None
 
     def test_in_all(self):
         """Both inferencers in __all__."""
         import agent_foundation.common.inferencers.agentic_inferencers as mod
+
         assert "RovoDevCliInferencer" in mod.__all__
         assert "RovoDevServeInferencer" in mod.__all__
 
@@ -437,8 +473,10 @@ class TestNonLegacyConstructCommand:
     def test_user_schema_preserved(self, tmp_path):
         """User's output_schema is used instead of auto-injected."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, output_schema='{"type":"object","properties":{"answer":{"type":"string"}}}',
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            output_schema='{"type":"object","properties":{"answer":{"type":"string"}}}',
         )
         cmd = inf.construct_command("Hello")
         assert "--output-schema" in cmd
@@ -448,8 +486,10 @@ class TestNonLegacyConstructCommand:
     def test_no_auto_schema_when_raw_off(self, tmp_path):
         """No auto-injection when raw_output_to_file=False."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, raw_output_to_file=False,
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            raw_output_to_file=False,
         )
         cmd = inf.construct_command("Hello")
         assert "--output-schema" not in cmd
@@ -462,8 +502,10 @@ class TestNonLegacyConstructCommand:
     def test_jira_skipped(self, tmp_path, caplog):
         """--jira absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, jira="https://jira/PROJ-1",
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            jira="https://jira/PROJ-1",
         )
         with caplog.at_level(logging.WARNING):
             cmd = inf.construct_command("Hello")
@@ -473,8 +515,10 @@ class TestNonLegacyConstructCommand:
     def test_deep_plan_skipped(self, tmp_path, caplog):
         """--enable-deep-plan absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, enable_deep_plan=True,
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            enable_deep_plan=True,
         )
         with caplog.at_level(logging.WARNING):
             cmd = inf.construct_command("Hello")
@@ -484,8 +528,10 @@ class TestNonLegacyConstructCommand:
     def test_agent_mode_skipped(self, tmp_path, caplog):
         """--agent-mode absent and warning logged in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, agent_mode="ask",
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            agent_mode="ask",
         )
         with caplog.at_level(logging.WARNING):
             cmd = inf.construct_command("Hello")
@@ -500,8 +546,10 @@ class TestNonLegacyConstructCommand:
     def test_xid_present(self, tmp_path):
         """--xid works in non-legacy mode (hidden flag in TUI)."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, xid="test-xid",
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            xid="test-xid",
         )
         cmd = inf.construct_command("Hello")
         assert "--xid test-xid" in cmd
@@ -517,8 +565,10 @@ class TestNonLegacyConstructCommand:
     def test_config_override(self, tmp_path):
         """--config-override included in non-legacy mode."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, config_override='{"agent":{"modelId":"opus"}}',
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            config_override='{"agent":{"modelId":"opus"}}',
         )
         cmd = inf.construct_command("Hello")
         assert "--config-override" in cmd
@@ -526,7 +576,8 @@ class TestNonLegacyConstructCommand:
     def test_enable_legacy_default_true(self, tmp_path):
         """Default enable_legacy is True (backward compat)."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
         )
         assert inf.enable_legacy is True
         cmd = inf.construct_command("Hello")
@@ -547,7 +598,7 @@ class TestExtractJsonFromOutput:
 
     def test_with_tui_noise(self):
         """Parses JSON after TUI output noise."""
-        text = "Working in /tmp\n✔ Started 18 MCP servers\n\n{\n    \"response\": \"hello\"\n}\n"
+        text = 'Working in /tmp\n✔ Started 18 MCP servers\n\n{\n    "response": "hello"\n}\n'
         result = extract_json_from_output(text)
         assert result == {"response": "hello"}
 
@@ -606,8 +657,10 @@ class TestNonLegacyParseOutput:
     def test_user_schema_skips_json_extraction(self, tmp_path):
         """When user sets output_schema, JSON extraction is skipped."""
         inf = RovoDevCliInferencer(
-            acli_path="/usr/bin/acli", target_path=str(tmp_path),
-            enable_legacy=False, output_schema='{"type":"object"}',
+            acli_path="/usr/bin/acli",
+            target_path=str(tmp_path),
+            enable_legacy=False,
+            output_schema='{"type":"object"}',
         )
         stdout = '{"response": "should not extract"}'
         result = inf.parse_output(stdout, "", 0)

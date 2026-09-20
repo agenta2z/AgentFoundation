@@ -4,16 +4,15 @@ the instance ``_session_id`` as the legacy/no-ctx fallback. A branch write never
 pollutes the instance backing, so sibling cold reads can't see another branch's
 session (the V8 cold-read fix — see test_m6_cold_read_isolation)."""
 
-from attr import attrs
-
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
-from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    enter_run,
-    exit_run,
-)
+from attr import attrs
 
 
 @attrs

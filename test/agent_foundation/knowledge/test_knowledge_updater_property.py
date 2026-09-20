@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 16.5, 16.7**
 """
+
 import hashlib
 import sys
 from pathlib import Path
@@ -22,8 +23,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.knowledge_updater import (
     KnowledgeUpdater,
     UpdateConfig,
@@ -33,6 +32,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Test Helpers ──────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ class InMemoryPieceStore(KnowledgePieceStore):
 
     def __init__(self, pieces: Optional[List[KnowledgePiece]] = None):
         self._pieces: dict[str, KnowledgePiece] = {}
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:

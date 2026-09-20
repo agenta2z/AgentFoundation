@@ -13,6 +13,7 @@ These tests use simple in-memory stub stores that implement the ABC interfaces
 minimally. The piece store stub has supports_space_filter=False so the KB
 handles filtering via over-fetch + post-filter.
 """
+
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -30,21 +31,20 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import given, settings, strategies as st, assume
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
-from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
     GraphEdge,
+    GraphNode,
 )
 
 
@@ -141,8 +141,7 @@ class StubMetadataStore(MetadataStore):
     def list_entities(self, entity_type: str = None) -> List[str]:
         if entity_type:
             return [
-                eid for eid, m in self._metadata.items()
-                if m.entity_type == entity_type
+                eid for eid, m in self._metadata.items() if m.entity_type == entity_type
             ]
         return list(self._metadata.keys())
 
@@ -164,7 +163,8 @@ class StubGraphStore(EntityGraphStore):
         if node_id in self._nodes:
             del self._nodes[node_id]
             self._edges = [
-                e for e in self._edges
+                e
+                for e in self._edges
                 if e.source_id != node_id and e.target_id != node_id
             ]
             return True
@@ -329,7 +329,11 @@ class TestNoSpaceFilterReturnsAllSpaces:
             st.tuples(_spaces_list, st.sampled_from(["p1", "p2", "p3", "p4", "p5"])),
             min_size=1,
             max_size=5,
-        ).map(lambda xs: [(s, pid) for s, pid in dict([(pid, s) for s, pid in xs]).items()])
+        ).map(
+            lambda xs: [
+                (s, pid) for s, pid in dict([(pid, s) for s, pid in xs]).items()
+            ]
+        )
     )
     @settings(max_examples=100)
     def test_retrieve_without_spaces_returns_all_pieces(self, pieces_data):
@@ -406,9 +410,7 @@ class TestNoSpaceFilterReturnsAllSpaces:
         kb, piece_store, metadata_store, graph_store = _make_kb()
 
         # Add source node and a neighbor with specific spaces
-        source = GraphNode(
-            node_id="user:test", node_type="user", label="Test"
-        )
+        source = GraphNode(node_id="user:test", node_type="user", label="Test")
         neighbor = GraphNode(
             node_id="neighbor:1",
             node_type="entity",
@@ -417,11 +419,13 @@ class TestNoSpaceFilterReturnsAllSpaces:
         )
         graph_store.add_node(source)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id="user:test",
-            target_id="neighbor:1",
-            edge_type="RELATED",
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="user:test",
+                target_id="neighbor:1",
+                edge_type="RELATED",
+            )
+        )
 
         result = kb.retrieve("query")
 
@@ -545,9 +549,7 @@ class TestGraphTraversalSpaceFiltering:
         kb, piece_store, metadata_store, graph_store = _make_kb()
 
         # Add source node
-        source = GraphNode(
-            node_id="user:test", node_type="user", label="Test"
-        )
+        source = GraphNode(node_id="user:test", node_type="user", label="Test")
         graph_store.add_node(source)
 
         # Add neighbors with various spaces
@@ -563,11 +565,13 @@ class TestGraphTraversalSpaceFiltering:
                 properties={"spaces": spaces},
             )
             graph_store.add_node(neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id="user:test",
-                target_id=nid,
-                edge_type="RELATED",
-            ))
+            graph_store.add_relation(
+                GraphEdge(
+                    source_id="user:test",
+                    target_id=nid,
+                    edge_type="RELATED",
+                )
+            )
             if set(spaces) & set(space_filter):
                 expected_neighbor_ids.add(nid)
 
@@ -575,7 +579,8 @@ class TestGraphTraversalSpaceFiltering:
 
         # Filter out depth-0 seed entries — only check neighbor nodes
         returned_ids = {
-            ctx["target_node_id"] for ctx in result.graph_context
+            ctx["target_node_id"]
+            for ctx in result.graph_context
             if ctx.get("depth", 0) > 0
         }
         assert returned_ids == expected_neighbor_ids, (
@@ -592,9 +597,7 @@ class TestGraphTraversalSpaceFiltering:
         """
         kb, piece_store, metadata_store, graph_store = _make_kb()
 
-        source = GraphNode(
-            node_id="user:test", node_type="user", label="Test"
-        )
+        source = GraphNode(node_id="user:test", node_type="user", label="Test")
         # Neighbor with no spaces property at all
         neighbor = GraphNode(
             node_id="neighbor:no_spaces",
@@ -604,11 +607,13 @@ class TestGraphTraversalSpaceFiltering:
         )
         graph_store.add_node(source)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id="user:test",
-            target_id="neighbor:no_spaces",
-            edge_type="RELATED",
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="user:test",
+                target_id="neighbor:no_spaces",
+                edge_type="RELATED",
+            )
+        )
 
         result = kb.retrieve("query", spaces=space_filter)
 
@@ -616,7 +621,8 @@ class TestGraphTraversalSpaceFiltering:
         # Filter out depth-0 seed entries — only check neighbor nodes
         should_be_included = "main" in space_filter
         returned_ids = {
-            ctx["target_node_id"] for ctx in result.graph_context
+            ctx["target_node_id"]
+            for ctx in result.graph_context
             if ctx.get("depth", 0) > 0
         }
         if should_be_included:
@@ -650,9 +656,7 @@ class TestKnowledgeBaseCallableSpacesPassthrough:
         space_filter=_space_filter,
     )
     @settings(max_examples=100)
-    def test_callable_matches_explicit_retrieve_format(
-        self, pieces_data, space_filter
-    ):
+    def test_callable_matches_explicit_retrieve_format(self, pieces_data, space_filter):
         """kb(query, spaces=filter) == kb.formatter.format(kb.retrieve(query, spaces=filter)).
 
         **Validates: Requirements 3.5**

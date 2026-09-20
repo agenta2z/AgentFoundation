@@ -6,12 +6,11 @@ Feature: meta-agent-workflow, Property 21: Validation success rate calculation
 **Validates: Requirements 8.4**
 """
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     ValidationResult,
     ValidationResults,
 )
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------

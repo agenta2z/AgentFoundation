@@ -1,0 +1,125 @@
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
+
+oncall("ml_oncall")
+
+# Shared no-network test doubles (FakeInferencer / SessionFake / AsyncOnlyFake /
+# PreflightFake), imported by the co-located tests via `from ._helpers import ...`.
+python_library(
+    name = "helpers",
+    srcs = ["_helpers.py"],
+    typing = False,
+)
+
+python_unittest(
+    name = "test_plus",
+    srcs = ["test_plus.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_config",
+    srcs = ["test_config.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_decorator",
+    srcs = ["test_decorator.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_run_context",
+    srcs = ["test_run_context.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_parsers",
+    srcs = ["test_parsers.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_stage0_normalize",
+    srcs = ["test_stage0_normalize.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_rendering",
+    srcs = ["test_rendering.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_body_roles",
+    srcs = ["test_body_roles.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":helpers",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_output",
+    srcs = ["test_output.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_trace",
+    srcs = ["test_trace.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

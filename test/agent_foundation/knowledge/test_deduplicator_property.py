@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5**
 """
+
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -21,8 +22,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.deduplicator import (
     DedupConfig,
     ThreeTierDeduplicator,
@@ -34,6 +33,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
 )
 from agent_foundation.knowledge.retrieval.models.results import DedupResult
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Test Helpers ──────────────────────────────────────────────────────────────
@@ -42,10 +42,12 @@ from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePie
 class InMemoryPieceStore(KnowledgePieceStore):
     """Minimal in-memory store for property testing with controllable search scores."""
 
-    def __init__(self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.5):
+    def __init__(
+        self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.5
+    ):
         self._pieces: dict[str, KnowledgePiece] = {}
         self._score = score
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:
@@ -101,21 +103,31 @@ _content_strategy = st.text(
 )
 
 # Thresholds: auto_dedup > llm_judge, both in (0, 1)
-_threshold_pair_strategy = st.tuples(
-    st.floats(min_value=0.01, max_value=0.99),
-    st.floats(min_value=0.01, max_value=0.99),
-).filter(lambda t: t[0] > t[1]).map(
-    lambda t: (t[0], t[1])  # (auto_dedup_threshold, llm_judge_threshold)
+_threshold_pair_strategy = (
+    st.tuples(
+        st.floats(min_value=0.01, max_value=0.99),
+        st.floats(min_value=0.01, max_value=0.99),
+    )
+    .filter(lambda t: t[0] > t[1])
+    .map(
+        lambda t: (t[0], t[1])  # (auto_dedup_threshold, llm_judge_threshold)
+    )
 )
 
 # Score above auto_dedup_threshold
-_score_above_auto_dedup = st.floats(min_value=0.981, max_value=1.0, allow_nan=False, allow_infinity=False)
+_score_above_auto_dedup = st.floats(
+    min_value=0.981, max_value=1.0, allow_nan=False, allow_infinity=False
+)
 
 # Score below llm_judge_threshold
-_score_below_llm_judge = st.floats(min_value=0.0, max_value=0.849, allow_nan=False, allow_infinity=False)
+_score_below_llm_judge = st.floats(
+    min_value=0.0, max_value=0.849, allow_nan=False, allow_infinity=False
+)
 
 # Score between thresholds (borderline)
-_score_borderline = st.floats(min_value=0.851, max_value=0.979, allow_nan=False, allow_infinity=False)
+_score_borderline = st.floats(
+    min_value=0.851, max_value=0.979, allow_nan=False, allow_infinity=False
+)
 
 
 # Feature: knowledge-module-migration, Property 17: Deduplicator threshold decision boundaries
@@ -134,8 +146,12 @@ class TestDeduplicatorThresholdDecisionBoundaries:
 
     @given(
         content=_content_strategy,
-        auto_dedup_threshold=st.floats(min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False),
-        llm_judge_threshold=st.floats(min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False),
+        auto_dedup_threshold=st.floats(
+            min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        llm_judge_threshold=st.floats(
+            min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_score_above_auto_dedup_returns_no_op(
@@ -176,8 +192,12 @@ class TestDeduplicatorThresholdDecisionBoundaries:
 
     @given(
         content=_content_strategy,
-        auto_dedup_threshold=st.floats(min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False),
-        llm_judge_threshold=st.floats(min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False),
+        auto_dedup_threshold=st.floats(
+            min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        llm_judge_threshold=st.floats(
+            min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_score_below_llm_judge_returns_add(
@@ -217,8 +237,12 @@ class TestDeduplicatorThresholdDecisionBoundaries:
 
     @given(
         content=_content_strategy,
-        auto_dedup_threshold=st.floats(min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False),
-        llm_judge_threshold=st.floats(min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False),
+        auto_dedup_threshold=st.floats(
+            min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        llm_judge_threshold=st.floats(
+            min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_borderline_score_with_tier3_disabled_returns_add(
@@ -260,8 +284,12 @@ class TestDeduplicatorThresholdDecisionBoundaries:
 
     @given(
         content=_content_strategy,
-        auto_dedup_threshold=st.floats(min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False),
-        llm_judge_threshold=st.floats(min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False),
+        auto_dedup_threshold=st.floats(
+            min_value=0.90, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        llm_judge_threshold=st.floats(
+            min_value=0.50, max_value=0.89, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_borderline_score_with_tier3_enabled_invokes_llm(
@@ -356,7 +384,9 @@ class TestDeduplicatorTier1ExactHashMatch:
         content2=_content_strategy,
     )
     @settings(max_examples=100)
-    def test_whitespace_only_difference_matches_hash(self, content1: str, content2: str):
+    def test_whitespace_only_difference_matches_hash(
+        self, content1: str, content2: str
+    ):
         """Two pieces with content differing only in whitespace should have the same hash.
 
         **Validates: Requirements 12.1**

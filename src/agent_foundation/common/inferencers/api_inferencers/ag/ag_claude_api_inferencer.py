@@ -9,9 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator, Iterable, Optional, Union
 
-from attr import attrib, attrs
-
-from agent_foundation.apis.claude_llm import ClaudeModels
 from agent_foundation.apis.ag.ai_gateway_claude_llm import (
     AIGatewayClaudeModels,
     generate_text as ai_gateway_generate_text,
@@ -19,9 +16,11 @@ from agent_foundation.apis.ag.ai_gateway_claude_llm import (
     generate_text_streaming as ai_gateway_generate_text_streaming,
 )
 from agent_foundation.apis.ag.gateway_mode import DEFAULT_PROXIMITY_PORT, GatewayMode
+from agent_foundation.apis.claude_llm import ClaudeModels
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -182,13 +181,15 @@ class AgClaudeApiInferencer(StreamingInferencerBase):
         keyword argument' errors when the base class merges user kwargs
         into _inference_args.
         """
-        args.setdefault('max_new_tokens', self.max_tokens)
-        args.setdefault('temperature', self.temperature)
+        args.setdefault("max_new_tokens", self.max_tokens)
+        args.setdefault("temperature", self.temperature)
         if self.system_prompt:
-            args.setdefault('system', self.system_prompt)
+            args.setdefault("system", self.system_prompt)
         return args
 
-    def _infer(self, inference_input: str, inference_config: Any = None, **_inference_args) -> str:
+    def _infer(
+        self, inference_input: str, inference_config: Any = None, **_inference_args
+    ) -> str:
         """Execute sync inference, injecting gateway_mode and proximity_port."""
         self._apply_defaults(_inference_args)
         response = ai_gateway_generate_text(
@@ -197,11 +198,13 @@ class AgClaudeApiInferencer(StreamingInferencerBase):
             api_key=self.secret_key,
             gateway_mode=self.gateway_mode,
             proximity_port=self.proximity_port,
-            **_inference_args
+            **_inference_args,
         )
         return response
 
-    async def _ainfer(self, inference_input: Any, inference_config: Any = None, **_inference_args) -> str:
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ) -> str:
         """Direct async inference via generate_text_async().
 
         Calls the non-streaming async API for efficiency when streaming
@@ -215,7 +218,10 @@ class AgClaudeApiInferencer(StreamingInferencerBase):
             proximity_port=self.proximity_port,
             **_inference_args,
         )
-        logger.debug("AG async response: %s", response[:200] if isinstance(response, str) and response else "")
+        logger.debug(
+            "AG async response: %s",
+            response[:200] if isinstance(response, str) and response else "",
+        )
         return response
 
     async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
@@ -224,7 +230,9 @@ class AgClaudeApiInferencer(StreamingInferencerBase):
         if messages is not None:
             self._messages_override = None
         else:
-            messages = prompt  # generate_text_streaming handles str -> messages conversion
+            messages = (
+                prompt  # generate_text_streaming handles str -> messages conversion
+            )
 
         self._apply_defaults(kwargs)
         async for chunk in ai_gateway_generate_text_streaming(

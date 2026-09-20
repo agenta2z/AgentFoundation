@@ -127,7 +127,9 @@ def check_proximity_available(port: int = DEFAULT_PROXIMITY_PORT) -> Tuple[bool,
         return False, f"proximity healthcheck error: {e}"
 
 
-def check_slauth_server_available(url: str = DEFAULT_SLAUTH_SERVER_URL) -> Tuple[bool, str]:
+def check_slauth_server_available(
+    url: str = DEFAULT_SLAUTH_SERVER_URL,
+) -> Tuple[bool, str]:
     """Check if the atlas SLAuth server is running.
 
     Attempts a TCP socket connection to the server's host and port.
@@ -179,7 +181,9 @@ def detect_available_mode(
     checks = {
         GatewayMode.DIRECT: lambda: check_direct_available(),
         GatewayMode.PROXIMITY: lambda: check_proximity_available(proximity_port),
-        GatewayMode.SLAUTH_SERVER: lambda: check_slauth_server_available(slauth_server_url),
+        GatewayMode.SLAUTH_SERVER: lambda: check_slauth_server_available(
+            slauth_server_url
+        ),
     }
 
     reasons = []
@@ -226,7 +230,9 @@ def get_direct_slauth_token(env: str = "staging", groups: str = None) -> str:
         f"--groups={groups} --force --ttl 60m"
     )
 
-    result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd, shell=True, check=True, capture_output=True, text=True, timeout=30
+    )
     return result.stdout.strip()
 
 
@@ -272,7 +278,7 @@ def bedrock_model_to_anthropic(bedrock_model: str) -> str:
     # Fallback: strip "anthropic." prefix and version suffix
     name = bedrock_model
     if name.startswith("anthropic."):
-        name = name[len("anthropic."):]
+        name = name[len("anthropic.") :]
     # Remove trailing version like "-v1:0" or "-v2:0"
     for suffix in ["-v1:0", "-v2:0", "-v1", "-v2"]:
         if name.endswith(suffix):

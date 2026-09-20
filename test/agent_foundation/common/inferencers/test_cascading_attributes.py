@@ -16,12 +16,11 @@ cascade fires at construction (as it does for orchestrators that call super()).
 import functools
 
 import pytest
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 
 @attrs
@@ -38,6 +37,7 @@ class StubInferencer(TemplatedInferencerBase):
 @attrs
 class CustomCascadeInferencer(StubInferencer):
     """Adds a (name, condition) tuple entry to exercise the conditional form."""
+
     model_id: str = attrib(default=None)
     _CASCADING_ATTRIBUTES = InferencerBase._CASCADING_ATTRIBUTES + [
         ("model_id", lambda parent_val, child_val: not child_val),
@@ -47,6 +47,7 @@ class CustomCascadeInferencer(StubInferencer):
 # ---------------------------------------------------------------------------
 # Construction-time cascade (post_init)
 # ---------------------------------------------------------------------------
+
 
 class TestConstructionTimeCascade:
     def test_cascades_to_unset_direct_child(self):
@@ -98,6 +99,7 @@ class TestConstructionTimeCascade:
 # Runtime toggle (enable_debug_mode / disable_debug_mode)
 # ---------------------------------------------------------------------------
 
+
 class TestRuntimeToggle:
     def test_enable_debug_mode_cascades(self):
         child = StubInferencer()
@@ -127,6 +129,7 @@ class TestRuntimeToggle:
 # Partial-child boundary (factory children NOT mutated here)
 # ---------------------------------------------------------------------------
 
+
 class TestPartialBoundary:
     def test_partial_child_not_mutated(self):
         factory = functools.partial(StubInferencer)
@@ -142,6 +145,7 @@ class TestPartialBoundary:
 # ---------------------------------------------------------------------------
 # Conditional (name, condition) tuple form
 # ---------------------------------------------------------------------------
+
 
 class TestConditionalForm:
     def test_tuple_condition_cascades_when_falsy(self):
@@ -159,6 +163,7 @@ class TestConditionalForm:
 # Real ConversationalInferencer: the user's target scenario
 # ---------------------------------------------------------------------------
 
+
 class TestConversationalInferencerCascade:
     """The CI's __attrs_post_init__ does NOT chain super(), so the
     construction-time cascade does not reach it — enable_debug_mode() is the
@@ -168,6 +173,7 @@ class TestConversationalInferencerCascade:
         from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
             ConversationalInferencer,
         )
+
         return ConversationalInferencer(base_inferencer=base)
 
     def test_constructor_debug_mode_does_not_cascade_for_ci(self):

@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Common utilities for Claude Code inferencers.
@@ -40,9 +39,7 @@ PermissionModeLiteral = Literal[
 # Subset of ``EffortLevel`` that the installed claude-agent-sdk's typed
 # ``effort`` field accepts. Values outside this set must be passed via
 # ``extra_args`` instead of the typed field.
-SDK_NATIVE_EFFORT_LEVELS: frozenset[str] = frozenset(
-    {"low", "medium", "high", "max"}
-)
+SDK_NATIVE_EFFORT_LEVELS: frozenset[str] = frozenset({"low", "medium", "high", "max"})
 
 # Subset of ``PermissionModeLiteral`` that the installed claude-agent-sdk's
 # typed ``permission_mode`` field accepts.
@@ -104,12 +101,14 @@ def resolve_disable_osx_sandbox(explicit: Optional[bool]) -> bool:
         if explicit is True or env_flag_enabled(ENV_DISABLE_OSX_SANDBOX):
             _logger.debug(
                 "%s is a macOS-only flag; ignoring on platform=%s.",
-                DANGEROUSLY_DISABLE_OSX_SANDBOX, sys.platform,
+                DANGEROUSLY_DISABLE_OSX_SANDBOX,
+                sys.platform,
             )
         return False
     if explicit is not None:
         return bool(explicit)
     return env_flag_enabled(ENV_DISABLE_OSX_SANDBOX)
+
 
 # Explicit mapping for Anthropic API / ClaudeModels values whose short
 # alias cannot be derived by simple date-stripping + regex conversion.

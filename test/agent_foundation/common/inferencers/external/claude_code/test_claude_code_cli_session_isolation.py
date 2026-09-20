@@ -153,7 +153,8 @@ class TestClaudeCodeCliSessionIsolation(unittest.TestCase):
             "or say 'I don\\'t know any secret word' if you don\\'t.",
         )
         self.assertNotIn(
-            "telescope", output.lower(),
+            "telescope",
+            output.lower(),
             "New session must NOT know 'telescope' from another session",
         )
 
@@ -172,7 +173,8 @@ class TestClaudeCodeCliSessionIsolation(unittest.TestCase):
         # Now recall the secret from a fresh inferencer
         recall = _ask_secret(sid)
         self.assertIn(
-            "sunflower", recall.lower(),
+            "sunflower",
+            recall.lower(),
             "Secret 'sunflower' should survive multiple turns of chitchat",
         )
 

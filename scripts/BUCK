@@ -11,5 +11,42 @@ python_binary(
     main_function = "agent_foundation.scripts.run_research_propose.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        # MetaMate GraphQL client (lazy-imported by ``MetamateSDKInferencer``).
+        # Without this dep, every Metamate flow in a multi-inferencer topology
+        # fails with ``RuntimeError: MetaMate upstream client not available:
+        # No module named 'msl'``. Matches the dep declared by the metamate
+        # SDK example at ``examples/.../external/metamate/BUCK``.
+    ],
+)
+
+# Live probe for the code-scope judge on its Plugboard backend: a backend smoke
+# call plus a fixed task set driven through the real ``judge_code_scope``.
+# Needs ``agent_foundation`` (the Plugboard inferencer + agentic_functions) in
+# addition to the metamate sources that define the judge.
+python_binary(
+    name = "probe_scope_judge",
+    srcs = ["probe_scope_judge.py"],
+    base_module = "agent_foundation.scripts",
+    main_function = "agent_foundation.scripts.probe_scope_judge.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# Throwaway reproduction harness: re-drive flow_03's exact InferenceInput
+# through ``MetamateSDKInferencer._ainfer_streaming`` (one raw Metamate turn) to
+# empirically confirm whether the server still OOMs. Same deps as above.
+python_binary(
+    name = "reproduce_flow03",
+    srcs = ["reproduce_flow03.py"],
+    base_module = "agent_foundation.scripts",
+    main_function = "agent_foundation.scripts.reproduce_flow03.main",
+    deps = [
+        # ``metamate_lib`` declares no deps of its own, so the full library is
+        # required too: the scope judge (on by default) resolves its Plugboard
+        # inferencer out of ``agent_foundation`` at first call.
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        # MetaMate GraphQL client, lazy-imported by ``MetamateSDKInferencer``;
+        # ``preflight()`` fails fast without it ("No module named 'msl'").
     ],
 )

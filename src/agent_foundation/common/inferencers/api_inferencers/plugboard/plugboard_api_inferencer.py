@@ -1,5 +1,3 @@
-
-
 """Plugboard inferencer with native streaming support.
 
 Extends StreamingInferencerBase so that streaming capability is built-in.
@@ -11,10 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +36,9 @@ class PlugboardApiInferencer(StreamingInferencerBase):
 
     system_prompt: str = attrib(default="")
     max_tokens: int = attrib(default=4096)
-    temperature: float = attrib(default=0.7)
+    # ``None`` omits the field from the request entirely — required by the newer
+    # Claude deployments, which reject ``temperature`` as deprecated.
+    temperature: Optional[float] = attrib(default=0.7)
     pipeline: str = attrib(default="usecase-dev-ai")
     model_pipeline_overrides: dict = attrib(factory=dict)
     _messages_override: Optional[list] = attrib(default=None, init=False)
@@ -100,9 +100,7 @@ class PlugboardApiInferencer(StreamingInferencerBase):
 
     async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield text chunks from Plugboard streaming API."""
-        from agent_foundation.apis.plugboard import (
-            generate_text_streaming,
-        )
+        from agent_foundation.apis.plugboard import generate_text_streaming
 
         messages = self._messages_override
         if messages is not None:

@@ -5,7 +5,8 @@ This module provides reusable message bubble components for chat interfaces,
 supporting different roles (user, assistant) and styling.
 """
 
-from typing import Optional, Literal
+from typing import Literal, Optional
+
 from dash import html
 
 
@@ -34,7 +35,7 @@ def create_message_bubble(
     avatar_margin: str = "12px",
     timestamp_font_size: str = "11px",
     timestamp_color: str = "#8E8EA0",
-    timestamp_margin_top: str = "8px"
+    timestamp_margin_top: str = "8px",
 ) -> html.Div:
     """
     Create a styled message bubble for chat interfaces.
@@ -112,10 +113,10 @@ def create_message_bubble(
         timestamp_element = html.Div(
             timestamp,
             style={
-                'fontSize': timestamp_font_size,
-                'color': timestamp_color,
-                'marginTop': timestamp_margin_top
-            }
+                "fontSize": timestamp_font_size,
+                "color": timestamp_color,
+                "marginTop": timestamp_margin_top,
+            },
         )
 
     # Create the message bubble
@@ -126,42 +127,38 @@ def create_message_bubble(
                     html.Div(
                         avatar,
                         style={
-                            'fontSize': avatar_size,
-                            'marginRight': avatar_margin,
-                            'flexShrink': '0'
-                        }
+                            "fontSize": avatar_size,
+                            "marginRight": avatar_margin,
+                            "flexShrink": "0",
+                        },
                     ),
                     html.Div(
                         children=[
                             html.Div(
                                 content,
                                 style={
-                                    'whiteSpace': 'pre-wrap',
-                                    'wordBreak': 'break-word',
-                                    'lineHeight': line_height,
-                                    'fontSize': font_size
-                                }
+                                    "whiteSpace": "pre-wrap",
+                                    "wordBreak": "break-word",
+                                    "lineHeight": line_height,
+                                    "fontSize": font_size,
+                                },
                             ),
-                            timestamp_element
+                            timestamp_element,
                         ],
-                        style={'flex': '1'}
-                    )
+                        style={"flex": "1"},
+                    ),
                 ],
                 style={
-                    'display': 'flex',
-                    'padding': padding,
-                    'backgroundColor': bg_color,
-                    'borderRadius': border_radius,
-                    'maxWidth': max_width,
-                    'color': text_color
-                }
+                    "display": "flex",
+                    "padding": padding,
+                    "backgroundColor": bg_color,
+                    "borderRadius": border_radius,
+                    "maxWidth": max_width,
+                    "color": text_color,
+                },
             )
         ],
-        style={
-            'display': 'flex',
-            'justifyContent': align,
-            'width': '100%'
-        }
+        style={"display": "flex", "justifyContent": align, "width": "100%"},
     )
 
 
@@ -174,7 +171,7 @@ def create_welcome_message(
     title_font_size: str = "24px",
     subtitle_font_size: str = "15px",
     icon_size: str = "48px",
-    spacing: str = "16px"
+    spacing: str = "16px",
 ) -> html.Div:
     """
     Create a welcome message for empty chat state.
@@ -200,44 +197,35 @@ def create_welcome_message(
         ... )
     """
     children = [
-        html.Div(
-            icon,
-            style={
-                'fontSize': icon_size,
-                'marginBottom': spacing
-            }
-        ),
+        html.Div(icon, style={"fontSize": icon_size, "marginBottom": spacing}),
         html.Div(
             title,
             style={
-                'fontSize': title_font_size,
-                'fontWeight': 'bold',
-                'color': title_color,
-                'marginBottom': spacing if subtitle else '0'
-            }
-        )
+                "fontSize": title_font_size,
+                "fontWeight": "bold",
+                "color": title_color,
+                "marginBottom": spacing if subtitle else "0",
+            },
+        ),
     ]
 
     if subtitle:
         children.append(
             html.Div(
                 subtitle,
-                style={
-                    'fontSize': subtitle_font_size,
-                    'color': subtitle_color
-                }
+                style={"fontSize": subtitle_font_size, "color": subtitle_color},
             )
         )
 
     return html.Div(
         children=children,
         style={
-            'display': 'flex',
-            'flexDirection': 'column',
-            'justifyContent': 'center',
-            'alignItems': 'center',
-            'height': '100%',
-            'textAlign': 'center',
-            'padding': '40px'
-        }
+            "display": "flex",
+            "flexDirection": "column",
+            "justifyContent": "center",
+            "alignItems": "center",
+            "height": "100%",
+            "textAlign": "center",
+            "padding": "40px",
+        },
     )

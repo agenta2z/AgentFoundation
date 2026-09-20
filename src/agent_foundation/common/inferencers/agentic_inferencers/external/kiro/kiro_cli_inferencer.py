@@ -10,12 +10,12 @@ import logging
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -185,9 +185,7 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         return " ".join(command_parts)
 
-    def parse_output(
-        self, stdout: str, stderr: str, return_code: int
-    ) -> dict:
+    def parse_output(self, stdout: str, stderr: str, return_code: int) -> dict:
         """Parse command output into a response dict.
 
         Simple text-based parsing — no JSON extraction needed.

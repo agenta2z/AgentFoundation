@@ -33,9 +33,7 @@ class StreamBridgeAdapter:
     """
 
     def __init__(self) -> None:
-        self._queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = (
-            asyncio.Queue()
-        )
+        self._queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
         self._closed: bool = False
         self._token_count: int = 0
         self._start_time: float = time.monotonic()

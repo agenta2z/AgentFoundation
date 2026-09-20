@@ -30,7 +30,9 @@ class RuntimeBindings:
 
     graph_reporter: Any = None  # fan-out via child_reporter (concurrency-safe)
     interactive: Any = None  # ⚠️ NOT concurrency-safe under parallel HITL (§2.11/J8)
-    checkpoint_store: Any = None  # optional live progress sink (§8.4 — not load-bearing)
+    checkpoint_store: Any = (
+        None  # optional live progress sink (§8.4 — not load-bearing)
+    )
     cancellation_token: Any = None  # read-only, shared by reference (P-#6)
 
     # -- Part F: graph node identity = ctx path -----------------------------
@@ -54,7 +56,7 @@ class RuntimeBindings:
         p = ctx_path or "/"
         base = (base_path or "/").rstrip("/")
         if base and (p == base or p.startswith(base + "/")):
-            rel = p[len(base):]
+            rel = p[len(base) :]
         else:
             rel = p
         return rel.strip("/")

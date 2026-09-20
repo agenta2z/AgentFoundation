@@ -167,22 +167,32 @@ class TestActualLWIIntegration(unittest.TestCase):
         """Sanity check that the actual production code contains the
         hierarchical block with step_index >= 2 guard and self._workspace.child()."""
         import inspect
+
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers import (
             linear_workflow_inferencer as lwi_module,
         )
-        source = inspect.getsource(lwi_module.LinearWorkflowInferencer._build_dynamic_step_wrapper)
-        self.assertIn("step_index >= 2", source,
-                      "step_index >= 2 guard missing")
-        self.assertNotIn("_base_followup_workspace", source,
-                         "Stale _base_followup_workspace stash still present")
+
+        source = inspect.getsource(
+            lwi_module.LinearWorkflowInferencer._build_dynamic_step_wrapper
+        )
+        self.assertIn("step_index >= 2", source, "step_index >= 2 guard missing")
+        self.assertNotIn(
+            "_base_followup_workspace",
+            source,
+            "Stale _base_followup_workspace stash still present",
+        )
 
     def test_lwi_propagation_override_exists(self):
         """LWI must have _propagate_workspace_to_children override."""
         import inspect
+
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers import (
             linear_workflow_inferencer as lwi_module,
         )
-        source = inspect.getsource(lwi_module.LinearWorkflowInferencer._propagate_workspace_to_children)
+
+        source = inspect.getsource(
+            lwi_module.LinearWorkflowInferencer._propagate_workspace_to_children
+        )
         self.assertIn("initial", source, "initial child name missing")
         self.assertIn("round01", source, "round01 child name missing")
 
@@ -191,6 +201,7 @@ class TestActualLWIIntegration(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
             LinearWorkflowInferencer,
         )
+
         skip = LinearWorkflowInferencer._workspace_propagation_skip
         self.assertIn("default_initial_inferencer", skip)
         self.assertIn("default_followup_inferencer", skip)

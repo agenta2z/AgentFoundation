@@ -1,5 +1,3 @@
-
-
 """Unit tests for the dual-timer (tool_use_idle_timeout_seconds) feature
 in StreamingInferencerBase.ainfer_streaming().
 
@@ -15,10 +13,10 @@ import unittest
 from typing import Any, AsyncIterator, Optional
 from unittest.mock import patch
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 
 @attrs

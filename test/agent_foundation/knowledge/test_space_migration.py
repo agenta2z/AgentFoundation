@@ -11,6 +11,7 @@ Tests the migration utility with mock stores to verify:
 
 Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 13.1, 13.2
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -73,8 +74,13 @@ def _make_metadata(entity_id="user:alice", entity_type="user", spaces=None):
     )
 
 
-def _make_kb_mock(pieces_by_scope=None, metadata_list=None, entity_ids=None,
-                  relations_by_entity=None, nodes_by_id=None):
+def _make_kb_mock(
+    pieces_by_scope=None,
+    metadata_list=None,
+    entity_ids=None,
+    relations_by_entity=None,
+    nodes_by_id=None,
+):
     """Create a mock KnowledgeBase with configurable stores.
 
     Args:
@@ -179,7 +185,9 @@ class TestSpaceMigrationUtility:
 
         # list_all should have been called for each entity + global
         calls = kb.piece_store.list_all.call_args_list
-        called_entity_ids = [c.kwargs.get("entity_id", c.args[0] if c.args else None) for c in calls]
+        called_entity_ids = [
+            c.kwargs.get("entity_id", c.args[0] if c.args else None) for c in calls
+        ]
         assert None in called_entity_ids  # global
         assert "user:alice" in called_entity_ids
         assert "service:grocery" in called_entity_ids
@@ -287,9 +295,7 @@ class TestSpaceMigrationUtility:
 
     def test_graph_node_migration(self):
         """Graph nodes discovered via relations should have spaces updated."""
-        node_user = GraphNode(
-            node_id="user:alice", node_type="user", properties={}
-        )
+        node_user = GraphNode(node_id="user:alice", node_type="user", properties={})
         node_service = GraphNode(
             node_id="service:grocery", node_type="service", properties={}
         )
@@ -359,7 +365,9 @@ class TestSpaceMigrationUtility:
         pieces = [
             _make_piece("p1", entity_id="user:alice", spaces=["main"]),
             _make_piece("p2", entity_id=None, spaces=["main"]),
-            _make_piece("p3", entity_id=None, spaces=["main"], validation_status="failed"),
+            _make_piece(
+                "p3", entity_id=None, spaces=["main"], validation_status="failed"
+            ),
         ]
 
         kb = _make_kb_mock(
@@ -438,7 +446,9 @@ class TestSpaceMigrationUtility:
             node_id="user:alice", node_type="user", properties={"spaces": ["personal"]}
         )
         node_service = GraphNode(
-            node_id="service:grocery", node_type="service", properties={"spaces": ["main"]}
+            node_id="service:grocery",
+            node_type="service",
+            properties={"spaces": ["main"]},
         )
         edge = GraphEdge(
             source_id="user:alice",
@@ -479,6 +489,8 @@ class TestSpaceMigrationUtility:
         report = utility.migrate()
 
         assert len(report.errors) >= 1
-        assert "list entities" in report.errors[0].lower() or "DB down" in report.errors[0]
+        assert (
+            "list entities" in report.errors[0].lower() or "DB down" in report.errors[0]
+        )
         # Global pieces should still be processed
         assert report.total_scanned >= 1

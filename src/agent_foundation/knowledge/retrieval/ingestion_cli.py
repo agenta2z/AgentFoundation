@@ -7,6 +7,7 @@ into a KnowledgeBase using KnowledgeDataLoader.
 
 Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7
 """
+
 import json
 import logging
 import os
@@ -17,13 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
 from agent_foundation.knowledge.prompt_templates import render_prompt
-
 
 
 class KnowledgeIngestionCLI:
@@ -148,7 +148,7 @@ class KnowledgeIngestionCLI:
         if text.startswith("```"):
             # Remove opening fence (```json or ```)
             first_newline = text.index("\n")
-            text = text[first_newline + 1:]
+            text = text[first_newline + 1 :]
             # Remove closing fence
             if text.rstrip().endswith("```"):
                 text = text.rstrip()[:-3].rstrip()
@@ -165,9 +165,7 @@ class KnowledgeIngestionCLI:
         required_sections = ["metadata", "pieces", "graph"]
         missing = [s for s in required_sections if s not in data]
         if missing:
-            raise ValueError(
-                f"Missing required sections: {', '.join(missing)}"
-            )
+            raise ValueError(f"Missing required sections: {', '.join(missing)}")
 
         # Validate pieces have required fields
         required_piece_fields = [
@@ -177,13 +175,10 @@ class KnowledgeIngestionCLI:
             "info_type",
         ]
         for i, piece in enumerate(data.get("pieces", [])):
-            missing_fields = [
-                f for f in required_piece_fields if f not in piece
-            ]
+            missing_fields = [f for f in required_piece_fields if f not in piece]
             if missing_fields:
                 raise ValueError(
-                    f"Piece {i} missing required fields: "
-                    f"{', '.join(missing_fields)}"
+                    f"Piece {i} missing required fields: {', '.join(missing_fields)}"
                 )
 
         return data
@@ -262,9 +257,7 @@ class KnowledgeIngestionCLI:
         import sys
 
         print("Knowledge Ingestion CLI")
-        print(
-            "Enter your information (press Ctrl+D or Ctrl+Z to finish):"
-        )
+        print("Enter your information (press Ctrl+D or Ctrl+Z to finish):")
         user_text = sys.stdin.read()
         if not user_text.strip():
             print("No input provided.")

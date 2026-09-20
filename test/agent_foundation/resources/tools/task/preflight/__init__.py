@@ -8,7 +8,7 @@ to be wasted compute.
 Layout:
   preflight/
     test_yaml_smoke.py                 # YAML loads + topology instantiates
-    test_workspace_final_deliverables.py  # use_final_deliverables_folder=True wiring
+    test_workspace_final_deliverables.py  # outer workspace uses two-axis outputs/
     ...
 
 Run all preflights:

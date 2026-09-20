@@ -16,15 +16,14 @@ behavior byte-for-byte.
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.run_context import (
-    CollisionError,
-    RunContext,
-    RunStateStore,
     active_run_context,
     bridge_entrypoint,
+    CollisionError,
     enter_run,
     exit_run,
+    RunContext,
+    RunStateStore,
 )
 
 

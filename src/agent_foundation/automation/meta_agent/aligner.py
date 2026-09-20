@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
     _HAS_BS4 = False
 
 # Regex helpers for lightweight HTML attribute extraction.
-_ATTR_RE = re.compile(r'''([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')''')
+_ATTR_RE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 _TAG_RE = re.compile(r"<(\w+)[\s>]")
 
 
@@ -59,7 +59,9 @@ class TraceAligner:
         """
         if not traces:
             return AlignedTraceSet(
-                positions=[], trace_ids=[], alignment_score=1.0,
+                positions=[],
+                trace_ids=[],
+                alignment_score=1.0,
             )
 
         trace_ids = [t.trace_id for t in traces]
@@ -77,10 +79,12 @@ class TraceAligner:
         alignment = self._pairwise_align(traces[0], traces[1])
         multi: List[Dict[str, Optional[int]]] = []
         for idx_a, idx_b in alignment:
-            multi.append({
-                traces[0].trace_id: idx_a,
-                traces[1].trace_id: idx_b,
-            })
+            multi.append(
+                {
+                    traces[0].trace_id: idx_a,
+                    traces[1].trace_id: idx_b,
+                }
+            )
 
         for trace in traces[2:]:
             multi = self._fold_trace(multi, traces, trace)
@@ -107,12 +111,14 @@ class TraceAligner:
             if alignment_type == AlignmentType.DETERMINISTIC:
                 total_matched += 1
 
-            positions.append(AlignedPosition(
-                index=pos_idx,
-                alignment_type=alignment_type,
-                steps=steps,
-                confidence=confidence,
-            ))
+            positions.append(
+                AlignedPosition(
+                    index=pos_idx,
+                    alignment_type=alignment_type,
+                    steps=steps,
+                    confidence=confidence,
+                )
+            )
 
         alignment_score = (
             total_matched / total_positions if total_positions > 0 else 1.0
@@ -251,7 +257,9 @@ class TraceAligner:
     # ------------------------------------------------------------------
 
     def _targets_match_by_selectors(
-        self, target_a: Any, target_b: Any,
+        self,
+        target_a: Any,
+        target_b: Any,
     ) -> bool:
         """
         Strategy (a): Compare targets by stable selectors.
@@ -269,7 +277,9 @@ class TraceAligner:
         return bool(selectors_a & selectors_b)
 
     def _targets_match_by_html(
-        self, step_a: TraceStep, step_b: TraceStep,
+        self,
+        step_a: TraceStep,
+        step_b: TraceStep,
     ) -> bool:
         """
         Strategy (b): Compare targets by HTML element structure.
@@ -286,7 +296,9 @@ class TraceAligner:
         return sig_a == sig_b
 
     def _targets_match_by_reasoning(
-        self, step_a: TraceStep, step_b: TraceStep,
+        self,
+        step_a: TraceStep,
+        step_b: TraceStep,
     ) -> bool:
         """
         Strategy (c): Compare targets by reasoning / description text.
@@ -338,9 +350,7 @@ class TraceAligner:
 
         # All non-None steps have equivalent type + target.
         # Now check args.
-        all_same_args = all(
-            _args_equal(reference.args, s.args) for s in non_none[1:]
-        )
+        all_same_args = all(_args_equal(reference.args, s.args) for s in non_none[1:])
 
         if has_gaps:
             if all_same_args:
@@ -358,17 +368,20 @@ class TraceAligner:
     # ------------------------------------------------------------------
 
     def _single_trace_positions(
-        self, trace: ExecutionTrace,
+        self,
+        trace: ExecutionTrace,
     ) -> List[AlignedPosition]:
         """Build positions for a single trace (all DETERMINISTIC)."""
         positions: List[AlignedPosition] = []
         for i, step in enumerate(trace.steps):
-            positions.append(AlignedPosition(
-                index=i,
-                alignment_type=AlignmentType.DETERMINISTIC,
-                steps={trace.trace_id: step},
-                confidence=1.0,
-            ))
+            positions.append(
+                AlignedPosition(
+                    index=i,
+                    alignment_type=AlignmentType.DETERMINISTIC,
+                    steps={trace.trace_id: step},
+                    confidence=1.0,
+                )
+            )
         return positions
 
     def _fold_trace(
@@ -441,7 +454,8 @@ class TraceAligner:
         return new_multi
 
     def _reconstruct_traces(
-        self, aligned: AlignedTraceSet,
+        self,
+        aligned: AlignedTraceSet,
     ) -> List[ExecutionTrace]:
         """
         Reconstruct ExecutionTrace objects from an AlignedTraceSet.
@@ -449,9 +463,7 @@ class TraceAligner:
         Used by ``merge()`` to recover the original traces before
         re-aligning with new traces.
         """
-        traces_map: Dict[str, List[TraceStep]] = {
-            tid: [] for tid in aligned.trace_ids
-        }
+        traces_map: Dict[str, List[TraceStep]] = {tid: [] for tid in aligned.trace_ids}
 
         for pos in aligned.positions:
             for tid in aligned.trace_ids:
@@ -512,7 +524,8 @@ class TraceAligner:
         return pairs
 
     def _element_signature(
-        self, step: TraceStep,
+        self,
+        step: TraceStep,
     ) -> Optional[Tuple[str, ...]]:
         """
         Extract a structural signature from the step's target element.
@@ -546,7 +559,9 @@ class TraceAligner:
         return tuple(sig_parts)
 
     def _find_element_in_html(
-        self, html: str, framework_id: str,
+        self,
+        html: str,
+        framework_id: str,
     ) -> Optional[str]:
         """Find an element by ``__id__`` attribute in HTML."""
         if _HAS_BS4:
@@ -562,9 +577,7 @@ class TraceAligner:
 
         # Regex fallback.
         pattern = re.compile(
-            r'<[^>]*__id__\s*=\s*["\']'
-            + re.escape(framework_id)
-            + r'["\'][^>]*>',
+            r'<[^>]*__id__\s*=\s*["\']' + re.escape(framework_id) + r'["\'][^>]*>',
             re.IGNORECASE,
         )
         match = pattern.search(html)
@@ -601,7 +614,7 @@ class TraceAligner:
 
         # Plain string that looks like an __id__.
         if isinstance(target, str) and target.startswith("__id__:"):
-            return target[len("__id__:"):]
+            return target[len("__id__:") :]
 
         return None
 

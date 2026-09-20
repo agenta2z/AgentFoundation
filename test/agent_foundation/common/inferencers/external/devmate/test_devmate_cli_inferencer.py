@@ -102,14 +102,16 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as ext:  # plain dir, not a repo
             inferencer = DevmateCliInferencer(target_path=ext)
             if inferencer._resolve_devmate_repo_root() is None:
-                self.skipTest("no Sapling repo (e.g. ~/fbsource) available to reroot to")
+                self.skipTest(
+                    "no Sapling repo (e.g. ~/fbsource) available to reroot to"
+                )
             root, mode = inferencer._devmate_effective_root()
             self.assertEqual(mode, "rerooted")
             self.assertEqual(inferencer._resolve_subprocess_cwd(), root)
             command = inferencer.construct_command("Document it")
-            self.assertIn("ABSOLUTE path", command)   # absolute-path anchor preamble
-            self.assertIn(ext, command)               # target conveyed by absolute path
-            self.assertIn("Document it", command)     # user input still present
+            self.assertIn("ABSOLUTE path", command)  # absolute-path anchor preamble
+            self.assertIn(ext, command)  # target conveyed by absolute path
+            self.assertIn("Document it", command)  # user input still present
 
     def test_construct_command_with_headless(self):
         """Test that --headless flag is added when headless=True."""
@@ -336,11 +338,15 @@ Finished session abc123-def456
 
             # NOTE: session_id must be a hex UUID-style string to match the
             # _extract_session_id regex r"Session ID:\s*([a-f0-9-]+)".
-            stdout = "Session ID: abc12345-def6-7890-abcd-ef0123456789\nFallback response"
+            stdout = (
+                "Session ID: abc12345-def6-7890-abcd-ef0123456789\nFallback response"
+            )
             result = inferencer.parse_output(stdout, "", 0)
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["session_id"], "abc12345-def6-7890-abcd-ef0123456789")
+            self.assertEqual(
+                result["session_id"], "abc12345-def6-7890-abcd-ef0123456789"
+            )
             self.assertIn("Fallback response", result["output"])
             self.assertNotIn("dump_data", result)
 

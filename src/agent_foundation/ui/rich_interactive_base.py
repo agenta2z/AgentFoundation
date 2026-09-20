@@ -8,14 +8,12 @@ Handles:
 Transport subclasses read self._current_input_mode in their _send_response().
 UI clients send structured dicts; this class maps them to agent-ready values.
 """
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from attr import attrs, attrib
-
 from agent_foundation.ui.input_modes import InputMode, InputModeConfig
-from agent_foundation.ui.interactive_base import (
-    InteractiveBase, InteractionFlags,
-)
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
@@ -102,15 +100,17 @@ class RichInteractiveBase(InteractiveBase):
         For direct transports, raw_input may be the structured data itself.
         """
         # Handle queue wrapper dict: extract user_input, process, put back
-        if isinstance(raw_input, dict) and 'user_input' in raw_input:
-            user_input = raw_input['user_input']
+        if isinstance(raw_input, dict) and "user_input" in raw_input:
+            user_input = raw_input["user_input"]
             processed = self._resolve_structured_input(user_input, input_mode)
-            return {**raw_input, 'user_input': processed}
+            return {**raw_input, "user_input": processed}
 
         # Direct transport: process the value itself
         return self._resolve_structured_input(raw_input, input_mode)
 
-    def _resolve_structured_input(self, user_input: Any, input_mode: InputModeConfig) -> Any:
+    def _resolve_structured_input(
+        self, user_input: Any, input_mode: InputModeConfig
+    ) -> Any:
         """Core mapping logic: structured UI data -> semantic value.
 
         Returns a string that the agent can directly use.
@@ -128,7 +128,9 @@ class RichInteractiveBase(InteractiveBase):
             expected = input_mode.expected_string
             if input_mode.case_sensitive:
                 return user_input if user_input == expected else expected
-            return user_input if str(user_input).lower() == expected.lower() else expected
+            return (
+                user_input if str(user_input).lower() == expected.lower() else expected
+            )
 
         # FREE_TEXT, PRESS_TO_CONTINUE: passthrough
         return user_input
@@ -141,17 +143,17 @@ class RichInteractiveBase(InteractiveBase):
             {"choice_index": 1, "follow_up_value": "pass"}  -> "pass"
             {"custom_text": "something"}                     -> "something"
         """
-        if 'follow_up_value' in data:
-            return data['follow_up_value']
+        if "follow_up_value" in data:
+            return data["follow_up_value"]
 
-        if 'choice_index' in data:
-            idx = data['choice_index']
+        if "choice_index" in data:
+            idx = data["choice_index"]
             if 0 <= idx < len(input_mode.options):
                 return input_mode.options[idx].value
             return str(idx)  # out of range fallback
 
-        if 'custom_text' in data:
-            return data['custom_text']
+        if "custom_text" in data:
+            return data["custom_text"]
 
         return str(data)  # fallback
 
@@ -166,17 +168,17 @@ class RichInteractiveBase(InteractiveBase):
             ]}
         Returns: "option0_value|val|extra"
         """
-        selections = data.get('selections', [])
+        selections = data.get("selections", [])
         values = []
 
         for sel in selections:
-            if 'follow_up_value' in sel:
-                values.append(sel['follow_up_value'])
-            elif 'choice_index' in sel:
-                idx = sel['choice_index']
+            if "follow_up_value" in sel:
+                values.append(sel["follow_up_value"])
+            elif "choice_index" in sel:
+                idx = sel["choice_index"]
                 if 0 <= idx < len(input_mode.options):
                     values.append(input_mode.options[idx].value)
-            elif 'custom_text' in sel:
-                values.append(sel['custom_text'])
+            elif "custom_text" in sel:
+                values.append(sel["custom_text"])
 
-        return '|'.join(values) if values else str(data)  # fallback
+        return "|".join(values) if values else str(data)  # fallback

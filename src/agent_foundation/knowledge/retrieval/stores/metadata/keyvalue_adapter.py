@@ -13,11 +13,14 @@ Mapping:
 
 Requirements: 11.1, 11.2, 11.3, 11.4, 11.5
 """
+
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from attr import attrs, attrib
-
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.utils import parse_entity_type
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import (
     DataOperationRecord,
     generate_operation_id,
@@ -25,9 +28,6 @@ from rich_python_utils.service_utils.data_operation_record import (
 from rich_python_utils.service_utils.keyvalue_service.keyvalue_service_base import (
     KeyValueServiceBase,
 )
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
-from agent_foundation.knowledge.retrieval.utils import parse_entity_type
 
 
 @attrs
@@ -93,22 +93,28 @@ class KeyValueMetadataStore(MetadataStore):
         existing_data = self.kv_service.get(metadata.entity_id, namespace=entity_type)
         if existing_data:
             existing = EntityMetadata.from_dict(existing_data)
-            metadata.history = existing.history + metadata.history  # Preserve existing history
-            metadata.history.append(DataOperationRecord(
-                operation="update",
-                timestamp=now,
-                operation_id=op_id,
-                source="KeyValueMetadataStore.save_metadata",
-                properties_before=dict(existing.properties),
-                properties_after=dict(metadata.properties),
-            ))
+            metadata.history = (
+                existing.history + metadata.history
+            )  # Preserve existing history
+            metadata.history.append(
+                DataOperationRecord(
+                    operation="update",
+                    timestamp=now,
+                    operation_id=op_id,
+                    source="KeyValueMetadataStore.save_metadata",
+                    properties_before=dict(existing.properties),
+                    properties_after=dict(metadata.properties),
+                )
+            )
         else:
-            metadata.history.append(DataOperationRecord(
-                operation="add",
-                timestamp=now,
-                operation_id=op_id,
-                source="KeyValueMetadataStore.save_metadata",
-            ))
+            metadata.history.append(
+                DataOperationRecord(
+                    operation="add",
+                    timestamp=now,
+                    operation_id=op_id,
+                    source="KeyValueMetadataStore.save_metadata",
+                )
+            )
 
         metadata.updated_at = now
         self.kv_service.put(
@@ -147,14 +153,16 @@ class KeyValueMetadataStore(MetadataStore):
         now = datetime.now(timezone.utc).isoformat()
         op_id = operation_id or generate_operation_id("MetadataStore", "delete")
         metadata.is_active = False
-        metadata.history.append(DataOperationRecord(
-            operation="delete",
-            timestamp=now,
-            operation_id=op_id,
-            source="KeyValueMetadataStore.delete_metadata",
-            properties_before=dict(metadata.properties),
-            details={"delete_mode": "soft"},
-        ))
+        metadata.history.append(
+            DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                source="KeyValueMetadataStore.delete_metadata",
+                properties_before=dict(metadata.properties),
+                details={"delete_mode": "soft"},
+            )
+        )
         metadata.updated_at = now
         self.kv_service.put(entity_id, metadata.to_dict(), namespace=entity_type)
         return True

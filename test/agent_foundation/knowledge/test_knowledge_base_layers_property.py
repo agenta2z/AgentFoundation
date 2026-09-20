@@ -11,6 +11,7 @@ with the same parameters and assembling the result.
 
 **Validates: Requirements 13.5, 13.6**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,18 +35,19 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-from hypothesis import given, settings, strategies as st, assume
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.graph_walk import merge_graph_contexts
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from conftest import InMemoryEntityGraphStore
+from hypothesis import assume, given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 
 
 # ── Strategies ───────────────────────────────────────────────────────────────
@@ -121,18 +123,26 @@ def _build_kb():
 
     graph_store = InMemoryEntityGraphStore()
     user_node = GraphNode(
-        node_id="user:test", node_type="user", label="Test User",
+        node_id="user:test",
+        node_type="user",
+        label="Test User",
         properties={"spaces": ["main"]},
     )
     neighbor = GraphNode(
-        node_id="company:acme", node_type="company", label="Acme Corp",
+        node_id="company:acme",
+        node_type="company",
+        label="Acme Corp",
         properties={"spaces": ["main"]},
     )
     graph_store.add_node(user_node)
     graph_store.add_node(neighbor)
-    graph_store.add_relation(GraphEdge(
-        source_id="user:test", target_id="company:acme", edge_type="WORKS_AT",
-    ))
+    graph_store.add_relation(
+        GraphEdge(
+            source_id="user:test",
+            target_id="company:acme",
+            edge_type="WORKS_AT",
+        )
+    )
 
     kb = KnowledgeBase(
         metadata_store=metadata_store,
@@ -204,16 +214,21 @@ class TestLayerMethodDecompositionEquivalence:
         pieces = []
         if query and query.strip() and kb.include_pieces:
             pieces = kb.retrieve_pieces(
-                query, resolved_entity_id, resolved_top_k, include_global,
-                None, None, None, 1, spaces,
+                query,
+                resolved_entity_id,
+                resolved_top_k,
+                include_global,
+                None,
+                None,
+                None,
+                1,
+                spaces,
             )
 
         # Build dedup set
         already_retrieved_piece_ids = None
         if kb.graph_retrieval_ignore_pieces_already_retrieved and pieces:
-            already_retrieved_piece_ids = {
-                p.piece_id: p.info_type for p, _ in pieces
-            }
+            already_retrieved_piece_ids = {p.piece_id: p.info_type for p, _ in pieces}
 
         search_ctx = kb.retrieve_search_graph(
             query, resolved_top_k, spaces, already_retrieved_piece_ids
@@ -245,8 +260,7 @@ class TestLayerMethodDecompositionEquivalence:
             for e in (result.graph_context or [])
         }
         expected_keys = {
-            (e["target_node_id"], e["relation_type"])
-            for e in expected_graph_context
+            (e["target_node_id"], e["relation_type"]) for e in expected_graph_context
         }
         assert result_keys == expected_keys, (
             f"Graph context keys mismatch:\n"

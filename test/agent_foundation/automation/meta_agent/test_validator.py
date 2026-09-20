@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import pytest
-
 from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceStep,
@@ -36,7 +35,9 @@ class FakeGraph:
     def __init__(self, result: FakeExecutionResult):
         self._result = result
 
-    def execute(self, initial_variables: Optional[Dict[str, Any]] = None) -> FakeExecutionResult:
+    def execute(
+        self, initial_variables: Optional[Dict[str, Any]] = None
+    ) -> FakeExecutionResult:
         return self._result
 
 
@@ -242,10 +243,12 @@ class TestMultipleInputs:
                 self._call_idx += 1
                 return result
 
-        validator = MultiGraphValidator([
-            FakeExecutionResult(success=True, outputs={"steps": steps_ok}),
-            FakeExecutionResult(success=True, outputs={"steps": steps_bad_actual}),
-        ])
+        validator = MultiGraphValidator(
+            [
+                FakeExecutionResult(success=True, outputs={"steps": steps_ok}),
+                FakeExecutionResult(success=True, outputs={"steps": steps_bad_actual}),
+            ]
+        )
 
         results = validator.validate(
             graph=FakeGraph(FakeExecutionResult()),  # unused
@@ -313,7 +316,9 @@ class TestExecutionFailure:
         assert r.passed is False
 
     def test_execution_result_not_success(self):
-        graph = FakeGraph(FakeExecutionResult(success=False, error=RuntimeError("fail")))
+        graph = FakeGraph(
+            FakeExecutionResult(success=False, error=RuntimeError("fail"))
+        )
         expected = _trace([_step("click", "btn")])
 
         validator = GraphValidator()

@@ -9,12 +9,11 @@ import logging
 import os
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
-    SDK_NATIVE_EFFORT_LEVELS,
-    SDK_NATIVE_PERMISSION_MODES,
     EffortLevel,
     PermissionModeLiteral,
+    SDK_NATIVE_EFFORT_LEVELS,
+    SDK_NATIVE_PERMISSION_MODES,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
@@ -25,6 +24,7 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +223,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
         # Resolve the macOS-sandbox toggle to a concrete bool: explicit ctor
         # value wins; otherwise fall back to the env var.
-        self.disable_osx_sandbox = resolve_disable_osx_sandbox(
-            self.disable_osx_sandbox
-        )
+        self.disable_osx_sandbox = resolve_disable_osx_sandbox(self.disable_osx_sandbox)
 
         if not self.enable_shell:
             filtered = [t for t in self.allowed_tools if t != "Bash"]

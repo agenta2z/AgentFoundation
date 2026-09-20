@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Union
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.template_defaults import (
@@ -98,13 +98,13 @@ from rich_python_utils.path_utils.path_listing import (
 def _detect_conflicts_and_promote(
     deliverables_dst,
     children_dir,
-    candidate_subdirs=("outputs/final_deliverables", "outputs"),
+    candidate_subdirs=("outputs",),
 ):
     """Detect deliverable conflicts across workers and auto-promote agreed files.
 
     Thin wrapper around the generic ``find_conflicting_and_agreed_files``.
-    Resolves each worker's output root (preferring final_deliverables/)
-    and delegates to the generic diff + copy helpers.
+    Resolves each worker's output root (``outputs/`` — the deliverable set per
+    the Part 2 two-axis model) and delegates to the generic diff + copy helpers.
     """
     roots = []
     root_names = []
@@ -195,8 +195,7 @@ def make_upstream_injecting_aggregator_prompt_builder():
 
 def make_conflict_aware_prompt_builder(
     conflict_resolution_mode="delegate_to_aggregator",
-    candidate_subdirs=("outputs/final_deliverables", "outputs"),
-    deliverables_subdir="final_deliverables",
+    candidate_subdirs=("outputs",),
 ):
     """Factory: returns an aggregator_prompt_builder that detects conflicts.
 
@@ -267,10 +266,9 @@ def make_conflict_aware_prompt_builder(
 
         children_dir = cur
         ws_root = os.path.dirname(children_dir)
-        fd_path = os.path.join(ws_root, "outputs", deliverables_subdir)
-        deliverables_dst = (
-            fd_path if os.path.isdir(fd_path) else os.path.join(ws_root, "outputs")
-        )
+        # Part 2 two-axis model: deliverables land directly in ``outputs/``
+        # (``final_deliverables/`` retired).
+        deliverables_dst = os.path.join(ws_root, "outputs")
         os.makedirs(deliverables_dst, exist_ok=True)
 
         promoted, conflicts = _detect_conflicts_and_promote(
@@ -300,6 +298,38 @@ def make_conflict_aware_prompt_builder(
         return original_query or ""
 
     return _builder
+
+
+class _FailedWorkerSentinel:
+    """v4 Phase 3.1 quorum marker — returned by ``_make_worker_fn`` when a
+    leaf worker fails terminally AND the BTA has opted into K-of-N quorum
+    via ``min_successful_workers > 0`` (set by MultiFlow as
+    ``min_successful_flows``).
+
+    Filtered out of ``worker_results`` in ``async_agg_fn`` before the
+    aggregator inferencer runs. If too few survivors remain (per the
+    ``min_successful_workers`` threshold), the BTA falls back to
+    ``_build_synthetic_aggregation`` with the survivors so partial
+    progress is preserved (per P-Mine §3.1: "soft gate that defers
+    to the existing synthetic-aggregation path").
+    """
+
+    __slots__ = ("node_name", "error_type", "error_message")
+
+    def __init__(self, node_name: str, error_type: str, error_message: str) -> None:
+        self.node_name = node_name
+        self.error_type = error_type
+        self.error_message = error_message
+
+    def __repr__(self) -> str:
+        return (
+            f"<_FailedWorkerSentinel name={self.node_name!r} "
+            f"{self.error_type}={self.error_message[:80]!r}>"
+        )
+
+    def __str__(self) -> str:
+        # Used by _build_synthetic_aggregation if it gets passed sentinels.
+        return f"(failed: {self.error_type}: {self.error_message})"
 
 
 @attrs(slots=False)
@@ -362,6 +392,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # user-supplied values always win (per-key for dicts, scalar fill for
     # template_root_space/template_key). Subclasses (MultiFlow) inherit via
     # MRO. See ``template_defaults`` module for the named bundles.
+    # Domain meaning for the blocks this class registers (see
+    # ``InferencerBase.BLOCK_PARSERS``). Registered by METHOD NAME because the
+    # transform reads ``worker_query_fields`` off the instance.
+    #
+    # The TRANSFORM only — the tolerant text->dict extraction stays in
+    # ``_parse_json_subtasks``, which also accepts an unlabeled fence, a bare
+    # ``{..."subtasks"...}`` scan and a backtick-repair retry that the generic
+    # label-anchored extractor does not.
+    BLOCK_PARSERS: ClassVar[Dict[str, Any]] = {
+        "decomposed_subtasks": "_subtasks_from_fence_dict",
+    }
+
     SLOT_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "breakdown_inferencer": BREAKDOWN_TEMPLATE_DEFAULTS,
         # Full structured-aggregation triplet. Refactor 12 made the version-
@@ -387,6 +429,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     breakdown_inferencer: InferencerBase = attrib(default=None)
     max_breakdown: Optional[int] = attrib(default=None)
     breakdown_parser: Optional[Callable] = attrib(default=None)
+
+    min_successful_workers: int = attrib(default=0)
+    """v4 Phase 3.1 — K-of-N quorum for BTA workers (parent of MultiFlow's
+    ``min_successful_flows``). Default 0 = disabled (backward-compatible:
+    any worker failure raises and fails the BTA, the historical behavior).
+    Set to N >= 1 to require at least N successful workers; failed workers
+    are filtered out before the aggregator runs.
+
+    When fewer than N workers survive, the BTA falls back to
+    ``_build_synthetic_aggregation`` with the survivors rather than raising,
+    preserving partial progress (per P-Mine § 3.1 "soft gate that defers
+    to synthetic-aggregation").
+
+    Failed workers emit ``node_status: error`` so the UI renders them red.
+    """
     # Built-in breakdown format: "auto" (default, numbered list fallback),
     # "json_subtasks" (task_breakdown JSON format), "numbered_list" (explicit).
     # When set to "json_subtasks", uses _parse_json_subtasks() instead of
@@ -462,8 +519,9 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     # === Workspace support (opt-in, overrides checkpoint_dir when set) ===
     # workspace: InferencerWorkspace — inherited from InferencerBase.
-    #   Configure workspace layout (e.g., use_final_deliverables_folder) on the
-    #   InferencerWorkspace object directly, keeping workspace concerns out of BTA.
+    #   Configure workspace layout on the InferencerWorkspace object directly,
+    #   keeping workspace concerns out of BTA. Part 2 (two-axis model): ``outputs/``
+    #   IS the deliverable set; there is no ``final_deliverables/`` subfolder.
     # The legacy `workspace_root: Optional[str]` shorthand was removed
     # 2026-05-05; pass `workspace=InferencerWorkspace(root="/path", ...)`.
 
@@ -495,16 +553,12 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     disable_aggregator: bool = attrib(default=False)  # Run workers but skip aggregation
     promote_worker_deliverables: bool = attrib(default=False, kw_only=True)
 
-    # === v1.7 Deliverable Boundary Semantics (Phase 2) ===
-    # BTA is a boundary by default. The boundary mechanism only ACTIVATES
-    # when use_final_deliverables_folder=True on the workspace; existing
-    # callers that don't set that flag get a no-op (backward compatible).
-    is_deliverable_boundary: bool = attrib(default=True, kw_only=True)
-    # When True, BTA's own response (aggregator's text output) is published
-    # to outputs/final_deliverables/<output_path>; when False, it stays in
-    # outputs/ as a report only. Default True since BTA's response IS the
-    # canonical aggregated artifact in most workflows.
-    publishes_response_as_deliverable: bool = attrib(default=True, kw_only=True)
+    # === Deliverable collection policy (no-aggregator fan-out) ===
+    # Part 2 (two-axis model): ``outputs/`` IS the deliverable set (no
+    # ``final_deliverables/`` subfolder, no deliverable flags). BTA promotes its
+    # aggregator's ``outputs/`` up to its own ``outputs/`` via ``_finalize_output``
+    # → ``_symlink_child_output`` regardless of any flag; workers are consumed
+    # inputs and are NOT promoted (the aggregator is what promotes).
     # Subclass-local policy for boundary aggregation:
     deliverable_namespace_strategy: str = attrib(default="by_child_name", kw_only=True)
     deliverable_conflict_strategy: str = attrib(default="skip_existing", kw_only=True)
@@ -544,6 +598,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # Reset at the top of _infer/_ainfer so reused BTA instances work correctly.
     _graph_topology_emitted: bool = attrib(default=False, init=False, repr=False)
 
+    # Task contract harvested from the first worker that reports one (publish-up).
+    # Workers are factory-ephemeral — never stored on ``self`` — so a parent that
+    # reviews THIS node's output has no path down to an author leaf. Backs
+    # ``_proposer_task_instructions``; see that method for why the aggregator is
+    # NOT an acceptable substitute.
+    _worker_task_instructions: str = attrib(default="", init=False, repr=False)
+
     # Captured at breakdown-parse time from the breakdown response's
     # ``aggregation_guidance`` field. Plumbed forward to the aggregator's
     # ``template_extra_feed["aggregation_guidance"]`` so the aggregator
@@ -561,6 +622,22 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
     # ------------------------------------------------------------------
     # Worker naming hook (overridable by subclasses)
     # ------------------------------------------------------------------
+
+    def _proposer_task_instructions(self) -> str:
+        """Task contract from a WORKER (this node's input side), via publish-up.
+
+        Workers are resolved from a ``LazyConfigFactory`` and are ephemeral
+        per-subtask locals — they are never retained on ``self`` and are not yielded
+        by ``_iter_child_inferencers`` — so there is no static path from here down to
+        an author leaf. Instead each worker's contract is harvested as it completes
+        (see the ``ainfer`` call site) and reported here.
+
+        ``self.aggregator_inferencer`` is deliberately NOT a fallback: it renders the
+        OUTPUT-side "aggregating/integrating the upstream outcomes" variant, so using
+        it would hand a reviewer a merge brief in place of the task contract. When no
+        worker reported one, return ``""`` and let the consumer omit the block.
+        """
+        return self._worker_task_instructions or ""
 
     def _worker_child_name(self, index: int) -> str:
         """Return the workspace child directory name for worker ``index``.
@@ -650,20 +727,43 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # aggregation_report.md output still gets written.
 
         # --- Expansion-driven (new) implementation support ---
-        # Cache for sub-queries used by subgraph_registry on resume.
-        # Populated by _make_breakdown_fn before returning GraphExpansionResult.
-        self._cached_sub_queries = None
+        # Per-call memo for the promoted breakdown checkpoint
+        # (checkpoints/breakdown/decomposed_subtasks.json), read at most once by
+        # _load_promoted_breakdown() and shared by the resume consumers (the
+        # worker fan-out via subgraph_registry + the aggregator's guidance).
+        # Reset per call in _infer/_ainfer. None = not yet read this call.
+        self._promoted_breakdown_cache = None
+        # Cache for the original request, threaded into the aggregator on resume.
+        # On resume the subgraph_registry factories below rebuild the aggregator
+        # node (via _reconstruct_graph_expansions) BEFORE the breakdown fn runs,
+        # so the breakdown fn's own ``_original_query=_inf_input`` threading is too
+        # late. ``_infer``/``_ainfer`` set this per-call to the same value
+        # (``_make_breakdown_fn``'s ``_inf_input``) so the factory can pass it
+        # through; without it the aggregator's "## Original User Request" slot
+        # (and the synthetic-fallback "Original task") render blank on resume.
+        self._cached_original_query = None
 
         # Register subgraph factories for WorkGraph's registry-based expansion
         # reconstruction. On resume, _reconstruct_graph_expansions() looks up
         # expansion_id in subgraph_registry and calls the factory. The closure
         # captures `self` so it can access worker_inferencers, aggregator_inferencer, etc.
+        # Each factory sources sub_queries from the promoted breakdown checkpoint
+        # (_load_promoted_breakdown) — the same decomposed_subtasks.json the
+        # aggregator restores its guidance from — and threads the cached original
+        # request so the reconstructed aggregator node receives it exactly as the
+        # fresh path does.
         self.subgraph_registry = self.subgraph_registry or {}
         self.subgraph_registry["bta_diamond"] = (
-            lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
+            lambda exp_id: self._build_subgraph_spec(
+                self._load_promoted_breakdown()[0],
+                _original_query=self._cached_original_query,
+            )
         )
         self.subgraph_registry["bta_workers"] = (
-            lambda exp_id: self._build_subgraph_spec(self._cached_sub_queries)
+            lambda exp_id: self._build_subgraph_spec(
+                self._load_promoted_breakdown()[0],
+                _original_query=self._cached_original_query,
+            )
         )
 
     # === MRO safety: block run()/arun() ===
@@ -729,12 +829,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             fd_dir = fd_dirs[idx] if idx < len(fd_dirs) else None
             if agg_has_local and fd_dir:
                 lines = [f"### Upstream Outcome {idx + 1}"]
-                label = (
-                    "See deliverables"
-                    if "final_deliverables" in str(fd_dir)
-                    else "See outputs folder"
-                )
-                lines.append(f"({label}: `{fd_dir}`)")
+                # Part 2: worker deliverables live directly in ``outputs/``.
+                lines.append(f"(See outputs folder: `{fd_dir}`)")
                 if path:
                     lines.append(f"(See file: `{path}`)")
                 parts.append("\n".join(lines))
@@ -826,6 +922,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # no consumer. If a future template needs the structured list,
         # add the injection at that time.
 
+        # Resume: the breakdown parse that normally sets _last_aggregation_guidance
+        # ran in a prior process, so restore it from the promoted breakdown
+        # checkpoint before the set/pop below (which owns the guidance channel).
+        if getattr(self, "_last_aggregation_guidance", None) is None:
+            _restored_guidance = self._load_promoted_breakdown()[1]
+            if _restored_guidance:
+                self._last_aggregation_guidance = _restored_guidance
+
         guidance = getattr(self, "_last_aggregation_guidance", None)
         if guidance:
             target.template_extra_feed["aggregation_guidance"] = guidance
@@ -893,16 +997,55 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 )
                 return parse_numbered_list(response_text)
 
-        subtasks = data.get("subtasks") or data.get("decomposed_subtasks") or []
-        if not subtasks:
+        parsed = self._subtasks_from_fence_dict(data)
+        if parsed is None:
+            # No subtasks at all — matches the original early return, which
+            # happened BEFORE guidance capture, so guidance stays None here.
+            return parse_numbered_list(response_text)
+        queries, guidance = parsed
+        # Assigned even when ``queries`` is empty: the original captured guidance
+        # before the empty-queries check, so it survived that fallback too.
+        self._last_aggregation_guidance = guidance
+        if not queries:
             return parse_numbered_list(response_text)
 
-        # Capture aggregation_guidance for the downstream aggregator. Tolerate
-        # missing/empty values — the aggregator prompt's ``{% if %}`` branch
-        # gates the whole section.
-        guidance = data.get("aggregation_guidance")
-        if isinstance(guidance, str) and guidance.strip():
-            self._last_aggregation_guidance = guidance.strip()
+        _logger.info("Parsed %d subtasks from JSON breakdown", len(queries))
+        return queries
+
+    def _subtasks_from_fence_dict(
+        self, data: dict
+    ) -> Optional[Tuple[List, Optional[str]]]:
+        """``decomposed_subtasks`` fence dict → ``(sub_queries, aggregation_guidance)``.
+
+        The TRANSFORM half of ``_parse_json_subtasks``, split out at the ``data``
+        boundary so one implementation serves every consumer of the block: this
+        parser (text → dict → here), and anything that already holds the parsed
+        fence (e.g. the persisted ``decomposed_subtasks.json``) — with no
+        re-serializing a dict back to text just to re-run the extraction regex.
+
+        Deliberately PURE with respect to instance state: it *reads*
+        ``worker_query_fields`` but writes nothing, so a caller holding a shared or
+        re-roled inferencer cannot be polluted by it. Assigning
+        ``_last_aggregation_guidance`` stays with the caller.
+
+        Returns ``None`` only when the dict carries **no subtasks at all** — the
+        caller then falls back with no guidance, matching the original early return.
+        When subtasks exist the pair is returned even if every one of them yielded
+        an empty query string (``queries == []``): the original captured guidance
+        *before* that check, so the caller must still record it before falling back.
+        """
+        subtasks = data.get("subtasks") or data.get("decomposed_subtasks") or []
+        if not subtasks:
+            return None
+
+        # Tolerate missing/empty guidance — the aggregator prompt's ``{% if %}``
+        # branch gates the whole section.
+        _raw_guidance = data.get("aggregation_guidance")
+        guidance = (
+            _raw_guidance.strip()
+            if isinstance(_raw_guidance, str) and _raw_guidance.strip()
+            else None
+        )
 
         queries = []
         for subtask in subtasks:
@@ -931,11 +1074,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     query_args["description"] = desc
                 queries.append({"query": query_text.strip(), "args": query_args})
 
-        if not queries:
-            return parse_numbered_list(response_text)
-
-        _logger.info("Parsed %d subtasks from JSON breakdown", len(queries))
-        return queries
+        return queries, guidance
 
     # _resolve_graph_reporter() is inherited from InferencerBase (Part F / GT#13).
     # Uniform graph_reporter propagation lives on the base now (seed into the
@@ -975,7 +1114,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         / "breakdown"
                         / "outputs"
                         / "breakdown_output.md",
-                        _ws / "checkpoints" / "breakdown_result.json",
                     ]:
                         if candidate.exists():
                             output_path = str(candidate)
@@ -1051,7 +1189,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     / "breakdown"
                     / "outputs"
                     / "breakdown_output.md",
-                    _ws_b / "checkpoints" / "breakdown_result.json",
                 ]:
                     if _cand.exists():
                         _bd_output = str(_cand)
@@ -1154,57 +1291,50 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             )
             return [str(psq)]
 
-    def _load_breakdown_checkpoint(self):
-        """Load saved breakdown result if resuming and checkpoint exists."""
-        if not self.resume_with_saved_results:
-            return None
-        if self._workspace is not None:
-            ckpt = self._workspace.checkpoint_path("breakdown_result.json")
-        elif self.checkpoint_dir:
-            ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
-        else:
-            return None
-        if not os.path.exists(ckpt):
-            return None
-        try:
-            with open(ckpt) as f:
-                saved = json.load(f)
-            sub_queries = saved.get("sub_queries", [])
-            if sub_queries:
-                _logger.info(
-                    "Resuming from saved breakdown checkpoint (%d sub_queries)",
-                    len(sub_queries),
-                )
-                return sub_queries
-        except (json.JSONDecodeError, KeyError, OSError) as e:
-            _logger.warning("Failed to load breakdown checkpoint: %s", e)
-        return None
+    def _load_promoted_breakdown(self):
+        """Read the promoted breakdown checkpoint -> ``(sub_queries, aggregation_guidance)``.
 
-    def _save_breakdown_checkpoint(self, raw_output, sub_queries):
-        """Save breakdown result and parsed sub_queries to checkpoint."""
-        if self._workspace is not None:
-            ckpt = self._workspace.checkpoint_path("breakdown_result.json")
-        elif self.checkpoint_dir:
-            ckpt = os.path.join(self.checkpoint_dir, "breakdown_result.json")
-        else:
-            return
-        os.makedirs(os.path.dirname(ckpt), exist_ok=True)
+        Resume-side counterpart of the breakdown's ``checkpoint_scope="parent"``
+        promotion: reads the ``decomposed_subtasks.json`` that
+        ``InferencerBase._promote_child_checkpoints`` published into this parent's
+        ``checkpoints/breakdown/`` and runs the SAME ``_subtasks_from_fence_dict``
+        transform the fresh-run parse uses — so the one file feeds BOTH resume
+        consumers: the worker fan-out (``sub_queries``, via the
+        ``subgraph_registry`` factories) and the aggregator
+        (``aggregation_guidance``, via ``_inject_aggregator_extra_feed``). This
+        retires the hand-rolled ``breakdown_result.json``.
+
+        Returns ``(None, None)`` when the file is absent (a fresh run, or a resume
+        of a run that never reached breakdown-complete), unparseable, or carries
+        no sub_queries. Memoizes only a usable read (on
+        ``_promoted_breakdown_cache``, reset per call), so a fresh run's early
+        absent-check at Step 0 cannot pin a stale ``None``.
+        """
+        cached = self._promoted_breakdown_cache
+        if cached is not None:
+            return cached
+        ws = self._workspace
+        if ws is None:
+            return (None, None)
+        path = ws.checkpoint_path(os.path.join("breakdown", "decomposed_subtasks.json"))
+        if not os.path.isfile(path):
+            return (None, None)
         try:
-            # Explicit utf-8 + ensure_ascii=False: raw_output may contain
-            # LLM-generated Unicode (arrows, em-dashes). Default encoding
-            # is cp1252 on Windows which would raise UnicodeEncodeError.
-            with open(ckpt, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"raw_output": str(raw_output), "sub_queries": sub_queries},
-                    f,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-            _logger.info(
-                "Saved breakdown checkpoint with %d sub_queries", len(sub_queries)
-            )
-        except (OSError, UnicodeEncodeError) as e:
-            _logger.warning("Failed to save breakdown checkpoint: %s", e)
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            _logger.warning("Failed to load promoted breakdown checkpoint: %s", e)
+            return (None, None)
+        parsed = self._subtasks_from_fence_dict(data)
+        if not parsed or not parsed[0]:
+            # No usable sub_queries — behave exactly as "no checkpoint" so Step 0
+            # runs a fresh breakdown instead of short-circuiting into an error.
+            return (None, None)
+        self._promoted_breakdown_cache = parsed
+        _logger.info(
+            "Loaded promoted breakdown checkpoint (%d sub_queries)", len(parsed[0])
+        )
+        return parsed
 
     async def _emit_graph_reconcile(self):
         """Emit final node statuses so the frontend can correct any stale UI state."""
@@ -1235,6 +1365,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         # the child's mailbox and returns None/the BTA's own ws — orphaning the plan.
         agg_ws = self._read_child_workspace(agg_inf, "aggregator") if agg_inf else None
 
+        # U3b: an aggregator IS configured but its workspace never published →
+        # silently taking the no-aggregator branch would DROP the aggregated
+        # deliverable. Fail loud instead. (The no-aggregator else-branch below
+        # stays valid for the legitimate disable_aggregator / no-aggregator case.)
+        if (
+            not self.disable_aggregator
+            and self.aggregator_inferencer is not None
+            and agg_ws is None
+        ):
+            raise RuntimeError(
+                "BTA aggregator is configured but its workspace could not be "
+                "resolved (agg_ws is None) — refusing to fall back to the "
+                "no-aggregator path and drop the aggregated output."
+            )
+
         if agg_ws is not None:
             self._symlink_child_output(
                 agg_ws, child_output_name=getattr(agg_inf, "output_path", None)
@@ -1242,12 +1387,18 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             resolved = self.resolve_output_path()
             if resolved and os.path.isfile(resolved):
                 self._emit_output_manifest(resolved)
-            self._try_extract_proposal_index(response)
+            # Proposal-index PRODUCTION moved to the task executor's finalize
+            # (Fix 3) — the generic BTA no longer writes proposals.json. The
+            # dead `_try_extract_proposal_index` / `_read_aggregator_output_text`
+            # methods are retained but unreferenced (removable in a cleanup pass).
             return response
         else:
-            # No aggregator: workers' outputs ARE the deliverables
-            if self._workspace and self._workspace.deliverables_dir:
-                workers_dir = os.path.join(self._workspace.deliverables_dir, "workers")
+            # No aggregator: workers' outputs ARE the deliverables. Part 2
+            # (two-axis model): deliverables live directly in ``outputs/`` — the
+            # BTA surfaces each worker's ``outputs/`` under its own
+            # ``outputs/workers/<worker>/``.
+            if self._workspace and self._workspace.outputs_dir:
+                workers_dir = os.path.join(self._workspace.outputs_dir, "workers")
                 for i, worker in enumerate(getattr(self, "_worker_instances", [])):
                     # M7: read the worker's canonical workspace from the orchestrator's
                     # own layout (self._workspace.child(<dir>)), not the bare property
@@ -1259,7 +1410,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     )
                     if worker_ws and worker_ws.has_deliverables:
                         self._symlink_or_copy(
-                            worker_ws.deliverables_dir,
+                            worker_ws.outputs_dir,
                             os.path.join(workers_dir, self._worker_child_name(i)),
                         )
             # Fall through to base for outputs/output.md summary write
@@ -1306,9 +1457,8 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 # INVARIANT (depended on by model_optimization/SOP.md Phase 3b
                 # and Phase 4): proposals.json lives at
                 #   <research-propose workspace>/outputs/proposals.json
-                # BTA._finalize_output early-returns when an aggregator is
-                # present, so the base class's outputs->final_deliverables move
-                # never runs for this file; this location is therefore stable
+                # Part 2 (two-axis model): ``outputs/`` IS the deliverable set
+                # (no ``final_deliverables/`` subfolder); this location is stable
                 # and discoverable by convention. Any future refactor that
                 # relocates this file MUST also update:
                 #   - resources/sops/model_optimization/SOP.md Phase 3b/4
@@ -1512,15 +1662,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         """Expansion-driven sync inference: single breakdown node → GraphExpansionResult → diamond."""
-        # Reset per-call state to prevent cross-run leakage on reused instances
-        self._cached_sub_queries = None
-        # Bootstrap _cached_sub_queries on resume
-        if self._cached_sub_queries is None:
-            saved = self._load_breakdown_checkpoint()
-            if saved is not None:
-                if self.max_breakdown is not None and len(saved) > self.max_breakdown:
-                    saved = saved[: self.max_breakdown]
-                self._cached_sub_queries = saved
+        # Reset per-call state to prevent cross-run leakage on reused instances.
+        # No pre-run bootstrap: on resume the subgraph_registry factory reads the
+        # promoted breakdown checkpoint directly via _load_promoted_breakdown(),
+        # so only the per-call memo reset and the original-query capture remain.
+        self._promoted_breakdown_cache = None
+        # Original request for the resume-path aggregator rebuild (see __init__).
+        self._cached_original_query = inference_input
 
         # Reset topology emission guard
         self._graph_topology_emitted = False
@@ -1596,18 +1744,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
             except Exception as _e:
                 _logger.warning("[BTA] initial topology emit failed: %s", _e)
 
-        # Reset per-call state to prevent cross-run leakage on reused instances
-        self._cached_sub_queries = None
-        # Bootstrap _cached_sub_queries on resume: load breakdown_result.json
-        # BEFORE WorkGraph._arun() because _reconstruct_graph_expansions() runs
-        # BEFORE start_nodes execute, and the subgraph_registry lambda calls
-        # self._build_subgraph_spec(self._cached_sub_queries).
-        if self._cached_sub_queries is None:
-            saved = self._load_breakdown_checkpoint()
-            if saved is not None:
-                if self.max_breakdown is not None and len(saved) > self.max_breakdown:
-                    saved = saved[: self.max_breakdown]
-                self._cached_sub_queries = saved
+        # Reset per-call state to prevent cross-run leakage on reused instances.
+        # No pre-_arun() bootstrap: _reconstruct_graph_expansions() runs BEFORE
+        # start_nodes execute and the subgraph_registry factory reads the promoted
+        # breakdown checkpoint directly via _load_promoted_breakdown(), so only the
+        # per-call memo reset and the original-query capture remain.
+        self._promoted_breakdown_cache = None
+        # Original request for the resume-path aggregator rebuild (see __init__).
+        self._cached_original_query = inference_input
 
         # Reset topology emission guard
         self._graph_topology_emitted = False
@@ -1871,36 +2015,14 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
 
             # Assign child workspace to worker
             if self._workspace is not None and isinstance(worker, InferencerBase):
-                prev_ws = getattr(worker, "_workspace", None)
-                use_fdl = (
-                    getattr(prev_ws, "use_final_deliverables_folder", False)
-                    if prev_ws
-                    else False
-                )
                 worker_ws = self._workspace.child(self._worker_child_name(i))
-                if use_fdl:
-                    from agent_foundation.common.inferencers.inferencer_workspace import (
-                        InferencerWorkspace,
-                    )
-
-                    worker_ws = InferencerWorkspace(
-                        root=worker_ws.root,
-                        use_final_deliverables_folder=use_fdl,
-                    )
-                worker_ws.ensure_dirs()
-                # M7 workspace virtualization (fan-out case): publish the per-worker
-                # workspace into the worker's child context so its ``_workspace``
-                # getter resolves it from the context (§2.12 option-b). The slot
+                # Durably re-bind the worker (a NON-SHARED, per-subtask node) to its
+                # child slot — publishes to the worker's child ctx AND sets the
+                # durable instance backing so the binding survives resume. The slot
                 # MUST match the worker's threaded run_context (``_node_name`` =
-                # ``{_bta_prefix}{worker_child_name}``). The instance assignment
-                # stays as the byte-identical fallback.
+                # ``{_bta_prefix}{worker_child_name}``). See _bind_rebuilt_child_ws.
                 _worker_node_name = f"{_bta_prefix}{self._worker_child_name(i)}"
-                _worker_child = self._rc_child(_worker_node_name)
-                self._publish_workspace_to_ctx(_worker_child, worker_ws)
-                if _worker_child is None:
-                    # Legacy (no context): mutate the worker instance (byte-identical);
-                    # under a context the workspace is published above -> write-pure.
-                    worker._workspace = worker_ws
+                self._bind_rebuilt_child_ws(worker, _worker_node_name, worker_ws)
                 self.log_info(
                     {
                         "bta_name": getattr(self, "name", None),
@@ -1913,16 +2035,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     },
                     log_type="WorkerWsAssigned",
                 )
-                # === v1.7 Phase 3: Wire worker as deliverable boundary ===
-                # Mark each worker as a boundary so its deliverables surface
-                # to this BTA's collect step. Workers may also be flow
-                # inferencers (MFDual, Dual) which default to is_deliverable_boundary=False;
-                # we explicitly promote them here because they're acting as
-                # the per-task work-unit. This is purely additive and only
-                # affects behavior when workspace.use_final_deliverables_folder=True.
-                worker.is_deliverable_boundary = True
-                # Output paths computed later in _build_agg_input (after
-                # workers finish, so files and LWI symlinks exist).
+                # Part 2 (two-axis model): workers are consumed inputs and are
+                # NOT promoted — the aggregator is what promotes its ``outputs/``
+                # up to this BTA's ``outputs/``. Output paths are computed later
+                # in _build_agg_input (after workers finish, so files and LWI
+                # symlinks exist).
                 worker_output_paths.append(None)
             else:
                 worker_output_paths.append(None)
@@ -1997,13 +2114,104 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                         pass
                                 return cached
                             self._check_cancelled()  # §2.1/P-#6: halt at worker boundary
-                            result = await w.ainfer(
-                                q,
-                                inference_config=inference_config,
-                                run_context=self._rc_child(
-                                    _node_id or "worker", workspace=_worker_ws
-                                ),
+                            # v4 Phase 3.1 quorum wrap: when min_successful_workers > 0,
+                            # catch terminal failures and return a sentinel rather than
+                            # raising. The aggregator step filters sentinels and falls
+                            # back to _build_synthetic_aggregation if too few survived.
+                            # Default (min_successful_workers == 0) preserves the
+                            # historical raise-on-failure behavior used by all
+                            # non-MultiFlow BTAs.
+                            _quorum_active = (
+                                getattr(self, "min_successful_workers", 0) > 0
                             )
+                            try:
+                                result = await w.ainfer(
+                                    q,
+                                    inference_config=inference_config,
+                                    run_context=self._rc_child(
+                                        _node_id or "worker", workspace=_worker_ws
+                                    ),
+                                )
+                                # Publish-up: workers are factory-ephemeral (never
+                                # stored on ``self``), so a parent reviewing THIS
+                                # node's output cannot reach an author leaf to learn
+                                # the task contract. Harvest it from the first worker
+                                # that reports one. Cheap, and first non-empty wins —
+                                # the contract is identical across workers. Its own
+                                # try/except: a bookkeeping failure must never be
+                                # mistaken for a worker failure by the handler below.
+                                try:
+                                    if not self._worker_task_instructions:
+                                        _ti_getter = getattr(
+                                            w, "_proposer_task_instructions", None
+                                        )
+                                        if callable(_ti_getter):
+                                            self._worker_task_instructions = (
+                                                _ti_getter() or ""
+                                            )
+                                except Exception as _ti_err:
+                                    _logger.debug(
+                                        "BTA[%s]: task_instructions publish-up "
+                                        "skipped: %s",
+                                        getattr(self, "name", "?"),
+                                        _ti_err,
+                                    )
+                            except BaseException as _werr:
+                                # CancelledError + KeyboardInterrupt must NOT be
+                                # swallowed (BaseException-not-Exception); pass them
+                                # straight through. Everything else (HopelessOutputError,
+                                # InferencerExecutionError, NodeExecutionFailed, generic
+                                # Exception after retry exhaustion) becomes a sentinel
+                                # iff quorum is active.
+                                import asyncio as _asyncio
+
+                                if isinstance(
+                                    _werr,
+                                    (
+                                        _asyncio.CancelledError,
+                                        KeyboardInterrupt,
+                                        SystemExit,
+                                        MemoryError,
+                                    ),
+                                ) or not isinstance(_werr, Exception):
+                                    # U4-B guard 1: never-contain floor — cooperative
+                                    # cancellation + any non-Exception BaseException
+                                    # ALWAYS propagate, regardless of quorum.
+                                    raise
+                                if isinstance(
+                                    _werr, getattr(self, "surfaceable_exceptions", ())
+                                ):
+                                    # U4-B: per-inferencer surfaceable allowlist — always
+                                    # propagate (never contain), like the floor.
+                                    raise
+                                if not _quorum_active:
+                                    raise
+                                # Quorum mode: mark this worker failed, emit
+                                # node_status(error) for UI red-render, return sentinel.
+                                _err_type = type(_werr).__name__
+                                _err_msg = str(_werr)[:500]
+                                if _reporter is not None and _node_id is not None:
+                                    try:
+                                        await _reporter.on_node_status(
+                                            _node_id,
+                                            "error",
+                                            error=f"{_err_type}: {_err_msg}",
+                                        )
+                                    except Exception:
+                                        pass
+                                _logger.warning(
+                                    "[BTA quorum] worker %r failed (%s); returning "
+                                    "sentinel — aggregator will filter and proceed if "
+                                    "survivors >= min_successful_workers=%d",
+                                    _node_id or _node_name,
+                                    _err_type,
+                                    getattr(self, "min_successful_workers", 0),
+                                )
+                                return _FailedWorkerSentinel(
+                                    _node_id or _node_name or "worker",
+                                    _err_type,
+                                    _err_msg,
+                                )
                             if _reporter is not None and _node_id is not None:
                                 try:
                                     await _reporter.on_node_stream(
@@ -2031,15 +2239,36 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         if cached is not None:
                             return cached
                         self._check_cancelled()  # §2.1/P-#6: sync worker boundary
-                        if hasattr(w, "infer"):
-                            return w.infer(
-                                q,
-                                inference_config=inference_config,
-                                run_context=self._rc_child(
-                                    _node_id or "worker", workspace=_worker_ws
-                                ),
+                        _quorum_active = getattr(self, "min_successful_workers", 0) > 0
+                        try:
+                            if hasattr(w, "infer"):
+                                return w.infer(
+                                    q,
+                                    inference_config=inference_config,
+                                    run_context=self._rc_child(
+                                        _node_id or "worker", workspace=_worker_ws
+                                    ),
+                                )
+                            return w(q)
+                        except BaseException as _werr:
+                            # U4-B: mirror the async worker containment on the SYNC
+                            # path. Never-contain floor (KeyboardInterrupt/SystemExit/
+                            # MemoryError + any non-Exception BaseException) always
+                            # propagates; otherwise, under an active quorum, mark the
+                            # worker failed and return a sentinel instead of sinking
+                            # the whole fan-out.
+                            if isinstance(
+                                _werr,
+                                (KeyboardInterrupt, SystemExit, MemoryError),
+                            ) or not isinstance(_werr, Exception):
+                                raise
+                            if not _quorum_active:
+                                raise
+                            return _FailedWorkerSentinel(
+                                node_name=_node_id or "worker",
+                                error_type=type(_werr).__name__,
+                                error_message=str(_werr)[:500],
                             )
-                        return w(q)
 
                     return worker_fn
 
@@ -2081,9 +2310,30 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             _node_name
                         )
 
-            _is_container = isinstance(worker, BreakdownThenAggregateInferencer) and (
-                _reporter is not None
-            )
+            # A worker is a "container" for the graph viz if it will emit its
+            # own sub-topology — broader than just BTA. After v4 Phase 5.1,
+            # LWI ALSO emits its step graph (per-round in dynamic mode), so
+            # it joins Dual + MFDual + MultiFlow + BTA as a container.
+            try:
+                from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+                    DualInferencer,
+                )
+            except Exception:
+                DualInferencer = None  # type: ignore
+            try:
+                from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+                    LinearWorkflowInferencer,
+                )
+            except Exception:
+                LinearWorkflowInferencer = None  # type: ignore
+            _is_container = (
+                isinstance(worker, BreakdownThenAggregateInferencer)
+                or (DualInferencer is not None and isinstance(worker, DualInferencer))
+                or (
+                    LinearWorkflowInferencer is not None
+                    and isinstance(worker, LinearWorkflowInferencer)
+                )
+            ) and (_reporter is not None)
             # The output-text emit (in the worker_fn closure) tags the worker's
             # result with its flat node id on THIS orchestrator's path-namespaced
             # sink — a per-closure captured value, concurrency-safe.
@@ -2188,30 +2438,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                             deliverables_fallback="none",
                         )
                         _captured_paths.append(p)
-                        # Capture deliverables folder for two-reference format.
-                        _fd = getattr(child_ws, "deliverables_dir", None)
-                        if _fd and os.path.isdir(_fd) and os.listdir(_fd):
-                            _captured_deliverable_dirs.append(os.path.abspath(_fd))
+                        # Capture the worker's outputs folder for the two-reference
+                        # format. Part 2 (two-axis model): ``outputs/`` IS the
+                        # deliverable set (no ``final_deliverables/`` subfolder).
+                        # Only reference the folder when it holds more than the
+                        # single canonical output file (i.e., a directory of
+                        # artifacts worth giving the aggregator to explore).
+                        _out_dir = getattr(child_ws, "outputs_dir", None)
+                        if (
+                            _out_dir
+                            and os.path.isdir(_out_dir)
+                            and len(os.listdir(_out_dir)) > 1
+                        ):
+                            _captured_deliverable_dirs.append(os.path.abspath(_out_dir))
                         else:
-                            _out_dir = getattr(child_ws, "outputs_dir", None)
-                            if _out_dir and os.path.isdir(_out_dir):
-                                from agent_foundation.common.workspace.layout import (
-                                    FINAL_DELIVERABLES_DIR,
-                                )
-
-                                _out_entries = [
-                                    e
-                                    for e in os.listdir(_out_dir)
-                                    if e != FINAL_DELIVERABLES_DIR
-                                ]
-                                if len(_out_entries) > 1:
-                                    _captured_deliverable_dirs.append(
-                                        os.path.abspath(_out_dir)
-                                    )
-                                else:
-                                    _captured_deliverable_dirs.append(None)
-                            else:
-                                _captured_deliverable_dirs.append(None)
+                            _captured_deliverable_dirs.append(None)
                         _winfo = {
                             "idx": idx,
                             "child_name": _bta_self._worker_child_name(idx),
@@ -2304,6 +2545,65 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 if is_async and hasattr(agg_inf, "ainfer"):
 
                     async def async_agg_fn(*worker_results, **_kwargs):
+                        # v4 Phase 3.1 quorum gate (no-op when min_successful_workers
+                        # == 0 — preserves historical behavior for non-MultiFlow BTAs).
+                        # Filter terminal-failed workers from worker_results before
+                        # the aggregator inferencer runs. U4-B: if fewer than the
+                        # quorum survive, FAIL LOUD (raise) — do NOT degrade to a
+                        # synthetic-aggregation stub that would flow into review/fix
+                        # as if it succeeded. Survivors >= quorum proceed to the
+                        # aggregator; failed workers are already filtered sentinels.
+                        _min_required = getattr(_bta_self, "min_successful_workers", 0)
+                        if _min_required > 0:
+                            _survivors = tuple(
+                                r
+                                for r in worker_results
+                                if not isinstance(r, _FailedWorkerSentinel)
+                            )
+                            _failed = [
+                                r
+                                for r in worker_results
+                                if isinstance(r, _FailedWorkerSentinel)
+                            ]
+                            if _failed:
+                                _bta_self.log_info(
+                                    {
+                                        "event": "QUORUM_FILTER",
+                                        "received": len(worker_results),
+                                        "survivors": len(_survivors),
+                                        "failed_workers": [
+                                            {
+                                                "name": s.node_name,
+                                                "type": s.error_type,
+                                                "msg": s.error_message[:200],
+                                            }
+                                            for s in _failed
+                                        ],
+                                        "min_required": _min_required,
+                                    },
+                                    "QuorumFilter",
+                                )
+                            if len(_survivors) < _min_required:
+                                # U4-B guard 3: FAIL LOUD when the quorum is unmet.
+                                # A below-threshold run must NOT silently degrade to a
+                                # synthetic-aggregation stub that flows into review/fix
+                                # as if it succeeded — surface the failure instead.
+                                _bta_self.log_warning(
+                                    {
+                                        "event": "QUORUM_BELOW_THRESHOLD_FAIL_LOUD",
+                                        "survivors": len(_survivors),
+                                        "min_required": _min_required,
+                                    },
+                                    "QuorumFailLoud",
+                                )
+                                raise RuntimeError(
+                                    "BTA quorum unmet: only "
+                                    f"{len(_survivors)}/{_min_required} required "
+                                    "workers succeeded — refusing to synthesize a "
+                                    "degraded aggregation. Failing loud."
+                                )
+                            # Quorum met — proceed with survivors only.
+                            worker_results = _survivors
                         # Fix #1: verify aggregator workspace points to canonical
                         # aggregator/ slot before invocation (guards against drift
                         # from prior calls on reused instances).
@@ -2313,19 +2613,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                 getattr(agg_inf, "_workspace", None), "root", None
                             )
                             if current != expected:
-                                from agent_foundation.common.inferencers.inferencer_workspace import (
-                                    InferencerWorkspace,
+                                # Drift on a reused instance (or a fresh instance on
+                                # resume, where current is None): durably re-bind the
+                                # aggregator to its canonical slot. The durable set is
+                                # unconditional (non-shared node) and resume-safe —
+                                # see _bind_rebuilt_child_ws.
+                                _bta_self._bind_rebuilt_child_ws(
+                                    agg_inf,
+                                    "aggregator",
+                                    _bta_self._workspace.child("aggregator"),
                                 )
-
-                                agg_ws = _bta_self._workspace.child("aggregator")
-                                agg_ws.ensure_dirs()
-                                # M7 write-purity: only re-assign the instance under
-                                # legacy (no ctx); the aggregator resolves its
-                                # workspace from the context otherwise.
-                                _agg_child = _bta_self._rc_child("aggregator")
-                                _bta_self._publish_workspace_to_ctx(_agg_child, agg_ws)
-                                if _agg_child is None:
-                                    agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
@@ -2375,19 +2672,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                                 getattr(agg_inf, "_workspace", None), "root", None
                             )
                             if current != expected:
-                                from agent_foundation.common.inferencers.inferencer_workspace import (
-                                    InferencerWorkspace,
+                                # Drift on a reused instance (or a fresh instance on
+                                # resume, where current is None): durably re-bind the
+                                # aggregator to its canonical slot. The durable set is
+                                # unconditional (non-shared node) and resume-safe —
+                                # see _bind_rebuilt_child_ws.
+                                _bta_self._bind_rebuilt_child_ws(
+                                    agg_inf,
+                                    "aggregator",
+                                    _bta_self._workspace.child("aggregator"),
                                 )
-
-                                agg_ws = _bta_self._workspace.child("aggregator")
-                                agg_ws.ensure_dirs()
-                                # M7 write-purity: only re-assign the instance under
-                                # legacy (no ctx); the aggregator resolves its
-                                # workspace from the context otherwise.
-                                _agg_child = _bta_self._rc_child("aggregator")
-                                _bta_self._publish_workspace_to_ctx(_agg_child, agg_ws)
-                                if _agg_child is None:
-                                    agg_inf._workspace = agg_ws
                         agg_input = _build_agg_input(
                             prompt_builder, worker_results, original_query
                         )
@@ -2408,14 +2702,13 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                 agg_inf = agg_inf()
                 self.aggregator_inferencer = agg_inf
             if self._workspace is not None and isinstance(agg_inf, InferencerBase):
-                agg_ws = self._workspace.child("aggregator")
-                agg_ws.ensure_dirs()
-                # M7 workspace write-purity: publish to the aggregator's child ctx;
-                # only mutate the instance under legacy (no context). Byte-identical.
-                _agg_child = self._rc_child("aggregator")
-                self._publish_workspace_to_ctx(_agg_child, agg_ws)
-                if _agg_child is None:
-                    agg_inf._workspace = agg_ws
+                # Durably re-bind the aggregator (a NON-SHARED, dispatched-once node)
+                # so its workspace survives resume, where the active ctx is not
+                # guaranteed stable across the recovery gate. Also publishes to the
+                # child ctx for fresh-path readers. See _bind_rebuilt_child_ws.
+                self._bind_rebuilt_child_ws(
+                    agg_inf, "aggregator", self._workspace.child("aggregator")
+                )
 
             _agg_node_name = f"{_bta_prefix}aggregator" if _bta_prefix else "aggregator"
             # Part F: the aggregator's per-token observer + output emit go through
@@ -2483,8 +2776,10 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         """Create the breakdown node callable that returns GraphExpansionResult.
 
         Handles predefined sub-queries, breakdown_only, interactive selection,
-        legacy checkpoint loading. Saves self._cached_sub_queries = sub_queries
-        BEFORE returning GraphExpansionResult.
+        and resume via the promoted breakdown checkpoint
+        (_load_promoted_breakdown). On a fresh breakdown it promotes the
+        decomposition into the parent's checkpoints/ (_promote_child_checkpoints)
+        so resume can rebuild the fan-out and restore the aggregator's guidance.
         """
         from rich_python_utils.common_objects.workflow.common.expansion import (
             GraphExpansionResult,
@@ -2493,14 +2788,22 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         _bta = self
         _inf_input = inference_input
         _inf_config = inference_config
-        _extra_args = _inference_args
         use_async = getattr(self, "use_async", False)
 
         if use_async:
 
             async def _breakdown_fn(*args, **kwargs):
-                # Step 0: Check for saved breakdown checkpoint (legacy compat)
-                sub_queries = _bta._load_breakdown_checkpoint()
+                # Step 0: resume short-circuit — reuse the promoted breakdown
+                # (checkpoints/breakdown/decomposed_subtasks.json) instead of
+                # re-running the breakdown LLM. Gated on resume_with_saved_results
+                # (mirroring the expansion-record reconstruction gate) so a fresh
+                # run never short-circuits; the promoted file does not exist yet at
+                # this point on a fresh run anyway.
+                sub_queries = (
+                    _bta._load_promoted_breakdown()[0]
+                    if _bta.resume_with_saved_results
+                    else None
+                )
                 raw_output = None
                 _from_predefined = False
 
@@ -2577,8 +2880,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     else:
                         sub_queries = parse_numbered_list(str(raw_output))
 
-                    # Save breakdown checkpoint
-                    _bta._save_breakdown_checkpoint(raw_output, sub_queries)
+                    # Promote the breakdown's decomposition into the parent's
+                    # checkpoints/ so resume rebuilds the fan-out and restores the
+                    # aggregator's guidance from it (see _promote_child_checkpoints
+                    # / _load_promoted_breakdown).
+                    _bta._promote_child_checkpoints(_bta.breakdown_inferencer)
 
                 # Apply max_breakdown cap
                 if (
@@ -2588,6 +2894,16 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     sub_queries = sub_queries[: _bta.max_breakdown]
 
                 if not sub_queries:
+                    if (
+                        not _bta.disable_aggregator
+                        and _bta.aggregator_inferencer is not None
+                    ):
+                        raise RuntimeError(
+                            "BTA breakdown produced zero sub_queries but an "
+                            "aggregator is configured — nothing to fan out or "
+                            "aggregate; refusing to silently return the raw "
+                            f"breakdown output. raw_output={str(raw_output)[:200]!r}"
+                        )
                     return raw_output if raw_output is not None else ""
 
                 # Breakdown-only mode (skip when predefined_sub_queries — already warned)
@@ -2637,9 +2953,6 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                         _logger.warning(
                             "[BTA] breakdown node_stream emit failed: %s", _e
                         )
-
-                # Cache sub_queries BEFORE returning GraphExpansionResult
-                _bta._cached_sub_queries = sub_queries
 
                 # On resume, _reconstruct_graph_expansions already attached workers
                 # to the breakdown node. WorkGraphNode._run resets _expansion_applied
@@ -2730,7 +3043,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     result=sub_queries,
                     subgraph=subgraph,
                     expansion_id=expansion_id,
-                    seed=sub_queries,
+                    seed=None,
                     reconstruct_from_seed=None,
                     attach_mode="insert",
                 )
@@ -2739,8 +3052,17 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
         else:
 
             def _breakdown_fn_sync(*args, **kwargs):
-                # Step 0: Check for saved breakdown checkpoint (legacy compat)
-                sub_queries = _bta._load_breakdown_checkpoint()
+                # Step 0: resume short-circuit — reuse the promoted breakdown
+                # (checkpoints/breakdown/decomposed_subtasks.json) instead of
+                # re-running the breakdown LLM. Gated on resume_with_saved_results
+                # (mirroring the expansion-record reconstruction gate) so a fresh
+                # run never short-circuits; the promoted file does not exist yet at
+                # this point on a fresh run anyway.
+                sub_queries = (
+                    _bta._load_promoted_breakdown()[0]
+                    if _bta.resume_with_saved_results
+                    else None
+                )
                 raw_output = None
                 _from_predefined = False
 
@@ -2777,7 +3099,11 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     else:
                         sub_queries = parse_numbered_list(str(raw_output))
 
-                    _bta._save_breakdown_checkpoint(raw_output, sub_queries)
+                    # Promote the breakdown's decomposition into the parent's
+                    # checkpoints/ so resume rebuilds the fan-out and restores the
+                    # aggregator's guidance from it (see _promote_child_checkpoints
+                    # / _load_promoted_breakdown).
+                    _bta._promote_child_checkpoints(_bta.breakdown_inferencer)
 
                 if (
                     _bta.max_breakdown is not None
@@ -2786,14 +3112,21 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     sub_queries = sub_queries[: _bta.max_breakdown]
 
                 if not sub_queries:
+                    if (
+                        not _bta.disable_aggregator
+                        and _bta.aggregator_inferencer is not None
+                    ):
+                        raise RuntimeError(
+                            "BTA breakdown produced zero sub_queries but an "
+                            "aggregator is configured — nothing to fan out or "
+                            "aggregate; refusing to silently return the raw "
+                            f"breakdown output. raw_output={str(raw_output)[:200]!r}"
+                        )
                     return raw_output if raw_output is not None else ""
 
                 # Breakdown-only mode (skip when predefined_sub_queries — already warned)
                 if _bta.breakdown_only and not _from_predefined:
                     return raw_output if raw_output is not None else sub_queries
-
-                # Cache sub_queries BEFORE returning GraphExpansionResult
-                _bta._cached_sub_queries = sub_queries
 
                 # On resume, _reconstruct_graph_expansions already attached workers
                 # to the breakdown node. WorkGraphNode._run resets _expansion_applied
@@ -2821,7 +3154,7 @@ class BreakdownThenAggregateInferencer(InferencerBase, WorkGraph):
                     result=sub_queries,
                     subgraph=subgraph,
                     expansion_id=expansion_id,
-                    seed=sub_queries,
+                    seed=None,
                     reconstruct_from_seed=None,
                     attach_mode="insert",
                 )

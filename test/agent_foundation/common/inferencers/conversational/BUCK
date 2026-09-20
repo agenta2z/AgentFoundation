@@ -1,0 +1,30 @@
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+
+# unittest.TestCase-style suite (buck python_unittest collects these) covering
+# the SOP phase-progression fixes. The sibling test_user_input_gate_phase_advance.py
+# is pytest-bare-function style and runs under the external pytest interpreter.
+python_unittest(
+    name = "test_phase_progression_guards",
+    srcs = ["test_phase_progression_guards.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# unittest.TestCase-style suite for pending-widget RECOVERY (Layer 2, Piece 3):
+# the deterministic re-arm that applies a persisted widget answer with NO LLM
+# re-inference. Drives a real ConversationalInferencer through run_agentic_loop
+# with a scripted fake base (no network), plus unbound-method decode + round-trip
+# tests.
+python_unittest(
+    name = "test_widget_recovery",
+    srcs = ["test_widget_recovery.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

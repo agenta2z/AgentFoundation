@@ -8,16 +8,15 @@ context, the handle lives in THIS instance's connection-scoped store keyed by
 backing, so cold reads resolve to None (connect fresh) — not a sibling's handle.
 """
 
-from attr import attrs
-
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
-from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    enter_run,
-    exit_run,
-)
+from attr import attrs
 
 
 @attrs

@@ -46,8 +46,7 @@ class RovoDevAuthError(RuntimeError):
         super().__init__(
             msg
             or (
-                "Rovo Dev authentication failed. "
-                "Run 'acli auth login' to authenticate."
+                "Rovo Dev authentication failed. Run 'acli auth login' to authenticate."
             )
         )
 
@@ -77,15 +76,15 @@ def find_acli_binary(explicit_path: Optional[str] = None) -> str:
 
 
 _CLI_NOISE_PATTERNS = [
-    re.compile(r"^\[[\?0-9;]*[a-zA-Z]"),          # bracketed paste mode [?2004h etc
-    re.compile(r"^Working in "),                    # working directory banner
-    re.compile(r"^Jira projects?: "),               # Jira project refs
-    re.compile(r"^Creating agent"),                  # agent startup
-    re.compile(r"^INTERNAL USE:"),                   # prompt collection warning
-    re.compile(r"^Turn off prompt collection"),      # prompt collection config hint
-    re.compile(r"^[✔✓] Using model:"),              # model info
-    re.compile(r"^[✔✓] Started \d+ MCP"),           # MCP server count
-    re.compile(r"^─{3,}"),                          # separator lines
+    re.compile(r"^\[[\?0-9;]*[a-zA-Z]"),  # bracketed paste mode [?2004h etc
+    re.compile(r"^Working in "),  # working directory banner
+    re.compile(r"^Jira projects?: "),  # Jira project refs
+    re.compile(r"^Creating agent"),  # agent startup
+    re.compile(r"^INTERNAL USE:"),  # prompt collection warning
+    re.compile(r"^Turn off prompt collection"),  # prompt collection config hint
+    re.compile(r"^[✔✓] Using model:"),  # model info
+    re.compile(r"^[✔✓] Started \d+ MCP"),  # MCP server count
+    re.compile(r"^─{3,}"),  # separator lines
 ]
 
 
@@ -144,8 +143,8 @@ def find_available_port(
 # Environment variables that must be removed to prevent nested-session detection
 # when spawning child acli rovodev processes from within a Rovo Dev session.
 CONFLICTING_ENV_VARS = [
-    "ROVODEV_CLI",       # Prevents nested sessions
-    "_PYI_ARCHIVE_FILE", # PyInstaller archive (from parent binary)
+    "ROVODEV_CLI",  # Prevents nested sessions
+    "_PYI_ARCHIVE_FILE",  # PyInstaller archive (from parent binary)
 ]
 
 

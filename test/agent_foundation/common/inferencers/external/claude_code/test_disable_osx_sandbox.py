@@ -20,7 +20,6 @@ import os
 from unittest import mock
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code import (
     common,
 )
@@ -39,12 +38,21 @@ FLAG = f"--{common.DANGEROUSLY_DISABLE_OSX_SANDBOX}"
 # Shared resolver
 # --------------------------------------------------------------------------- #
 
+
 class TestResolver:
     @pytest.mark.parametrize(
         "value,expected",
-        [("1", True), ("true", True), ("TRUE", True), (" yes ", True),
-         ("on", True), ("0", False), ("false", False), ("", False),
-         ("maybe", False)],
+        [
+            ("1", True),
+            ("true", True),
+            ("TRUE", True),
+            (" yes ", True),
+            ("on", True),
+            ("0", False),
+            ("false", False),
+            ("", False),
+            ("maybe", False),
+        ],
     )
     def test_env_flag_enabled(self, value, expected):
         with mock.patch.dict(os.environ, {"X_FLAG": value}, clear=False):
@@ -76,6 +84,7 @@ class TestResolver:
 # --------------------------------------------------------------------------- #
 # CLI inferencer — flag emission in the constructed command
 # --------------------------------------------------------------------------- #
+
 
 def _cli_command(**kwargs) -> str:
     # CLAUDE_CODE_COMMAND short-circuits the version probe (fast + hermetic).
@@ -121,17 +130,22 @@ class TestCliFlag:
 # super() + tier resolution must run.
 # --------------------------------------------------------------------------- #
 
+
 class TestPostInitIntact:
     def test_model_tier_resolves(self):
         # Proves __attrs_post_init__ reaches the tier branch (was dead code).
-        with mock.patch.dict(os.environ, {"CLAUDE_CODE_COMMAND": "claude"}, clear=False):
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CODE_COMMAND": "claude"}, clear=False
+        ):
             inf = ClaudeCodeCliInferencer(target_path="/tmp", model_tier="lite")
         assert inf.model_name == "haiku"
 
     def test_super_post_init_ran(self):
         # InferencerBase.__attrs_post_init__ syncs the workspace handle; if
         # super() weren't chained, this attribute machinery wouldn't be set up.
-        with mock.patch.dict(os.environ, {"CLAUDE_CODE_COMMAND": "claude"}, clear=False):
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CODE_COMMAND": "claude"}, clear=False
+        ):
             inf = ClaudeCodeCliInferencer(target_path="/tmp")
         # effective_cwd is provided by the base and depends on base post-init
         # state; accessing it must not raise and must reflect target_path.
@@ -141,6 +155,7 @@ class TestPostInitIntact:
 # --------------------------------------------------------------------------- #
 # SDK inferencer — flag routed through extra_args
 # --------------------------------------------------------------------------- #
+
 
 class TestSdkFlag:
     def test_explicit_true_routes_to_extra_args(self):

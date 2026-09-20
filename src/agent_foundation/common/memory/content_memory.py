@@ -2,8 +2,9 @@
 Main ContentMemory class - simplified generic memory for capturing child elements.
 """
 
-from typing import List, Dict, Optional, Callable, Any
-from attr import attrs, attrib
+from typing import Any, Callable, Dict, List, Optional
+
+from attr import attrib, attrs
 from rich_python_utils.common_utils import get_
 
 
@@ -57,23 +58,42 @@ class ContentMemory:
     auto_merge_memory: bool = attrib(default=True)
     exclude_last_entry_from_memory: bool = attrib(default=True)
 
-    default_get_children: Any = attrib(default='children')  # Default strategy for extracting children
-    default_get_signature: Optional[Callable[[Any], Any]] = attrib(default=None)  # Default signature function
-    use_base_memory_for_merge: bool = attrib(default=False)  # If True, deduplicate against base_memory
-    get_base_signatures: Optional[Callable[[Any], set]] = attrib(default=None)  # Extract signatures from base_memory
+    default_get_children: Any = attrib(
+        default="children"
+    )  # Default strategy for extracting children
+    default_get_signature: Optional[Callable[[Any], Any]] = attrib(
+        default=None
+    )  # Default signature function
+    use_base_memory_for_merge: bool = attrib(
+        default=False
+    )  # If True, deduplicate against base_memory
+    get_base_signatures: Optional[Callable[[Any], set]] = attrib(
+        default=None
+    )  # Extract signatures from base_memory
     memory_accumulator: Optional[Callable[[Optional[Any], List[Any]], Any]] = attrib(
-        default=None)  # Custom accumulator(base_memory, memory_list) -> combined
+        default=None
+    )  # Custom accumulator(base_memory, memory_list) -> combined
 
-    associated_attributes: Dict[str, Any] = attrib(factory=dict)  # Metadata (e.g., last_action_type)
+    associated_attributes: Dict[str, Any] = attrib(
+        factory=dict
+    )  # Metadata (e.g., last_action_type)
 
     # Base memory and metadata (private backing fields)
-    _base_memory: Optional[Any] = attrib(default=None)  # Readonly baseline content (e.g., original HTML)
+    _base_memory: Optional[Any] = attrib(
+        default=None
+    )  # Readonly baseline content (e.g., original HTML)
     _base_memory_for_comparison: Optional[Any] = attrib(
-        default=None)  # Baseline used for deduplication (e.g., target element for incremental tracking)
-    _base_memory_signatures: Optional[set] = attrib(init=False, default=None)  # Cached signatures from base_memory
-    _memory: Dict[Any, Any] = attrib(init=False, factory=dict)  # State - Dict[signature, element] (private)
-    _last_added_memory_signatures: set = attrib(init=False,
-                                                factory=set)  # Signatures of elements added in the last capture_snapshot
+        default=None
+    )  # Baseline used for deduplication (e.g., target element for incremental tracking)
+    _base_memory_signatures: Optional[set] = attrib(
+        init=False, default=None
+    )  # Cached signatures from base_memory
+    _memory: Dict[Any, Any] = attrib(
+        init=False, factory=dict
+    )  # State - Dict[signature, element] (private)
+    _last_added_memory_signatures: set = attrib(
+        init=False, factory=set
+    )  # Signatures of elements added in the last capture_snapshot
 
     @property
     def base_memory(self) -> Optional[Any]:
@@ -86,9 +106,9 @@ class ContentMemory:
         return self._base_memory_for_comparison
 
     def set_base_memory(
-            self,
-            base_memory: Optional[Any] = None,
-            base_memory_for_comparison: Optional[Any] = None
+        self,
+        base_memory: Optional[Any] = None,
+        base_memory_for_comparison: Optional[Any] = None,
     ) -> None:
         """
         Set base memory fields together and clear cached signatures if values change.
@@ -102,8 +122,16 @@ class ContentMemory:
                                        If None, falls back to base_memory for comparison.
         """
         # Check if effective comparison base will change
-        old_comparison_base = self._base_memory_for_comparison if self._base_memory_for_comparison is not None else self._base_memory
-        new_comparison_base = base_memory_for_comparison if base_memory_for_comparison is not None else base_memory
+        old_comparison_base = (
+            self._base_memory_for_comparison
+            if self._base_memory_for_comparison is not None
+            else self._base_memory
+        )
+        new_comparison_base = (
+            base_memory_for_comparison
+            if base_memory_for_comparison is not None
+            else base_memory
+        )
 
         # Update base memory fields
         self._base_memory = base_memory
@@ -117,10 +145,10 @@ class ContentMemory:
         self.reset_incremental()
 
     def capture_snapshot(
-            self,
-            content: Any,
-            get_children: Optional[Any] = None,
-            get_signature: Optional[Callable[[Any], Any]] = None
+        self,
+        content: Any,
+        get_children: Optional[Any] = None,
+        get_signature: Optional[Callable[[Any], Any]] = None,
     ) -> None:
         """
         Capture children from content structure.
@@ -162,8 +190,16 @@ class ContentMemory:
 
         # Compute base signatures if needed (lazy computation)
         # Use base_memory_for_comparison if set, otherwise fall back to base_memory
-        comparison_base = self.base_memory_for_comparison if self.base_memory_for_comparison is not None else self.base_memory
-        if self.use_base_memory_for_merge and self._base_memory_signatures is None and comparison_base is not None:
+        comparison_base = (
+            self.base_memory_for_comparison
+            if self.base_memory_for_comparison is not None
+            else self.base_memory
+        )
+        if (
+            self.use_base_memory_for_merge
+            and self._base_memory_signatures is None
+            and comparison_base is not None
+        ):
             if self.get_base_signatures is not None:
                 self._base_memory_signatures = self.get_base_signatures(comparison_base)
             else:
@@ -185,7 +221,11 @@ class ContentMemory:
             for elem in new_elements:
                 signature = get_signature(elem)
                 # Skip if signature exists in base_memory (when use_base_memory_for_merge=True)
-                if self.use_base_memory_for_merge and self._base_memory_signatures and signature in self._base_memory_signatures:
+                if (
+                    self.use_base_memory_for_merge
+                    and self._base_memory_signatures
+                    and signature in self._base_memory_signatures
+                ):
                     continue
                 self._memory[signature] = elem
                 self._last_added_memory_signatures.add(signature)
@@ -195,7 +235,11 @@ class ContentMemory:
                 signature = get_signature(elem)
 
                 # Skip if signature exists in base_memory (when use_base_memory_for_merge=True)
-                if self.use_base_memory_for_merge and self._base_memory_signatures and signature in self._base_memory_signatures:
+                if (
+                    self.use_base_memory_for_merge
+                    and self._base_memory_signatures
+                    and signature in self._base_memory_signatures
+                ):
                     continue
 
                 if self.auto_merge_memory:
@@ -212,10 +256,14 @@ class ContentMemory:
     def memory(self):
         """Get memory elements as a list (in insertion order for Python 3.7+)."""
         accumulator = self.memory_accumulator or self._default_memory_accumulator
-        memory_list = self._get_memory_list(exclude_last=self.exclude_last_entry_from_memory)
+        memory_list = self._get_memory_list(
+            exclude_last=self.exclude_last_entry_from_memory
+        )
         return accumulator(self.base_memory, memory_list)
 
-    def _default_memory_accumulator(self, base_memory: Optional[Any], memory_list: List[Any]) -> Any:
+    def _default_memory_accumulator(
+        self, base_memory: Optional[Any], memory_list: List[Any]
+    ) -> Any:
         """
         Default memory accumulator implementation.
 
@@ -235,7 +283,7 @@ class ContentMemory:
 
         # Combine base_memory with memory elements
         if isinstance(base_memory, str):
-            return base_memory + '\n' + '\n'.join(str(item) for item in memory_list)
+            return base_memory + "\n" + "\n".join(str(item) for item in memory_list)
         elif isinstance(base_memory, list):
             # List content: extend
             return base_memory + memory_list
@@ -255,7 +303,11 @@ class ContentMemory:
         """
         if exclude_last and self._last_added_memory_signatures:
             # Filter out items whose signatures are in the last added set
-            return [elem for sig, elem in self._memory.items() if sig not in self._last_added_memory_signatures]
+            return [
+                elem
+                for sig, elem in self._memory.items()
+                if sig not in self._last_added_memory_signatures
+            ]
         return list(self._memory.values())
 
     def reset_incremental(self):

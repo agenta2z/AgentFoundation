@@ -59,6 +59,7 @@ def make_inferencer(target_path: str, model: str):
 
 # -- Demo 1: Async single call (ainfer) --------------------------------------
 
+
 async def demo_async_single(query: str, target_path: str, model: str) -> None:
     """ainfer: returns the full response text at once."""
     print("=" * 70)
@@ -85,6 +86,7 @@ async def demo_async_single(query: str, target_path: str, model: str) -> None:
 
 
 # -- Demo 2: Async streaming (ainfer_streaming) -------------------------------
+
 
 async def demo_async_streaming(query: str, target_path: str, model: str) -> None:
     """Async streaming: yields text deltas as the Devmate SDK emits events."""
@@ -127,6 +129,7 @@ async def demo_async_streaming(query: str, target_path: str, model: str) -> None
 
 # -- Demo 3: SDKInferencerResponse -------------------------------------------
 
+
 async def demo_sdk_response(query: str, target_path: str, model: str) -> None:
     """SDKInferencerResponse: structured result with session_id and tokens."""
     print("=" * 70)
@@ -160,6 +163,7 @@ async def demo_sdk_response(query: str, target_path: str, model: str) -> None:
 
 # -- Demo 4: Sync bridge (_infer) --------------------------------------------
 
+
 def demo_sync_single(query: str, target_path: str, model: str) -> None:
     """Sync _infer bridge: for non-async code (creates a fresh event loop)."""
     print("=" * 70)
@@ -189,27 +193,32 @@ def demo_sync_single(query: str, target_path: str, model: str) -> None:
 
 # -- Main ---------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Devmate SDK Inferencer -- Streaming & Modes Demo"
     )
     parser.add_argument(
-        "-q", "--query",
+        "-q",
+        "--query",
         default="Explain what a Python decorator is in 2 bullet points.",
         help="Query to send to Devmate",
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="claude-sonnet-4-5",
         help="Devmate SDK model (default: claude-sonnet-4-5)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default=os.path.expanduser("~/fbsource"),
         help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
     parser.add_argument(
-        "-e", "--examples",
+        "-e",
+        "--examples",
         type=int,
         default=4,
         choices=[1, 2, 3, 4],

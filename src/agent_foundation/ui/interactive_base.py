@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
 import asyncio
+from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from enum import StrEnum
-from typing import Tuple, Any, Union, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from attr import attrs, attrib
-
+from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_utils import iter_
 
@@ -13,13 +12,14 @@ _CURRENT_INTERACTION_CALLER: ContextVar[str] = ContextVar(
     "interaction_caller", default=""
 )
 
-LOG_TYPE_USER_INPUT = 'UserInput'
-LOG_TYPE_SYSTEM_RESPONSE = 'SystemResponse'
+LOG_TYPE_USER_INPUT = "UserInput"
+LOG_TYPE_SYSTEM_RESPONSE = "SystemResponse"
+
 
 class InteractionFlags(StrEnum):
-    PendingInput = 'PendingInput'
-    MessageOnly = 'MessageOnly'
-    TurnCompleted = 'TurnCompleted'
+    PendingInput = "PendingInput"
+    MessageOnly = "MessageOnly"
+    TurnCompleted = "TurnCompleted"
 
 
 @attrs
@@ -60,17 +60,19 @@ class InteractiveBase(Debuggable):
             Abstract protected method that subclasses must implement to handle the delivery of responses.
             The response format and flag usage will vary based on the interaction medium.
     """
+
     system_name: str = attrib(default="System")
     user_name: str = attrib(default="User")
     log_input_content: bool = attrib(default=True, kw_only=True)
     log_response_content: bool = attrib(default=True, kw_only=True)
+
     def get_user_input_string(self, user_input: Any) -> str:
         if user_input:
-            return f'{self.user_name}: {user_input}'
+            return f"{self.user_name}: {user_input}"
 
     def get_system_response_string(self, system_response: Any) -> str:
         if system_response:
-            return f'{self.system_name}: {system_response}'
+            return f"{self.system_name}: {system_response}"
 
     @abstractmethod
     def _get_input(self):
@@ -89,10 +91,15 @@ class InteractiveBase(Debuggable):
 
         retrieved_input = self._get_input()
         if retrieved_input is None:
-            self.log_debug("No input available (timeout or empty queue)", log_type=LOG_TYPE_USER_INPUT)
+            self.log_debug(
+                "No input available (timeout or empty queue)",
+                log_type=LOG_TYPE_USER_INPUT,
+            )
         else:
             if self.log_input_content:
-                self.log_debug(f"Received input: {retrieved_input}", log_type=LOG_TYPE_USER_INPUT)
+                self.log_debug(
+                    f"Received input: {retrieved_input}", log_type=LOG_TYPE_USER_INPUT
+                )
             else:
                 self.log_debug("Received input", log_type=LOG_TYPE_USER_INPUT)
         return retrieved_input
@@ -115,7 +122,9 @@ class InteractiveBase(Debuggable):
         raise NotImplementedError
 
     @abstractmethod
-    def _send_response(self, response:  Any, flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def _send_response(
+        self, response: Any, flag: InteractionFlags = InteractionFlags.TurnCompleted
+    ) -> None:
         """
         Handles the delivery of a single response to the user.
 
@@ -136,7 +145,6 @@ class InteractiveBase(Debuggable):
         """
         raise NotImplementedError
 
-
     def _send_pending_message(self):
         """
         No-op placeholder for signaling a pending message.
@@ -152,7 +160,12 @@ class InteractiveBase(Debuggable):
         """
         pass
 
-    def send_response(self, response: Union[Any, List, Tuple], flag: InteractionFlags = InteractionFlags.TurnCompleted, **kwargs) -> None:
+    def send_response(
+        self,
+        response: Union[Any, List, Tuple],
+        flag: InteractionFlags = InteractionFlags.TurnCompleted,
+        **kwargs,
+    ) -> None:
         """
         Sends one or more responses to the user and resets the input state for the next interaction.
 
@@ -179,19 +192,25 @@ class InteractiveBase(Debuggable):
             - After processing responses, `reset_input` is invoked to prepare the system for
               the next interaction.
         """
-        self.log_debug(f"Sending response(s), flag={flag.value}", log_type=LOG_TYPE_SYSTEM_RESPONSE)
+        self.log_debug(
+            f"Sending response(s), flag={flag.value}", log_type=LOG_TYPE_SYSTEM_RESPONSE
+        )
 
         if self.log_response_content:
             responses_list = []
             for _response in iter_(response):
                 self._send_response(_response, flag=flag)
                 responses_list.append(_response)
-            self.log_debug(f"Response content: {responses_list}", log_type=LOG_TYPE_SYSTEM_RESPONSE)
+            self.log_debug(
+                f"Response content: {responses_list}", log_type=LOG_TYPE_SYSTEM_RESPONSE
+            )
         else:
             for _response in iter_(response):
                 self._send_response(_response, flag=flag)
 
-        self.log_debug("Response(s) sent successfully", log_type=LOG_TYPE_SYSTEM_RESPONSE)
+        self.log_debug(
+            "Response(s) sent successfully", log_type=LOG_TYPE_SYSTEM_RESPONSE
+        )
 
         if flag:
             self._send_pending_message()

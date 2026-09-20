@@ -13,23 +13,38 @@ Template Variable System:
 import os
 import pickle
 import tempfile
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Union, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
-from attr import attrs, attrib
+from attr import attrib, attrs
 
 if TYPE_CHECKING:
     from agent_foundation.agents.agent import Agent
 
-from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode
+import logging
+
 from rich_python_utils.common_objects.serializable import (
-    Serializable,
-    FIELD_TYPE,
     FIELD_MODULE,
     FIELD_SERIALIZATION,
+    FIELD_TYPE,
+    Serializable,
     SERIALIZATION_DICT,
 )
+from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode
 from rich_python_utils.common_utils.typing_helper import coerce_to_type
 
+from .action_executor import MultiActionExecutor
+from .action_metadata import ActionMetadataRegistry
 from .common import (
     Action,
     ActionResult,
@@ -39,15 +54,11 @@ from .common import (
     TargetSpecWithFallback,
     TargetStrategy,
 )
-from .action_metadata import ActionMetadataRegistry
-from .action_executor import MultiActionExecutor
 
-
-import logging
 logger = logging.getLogger(__name__)
 
 # Template engine support - default to python str.format
-SUPPORTED_TEMPLATE_ENGINES = ('python', 'jinja2', 'handlebars', 'string_template')
+SUPPORTED_TEMPLATE_ENGINES = ("python", "jinja2", "handlebars", "string_template")
 
 
 def _get_template_utils(engine: str) -> Tuple[Callable, Callable]:
@@ -60,21 +71,25 @@ def _get_template_utils(engine: str) -> Tuple[Callable, Callable]:
     Returns:
         Tuple of (compile_template, format_template) callables
     """
-    if engine == 'python':
+    if engine == "python":
         from rich_python_utils.string_utils.formatting.python_str_format import (
-            compile_template, format_template
+            compile_template,
+            format_template,
         )
-    elif engine == 'jinja2':
+    elif engine == "jinja2":
         from rich_python_utils.string_utils.formatting.jinja2_format import (
-            compile_template, format_template
+            compile_template,
+            format_template,
         )
-    elif engine == 'handlebars':
+    elif engine == "handlebars":
         from rich_python_utils.string_utils.formatting.handlebars_format import (
-            compile_template, format_template
+            compile_template,
+            format_template,
         )
-    elif engine == 'string_template':
+    elif engine == "string_template":
         from rich_python_utils.string_utils.formatting.string_template_format import (
-            compile_template, format_template
+            compile_template,
+            format_template,
         )
     else:
         raise ValueError(
@@ -84,7 +99,7 @@ def _get_template_utils(engine: str) -> Tuple[Callable, Callable]:
     return compile_template, format_template
 
 
-def _is_single_var_template(template: str, engine: str = 'python') -> Optional[str]:
+def _is_single_var_template(template: str, engine: str = "python") -> Optional[str]:
     """
     Check if template is exactly a single variable placeholder.
 
@@ -100,6 +115,7 @@ def _is_single_var_template(template: str, engine: str = 'python') -> Optional[s
         The variable name if template is exactly a single variable, None otherwise
     """
     import re
+
     template = template.strip()
 
     compile_fn, _ = _get_template_utils(engine)
@@ -113,17 +129,17 @@ def _is_single_var_template(template: str, engine: str = 'python') -> Optional[s
 
     var_name = next(iter(variables))
 
-    if engine == 'python':
-        if template == f'{{{var_name}}}':
+    if engine == "python":
+        if template == f"{{{var_name}}}":
             return var_name
-    elif engine == 'jinja2':
-        if re.match(rf'^{{\{{\s*{re.escape(var_name)}\s*\}}\}}$', template):
+    elif engine == "jinja2":
+        if re.match(rf"^{{\{{\s*{re.escape(var_name)}\s*\}}\}}$", template):
             return var_name
-    elif engine == 'handlebars':
-        if template == f'{{{{{var_name}}}}}':
+    elif engine == "handlebars":
+        if template == f"{{{{{var_name}}}}}":
             return var_name
-    elif engine == 'string_template':
-        if template == f'${var_name}' or template == f'${{{var_name}}}':
+    elif engine == "string_template":
+        if template == f"${var_name}" or template == f"${{{var_name}}}":
             return var_name
 
     return None
@@ -184,7 +200,7 @@ class ActionNode(WorkGraphNode):
     action: Action = attrib(kw_only=True)
     action_executor: Union[Callable, MultiActionExecutor] = attrib(kw_only=True)
     action_metadata: ActionMetadataRegistry = attrib(kw_only=True)
-    template_engine: str = attrib(default='python', kw_only=True)
+    template_engine: str = attrib(default="python", kw_only=True)
     result_save_dir: Optional[str] = attrib(default=None, kw_only=True)
 
     # Template tracking (populated in __attrs_post_init__)
@@ -214,6 +230,7 @@ class ActionNode(WorkGraphNode):
 
     def __attrs_post_init__(self):
         import logging
+
         _logger = logging.getLogger(__name__)
         _logger.debug(
             f"[ActionNode.__attrs_post_init__] action_id={self.action.id}, "
@@ -222,7 +239,9 @@ class ActionNode(WorkGraphNode):
         )
 
         # Auto-wrap Mapping action_executor into MultiActionExecutor
-        if isinstance(self.action_executor, Mapping) and not isinstance(self.action_executor, MultiActionExecutor):
+        if isinstance(self.action_executor, Mapping) and not isinstance(
+            self.action_executor, MultiActionExecutor
+        ):
             self.action_executor = MultiActionExecutor(self.action_executor)
 
         # Set the value callable to our execution method
@@ -258,7 +277,7 @@ class ActionNode(WorkGraphNode):
         if isinstance(self.action.target, str):
             self._scan_template_value(
                 value=self.action.target,
-                arg_name='_target',
+                arg_name="_target",
                 compile_fn=compile_fn,
                 parsed_arg_types={},  # target doesn't have arg_type
             )
@@ -321,7 +340,10 @@ class ActionNode(WorkGraphNode):
     def substitute_variables(
         self,
         variables: Dict[str, Any],
-    ) -> Tuple[Optional[Union[TargetSpec, TargetSpecWithFallback, str]], Optional[Dict[str, Any]]]:
+    ) -> Tuple[
+        Optional[Union[TargetSpec, TargetSpecWithFallback, str]],
+        Optional[Dict[str, Any]],
+    ]:
         """
         Substitute template variables in target and args.
 
@@ -347,10 +369,13 @@ class ActionNode(WorkGraphNode):
 
         # Substitute target
         resolved_target = self.action.target
-        if isinstance(self.action.target, str) and '_target' in self._compiled_templates:
+        if (
+            isinstance(self.action.target, str)
+            and "_target" in self._compiled_templates
+        ):
             resolved_target = self._substitute_value(
                 value=self.action.target,
-                arg_name='_target',
+                arg_name="_target",
                 variables=variables,
                 format_fn=format_fn,
             )
@@ -414,7 +439,7 @@ class ActionNode(WorkGraphNode):
     def has_saved_result(self) -> bool:
         """
         Check if a saved result exists for this action.
-        
+
         Returns:
             True if a saved result file exists, False otherwise.
         """
@@ -422,49 +447,49 @@ class ActionNode(WorkGraphNode):
             return False
         result_path = self._get_result_path(self.action.id)
         return os.path.exists(result_path)
-    
+
     def load_saved_result(self) -> Optional[ActionResult]:
         """
         Load a previously saved result for this action.
-        
+
         Returns:
             ActionResult if saved result exists, None otherwise.
         """
         if not self.has_saved_result():
             return None
-        
+
         result_path = self._get_result_path(self.action.id)
         try:
-            with open(result_path, 'rb') as f:
+            with open(result_path, "rb") as f:
                 return pickle.load(f)
         except Exception:
             return None
-    
+
     def save_result(self, result: ActionResult) -> bool:
         """
         Save an action result to disk.
-        
+
         Args:
             result: The ActionResult to save.
-        
+
         Returns:
             True if save was successful, False otherwise.
         """
         if not self.enable_result_save:
             return False
-        
+
         result_path = self._get_result_path(self.action.id)
-        
+
         # Ensure directory exists
         os.makedirs(os.path.dirname(result_path), exist_ok=True)
-        
+
         try:
-            with open(result_path, 'wb') as f:
+            with open(result_path, "wb") as f:
                 pickle.dump(result, f)
             return True
         except Exception:
             return False
-    
+
     def _execute_action(self, context: ExecutionRuntime) -> ActionResult:
         """
         Execute the action, cycling through fallback strategies on retry.
@@ -479,11 +504,14 @@ class ActionNode(WorkGraphNode):
             ActionResult with success status and value.
         """
         import logging
+
         _logger = logging.getLogger(__name__)
 
         try:
             # Substitute template variables using context.variables
-            resolved_target, resolved_args = self.substitute_variables(context.variables)
+            resolved_target, resolved_args = self.substitute_variables(
+                context.variables
+            )
 
             _logger.debug(
                 f"[ActionNode._execute_action] action_id={self.action.id}, "
@@ -517,7 +545,9 @@ class ActionNode(WorkGraphNode):
                 )
                 # Resolve element using find_element_agent
                 resolved_element = self._resolve_agent_target(resolved_target, context)
-                logger.info(f"[ActionNode._execute_action] Resolved element: {resolved_element}")
+                logger.info(
+                    f"[ActionNode._execute_action] Resolved element: {resolved_element}"
+                )
                 # Execute action with resolved element
                 result = self.action_executor(
                     action_type=self.action.type,
@@ -570,7 +600,7 @@ class ActionNode(WorkGraphNode):
                 context.set_variable(self.output_variable, action_result.value)
 
             # Always store last result as '_' for implicit reference
-            context.set_variable('_', action_result.value)
+            context.set_variable("_", action_result.value)
 
             # Save result if persistence is enabled
             if self.enable_result_save:
@@ -586,15 +616,20 @@ class ActionNode(WorkGraphNode):
             #   actions, then retrying the SAME target (fallback_index stays at 0)
             # - TargetSpecWithFallback without a branch cycles through different strategies
             # - Combining both would create confusing semantics, so they're mutually exclusive
-            if self._is_element_not_found_error(e) and self.action.target_not_found_actions:
+            if (
+                self._is_element_not_found_error(e)
+                and self.action.target_not_found_actions
+            ):
                 return self._handle_target_not_found_branch(context, e)
-            
+
             # Increment fallback index for next retry attempt (WorkGraphNode retry mechanism).
             # This only runs when NO target_not_found branch exists (due to early return above).
             if isinstance(self.action.target, TargetSpecWithFallback):
-                context.set_node_state(self.action.id, 'fallback_index', lambda x: (x or 0) + 1)
+                context.set_node_state(
+                    self.action.id, "fallback_index", lambda x: (x or 0) + 1
+                )
             raise  # Re-raise to trigger WorkGraphNode retry
-    
+
     def _execute_with_current_fallback(
         self,
         context: ExecutionRuntime,
@@ -616,9 +651,11 @@ class ActionNode(WorkGraphNode):
         target = self.action.target
 
         if not isinstance(target, TargetSpecWithFallback):
-            raise ValueError("_execute_with_current_fallback called with non-fallback target")
+            raise ValueError(
+                "_execute_with_current_fallback called with non-fallback target"
+            )
 
-        fallback_index = context.get_node_state(self.action.id, 'fallback_index', 0)
+        fallback_index = context.get_node_state(self.action.id, "fallback_index", 0)
         if fallback_index >= len(target.strategies):
             raise ValueError("All fallback strategies exhausted")
 
@@ -636,20 +673,22 @@ class ActionNode(WorkGraphNode):
             action_target_strategy=target_strategy,
             no_action_if_target_not_found=self.action.no_action_if_target_not_found,
         )
-    
+
     def _get_fallback_result(self, *args, **kwargs) -> ActionResult:
         """
         Return failure result when all fallback strategies are exhausted.
-        
+
         Returns:
             ActionResult with success=False and the last error.
         """
         return ActionResult(
             success=False,
-            error=ValueError(f"All fallback strategies failed for action '{self.action.id}'"),
+            error=ValueError(
+                f"All fallback strategies failed for action '{self.action.id}'"
+            ),
             metadata={"fallback_exhausted": True},
         )
-    
+
     def _get_target_value(
         self, target: Union[TargetSpec, str, int, float, None]
     ) -> Optional[Union[str, int, float]]:
@@ -669,7 +708,7 @@ class ActionNode(WorkGraphNode):
         if isinstance(target, TargetSpec):
             return target.value
         return None
-    
+
     def _get_target_strategy(
         self, target: Union[TargetSpec, str, None]
     ) -> Optional[str]:
@@ -692,108 +731,109 @@ class ActionNode(WorkGraphNode):
 
     def _is_element_not_found_error(self, e: Exception) -> bool:
         """Check if exception is an element-not-found error.
-        
+
         Uses exact type name matching to avoid false positives (e.g., FileNotFoundError).
         Also checks inheritance chain for subclasses.
-        
+
         Args:
             e: The exception to check.
-            
+
         Returns:
             True if the exception is an element-not-found error, False otherwise.
         """
         TARGET_NOT_FOUND_EXCEPTIONS = {
-            'ElementNotFoundError',
-            'ElementNotFoundException',
-            'TargetNotFoundError'
+            "ElementNotFoundError",
+            "ElementNotFoundException",
+            "TargetNotFoundError",
         }
-        
+
         exc_name = type(e).__name__
         if exc_name in TARGET_NOT_FOUND_EXCEPTIONS:
             return True
-        
+
         # Check MRO for subclasses
         return any(
-            cls.__name__ in TARGET_NOT_FOUND_EXCEPTIONS
-            for cls in type(e).__mro__
+            cls.__name__ in TARGET_NOT_FOUND_EXCEPTIONS for cls in type(e).__mro__
         )
 
     def _handle_target_not_found_branch(
-        self,
-        context: ExecutionRuntime,
-        original_error: Exception
+        self, context: ExecutionRuntime, original_error: Exception
     ) -> ActionResult:
         """Execute target_not_found branch with retry logic.
-        
+
         The retry loop is HERE, not in _execute_action(). This method:
         1. Executes branch actions
         2. If retry_after_handling=False, returns success
         3. If retry_after_handling=True, retries the original action
         4. Repeats until max_retries exceeded
-        
+
         Design Note on TargetSpecWithFallback:
             When the action's target is a TargetSpecWithFallback, all retries within
             this method use fallback_index=0 (the first strategy). This is intentional:
             the target_not_found branch is designed to execute fallback actions and
             retry the SAME target, not cycle through different strategies. If you need
             strategy cycling, use TargetSpecWithFallback without a target_not_found branch.
-        
+
         Args:
             context: Execution runtime context with variables and previous results.
             original_error: The original exception that triggered the branch.
-            
+
         Returns:
             ActionResult with success status and value.
-            
+
         Raises:
             TargetNotFoundError: When max_retries is exceeded.
         """
         import logging
         import time
+
         _logger = logging.getLogger(__name__)
-        
+
         config = self.action.target_not_found_config or {}
-        max_retries = config.get('max_retries', 3)
-        retry_delay = config.get('retry_delay', 1.0)
-        retry_after_handling = config.get('retry_after_handling', False)
-        
+        max_retries = config.get("max_retries", 3)
+        retry_delay = config.get("retry_delay", 1.0)
+        retry_after_handling = config.get("retry_after_handling", False)
+
         attempt_count = 0
-        
+
         while True:
             attempt_count += 1
-            
+
             _logger.debug(
                 f"[ActionNode._handle_target_not_found_branch] "
                 f"action_id={self.action.id}, attempt={attempt_count}, "
                 f"retry_after_handling={retry_after_handling}"
             )
-            
+
             # Execute branch actions
             branch_results = self._execute_branch_actions(
                 context, self.action.target_not_found_actions
             )
-            
+
             # If not retrying, return success
             if not retry_after_handling:
                 return ActionResult(
                     success=True,
                     value=None,
-                    metadata={'branch_executed': True, 'branch_results': branch_results}
+                    metadata={
+                        "branch_executed": True,
+                        "branch_results": branch_results,
+                    },
                 )
-            
+
             # Check retry limit
             if attempt_count > max_retries:
                 raise TargetNotFoundError(
                     action_type=self.action.type,
                     target=self.action.target,
                     attempt_count=attempt_count,
-                    max_retries=max_retries
+                    max_retries=max_retries,
                 ) from original_error
-            
+
             # Wait before retry
             if retry_delay > 0:
                 time.sleep(retry_delay)
-            
+
             # Retry original action (same logic as main try block)
             # NOTE on no_action_if_target_not_found=False below:
             # We intentionally force this to False during retry because:
@@ -804,11 +844,13 @@ class ActionNode(WorkGraphNode):
             # 4. If we respected the original setting, retry would immediately skip,
             #    defeating the purpose of the target_not_found branch
             try:
-                resolved_target, resolved_args = self.substitute_variables(context.variables)
-                
+                resolved_target, resolved_args = self.substitute_variables(
+                    context.variables
+                )
+
                 # Resolve the executor for this action type
                 executor = self._resolve_executor(self.action.type)
-                
+
                 # Check if executor is an Agent instance
                 if self._is_agent_executor(executor):
                     return self._execute_agent_action(
@@ -817,10 +859,12 @@ class ActionNode(WorkGraphNode):
                         resolved_target=resolved_target,
                         resolved_args=resolved_args,
                     )
-                
+
                 # Check for agent-based element finding strategy
                 if self._is_agent_target_strategy(resolved_target):
-                    resolved_element = self._resolve_agent_target(resolved_target, context)
+                    resolved_element = self._resolve_agent_target(
+                        resolved_target, context
+                    )
                     result = self.action_executor(
                         action_type=self.action.type,
                         action_target=resolved_element,
@@ -846,25 +890,25 @@ class ActionNode(WorkGraphNode):
                         action_target_strategy=target_strategy,
                         no_action_if_target_not_found=False,  # See NOTE above
                     )
-                
+
                 # Success! Return
                 action_result = ActionResult(
                     success=True,
                     value=result,
                     metadata={
-                        'branch_executed': True,
-                        'retry_succeeded': True,
-                        'retry_attempt': attempt_count
-                    }
+                        "branch_executed": True,
+                        "retry_succeeded": True,
+                        "retry_attempt": attempt_count,
+                    },
                 )
-                
+
                 # Store in context
                 if self.output_variable:
                     context.set_variable(self.output_variable, action_result.value)
-                context.set_variable('_', action_result.value)
-                
+                context.set_variable("_", action_result.value)
+
                 return action_result
-                
+
             except Exception as e:
                 if not self._is_element_not_found_error(e):
                     raise  # Different error, propagate
@@ -872,16 +916,14 @@ class ActionNode(WorkGraphNode):
                 continue
 
     def _execute_branch_actions(
-        self,
-        context: ExecutionRuntime,
-        branch_actions: List[Action]
+        self, context: ExecutionRuntime, branch_actions: List[Action]
     ) -> List[ActionResult]:
         """Execute a list of branch actions.
-        
+
         Args:
             context: Execution runtime context with variables and previous results.
             branch_actions: List of Action objects to execute.
-            
+
         Returns:
             List of ActionResult objects from each branch action.
         """
@@ -937,6 +979,7 @@ class ActionNode(WorkGraphNode):
         """
         try:
             from agent_foundation.agents.agent import Agent
+
             return isinstance(executor, Agent)
         except ImportError:
             return False
@@ -959,6 +1002,7 @@ class ActionNode(WorkGraphNode):
             return True
         try:
             from agent_foundation.agents.agent import Agent
+
             return isinstance(executor, Agent)
         except ImportError:
             return False
@@ -1008,6 +1052,7 @@ class ActionNode(WorkGraphNode):
             AgentExecutionError: If the agent fails to resolve the element.
         """
         import logging
+
         _logger = logging.getLogger(__name__)
 
         _logger.debug(
@@ -1032,13 +1077,13 @@ class ActionNode(WorkGraphNode):
 
         # Prepare input for agent
         task_input = {
-            'user_input': target.value,
-            'context': context.variables,
+            "user_input": target.value,
+            "context": context.variables,
         }
 
         # Pass options if provided
         if target.options:
-            task_input['options'] = target.options
+            task_input["options"] = target.options
 
         try:
             # Execute agent to find element
@@ -1051,7 +1096,7 @@ class ActionNode(WorkGraphNode):
 
             # Return the agent's output as the resolved element reference
             # The agent should return a selector, xpath, or element object
-            if hasattr(result, 'output'):
+            if hasattr(result, "output"):
                 return result.output
             return result
 
@@ -1091,19 +1136,20 @@ class ActionNode(WorkGraphNode):
             AgentExecutionError: If the agent execution fails.
         """
         import logging
+
         _logger = logging.getLogger(__name__)
 
         # Get task description from resolved target
         task_description = str(resolved_target) if resolved_target is not None else ""
 
         # Get previous action result if available (stored in '_' variable)
-        previous_result = context.variables.get('_')
+        previous_result = context.variables.get("_")
 
         # Prepare task input for agent
         task_input = {
-            'user_input': task_description,
-            'context': context.variables,
-            'action_results': previous_result,
+            "user_input": task_description,
+            "context": context.variables,
+            "action_results": previous_result,
         }
 
         # Add any additional args from the action
@@ -1135,7 +1181,7 @@ class ActionNode(WorkGraphNode):
                 context.set_variable(self.output_variable, action_result.value)
 
             # Always store last result as '_' for implicit reference
-            context.set_variable('_', action_result.value)
+            context.set_variable("_", action_result.value)
 
             # Save result if persistence is enabled
             if self.enable_result_save:
@@ -1164,7 +1210,7 @@ class ActionNode(WorkGraphNode):
                 # Still store result in context even on failure
                 if self.output_variable:
                     context.set_variable(self.output_variable, None)
-                context.set_variable('_', None)
+                context.set_variable("_", None)
                 return action_result
 
             # Default: on_error="stop" - re-raise with context
@@ -1176,19 +1222,17 @@ class ActionNode(WorkGraphNode):
 
     # Serializable interface methods
     def to_serializable_obj(
-        self,
-        mode: str = 'auto',
-        _output_format: Optional[str] = None
+        self, mode: str = "auto", _output_format: Optional[str] = None
     ) -> Dict[str, Any]:
         """Convert ActionNode to serializable Python object.
-        
+
         Overrides Serializable.to_serializable_obj() to provide custom
         serialization that preserves the action definition and retry configuration.
-        
+
         Args:
             mode: Serialization mode ('auto', 'dict', 'pickle')
             _output_format: Target output format for conflict detection
-        
+
         Returns:
             Dict containing action definition and config
         """
@@ -1201,64 +1245,66 @@ class ActionNode(WorkGraphNode):
                 "enable_result_save": self.enable_result_save,
                 "result_save_dir": self.result_save_dir,
                 "max_repeat": self.max_repeat,
-            }
+            },
         }
-    
+
     @classmethod
     def from_serializable_obj(
         cls,
         obj: Dict[str, Any],
         action_executor: Callable = None,
         action_metadata: Optional[ActionMetadataRegistry] = None,
-        **context
-    ) -> 'ActionNode':
+        **context,
+    ) -> "ActionNode":
         """Reconstruct ActionNode from serializable dict.
-        
+
         Overrides Serializable.from_serializable_obj() to provide custom
         deserialization that reconstructs the action with context injection
         for action_executor and action_metadata.
-        
+
         Args:
             obj: The serializable object (dict)
             action_executor: Callable for executing actions (required)
             action_metadata: Action type registry (optional)
             **context: Additional context parameters
-        
+
         Returns:
             Reconstructed ActionNode instance
-        
+
         Raises:
             ValueError: If action_executor is not provided
         """
         if action_executor is None:
-            action_executor = context.get('action_executor')
+            action_executor = context.get("action_executor")
         if action_executor is None:
-            raise ValueError("Required context parameter 'action_executor' not provided")
-        
+            raise ValueError(
+                "Required context parameter 'action_executor' not provided"
+            )
+
         if action_metadata is None:
-            action_metadata = context.get('action_metadata', ActionMetadataRegistry())
-        
+            action_metadata = context.get("action_metadata", ActionMetadataRegistry())
+
         # Reconstruct action from dict
-        action = Action(**obj['action'])
-        config = obj.get('config', {})
-        
+        action = Action(**obj["action"])
+        config = obj.get("config", {})
+
         return cls(
             action=action,
             action_executor=action_executor,
             action_metadata=action_metadata,
-            enable_result_save=config.get('enable_result_save', False),
-            result_save_dir=config.get('result_save_dir'),
+            enable_result_save=config.get("enable_result_save", False),
+            result_save_dir=config.get("result_save_dir"),
         )
 
     def _get_result_path(self, name: str, *args, **kwargs) -> str:
         """
         Get the path for saving action results.
-        
+
         Uses result_save_dir if configured, otherwise uses temp directory.
-        
+
         Args:
             name: The name/id of the result to save.
-        
+
         Returns:
             Path string for the result file.
         """
@@ -1298,8 +1344,9 @@ class AgentExecutionError(Exception):
         self.description = description
         self.original_error = original_error
         # Truncate description for message
-        desc_preview = description[:100] + "..." if len(description) > 100 else description
+        desc_preview = (
+            description[:100] + "..." if len(description) > 100 else description
+        )
         super().__init__(
-            f"Agent '{agent_id}' failed on task: {desc_preview} "
-            f"Error: {original_error}"
+            f"Agent '{agent_id}' failed on task: {desc_preview} Error: {original_error}"
         )

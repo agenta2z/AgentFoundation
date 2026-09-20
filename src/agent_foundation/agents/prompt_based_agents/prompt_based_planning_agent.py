@@ -3,81 +3,84 @@ from functools import partial
 from itertools import product
 from typing import List
 
-from attr import attrs, attrib
+from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import (
+    PromptBasedActionAgent,
+)
+from attr import attrib, attrs
+from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
+from rich_python_utils.string_utils import split_, strip_
 
-from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
-from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
-from rich_python_utils.string_utils import strip_, split_
+DEFAULT_RESPONSE_FIELD_PROBLEMS = "Problems"
+DEFAULT_RESPONSE_FIELD_PROBLEM = "Problem"
+DEFAULT_RESPONSE_FIELD_PROBLEM_ID = "ProblemID"
+DEFAULT_RESPONSE_FIELD_PROBLEM_GRAPH = "ProblemGraph"
+DEFAULT_ACTION_SEP = "->"
+DEFAULT_SECONDARY_ACTION_SEP = ","
 
-DEFAULT_RESPONSE_FIELD_PROBLEMS = 'Problems'
-DEFAULT_RESPONSE_FIELD_PROBLEM = 'Problem'
-DEFAULT_RESPONSE_FIELD_PROBLEM_ID = 'ProblemID'
-DEFAULT_RESPONSE_FIELD_PROBLEM_GRAPH = 'ProblemGraph'
-DEFAULT_ACTION_SEP = '->'
-DEFAULT_SECONDARY_ACTION_SEP = ','
 
 @attrs
 class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
     """
-    A planning agent that decomposes complex tasks into sub-problems with dependencies.
+        A planning agent that decomposes complex tasks into sub-problems with dependencies.
 
-    KEY DIFFERENCE FROM PromptBasedActionAgent:
-    ==========================================
-    - PromptBasedActionAgent._create_next_actions() returns List[List[AgentAction]]
-      → Base Agent.__call__() builds WorkGraph dynamically with branched recursion
+        KEY DIFFERENCE FROM PromptBasedActionAgent:
+        ==========================================
+        - PromptBasedActionAgent._create_next_actions() returns List[List[AgentAction]]
+          → Base Agent.__call__() builds WorkGraph dynamically with branched recursion
 
-    - PromptBasedActionPlanningAgent._create_next_actions() returns WorkGraph (callable)
-      → Base Agent.__call__() detects callable and executes it directly
+        - PromptBasedActionPlanningAgent._create_next_actions() returns WorkGraph (callable)
+          → Base Agent.__call__() detects callable and executes it directly
 
-    This polymorphic design allows the planning agent to have FULL CONTROL over
-    the execution graph structure, parsed from the LLM's ProblemGraph response.
+        This polymorphic design allows the planning agent to have FULL CONTROL over
+        the execution graph structure, parsed from the LLM's ProblemGraph response.
 
-    WORKFLOW:
-    =========
-    1. LLM receives user request and decomposes into Problems with ProblemIDs
-    2. LLM specifies dependencies in ProblemGraph (e.g., "A -> B" means B depends on A)
-    3. This agent parses ProblemGraph into paths and builds a WorkGraph
-    4. WorkGraph is returned as next_actions (callable)
-    5. Base Agent.__call__() executes the WorkGraph directly
-    6. Results flow between nodes via 'previous_agent_results' named argument
+        WORKFLOW:
+        =========
+        1. LLM receives user request and decomposes into Problems with ProblemIDs
+        2. LLM specifies dependencies in ProblemGraph (e.g., "A -> B" means B depends on A)
+        3. This agent parses ProblemGraph into paths and builds a WorkGraph
+        4. WorkGraph is returned as next_actions (callable)
+        5. Base Agent.__call__() executes the WorkGraph directly
+        6. Results flow between nodes via 'previous_agent_results' named argument
 
-    EXAMPLE LLM RESPONSE:
-    ====================
-<StructuredResponse>
- <Problems>
-  <Problem>
-   <Request>Search customized recipe variations for Starbucks French roast coffee</Request>
-   <SolutionRequirement>Specific recipe modifications needed with exact customization options and quantities for ordering</SolutionRequirement>
-   <ProblemID>SUGGEST_RECIPE_STARBUCKS</ProblemID>
-  </Problem>
-  <Problem>
-   <Request>Place online order for one customized French roast coffee from Starbucks</Request>
-   <ProblemID>ORDER_STARBUCKS</ProblemID>
-  </Problem>
-  <Problem>
-   <Request>Place online order for one French roast coffee from McDonald's</Request>
-   <ProblemID>ORDER_MCDONALDS</ProblemID>
-  </Problem>
- </Problems>
- <ProblemGraph>
-  SUGGEST_RECIPE_STARBUCKS -> ORDER_STARBUCKS
-  ORDER_MCDONALDS
- </ProblemGraph>
-</StructuredResponse>
+        EXAMPLE LLM RESPONSE:
+        ====================
+    <StructuredResponse>
+     <Problems>
+      <Problem>
+       <Request>Search customized recipe variations for Starbucks French roast coffee</Request>
+       <SolutionRequirement>Specific recipe modifications needed with exact customization options and quantities for ordering</SolutionRequirement>
+       <ProblemID>SUGGEST_RECIPE_STARBUCKS</ProblemID>
+      </Problem>
+      <Problem>
+       <Request>Place online order for one customized French roast coffee from Starbucks</Request>
+       <ProblemID>ORDER_STARBUCKS</ProblemID>
+      </Problem>
+      <Problem>
+       <Request>Place online order for one French roast coffee from McDonald's</Request>
+       <ProblemID>ORDER_MCDONALDS</ProblemID>
+      </Problem>
+     </Problems>
+     <ProblemGraph>
+      SUGGEST_RECIPE_STARBUCKS -> ORDER_STARBUCKS
+      ORDER_MCDONALDS
+     </ProblemGraph>
+    </StructuredResponse>
 
-    RESULTING EXECUTION GRAPH:
-    =========================
-      SUGGEST_RECIPE_STARBUCKS ──► ORDER_STARBUCKS
-      ORDER_MCDONALDS (independent, runs in parallel)
+        RESULTING EXECUTION GRAPH:
+        =========================
+          SUGGEST_RECIPE_STARBUCKS ──► ORDER_STARBUCKS
+          ORDER_MCDONALDS (independent, runs in parallel)
 
-    RESULT PASSING:
-    ==============
-    When ORDER_STARBUCKS runs, it receives SUGGEST_RECIPE_STARBUCKS's result via:
-      kwargs['previous_agent_results'] = <result from SUGGEST_RECIPE>
+        RESULT PASSING:
+        ==============
+        When ORDER_STARBUCKS runs, it receives SUGGEST_RECIPE_STARBUCKS's result via:
+          kwargs['previous_agent_results'] = <result from SUGGEST_RECIPE>
 
-    This is then converted to attachments in Agent.__call__() so the LLM can see
-    the previous task's output when reasoning about the current task.
+        This is then converted to attachments in Agent.__call__() so the LLM can see
+        the previous task's output when reasoning about the current task.
     """
+
     enable_action_groups: bool = attrib(default=False)
 
     # Planning agents typically only need one iteration to decompose and plan
@@ -88,7 +91,9 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
     response_field_next_actions: str = attrib(default=DEFAULT_RESPONSE_FIELD_PROBLEMS)
     response_field_action: str = attrib(default=DEFAULT_RESPONSE_FIELD_PROBLEM)
     response_field_action_id: str = attrib(default=DEFAULT_RESPONSE_FIELD_PROBLEM_ID)
-    response_field_action_graph: str = attrib(default=DEFAULT_RESPONSE_FIELD_PROBLEM_GRAPH)
+    response_field_action_graph: str = attrib(
+        default=DEFAULT_RESPONSE_FIELD_PROBLEM_GRAPH
+    )
 
     # Graph parsing separators:
     # action_sep: Sequential dependency (A -> B means B depends on A)
@@ -122,10 +127,12 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
         action_id = raw_action_item.get(self.response_field_action_id, None)
         actor = partial(self.actor, **actor_args)
         if action_id:
-            setattr(actor, 'name', action_id)
+            setattr(actor, "name", action_id)
         return actor
 
-    def _create_next_actions(self, action_items: List[WorkGraphNode], raw_response_parse: Mapping):
+    def _create_next_actions(
+        self, action_items: List[WorkGraphNode], raw_response_parse: Mapping
+    ):
         """
         Build a WorkGraph from the LLM's ProblemGraph dependency specification.
 
@@ -171,7 +178,9 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
         This enables context propagation through the dependency graph.
         """
         if self.response_field_action_graph in raw_response_parse:
-            raw_graph_text = strip_(raw_response_parse[self.response_field_action_graph])
+            raw_graph_text = strip_(
+                raw_response_parse[self.response_field_action_graph]
+            )
             if not raw_graph_text:
                 self.log_warning("No action graph is identified.")
                 return
@@ -180,13 +189,14 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
             # This allows us to convert ProblemID strings from the graph text
             # into the actual callable actors
             action_id_to_action_items_map = {
-                action_item.name: action_item
-                for action_item in action_items
+                action_item.name: action_item for action_item in action_items
             }
 
             # Parse graph text line by line
             # Each line represents an independent path or dependency chain
-            raw_action_dependency_texts = split_(raw_graph_text, sep='\n', lstrip=True, rstrip=True)
+            raw_action_dependency_texts = split_(
+                raw_graph_text, sep="\n", lstrip=True, rstrip=True
+            )
 
             action_graph = []
             for raw_action_dependency_text in raw_action_dependency_texts:
@@ -195,13 +205,25 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
 
                 # Split by '->' to get sequential dependencies
                 # "A -> B -> C" becomes ["A", "B", "C"]
-                action_item_names = split_(raw_action_dependency_text, sep=self.action_sep, lstrip=True, rstrip=True)
+                action_item_names = split_(
+                    raw_action_dependency_text,
+                    sep=self.action_sep,
+                    lstrip=True,
+                    rstrip=True,
+                )
 
                 # Handle ',' for parallel alternatives using Cartesian product
                 # "A, B -> C" with action_item_names = ["A, B", "C"]
                 # After split by ',': [["A", "B"], ["C"]]
                 # Cartesian product: [("A", "C"), ("B", "C")] - two paths!
-                for action_path in product(*map(lambda x: split_(x, sep=self.secondary_action_sep, lstrip=True, rstrip=True), action_item_names)):
+                for action_path in product(
+                    *map(
+                        lambda x: split_(
+                            x, sep=self.secondary_action_sep, lstrip=True, rstrip=True
+                        ),
+                        action_item_names,
+                    )
+                ):
                     action_graph.append(
                         tuple(
                             action_id_to_action_items_map[action_item_name]
@@ -211,7 +233,7 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
         else:
             # Missing the action graph, we assume a linear dependency
             # All action_items execute in sequence as a single path
-            action_graph = (action_items, )
+            action_graph = (action_items,)
 
         # BUILD AND RETURN WORKGRAPH (CALLABLE):
         # =====================================
@@ -230,10 +252,9 @@ class PromptBasedActionPlanningAgent(PromptBasedActionAgent):
             action_graph,
             node_cls=partial(
                 WorkGraphNode,
-                result_pass_down_mode=self.task_input_field_previous_agent_results
-            )
+                result_pass_down_mode=self.task_input_field_previous_agent_results,
+            ),
         )
-
 
     def _create_agent_state(self, raw_response_parse: Mapping):
         """

@@ -11,11 +11,6 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphEdge,
-    GraphNode,
-)
-
 from agent_foundation.knowledge.packs.models import (
     KnowledgePack,
     PackInstallResult,
@@ -26,6 +21,10 @@ from agent_foundation.knowledge.packs.models import (
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 
 logger = logging.getLogger(__name__)
 

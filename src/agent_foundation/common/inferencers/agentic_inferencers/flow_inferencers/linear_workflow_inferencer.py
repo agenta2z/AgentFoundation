@@ -21,15 +21,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 _logger = logging.getLogger(__name__)
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.serializable import SerializationMode
+from rich_python_utils.common_objects.workflow.common.expansion import ExpansionResult
 from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
     ResultPassDownMode,
 )
-from rich_python_utils.common_objects.workflow.common.expansion import ExpansionResult
 from rich_python_utils.common_objects.workflow.common.step_wrapper import StepWrapper
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
@@ -156,7 +155,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     initial_state_factory: Optional[Callable] = attrib(default=None)
 
     # --- New: Iteration Management ---
-    iteration_workspace_factory: Optional[Callable[[str, int], str]] = attrib(default=None)
+    iteration_workspace_factory: Optional[Callable[[str, int], str]] = attrib(
+        default=None
+    )
     reset_sessions_per_iteration: bool = attrib(default=False)
     iteration_record_builder: Optional[Callable[[dict], dict]] = attrib(default=None)
     checkpoint_subdir: Optional[str] = attrib(default=None)
@@ -172,10 +173,12 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
     _DERIVED_FROM_WORKSPACE = ()
 
-    _workspace_propagation_skip: frozenset = frozenset((
-        "default_initial_inferencer",
-        "default_followup_inferencer",
-    ))
+    _workspace_propagation_skip: frozenset = frozenset(
+        (
+            "default_initial_inferencer",
+            "default_followup_inferencer",
+        )
+    )
 
     # --- Suppress Workflow constructor parameters (init=False) ---
     result_pass_down_mode = attrib(default=ResultPassDownMode.NoPassDown, init=False)
@@ -235,8 +238,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
           instance backing — byte-identical to the pre-virtualization behaviour).
         """
         from agent_foundation.common.inferencers.run_context import (
-            InferencerStateBase,
             active_run_context,
+            InferencerStateBase,
         )
         from agent_foundation.common.inferencers.run_context.state import (
             LinearWorkflowState,
@@ -263,9 +266,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         """Return the per-path transient scratch dict for re-derived runner fields,
         or ``None`` when no RunContext is active (caller uses the instance backing).
         """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is None:
@@ -275,8 +276,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     @property
     def _pending_state(self):
         from agent_foundation.common.inferencers.run_context import (
-            InferencerStateBase,
             active_run_context,
+            InferencerStateBase,
         )
 
         ctx = active_run_context()
@@ -296,8 +297,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     @_pending_state.setter
     def _pending_state(self, value):
         from agent_foundation.common.inferencers.run_context import (
-            InferencerStateBase,
             active_run_context,
+            InferencerStateBase,
         )
 
         ctx = active_run_context()
@@ -330,8 +331,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         # rest of the engine reads ``self._state`` while ``_ainfer`` seeds via
         # ``self._pending_state`` — they must be one object.
         from agent_foundation.common.inferencers.run_context import (
-            InferencerStateBase,
             active_run_context,
+            InferencerStateBase,
         )
 
         ctx = active_run_context()
@@ -348,8 +349,8 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     @_state.setter
     def _state(self, value):
         from agent_foundation.common.inferencers.run_context import (
-            InferencerStateBase,
             active_run_context,
+            InferencerStateBase,
         )
 
         ctx = active_run_context()
@@ -699,9 +700,16 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             from agent_foundation.common.inferencers.inferencer_base import (
                 InferencerBase,
             )
+
             for inf, child_name in (
-                (getattr(self, "default_initial_inferencer", None), self._dynamic_child_name(0)),
-                (getattr(self, "default_followup_inferencer", None), self._dynamic_child_name(1)),
+                (
+                    getattr(self, "default_initial_inferencer", None),
+                    self._dynamic_child_name(0),
+                ),
+                (
+                    getattr(self, "default_followup_inferencer", None),
+                    self._dynamic_child_name(1),
+                ),
             ):
                 if inf is None or not isinstance(inf, InferencerBase):
                     continue
@@ -720,9 +728,16 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             from agent_foundation.common.inferencers.inferencer_base import (
                 InferencerBase,
             )
+
             for inf, child_name in (
-                (getattr(self, "default_initial_inferencer", None), self._dynamic_child_name(0)),
-                (getattr(self, "default_followup_inferencer", None), self._dynamic_child_name(1)),
+                (
+                    getattr(self, "default_initial_inferencer", None),
+                    self._dynamic_child_name(0),
+                ),
+                (
+                    getattr(self, "default_followup_inferencer", None),
+                    self._dynamic_child_name(1),
+                ),
             ):
                 if inf is None or not isinstance(inf, InferencerBase):
                     continue
@@ -742,7 +757,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                         "this LWI's tree %r — output may land in the wrong "
                         "directory. Likely cause: instance shared between flow "
                         "configs and a higher-level role.",
-                        child_name, child_ws.root, parent_workspace.root,
+                        child_name,
+                        child_ws.root,
+                        parent_workspace.root,
                     )
 
     # ------------------------------------------------------------------
@@ -766,12 +783,23 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 consensus_iter = (self._state or {}).get("consensus_iteration_id", 0)
                 child_name = self._dynamic_child_name(step_count - 1, consensus_iter)
                 child_ws = self._workspace.child(child_name)
-                from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
+                from agent_foundation.common.inferencers.inferencer_workspace import (
+                    DEFAULT_OUTPUT_FILENAME,
+                )
+
                 _output_name = self.output_path or DEFAULT_OUTPUT_FILENAME
-                _child_out = child_ws.output_path(_output_name) if hasattr(child_ws, "output_path") else None
+                _child_out = (
+                    child_ws.output_path(_output_name)
+                    if hasattr(child_ws, "output_path")
+                    else None
+                )
                 _child_out_exists = os.path.isfile(_child_out) if _child_out else False
                 self._symlink_child_output(child_ws)
-                _own_out = self._workspace.output_path(_output_name) if hasattr(self._workspace, "output_path") else None
+                _own_out = (
+                    self._workspace.output_path(_output_name)
+                    if hasattr(self._workspace, "output_path")
+                    else None
+                )
                 self.log_info(
                     {
                         "child_name": child_name,
@@ -780,8 +808,12 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                         "own_ws": self._workspace.root,
                         "own_output_path": self.output_path,
                         "own_output": _own_out,
-                        "symlink_exists": os.path.exists(_own_out) if _own_out else False,
-                        "symlink_islink": os.path.islink(_own_out) if _own_out else False,
+                        "symlink_exists": os.path.exists(_own_out)
+                        if _own_out
+                        else False,
+                        "symlink_islink": os.path.islink(_own_out)
+                        if _own_out
+                        else False,
                     },
                     log_type="LWISymlink",
                 )
@@ -948,6 +980,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
                 StepResultSaveOptions,
             )
+
             self.enable_result_save = StepResultSaveOptions.Always
             self.resume_with_saved_results = not self.dynamic_mode
 
@@ -1089,7 +1122,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         while ``_finalize_output`` looked for ``round{NN}``.
         """
         base = "initial" if step_index == 0 else f"round{step_index:02d}"
-        return base + (f"_iter{consensus_iter}" if consensus_iter and consensus_iter > 0 else "")
+        return base + (
+            f"_iter{consensus_iter}" if consensus_iter and consensus_iter > 0 else ""
+        )
 
     def _build_dynamic_step_wrapper(self, inferencer, step_index):
         """Build a step wrapper closure for dynamic mode.
@@ -1133,7 +1168,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                         call_maybe_async,
                     )
 
-                    inp = await call_maybe_async(self.dynamic_input_builder, state, prev)
+                    inp = await call_maybe_async(
+                        self.dynamic_input_builder, state, prev
+                    )
                 else:
                     inp = prev
 
@@ -1150,7 +1187,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             # finds -> empty flow deliverable -> aggregator embeds raw <Response>.
             consensus_iter = state.get("consensus_iteration_id", 0) if state else 0
             _step_ws = (
-                self._workspace.child(self._dynamic_child_name(step_index, consensus_iter))
+                self._workspace.child(
+                    self._dynamic_child_name(step_index, consensus_iter)
+                )
                 if self._workspace is not None
                 else None
             )
@@ -1159,8 +1198,17 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 # step>=2 reuses the followup instance across rounds; reset its
                 # session so each round starts clean (step 0/1 use the distinct
                 # default initial/followup instances).
-                if inf_instance is not None and step_index >= 2 and hasattr(inf_instance, "reset_session"):
+                if (
+                    inf_instance is not None
+                    and step_index >= 2
+                    and hasattr(inf_instance, "reset_session")
+                ):
                     inf_instance.reset_session()
+
+            # v4 Phase 5.1 — emit per-step running status BEFORE invoking
+            # the leaf inferencer so the UI shows live progress for this round.
+            _step_name = self._dynamic_child_name(step_index, consensus_iter)
+            await self._emit_lwi_step_status(_step_name, "running")
 
             # 2. Execute inferencer — forward inference_config and _inference_args
             # (stored by _ainfer at lines 742-743) to match static-mode behavior.
@@ -1184,6 +1232,36 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             state["dynamic_step_results"].append(actual_result)
             state["dynamic_step_count"] = len(state["dynamic_step_results"])
 
+            # v4 Phase 5.1 — emit per-step completed status with the resolved
+            # output path so NodeDetailPanel can fetch and render the file.
+            _step_output_path = ""
+            try:
+                if _step_ws is not None:
+                    _outputs_dir = _step_ws.child("outputs").root
+                    import os as _os
+
+                    if _os.path.isdir(_outputs_dir):
+                        # Match BTA's candidate-file order so the UI gets a
+                        # reasonable default. Prefer canonical output.md /
+                        # result.md / response.md.
+                        for _candidate in (
+                            "output.md",
+                            "result.md",
+                            "response.md",
+                            "facet.md",
+                        ):
+                            _p = _os.path.join(_outputs_dir, _candidate)
+                            if _os.path.isfile(_p) and _os.path.getsize(_p) > 0:
+                                _step_output_path = _p
+                                break
+            except Exception:
+                _step_output_path = ""
+            await self._emit_lwi_step_status(
+                _step_name,
+                "completed",
+                output_path=_step_output_path,
+            )
+
             # NOTE: No state channel for output paths is maintained because
             # no dynamic_input_builder currently reads
             # state["dynamic_step_output_paths"] — would be speculative
@@ -1192,7 +1270,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
             # 5. Check termination
             should_stop = False
-            if self.end_condition is not None and self.end_condition(state, actual_result):
+            if self.end_condition is not None and self.end_condition(
+                state, actual_result
+            ):
                 should_stop = True
             if state["dynamic_step_count"] >= self.max_dynamic_steps:
                 should_stop = True
@@ -1206,6 +1286,13 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             next_wrapper = self._build_dynamic_step_wrapper(
                 next_inf_instance, step_index + 1
             )
+
+            # v4 Phase 5.1 — append the new round to the LWI topology so the
+            # UI shows the freshly-added round as pending. reset=False uses
+            # the new append-only merge semantics (Phase 5.2): no state on
+            # existing rounds is touched; only the new round node + edge
+            # appears.
+            await self._emit_lwi_topology(reset=False)
 
             return ExpansionResult(
                 result=actual_result,
@@ -1233,9 +1320,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         self.max_expansion_events = self.max_dynamic_steps
 
         # Build the step 0 closure using default_initial_inferencer
-        step_fn = self._build_dynamic_step_wrapper(
-            self.default_initial_inferencer, 0
-        )
+        step_fn = self._build_dynamic_step_wrapper(self.default_initial_inferencer, 0)
 
         def _sync_state(state, result):
             """Keep Workflow's local state variable pointing at self._state."""
@@ -1269,8 +1354,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         names = [sc.name for sc in self.step_configs]
         if len(names) != len(set(names)):
             raise ValueError(
-                "WorkflowStepConfig names must be unique. "
-                f"Duplicates found in: {names}"
+                f"WorkflowStepConfig names must be unique. Duplicates found in: {names}"
             )
         for sc in self.step_configs:
             if sc.inferencer is None and sc.step_fn is None and sc.enabled:
@@ -1318,7 +1402,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
                 # Iteration workspace setup — detect iteration change
                 if has_loops:
-                    prev_iteration = state.get("_prev_iteration", state.get("iteration", 1))
+                    prev_iteration = state.get(
+                        "_prev_iteration", state.get("iteration", 1)
+                    )
                     curr_iteration = state.get("iteration", 1)
                     if curr_iteration != prev_iteration:
                         self._setup_iteration(state)
@@ -1344,13 +1430,16 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 if _sc.inferencer is not None:
                     result = await _sc.inferencer.ainfer(
                         step_input,
-                        run_context=self._rc_child(getattr(_sc, "name", None) or "step"),
+                        run_context=self._rc_child(
+                            getattr(_sc, "name", None) or "step"
+                        ),
                         **extra_kwargs,
                     )
                 elif _sc.step_fn is not None:
                     from rich_python_utils.common_utils.async_utils import (
                         call_maybe_async,
                     )
+
                     result = await call_maybe_async(_sc.step_fn, step_input, state)
                 else:
                     result = None
@@ -1400,6 +1489,148 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     # ------------------------------------------------------------------
     # Inference entry points
     # ------------------------------------------------------------------
+
+    # ==================================================================
+    # v4 Phase 5.1 — graph visualization emit protocol for LWI.
+    #
+    # Without this, every LWI's per-step/per-round structure is invisible
+    # in the UI (each round's children/initial, round01, round02 directories
+    # exist on disk but never surface as graph nodes). Mirrors Dual's
+    # _emit_dual_topology / _emit_stage_status / _emit_graph_reconcile
+    # pattern. All emits are guarded — visualization must never abort
+    # inference (LWI is foundational; thrown emits would cascade).
+    # ==================================================================
+
+    def _lwi_step_names(self) -> List[str]:
+        """Step names for the CURRENT step set (static or dynamic-snapshot).
+
+        Static mode: names come from ``step_configs`` (immutable).
+        Dynamic mode: names come from ``_dynamic_child_name(i)`` for the
+        rounds we've materialized so far (mutates over time as new rounds
+        are added — each materialization triggers a new emit with
+        ``reset=False`` to append the new round in-place client-side).
+        """
+        if self.dynamic_mode:
+            count = int(
+                (self._state or self._pending_state or {}).get("dynamic_step_count", 0)
+                or 0
+            )
+            # Always include at least the "initial" round; before any
+            # dynamic step has run, count == 0 — we still want to render
+            # the initial step as a pending/running node.
+            n_rounds = max(count + 1, 1)
+            return [self._dynamic_child_name(i) for i in range(n_rounds)]
+        return [
+            getattr(sc, "name", "")
+            for sc in (self.step_configs or [])
+            if getattr(sc, "name", "")
+        ]
+
+    async def _emit_lwi_topology(self, reset: bool = True) -> None:
+        """Emit this LWI's step graph (one node per step; linear edges).
+
+        ``reset=True`` (default) — full snapshot; client merge-replaces.
+        ``reset=False`` — append-only; client adds new nodes/edges, preserves
+        accumulated runtime state on existing nodes. Used by dynamic mode
+        when adding round02 on top of [initial, round01].
+        """
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            from agent_foundation.common.inferencers.graph_events import (
+                GraphTopologyEvent,
+                NodeStatus,
+            )
+
+            names = self._lwi_step_names()
+            if not names:
+                return
+            nodes = []
+            edges = []
+            prev = None
+            for name in names:
+                nodes.append(
+                    {
+                        "id": name,
+                        "label": name.capitalize()
+                        if not name.startswith("round")
+                        else name,
+                        "group": None,
+                        "status": NodeStatus.PENDING,
+                    }
+                )
+                if prev is not None:
+                    edges.append({"source": prev, "target": name})
+                prev = name
+            await reporter.on_graph_topology(
+                GraphTopologyEvent(
+                    nodes=nodes,
+                    edges=edges,
+                    layout="horizontal",
+                    reset=reset,
+                )
+            )
+        except Exception:
+            import logging as _log
+
+            _log.getLogger(__name__).debug(
+                "[LWI] _emit_lwi_topology failed",
+                exc_info=True,
+            )
+
+    async def _emit_lwi_step_status(
+        self,
+        step_name: str,
+        status: str,
+        output_path: str = "",
+    ) -> None:
+        """Emit a node_status for an LWI step node (guarded; no-op w/o reporter)."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            await reporter.on_node_status(
+                step_name,
+                status,
+                output_path=output_path or "",
+            )
+        except Exception:
+            import logging as _log
+
+            _log.getLogger(__name__).debug(
+                "[LWI] _emit_lwi_step_status(%s, %s) failed",
+                step_name,
+                status,
+                exc_info=True,
+            )
+
+    async def _emit_lwi_reconcile(self) -> None:
+        """Final reconcile — bulk-stamp all step nodes completed."""
+        try:
+            reporter = self._resolve_graph_reporter()
+            if reporter is None:
+                return
+            names = self._lwi_step_names()
+            if not names:
+                return
+            await reporter.on_graph_reconcile({name: "completed" for name in names})
+        except Exception:
+            import logging as _log
+
+            _log.getLogger(__name__).debug(
+                "[LWI] _emit_lwi_reconcile failed",
+                exc_info=True,
+            )
+
+    def _is_orchestrator(self) -> bool:
+        # U4-A: LWI owns sequential step children (StepWrapper instances) but holds
+        # them in ``step_configs``/a list rather than named child slots, so it
+        # overrides NEITHER ``_iter_child_inferencers`` nor ``_iter_child_slots`` —
+        # the base's generic override-signal misses it. LWI IS an orchestrator, so on
+        # failure ``_ainfer_recovery`` must RE-RAISE (contain at the parent) rather
+        # than blindly re-run the whole workflow against a dirty workspace.
+        return True
 
     async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
         """Async inference — build state, delegate to Workflow._arun().
@@ -1465,8 +1696,17 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         # Enable checkpointing when workspace is available
         self._auto_enable_checkpointing()
 
+        # v4 Phase 5.1 — emit the LWI's initial step topology so the UI
+        # can render this LWI's sub-structure. Guarded; never aborts on viz
+        # failure.
+        await self._emit_lwi_topology(reset=True)
+
         # Run the workflow
         await Workflow._arun(self, inference_input, **_inference_args)
+
+        # v4 Phase 5.1 — final reconcile so any per-step status gaps are
+        # corrected to the terminal "completed" state.
+        await self._emit_lwi_reconcile()
 
         # Build response
         if self.response_builder is not None:
@@ -1505,7 +1745,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         if ws is not None:
             filename = f"step_{result_id}.json"
             if self.checkpoint_subdir:
-                filename = os.path.join(self.checkpoint_subdir, f"step_{result_id}.json")
+                filename = os.path.join(
+                    self.checkpoint_subdir, f"step_{result_id}.json"
+                )
             return ws.checkpoint_path(filename)
         return f"step_{result_id}.json"
 

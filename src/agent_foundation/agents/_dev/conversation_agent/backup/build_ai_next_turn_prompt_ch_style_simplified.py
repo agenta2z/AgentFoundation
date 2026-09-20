@@ -1,17 +1,15 @@
 def build_ai_next_turn_prompt_ch_style_simplified(
-        turns: List[Dict[str, str]],  # New parameter
-        character_profile: str = "",
-        icebreaker: str = "",
-        user_profile: str = ""
+    turns: List[Dict[str, str]],  # New parameter
+    character_profile: str = "",
+    icebreaker: str = "",
+    user_profile: str = "",
 ):
     # Build system prompt from persona info
     ch_system_prompt = """Conversation Guidance:
     Your name is {name}
     {description}
     Here are some facts about you: {instructions}
-    """.format(
-        name=name, description=description, instructions=instructions
-    )
+    """.format(name=name, description=description, instructions=instructions)
 
     # Add examples if provided
     examples_prompt = ""
@@ -38,9 +36,6 @@ def build_ai_next_turn_prompt_ch_style_simplified(
         # Map roles if needed (assistant -> assistant, user -> user, etc.)
         role = turn["role"]
         if role in ["user", "assistant", "system"]:
-            ai_history.append({
-                "role": role,
-                "content": turn["content"]
-            })
+            ai_history.append({"role": role, "content": turn["content"]})
 
     return ai_history

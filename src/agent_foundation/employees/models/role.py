@@ -9,14 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from agent_foundation.employees.models.enums import AutonomyLevel, RoleStatus
 from agent_foundation.employees.models.skill import (
     CommunicationPolicy,
     GuardrailConfig,
     MindsetDirective,
-    SOPDefinition,
     SkillConfig,
+    SOPDefinition,
     ToolConfig,
 )
 
@@ -40,13 +39,13 @@ class AIEmployeeRole:
     """
 
     # Identity
-    id: str                   # e.g. "program_manager"
-    name: str                 # e.g. "Program Manager"
-    description: str          # brief description for UI display
+    id: str  # e.g. "program_manager"
+    name: str  # e.g. "Program Manager"
+    description: str  # brief description for UI display
     version: str = _YAML_VERSION
 
     # Artifacts (produced by /create-role Phase 1 and /role-setup Phase 2)
-    role_document_path: Path | None = None   # path to role_document.md
+    role_document_path: Path | None = None  # path to role_document.md
     skills: list[SkillConfig] = field(default_factory=list)
     tools: ToolConfig = field(default_factory=ToolConfig)
     guardrails: GuardrailConfig = field(default_factory=GuardrailConfig)
@@ -60,7 +59,7 @@ class AIEmployeeRole:
     status: RoleStatus = RoleStatus.draft
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    created_by: str = ""      # session_id or user that ran /create-role
+    created_by: str = ""  # session_id or user that ran /create-role
 
     # Metadata
     tags: list[str] = field(default_factory=list)
@@ -219,9 +218,5 @@ class AIEmployeeRole:
         return {
             "name": self.name,
             "role": self.description,
-            "mindset": {
-                m.text: m.text
-                for m in self.mindsets
-                if m.default_enabled
-            },
+            "mindset": {m.text: m.text for m in self.mindsets if m.default_enabled},
         }

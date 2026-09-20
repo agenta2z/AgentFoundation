@@ -96,7 +96,9 @@ def _is_with_child_ctx_item(item: ast.withitem) -> bool:
     )
 
 
-def find_child_call_sites(source: str, methods: Iterable[str] = CHILD_CALL_METHODS) -> list[CallSite]:
+def find_child_call_sites(
+    source: str, methods: Iterable[str] = CHILD_CALL_METHODS
+) -> list[CallSite]:
     """Parse ``source`` and return every child-inference call site it contains."""
     method_set = frozenset(methods)
     tree = ast.parse(source)

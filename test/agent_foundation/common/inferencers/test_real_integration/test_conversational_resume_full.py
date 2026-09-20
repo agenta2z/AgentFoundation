@@ -10,7 +10,6 @@ import json
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )

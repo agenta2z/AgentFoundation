@@ -31,8 +31,6 @@ import logging
 import os
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
@@ -43,6 +41,7 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +89,19 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # Codex SDK configuration.
     # ``None`` -> the model configured for your Codex login; else passed to thread_start.
     model_name: Optional[str] = attrib(default=None)
-    # ``-s`` sandbox policy: read-only | workspace-write | full-access.
-    sandbox_mode: Optional[str] = attrib(default="workspace-write")
+    # ``-s`` sandbox policy: read-only | workspace-write | full-access
+    # (``danger-full-access`` is accepted as an alias for full-access).
+    #
+    # Default ``danger-full-access`` (NO codex-internal sandbox), for the same
+    # reason as CodexCliInferencer: align with the sibling no-sandbox CLIs
+    # (ClaudeCode ``bypassPermissions`` / Devmate ``autoRunAll``) and the
+    # machine's ``danger-full-access`` Codex config ("Meta sandboxes
+    # externally"). ``workspace-write`` re-imposed a redundant sandbox rooted at
+    # the read-target cwd, so the agent could not write its own ``output.md``
+    # (a sibling subtree). SECURITY: no OS-level FS confinement; correct only
+    # inside an outer sandbox / trusted context. Pass a stricter ``sandbox_mode``
+    # explicitly if confinement is required.
+    sandbox_mode: Optional[str] = attrib(default="danger-full-access")
     # Codex ApprovalMode: auto_review (default) | deny_all. ``None`` -> SDK default.
     approval_mode: Optional[str] = attrib(default=None)
     # Codex thread instructions (system-prompt analogs).
@@ -256,17 +266,18 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 try:
                     await client.close()
                 except Exception as e:  # pragma: no cover - best-effort teardown
-                    logger.debug("[%s] codex client.close() failed: %s",
-                                 self.__class__.__name__, e)
+                    logger.debug(
+                        "[%s] codex client.close() failed: %s",
+                        self.__class__.__name__,
+                        e,
+                    )
             h.set("client", None)
             h.set("thread", None)
             h.set("connected_loop", None)
 
     # === Streaming primitive ===
 
-    async def _ainfer_streaming(
-        self, prompt: str, **kwargs: Any
-    ) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Stream text from a Codex thread turn.
 
         Yields ``item/agentMessage/delta`` text; every other notification yields
@@ -379,9 +390,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
         async def _run_and_close():
             try:
-                return await self._ainfer(
-                    inference_input, inference_config, **kwargs
-                )
+                return await self._ainfer(inference_input, inference_config, **kwargs)
             finally:
                 # The sync bridge runs on a throwaway event loop, so the per-call
                 # connection can't be reused — close it to avoid leaking app-server

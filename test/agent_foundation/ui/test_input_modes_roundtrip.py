@@ -3,16 +3,16 @@
 Covers ChoiceOption.description, the 'multiple_choices' backward-compat alias,
 and full to_dict/from_dict round-trips for all input modes.
 """
-import pytest
 
+import pytest
 from agent_foundation.ui.input_modes import (
     ChoiceOption,
+    exact_string,
     InputMode,
     InputModeConfig,
-    press_to_continue,
-    exact_string,
-    single_choice,
     multiple_choices,
+    press_to_continue,
+    single_choice,
 )
 
 

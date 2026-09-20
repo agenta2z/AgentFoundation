@@ -1,5 +1,3 @@
-
-
 """LLM-based context compressor for AgenticDynamicContext.
 
 Wraps an InferencerBase and uses it to compress accumulated action history
@@ -12,9 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
 logger = logging.getLogger(__name__)
 

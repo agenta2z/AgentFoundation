@@ -1,5 +1,3 @@
-
-
 """Tests for QueueInteractive.stream_token_batches task_id support.
 
 Verifies Phase 0: task_id parameter flows through to token_batch and
@@ -17,9 +15,8 @@ class StreamTokenBatchesTaskIdTest(unittest.TestCase):
     def test_stream_token_batches_signature_accepts_task_id(self) -> None:
         """Phase 0: stream_token_batches should accept task_id parameter."""
         import inspect
-        from agent_foundation.common.ui.queue_interactive import (
-            QueueInteractive,
-        )
+
+        from agent_foundation.common.ui.queue_interactive import QueueInteractive
 
         sig = inspect.signature(QueueInteractive.stream_token_batches)
         params = list(sig.parameters.keys())
@@ -28,9 +25,8 @@ class StreamTokenBatchesTaskIdTest(unittest.TestCase):
     def test_flush_token_batch_signature_accepts_task_id(self) -> None:
         """Phase 0: _flush_token_batch should accept task_id parameter."""
         import inspect
-        from agent_foundation.common.ui.queue_interactive import (
-            QueueInteractive,
-        )
+
+        from agent_foundation.common.ui.queue_interactive import QueueInteractive
 
         sig = inspect.signature(QueueInteractive._flush_token_batch)
         params = list(sig.parameters.keys())

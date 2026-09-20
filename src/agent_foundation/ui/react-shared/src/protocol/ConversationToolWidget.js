@@ -40,6 +40,13 @@ import { parseResponseTags, stripSessionContext, stripAnsi, stripAcliNoise, stri
  *
  * A single-tool compound renders without the tab bar (no regression).
  */
+
+// Default NOOP so a missing/undefined `onSubmit` from any caller path
+// (readOnly replay, stale-closure remount, misconfigured host) can never
+// crash the leaf widget's own click handlers with "onSubmit is not a
+// function". Leaf widgets that need to signal a dropped payload should
+// console.error inside their own guards (see ProposalSelectionWidget's
+// safeOnSubmit).
 const NOOP = () => {};
 
 // Derive a short, human-friendly tab label from an output-variable name
@@ -153,13 +160,13 @@ function StepWidget({ tool, submitLabel, onSubmit, onView, onViewFolder, pathAut
     || (tool.tool_type === 'confirmation' ? 'confirmation' : null)
     || mode;
   const Widget = getWidget(widgetType);
-  return <Widget config={config} submitLabel={submitLabel} onSubmit={onSubmit} onView={onView} onViewFolder={onViewFolder} readOnly={readOnly} value={value} />;
+  return <Widget config={config} submitLabel={submitLabel} onSubmit={onSubmit || NOOP} onView={onView} onViewFolder={onViewFolder} readOnly={readOnly} value={value} />;
 }
 
 /**
  * Main dispatcher — maps pendingInput.inputMode to the correct widget.
  */
-export default function ConversationToolWidget({ pendingInput, onSubmit, onView, onViewFolder, pathAutocompleteProvider, readOnly, responseValues }) {
+export default function ConversationToolWidget({ pendingInput, onSubmit, onOpenDashboard, onView, onViewFolder, pathAutocompleteProvider, readOnly, responseValues }) {
   const theme = useTheme();
 
   if (!pendingInput) return null;
@@ -197,7 +204,7 @@ export default function ConversationToolWidget({ pendingInput, onSubmit, onView,
       <WidgetContainer>
         <CompoundWidget
           tools={metadata.tools}
-          onSubmit={onSubmit}
+          onSubmit={onSubmit || NOOP}
           onView={onView}
           onViewFolder={onViewFolder}
           pathAutocompleteProvider={pathAutocompleteProvider}
@@ -222,8 +229,12 @@ export default function ConversationToolWidget({ pendingInput, onSubmit, onView,
   return (
     <WidgetContainer>
       {/* Preamble: the AI's text before the tool invocation (already shown above,
-          but kept here for cases where it's short and helpful inline) */}
-      <Widget config={config} onSubmit={onSubmit} onView={onView} onViewFolder={onViewFolder} readOnly={readOnly} value={responseValues} />
+          but kept here for cases where it's short and helpful inline).
+          `onOpenDashboard` is threaded beside `onSubmit` for the proposal_selection
+          --experiment-hub handoff (R1): ProposalSelectionWidget's primary button
+          calls it (open+seed the hub) instead of onSubmit when opensDashboard.
+          Undefined for every other widget → they ignore it. */}
+      <Widget config={config} onSubmit={onSubmit || NOOP} onOpenDashboard={onOpenDashboard} onView={onView} onViewFolder={onViewFolder} readOnly={readOnly} value={responseValues} />
     </WidgetContainer>
   );
 }

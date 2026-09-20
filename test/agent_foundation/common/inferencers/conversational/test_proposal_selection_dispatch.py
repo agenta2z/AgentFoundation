@@ -5,17 +5,16 @@ wired in AF): parser carry-through, proposal resolution from ``proposals_path``,
 enrichment into choices, ``_build_input_mode`` branch, and interactive
 multi-select capture into the output variable.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
-
-from agent_foundation.common.data_models.proposal import (
-    register_proposal_parser,
-)
+from agent_foundation.common.data_models.proposal import register_proposal_parser
 from agent_foundation.common.data_models.proposal.model import (
     Proposal,
     ProposalGroup,
@@ -31,10 +30,29 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     ConversationToolType,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-    ConversationalInferencer,
     _build_input_mode,
+    ConversationalInferencer,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
+    HandlerContext,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handlers import (
+    default_registry,
 )
 from agent_foundation.ui.input_modes import InputMode
+
+
+def _ctx_for_test() -> HandlerContext:
+    return HandlerContext(
+        prior_context=MappingProxyType({}),
+        prompt_renderer=None,
+        tool_executor=None,
+        interactive=None,
+        action_tools=None,
+        tool_registry=None,
+        resolve_tool_name=None,
+        handler_registry=default_registry(),
+    )
 
 
 def _sample_index() -> ProposalIndex:
@@ -46,10 +64,21 @@ def _sample_index() -> ProposalIndex:
                 phase=1,
                 label="Quick Wins",
                 proposals=[
-                    Proposal(id="P1", rank=1, title="Add caching",
-                             impact="high", complexity="low", summary="cache hot paths"),
-                    Proposal(id="P3", rank=3, title="Rewrite auth",
-                             impact="medium", complexity="high"),
+                    Proposal(
+                        id="P1",
+                        rank=1,
+                        title="Add caching",
+                        impact="high",
+                        complexity="low",
+                        summary="cache hot paths",
+                    ),
+                    Proposal(
+                        id="P3",
+                        rank=3,
+                        title="Rewrite auth",
+                        impact="medium",
+                        complexity="high",
+                    ),
                 ],
             ),
         ],
@@ -158,7 +187,9 @@ def test_resolve_via_registered_parser_fallback():
     register_proposal_parser(_Parser())
     try:
         tool = ConversationTool(tool_type="proposal_selection", metadata={})
-        resolver = _Resolver(prior_context={"workspace_path__research_propose": "/discovered/ws"})
+        resolver = _Resolver(
+            prior_context={"workspace_path__research_propose": "/discovered/ws"}
+        )
         data = resolver._resolve_proposals_source(tool)
         assert data is not None and data["total_count"] == 2
     finally:
@@ -203,11 +234,13 @@ def test_build_input_mode_proposal_selection():
     tool = ConversationTool(
         tool_type="proposal_selection",
         prompt="Pick proposals",
-        choices=[ChoiceItem(label="P1: x", value="P1"),
-                 ChoiceItem(label="P3: y", value="P3")],
+        choices=[
+            ChoiceItem(label="P1: x", value="P1"),
+            ChoiceItem(label="P3: y", value="P3"),
+        ],
         metadata={"proposals": {"total_count": 2}, "widget_type": "proposal_selection"},
     )
-    mode = _build_input_mode(tool)
+    mode = _build_input_mode(tool, _ctx_for_test())
     assert mode.mode == InputMode.MULTIPLE_CHOICE
     assert [o.value for o in mode.options] == ["P1", "P3"]
     assert mode.metadata["widget_type"] == "proposal_selection"
@@ -221,13 +254,18 @@ def test_interactive_selection_persists_to_output_var():
     tool = ConversationTool(
         tool_type="proposal_selection",
         prompt="Pick",
-        choices=[ChoiceItem(label="P1", value="P1"), ChoiceItem(label="P3", value="P3")],
+        choices=[
+            ChoiceItem(label="P1", value="P1"),
+            ChoiceItem(label="P3", value="P3"),
+        ],
         output_vars=["selected_proposal_ids"],
     )
     ci = _DecodeCI()
     fake = _FakeInteractive({"user_input": {"selected_proposals": ["P1", "P3"]}})
 
-    result = asyncio.run(ci._handle_conversation_tool(tool, "text", interactive_override=fake))
+    result = asyncio.run(
+        ci._handle_conversation_tool(tool, "text", interactive_override=fake)
+    )
 
     assert result == "P1,P3"
     assert ci.prior_context["selected_proposal_ids"] == "P1,P3"
@@ -237,13 +275,18 @@ def test_interactive_selection_via_choice_indices():
     tool = ConversationTool(
         tool_type="proposal_selection",
         prompt="Pick",
-        choices=[ChoiceItem(label="P1", value="P1"), ChoiceItem(label="P3", value="P3")],
+        choices=[
+            ChoiceItem(label="P1", value="P1"),
+            ChoiceItem(label="P3", value="P3"),
+        ],
         output_vars=["selected_proposal_ids"],
     )
     ci = _DecodeCI()
     fake = _FakeInteractive({"user_input": {"choice_indices": [1]}})
 
-    result = asyncio.run(ci._handle_conversation_tool(tool, "text", interactive_override=fake))
+    result = asyncio.run(
+        ci._handle_conversation_tool(tool, "text", interactive_override=fake)
+    )
 
     assert result == "P3"
     assert ci.prior_context["selected_proposal_ids"] == "P3"

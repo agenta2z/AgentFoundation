@@ -95,9 +95,7 @@ class SkillSynthesizer:
             return None
 
         # Check average similarity meets threshold
-        avg_sim = (
-            sum(s for _, s in candidates) / len(candidates) if candidates else 0
-        )
+        avg_sim = sum(s for _, s in candidates) / len(candidates) if candidates else 0
         if avg_sim < self.config.min_avg_similarity:
             return None
 

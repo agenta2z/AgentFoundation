@@ -1,13 +1,15 @@
 from enum import StrEnum
-from typing import Dict, Any, Iterable, Union, Mapping
+from typing import Any, Dict, Iterable, Mapping, Union
 
-from attr import attrs, attrib
+from attr import attrib, attrs
 from rich_python_utils.io_utils.json_io import artifact_field
 
+
 class AgentResponseFormat(StrEnum):
-    XML = 'xml'
-    JSON = 'json'
-    Other = 'other'
+    XML = "xml"
+    JSON = "json"
+    Other = "other"
+
 
 @attrs
 class AgentAction:
@@ -19,6 +21,7 @@ class AgentAction:
     args: Dict[str, Any] = attrib(default=None)
     source: Any = attrib(default=None)
     result: Any = attrib(default=None)
+
 
 @attrs
 class AgentResponse:

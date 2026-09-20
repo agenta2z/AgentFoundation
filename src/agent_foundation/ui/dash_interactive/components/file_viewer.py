@@ -4,10 +4,9 @@ File viewer panel component for displaying file contents in a slide-out panel.
 
 from typing import Any, Dict, List, Optional
 
+from agent_foundation.ui.dash_interactive.components.base import BaseComponent
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
-
-from agent_foundation.ui.dash_interactive.components.base import BaseComponent
 
 
 class FileViewerPanel(BaseComponent):

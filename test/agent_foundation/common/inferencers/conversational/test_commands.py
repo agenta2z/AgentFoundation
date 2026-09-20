@@ -3,18 +3,17 @@
 import asyncio
 import unittest
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.commands import (
+    command,
     CommandMeta,
     CommandRegistry,
     UnknownCommand,
-    command,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 @attrs(slots=False)

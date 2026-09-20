@@ -7,6 +7,7 @@ STRUCTURING_PROMPT content, check-in saving, and store path behavior.
 
 Requirements: 8.1, 8.2, 8.3, 8.7, 8.9
 """
+
 import json
 import sys
 from pathlib import Path
@@ -25,17 +26,19 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
-from agent_foundation.knowledge import KnowledgeIngestionCLI, KnowledgeBase
+from agent_foundation.knowledge import KnowledgeBase, KnowledgeIngestionCLI
 from agent_foundation.knowledge.prompt_templates import render_prompt
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
@@ -43,43 +46,42 @@ from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service im
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
 )
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
-)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-VALID_JSON_RESPONSE = json.dumps({
-    "metadata": {
-        "user:test": {
-            "entity_type": "user",
-            "properties": {"FirstName": "Test", "LastName": "User"},
-        }
-    },
-    "pieces": [
-        {
-            "piece_id": "test-fact",
-            "content": "Test user is a member of TestService",
-            "knowledge_type": "fact",
-            "info_type": "user_profile",
-            "tags": ["test"],
-            "entity_id": "user:test",
-            "embedding_text": "test membership service",
-        }
-    ],
-    "graph": {
-        "nodes": [
+VALID_JSON_RESPONSE = json.dumps(
+    {
+        "metadata": {
+            "user:test": {
+                "entity_type": "user",
+                "properties": {"FirstName": "Test", "LastName": "User"},
+            }
+        },
+        "pieces": [
             {
-                "node_id": "user:test",
-                "node_type": "user",
-                "label": "Test User",
-                "properties": {},
+                "piece_id": "test-fact",
+                "content": "Test user is a member of TestService",
+                "knowledge_type": "fact",
+                "info_type": "user_profile",
+                "tags": ["test"],
+                "entity_id": "user:test",
+                "embedding_text": "test membership service",
             }
         ],
-        "edges": [],
-    },
-})
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "user:test",
+                    "node_type": "user",
+                    "label": "Test User",
+                    "properties": {},
+                }
+            ],
+            "edges": [],
+        },
+    }
+)
 
 
 def _make_kb():
@@ -89,9 +91,7 @@ def _make_kb():
         piece_store=RetrievalKnowledgePieceStore(
             retrieval_service=MemoryRetrievalService()
         ),
-        graph_store=GraphServiceEntityGraphStore(
-            graph_service=MemoryGraphService()
-        ),
+        graph_store=GraphServiceEntityGraphStore(graph_service=MemoryGraphService()),
         active_entity_id="user:test",
     )
 

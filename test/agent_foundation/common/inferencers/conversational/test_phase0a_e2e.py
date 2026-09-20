@@ -1,8 +1,12 @@
 """End-to-end lock for model_optimization Phase 0a typed/composite inputs.
 
-Exercises the LIVE inline path (parser -> _build_input_mode -> runtime decode),
-NOT the dormant handler registry, so a regression in any of the four layers
+Exercises the LIVE dispatch path (parser -> _build_input_mode via registry
+handler -> runtime decode), so a regression in any of the four layers
 (parse / schema / build / decode) fails here.
+
+Post-Phase E: `_build_input_mode(tool, ctx)` dispatches through
+`ctx.handler_registry`; tests construct a minimal HandlerContext via
+`_ctx_for_test()`.
 
 Covers the verbatim Phase 0a wire shapes the LLM emits:
   * clarification with hyphenated `expected-input-type` + `prefix` (path autocomplete)
@@ -12,17 +16,38 @@ and the two-variable binding + path finalisation on submit.
 """
 
 import json
+from types import MappingProxyType
 
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
-    _tool_invocation_to_conversation_tool,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational import (
     conversational_inferencer as ci_mod,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
-    decode_tool_bindings,
-    decode_compound_bindings,
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_response_parser import (
+    _tool_invocation_to_conversation_tool,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tool_runtime import (
+    decode_compound_bindings,
+    decode_tool_bindings,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
+    HandlerContext,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handlers import (
+    default_registry,
+)
+
+
+def _ctx_for_test() -> HandlerContext:
+    """Minimal HandlerContext with a real registry for dispatch."""
+    return HandlerContext(
+        prior_context=MappingProxyType({}),
+        prompt_renderer=None,
+        tool_executor=None,
+        interactive=None,
+        action_tools=None,
+        tool_registry=None,
+        resolve_tool_name=None,
+        handler_registry=default_registry(),
+    )
 
 
 SESSION_ROOT = "/session_root_abc"
@@ -46,7 +71,11 @@ SINGLE_CHOICE = {
     "arguments": {
         "prompt": "Where are the modeling artifacts?",
         "choices": [
-            {"label": "Auto discover", "value": "auto_discover", "description": "infer"},
+            {
+                "label": "Auto discover",
+                "value": "auto_discover",
+                "description": "infer",
+            },
             {
                 "label": "Specify paths",
                 "value": "manual_paths",
@@ -68,26 +97,26 @@ SINGLE_CHOICE = {
 def test_phase0a_clarification_parses():
     tool = _tool_invocation_to_conversation_tool(CLARIFICATION)
     assert tool.tool_type == "clarification"
-    assert tool.expected_input_type == "path"            # hyphen canonicalised
+    assert tool.expected_input_type == "path"  # hyphen canonicalised
     assert tool.prefix == SESSION_ROOT
     assert tool.output_vars == ["workflow_target_path"]  # string -> list
 
 
 def test_phase0a_single_choice_composite_parses():
     tool = _tool_invocation_to_conversation_tool(SINGLE_CHOICE)
-    assert tool.tool_type == "single_choice"             # "single-choice" normalised
+    assert tool.tool_type == "single_choice"  # "single-choice" normalised
     assert tool.output_vars == ["workflow_modeling_artifacts_mode"]
     c0, c1 = tool.choices
     assert not c0.has_input and c1.has_input
     assert c1.input.name == "workflow_modeling_artifacts_path"
-    assert c1.input.expected_input_type == "path"        # hyphen canonicalised
-    assert c1.input.allow_multiple_input is True          # hyphen canonicalised
+    assert c1.input.expected_input_type == "path"  # hyphen canonicalised
+    assert c1.input.allow_multiple_input is True  # hyphen canonicalised
     assert c1.input.prefix == SESSION_ROOT
 
 
 def test_phase0a_clarification_build_input_mode_is_path_widget():
     tool = _tool_invocation_to_conversation_tool(CLARIFICATION)
-    cfg = ci_mod._build_input_mode(tool).to_dict()
+    cfg = ci_mod._build_input_mode(tool, _ctx_for_test()).to_dict()
     assert cfg.get("expected_input_type") == "path"
     assert cfg.get("prefix") == SESSION_ROOT
     assert cfg["metadata"]["widget_type"] == "path_input"
@@ -95,9 +124,13 @@ def test_phase0a_clarification_build_input_mode_is_path_widget():
 
 def test_phase0a_single_choice_build_input_mode_carries_option_input():
     tool = _tool_invocation_to_conversation_tool(SINGLE_CHOICE)
-    cfg = ci_mod._build_input_mode(tool).to_dict()
+    cfg = ci_mod._build_input_mode(tool, _ctx_for_test()).to_dict()
     opts = cfg["options"]
-    assert opts[0] == {"label": "Auto discover", "value": "auto_discover", "description": "infer"}
+    assert opts[0] == {
+        "label": "Auto discover",
+        "value": "auto_discover",
+        "description": "infer",
+    }
     assert opts[1]["input"]["name"] == "workflow_modeling_artifacts_path"
     assert opts[1]["input"]["expected_input_type"] == "path"
     assert opts[1]["input"]["allow_multiple_input"] is True
@@ -105,19 +138,27 @@ def test_phase0a_single_choice_build_input_mode_carries_option_input():
 
 def test_phase0a_manual_response_binds_both_vars():
     tool = _tool_invocation_to_conversation_tool(SINGLE_CHOICE)
-    response = {"choice_index": 1, "inputs": {
-        "workflow_modeling_artifacts_path": ["data/features", "experiments/run_42"]
-    }}
+    response = {
+        "choice_index": 1,
+        "inputs": {
+            "workflow_modeling_artifacts_path": ["data/features", "experiments/run_42"]
+        },
+    }
     bindings = decode_tool_bindings(tool, response, session_root=SESSION_ROOT)
     assert bindings["workflow_modeling_artifacts_mode"] == "manual_paths"
     # multi path -> JSON array string (reversible), prefix re-joined, never str(list)
     paths = json.loads(bindings["workflow_modeling_artifacts_path"])
-    assert paths == [f"{SESSION_ROOT}/data/features", f"{SESSION_ROOT}/experiments/run_42"]
+    assert paths == [
+        f"{SESSION_ROOT}/data/features",
+        f"{SESSION_ROOT}/experiments/run_42",
+    ]
 
 
 def test_phase0a_auto_response_binds_mode_only():
     tool = _tool_invocation_to_conversation_tool(SINGLE_CHOICE)
-    bindings = decode_tool_bindings(tool, {"choice_index": 0}, session_root=SESSION_ROOT)
+    bindings = decode_tool_bindings(
+        tool, {"choice_index": 0}, session_root=SESSION_ROOT
+    )
     assert bindings == {"workflow_modeling_artifacts_mode": "auto_discover"}
     assert "workflow_modeling_artifacts_path" not in bindings  # no stale path
 
@@ -137,6 +178,8 @@ def test_phase0a_compound_two_tools_one_turn():
     bindings = decode_compound_bindings([clar, sc], values, session_root=SESSION_ROOT)
     assert bindings["workflow_target_path"] == f"{SESSION_ROOT}/models/ranking"
     assert bindings["workflow_modeling_artifacts_mode"] == "manual_paths"
-    assert json.loads(bindings["workflow_modeling_artifacts_path"]) == [f"{SESSION_ROOT}/data/x"]
+    assert json.loads(bindings["workflow_modeling_artifacts_path"]) == [
+        f"{SESSION_ROOT}/data/x"
+    ]
     # The mode-var child payload is NOT stringified into the mode variable.
     assert "{'choice_index'" not in bindings["workflow_modeling_artifacts_mode"]

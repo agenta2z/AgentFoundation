@@ -156,9 +156,7 @@ def count_cache_files(cache_folder: str, prompt: str, class_name: str) -> int:
     )
 
 
-def read_latest_cache(
-    cache_folder: str, prompt: str, class_name: str
-) -> Optional[str]:
+def read_latest_cache(cache_folder: str, prompt: str, class_name: str) -> Optional[str]:
     """Read the most recent cache file for a prompt. Returns ``None`` if absent."""
     h = hashlib.sha256(prompt.encode()).hexdigest()[:8]
     matches = glob.glob(
@@ -253,9 +251,11 @@ def verify_lru_cache_with_ttl(code: str) -> None:
 
     # Negative ttl raises ValueError
     try:
+
         @decorator(maxsize=2, ttl_seconds=-1)
         def bad_fn(x):
             return x
+
         raise AssertionError("Expected ValueError for negative ttl")
     except ValueError:
         pass

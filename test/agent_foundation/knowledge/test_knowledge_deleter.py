@@ -3,7 +3,6 @@
 from typing import List, Optional, Tuple
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.knowledge_deleter import (
     ConfirmationRequiredError,
     DeleteConfig,

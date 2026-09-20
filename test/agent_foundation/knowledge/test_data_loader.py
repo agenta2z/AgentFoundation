@@ -7,6 +7,7 @@ and sensitive content handling.
 
 Requirements: 1.1, 1.2, 1.3, 1.5, 1.6, 1.7
 """
+
 import json
 import sys
 from pathlib import Path
@@ -25,26 +26,25 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
 )
 
 
@@ -267,9 +267,7 @@ class TestLoadMalformedJSON:
     def test_missing_required_sections_raises_value_error(self, kb, tmp_path):
         """Loading a file missing required sections raises ValueError."""
         incomplete_file = tmp_path / "incomplete.json"
-        incomplete_file.write_text(
-            json.dumps({"metadata": {}}), encoding="utf-8"
-        )
+        incomplete_file.write_text(json.dumps({"metadata": {}}), encoding="utf-8")
 
         with pytest.raises(ValueError, match="missing required sections"):
             KnowledgeDataLoader.load(kb, str(incomplete_file))

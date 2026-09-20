@@ -7,6 +7,7 @@ Creates a DualInferencer with mock base/review/fixer inferencers and verifies:
 
 Requirements: 21.1, 21.3, 21.5
 """
+
 import json
 import os
 import shutil

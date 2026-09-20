@@ -1,0 +1,99 @@
+{%- if separate_proposal_files %}
+
+## Per-Proposal File Output
+
+For each proposal, write its **full detailed content** to an individual file at:
+`{{ workspace_outputs }}/proposals/<ID>.md` (e.g., `proposals/P1.md`).
+
+Each proposal file should be a complete, self-contained document covering
+the proposal in depth — including but not limited to problem context, approach
+details, implementation considerations, impact analysis, risks, and any
+supporting evidence or references gathered during research.
+
+The unified plan artifact still contains the integrated narrative. The per-proposal
+files provide the full detail that downstream tools need when picking individual
+proposals for execution.
+{%- endif %}
+
+## Structured Proposal Index
+
+Conclude your deliverable (`{{ output_path }}`) with a structured proposal index as a fenced JSON block — it rides IN the deliverable file (a downstream tool parses the index directly from the file, not from your `<Response>` summary).
+Each proposal must be individually addressable by a unique ID (use sequential
+IDs like P1, P2, ...). Group proposals into phases by implementation priority.
+{%- if separate_proposal_files %}
+
+The `proposal_file` field MUST point to the per-proposal file you wrote above.
+{%- endif %}
+
+```json proposal_index
+{
+  "version": "1",
+  "themes": ["Multi-Task Architecture", "Loss & Training"],
+  "groups": [
+    {
+      "phase": 1,
+      "label": "Quick Wins",
+      "description": "Low complexity, high impact changes",
+      "proposals": [
+        {
+          "id": "P1",
+          "rank": 1,
+          "title": "Short descriptive title",
+          "summary": "One-line summary of the proposal",
+          "impact": "high",
+          "complexity": "low",
+          "problem": "What problem this solves",
+          "approach": "How to implement it",
+{%- if separate_proposal_files %}
+          "proposal_file": "proposals/P1.md",
+{%- endif %}
+          "dependencies": [],
+          "cross_refs": "Builds on the shared registry from P3",
+          "tags": ["category"]
+        }
+      ],
+      "batches": [
+        {
+          "id": "1A",
+          "label": "Loss & Training, Independent",
+          "timeline": "Week 1",
+          "proposal_ids": ["P1"]
+        }
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "c1",
+      "kind": "conflicts",
+      "proposal_ids": ["P2", "P4"],
+      "reason": "Both modify losses/sampled_softmax.py; apply sequentially, not in parallel"
+    },
+    {
+      "id": "c2",
+      "kind": "mutually_exclusive",
+      "proposal_ids": ["P5", "P6"],
+      "reason": "Two alternative approaches to the same goal; pick one"
+    }
+  ],
+  "total_count": 1
+}
+```
+
+**Rules for the proposal index:**
+- Every proposal from the unified plan MUST appear in exactly one group.
+- `rank` is globally unique across all groups (1 = highest priority).
+- `summary` MUST be 1-2 sentences of plain prose. NO markdown headings, tables, bullet lists, code fences, or bold-only fragments. Do NOT truncate — never end with `…` or `...`. Full detail belongs in the per-proposal document ({%- if separate_proposal_files %} `proposal_file`{%- else %} unified plan body{%- endif %}), not this field. The widget uses `summary` verbatim as the collapsed-card one-liner.
+- `problem`, `approach`, and any prose field: write complete sentences. Do NOT truncate with `…` — the JSON prose fields are shown inline in the widget, and truncation markers surface as visible garbage.
+{%- if separate_proposal_files %}
+- `proposal_file` points to the per-proposal detail file (relative to workspace outputs).
+{%- endif %}
+- `dependencies` lists proposal IDs that must be implemented before the current proposal; these may reference proposals in any group.
+- `cross_refs` captures informal, free-text context notes that don't fit the structured fields (e.g. "builds on the registry introduced in P3"). Do NOT restate conflicts or alternatives here — those belong in `constraints`.
+- `constraints` captures formal inter-proposal rules. Each entry has an `id`, a `kind`, the `proposal_ids` it applies to, and a short `reason`. Valid `kind` values:
+  - `conflicts` — the proposals **clash if applied together** (e.g. they modify the same file/function), so implement them **sequentially, not in parallel**. BOTH can still be selected.
+  - `mutually_exclusive` — the proposals are **alternatives**; pick only **one**.
+- Actively derive `conflicts`: compare proposals' impacted files/modules — proposals touching the same file/function should get a `conflicts` constraint unless they are cleanly separable.
+- `total_count` must equal the actual number of proposals.
+- `themes` (optional) lists the cross-cutting theme labels proposals fall under; the Experiment Hub uses these to group proposals by theme. Omit if not applicable.
+- `batches` (optional, per group) sub-divides a phase into executable batches; each batch carries an `id`, optional `label`/`timeline`, and `proposal_ids` referencing proposals in that group. The Experiment Hub queues selected proposals batch-by-batch. Proposals that pair well and should be done together go into the same batch. Omit if you are not batching.

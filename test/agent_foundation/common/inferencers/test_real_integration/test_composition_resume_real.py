@@ -12,7 +12,6 @@ faster than the first.
 import time
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -20,7 +19,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
 )
 
-from .conftest import DEFAULT_TIMEOUT, skip_claude, assert_cached_skip, assert_real_call
+from .conftest import assert_cached_skip, assert_real_call, DEFAULT_TIMEOUT, skip_claude
 
 
 def _make_claude(tmp_workspace, **overrides):

@@ -1,11 +1,12 @@
-from attr import attrs, attrib
-
-from agent_foundation.common.inferencers.bedrock_inferencers.bedrock_inferencer import BedrockInferencer
+from agent_foundation.common.inferencers.bedrock_inferencers.bedrock_inferencer import (
+    BedrockInferencer,
+)
 from agent_foundation.common.inferencers.bedrock_inferencers.constants import (
+    BEDROCK_ANTHROPIC_VERSION,
     DEFAULT_INFERENCE_ARGS_CLAUDE3,
     MODEL_ID_CLAUDE3_HAIKU,
-    BEDROCK_ANTHROPIC_VERSION
 )
+from attr import attrib, attrs
 
 
 @attrs
@@ -74,10 +75,7 @@ class Claude3BedrockInferencer(BedrockInferencer):
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "text",
-                        "text": inference_input
-                    },
+                    {"type": "text", "text": inference_input},
                 ],
             }
         ]
@@ -85,7 +83,7 @@ class Claude3BedrockInferencer(BedrockInferencer):
         request_body = {
             "anthropic_version": self.anthropic_version,
             "messages": messages,
-            **_inference_args
+            **_inference_args,
         }
 
         return request_body

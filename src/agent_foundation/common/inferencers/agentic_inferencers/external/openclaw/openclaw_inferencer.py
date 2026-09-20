@@ -47,8 +47,6 @@ import shlex
 import uuid
 from typing import Any, AsyncIterator, Optional, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
     DEFAULT_DOCKER_CONTAINER,
     DEFAULT_GATEWAY_URL,
@@ -60,12 +58,12 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.c
     DEFAULT_SESSION_ID,
     DEFAULT_TIMEOUT_SECONDS,
     GATEWAY_SCOPES,
+    is_rate_limit_error,
     OpenClawAuthError,
     OpenClawError,
     OpenClawMode,
     OpenClawRateLimitError,
     OpenClawTimeoutError,
-    is_rate_limit_error,
     parse_cli_json_output,
     read_gateway_token_from_pod,
     run_subprocess,
@@ -73,6 +71,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.c
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +366,7 @@ class OpenClawInferencer(StreamingInferencerBase):
         from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
             read_skill_env_from_pod,
         )
+
         twg_env = read_skill_env_from_pod(
             skill_name="twg",
             docker_container=self.docker_container,
@@ -424,7 +424,9 @@ class OpenClawInferencer(StreamingInferencerBase):
         result = parse_cli_json_output(stdout, stderr, rc)
 
         # Check for rate limit in output/error
-        combined = (result.get("output", "") + " " + (result.get("error") or "")).lower()
+        combined = (
+            result.get("output", "") + " " + (result.get("error") or "")
+        ).lower()
         if is_rate_limit_error(combined):
             raise OpenClawRateLimitError(
                 f"Rate limit hit (CLI mode): {result.get('error') or result.get('output', '')[:200]}"
@@ -466,10 +468,8 @@ class OpenClawInferencer(StreamingInferencerBase):
                 "websockets package not installed. Run: pip install websockets"
             ) from e
 
-        origin = (
-            self.gateway_url
-            .replace("wss://", "https://")
-            .replace("ws://", "http://")
+        origin = self.gateway_url.replace("wss://", "https://").replace(
+            "ws://", "http://"
         )
         try:
             ws = await websockets.connect(
@@ -481,6 +481,7 @@ class OpenClawInferencer(StreamingInferencerBase):
             from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
                 OpenClawNotFoundError,
             )
+
             raise OpenClawNotFoundError(
                 f"Cannot connect to OpenClaw gateway at {self.gateway_url}: {e}"
             ) from e
@@ -500,34 +501,38 @@ class OpenClawInferencer(StreamingInferencerBase):
 
         # 2. Send connect RequestFrame
         connect_id = str(uuid.uuid4())
-        await ws.send(json.dumps({
-            "type": "req",
-            "id": connect_id,
-            "method": "connect",
-            "params": {
-                "minProtocol": 1,
-                "maxProtocol": 10,
-                "auth": {"token": self.auth_token},
-                # Must use "openclaw-control-ui" + "ui" mode for write scope
-                # with token auth. Plain "cli" mode strips write scopes
-                # because the server requires RSA device identity for CLI auth.
-                "client": {
-                    "id": "openclaw-control-ui",
-                    "version": "1.0.0",
-                    "platform": "python",
-                    "mode": "ui",
-                },
-                # "tool-events" cap causes the gateway to register this
-                # connection as a tool-event recipient via
-                # registerToolEventRecipient(runId, connId) in agent.ts.
-                # This is required for enable_turn_separation=True to work —
-                # without it, stream="tool" events are only sent to the
-                # Control UI (broadcastToConnIds), not to general WS clients.
-                "caps": ["tool-events"],
-                "scopes": GATEWAY_SCOPES,
-                "role": "operator",
-            },
-        }))
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "req",
+                    "id": connect_id,
+                    "method": "connect",
+                    "params": {
+                        "minProtocol": 1,
+                        "maxProtocol": 10,
+                        "auth": {"token": self.auth_token},
+                        # Must use "openclaw-control-ui" + "ui" mode for write scope
+                        # with token auth. Plain "cli" mode strips write scopes
+                        # because the server requires RSA device identity for CLI auth.
+                        "client": {
+                            "id": "openclaw-control-ui",
+                            "version": "1.0.0",
+                            "platform": "python",
+                            "mode": "ui",
+                        },
+                        # "tool-events" cap causes the gateway to register this
+                        # connection as a tool-event recipient via
+                        # registerToolEventRecipient(runId, connId) in agent.ts.
+                        # This is required for enable_turn_separation=True to work —
+                        # without it, stream="tool" events are only sent to the
+                        # Control UI (broadcastToConnIds), not to general WS clients.
+                        "caps": ["tool-events"],
+                        "scopes": GATEWAY_SCOPES,
+                        "role": "operator",
+                    },
+                }
+            )
+        )
 
         # 3. Wait for hello-ok ResponseFrame
         deadline = asyncio.get_event_loop().time() + 10
@@ -551,7 +556,9 @@ class OpenClawInferencer(StreamingInferencerBase):
                 logger.debug(
                     "Gateway connected: protocol=%s connId=%s",
                     frame.get("payload", {}).get("protocol"),
-                    str(frame.get("payload", {}).get("server", {}).get("connId", ""))[:12],
+                    str(frame.get("payload", {}).get("server", {}).get("connId", ""))[
+                        :12
+                    ],
                 )
                 return ws
             # Skip other events (e.g. snapshot) until we get our res
@@ -571,15 +578,17 @@ class OpenClawInferencer(StreamingInferencerBase):
         """
         session_key = f"agent:main:{session_id}"
         req_id = str(uuid.uuid4())
-        payload = json.dumps({
-            "type": "req",
-            "id": req_id,
-            "method": "sessions.patch",
-            "params": {
-                "key": session_key,
-                "model": self.model,
-            },
-        })
+        payload = json.dumps(
+            {
+                "type": "req",
+                "id": req_id,
+                "method": "sessions.patch",
+                "params": {
+                    "key": session_key,
+                    "model": self.model,
+                },
+            }
+        )
         try:
             ws = await self._ws_connect()
             try:
@@ -599,12 +608,15 @@ class OpenClawInferencer(StreamingInferencerBase):
                             if msg.get("ok") is False:
                                 logger.warning(
                                     "sessions.patch model=%s session=%s failed: %s",
-                                    self.model, session_id, msg.get("error"),
+                                    self.model,
+                                    session_id,
+                                    msg.get("error"),
                                 )
                             else:
                                 logger.debug(
                                     "sessions.patch model=%s session=%s → ok",
-                                    self.model, session_id,
+                                    self.model,
+                                    session_id,
                                 )
                             break
                     except Exception:
@@ -614,12 +626,11 @@ class OpenClawInferencer(StreamingInferencerBase):
         except Exception as exc:
             logger.warning(
                 "sessions.patch model=%s failed (non-fatal, will use default model): %s",
-                self.model, exc,
+                self.model,
+                exc,
             )
 
-    async def _stream_gateway(
-        self, prompt: str, session_id: str
-    ) -> AsyncIterator[str]:
+    async def _stream_gateway(self, prompt: str, session_id: str) -> AsyncIterator[str]:
         """Connect to the gateway and stream an agent response chunk by chunk.
 
         Yields incremental text from ``delta`` events. Delta events send
@@ -639,7 +650,10 @@ class OpenClawInferencer(StreamingInferencerBase):
             OpenClawError: On unexpected agent error or aborted run.
         """
         # Set model override on the session before streaming if specified
-        if self.model and self.mode in (OpenClawMode.PodGateway, OpenClawMode.LocalGateway):
+        if self.model and self.mode in (
+            OpenClawMode.PodGateway,
+            OpenClawMode.LocalGateway,
+        ):
             await self._set_session_model(session_id)
 
         ws = await self._ws_connect()
@@ -660,12 +674,16 @@ class OpenClawInferencer(StreamingInferencerBase):
             if self.thinking:
                 params["thinking"] = self.thinking
 
-            await ws.send(json.dumps({
-                "type": "req",
-                "id": req_id,
-                "method": "agent",
-                "params": params,
-            }))
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "req",
+                        "id": req_id,
+                        "method": "agent",
+                        "params": params,
+                    }
+                )
+            )
 
             accumulated = ""
             # True once any assistant text has been streamed via delta events.
@@ -724,9 +742,13 @@ class OpenClawInferencer(StreamingInferencerBase):
                         # When _has_streamed is True, the full text was already
                         # yielded incrementally — do NOT re-yield from payloads.
                         if not _has_streamed:
-                            result_payloads = payload.get("result", {}).get("payloads", [])
+                            result_payloads = payload.get("result", {}).get(
+                                "payloads", []
+                            )
                             final_text = "\n".join(
-                                p.get("text", "") for p in result_payloads if p.get("text")
+                                p.get("text", "")
+                                for p in result_payloads
+                                if p.get("text")
                             ).strip()
                             if final_text:
                                 yield final_text
@@ -737,7 +759,8 @@ class OpenClawInferencer(StreamingInferencerBase):
                         err = payload.get("error", {})
                         err_msg = (
                             err.get("message", str(err))
-                            if isinstance(err, dict) else str(err)
+                            if isinstance(err, dict)
+                            else str(err)
                         ) or str(payload)
                         if is_rate_limit_error(err_msg):
                             raise OpenClawRateLimitError(
@@ -781,7 +804,7 @@ class OpenClawInferencer(StreamingInferencerBase):
                         cumulative: str = data.get("text", "")
                         if cumulative:
                             new_part = (
-                                cumulative[len(accumulated):]
+                                cumulative[len(accumulated) :]
                                 if cumulative.startswith(accumulated)
                                 else cumulative
                             )
@@ -825,16 +848,12 @@ class OpenClawInferencer(StreamingInferencerBase):
                             or data.get("reason")
                             or str(data)
                         ) or "unknown error"
-                        logger.warning(
-                            "OpenClaw agent %s — full data: %s", phase, data
-                        )
+                        logger.warning("OpenClaw agent %s — full data: %s", phase, data)
                         if is_rate_limit_error(err_msg):
                             raise OpenClawRateLimitError(
                                 f"Rate limit hit (gateway stream): {err_msg}"
                             )
-                        raise OpenClawError(
-                            f"OpenClaw agent {phase}: {err_msg}"
-                        )
+                        raise OpenClawError(f"OpenClaw agent {phase}: {err_msg}")
 
         finally:
             try:
@@ -842,9 +861,7 @@ class OpenClawInferencer(StreamingInferencerBase):
             except Exception:
                 pass
 
-    async def _ainfer_gateway(
-        self, prompt: str, session_id: str
-    ) -> dict:  # type: ignore[type-arg]
+    async def _ainfer_gateway(self, prompt: str, session_id: str) -> dict:  # type: ignore[type-arg]
         """Accumulate a full gateway-mode response (non-streaming).
 
         Args:
@@ -870,9 +887,7 @@ class OpenClawInferencer(StreamingInferencerBase):
     # Retry logic
     # =========================================================================
 
-    async def _ainfer_with_retry(
-        self, prompt: str, session_id: str
-    ) -> dict:  # type: ignore[type-arg]
+    async def _ainfer_with_retry(self, prompt: str, session_id: str) -> dict:  # type: ignore[type-arg]
         """Run inference with exponential-backoff retry on rate-limit / timeout.
 
         On retry, uses ``retry_continuation_prompt`` with the original prompt
@@ -900,14 +915,15 @@ class OpenClawInferencer(StreamingInferencerBase):
             except (OpenClawRateLimitError, OpenClawTimeoutError) as e:
                 last_error = e
                 if attempt == self.max_retries:
-                    logger.warning(
-                        "All %d retries exhausted: %s", self.max_retries, e
-                    )
+                    logger.warning("All %d retries exhausted: %s", self.max_retries, e)
                     break
                 wait = self.retry_delay * attempt
                 logger.warning(
                     "Attempt %d/%d failed (%s). Retrying in %.0fs...",
-                    attempt, self.max_retries, type(e).__name__, wait,
+                    attempt,
+                    self.max_retries,
+                    type(e).__name__,
+                    wait,
                 )
                 await asyncio.sleep(wait)
                 # Use continuation prompt on retry
@@ -979,10 +995,7 @@ class OpenClawInferencer(StreamingInferencerBase):
         Returns:
             Accumulated response text string.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
         _rc_token = enter_run(
             run_context, default_workspace=getattr(self, "_workspace", None)
@@ -992,10 +1005,13 @@ class OpenClawInferencer(StreamingInferencerBase):
             if new_session:
                 self.active_session_id = None
 
-            session_id = kwargs.get(
-                "session_id",
-                self.active_session_id if self.auto_resume else self.session_id,
-            ) or self.session_id
+            session_id = (
+                kwargs.get(
+                    "session_id",
+                    self.active_session_id if self.auto_resume else self.session_id,
+                )
+                or self.session_id
+            )
 
             prompt = self._extract_prompt(inference_input)
 
@@ -1034,7 +1050,9 @@ class OpenClawInferencer(StreamingInferencerBase):
         from rich_python_utils.common_utils.async_function_helper import _run_async
 
         return _run_async(
-            self.ainfer(inference_input, inference_config, run_context=run_context, **kwargs)
+            self.ainfer(
+                inference_input, inference_config, run_context=run_context, **kwargs
+            )
         )
 
     async def ainfer_streaming(  # type: ignore[override]
@@ -1060,10 +1078,13 @@ class OpenClawInferencer(StreamingInferencerBase):
         if new_session:
             self.active_session_id = None
 
-        session_id = kwargs.get(
-            "session_id",
-            self.active_session_id if self.auto_resume else self.session_id,
-        ) or self.session_id
+        session_id = (
+            kwargs.get(
+                "session_id",
+                self.active_session_id if self.auto_resume else self.session_id,
+            )
+            or self.session_id
+        )
 
         prompt = self._extract_prompt(inference_input)
 
@@ -1112,12 +1133,15 @@ class OpenClawInferencer(StreamingInferencerBase):
         if self.mode == OpenClawMode.LocalGateway:
             # LocalGateway: session files are on the local filesystem
             from pathlib import Path
+
             local_sessions_dir = Path("~/.openclaw/agents/main/sessions").expanduser()
             session_file = local_sessions_dir / f"{session_id}.jsonl"
             is_new = not session_file.exists()
             logger.debug(
                 "Session '%s' local transcript check: %s (is_new=%s)",
-                session_id, session_file, is_new,
+                session_id,
+                session_file,
+                is_new,
             )
             return is_new
 
@@ -1136,14 +1160,17 @@ class OpenClawInferencer(StreamingInferencerBase):
             is_new = "NEW" in result and "EXISTS" not in result
             logger.debug(
                 "Session '%s' pod transcript check: %s (is_new=%s)",
-                session_id, result, is_new,
+                session_id,
+                result,
+                is_new,
             )
             return is_new
         except Exception as e:
             logger.warning(
                 "Could not check session existence for '%s': %s. "
                 "Assuming session exists (no warm-up).",
-                session_id, e,
+                session_id,
+                e,
             )
             return False  # safe default: don't warm up if check fails
 
@@ -1273,11 +1300,14 @@ class OpenClawInferencer(StreamingInferencerBase):
             result = inf.infer("What should I follow up on today?")
         """
         from rich_python_utils.common_utils.async_function_helper import _run_async
+
         _run_async(self.initialize_session())
 
     # ── Convenience session methods ───────────────────────────────────────────
 
-    def new_session(self, inference_input: Any, *, run_context=None, **kwargs: Any) -> Any:
+    def new_session(
+        self, inference_input: Any, *, run_context=None, **kwargs: Any
+    ) -> Any:
         """Start a new session and run inference. Clears session context.
 
         Args:
@@ -1292,7 +1322,9 @@ class OpenClawInferencer(StreamingInferencerBase):
             inference_input, new_session=True, run_context=run_context, **kwargs
         )
 
-    async def anew_session(self, inference_input: Any, *, run_context=None, **kwargs: Any) -> Any:
+    async def anew_session(
+        self, inference_input: Any, *, run_context=None, **kwargs: Any
+    ) -> Any:
         """Async version of ``new_session()``.
 
         Args:
@@ -1323,10 +1355,13 @@ class OpenClawInferencer(StreamingInferencerBase):
         preferred entry point; this exists to satisfy the abstract contract.
         """
         prompt = self._extract_prompt(inference_input)
-        session_id = kwargs.get(
-            "session_id",
-            self.active_session_id if self.auto_resume else self.session_id,
-        ) or self.session_id
+        session_id = (
+            kwargs.get(
+                "session_id",
+                self.active_session_id if self.auto_resume else self.session_id,
+            )
+            or self.session_id
+        )
 
         if self.mode == OpenClawMode.PodCLI:
             result = self._infer_cli(prompt, session_id)
@@ -1335,6 +1370,7 @@ class OpenClawInferencer(StreamingInferencerBase):
 
         # Gateway mode sync: run async via _run_async
         from rich_python_utils.common_utils.async_function_helper import _run_async
+
         return _run_async(self._ainfer_with_retry(prompt, session_id))
 
     async def _ainfer(
@@ -1345,10 +1381,13 @@ class OpenClawInferencer(StreamingInferencerBase):
     ) -> Any:
         """Async inference — delegates to ``_ainfer_with_retry()``."""
         prompt = self._extract_prompt(inference_input)
-        session_id = kwargs.get(
-            "session_id",
-            self.active_session_id if self.auto_resume else self.session_id,
-        ) or self.session_id
+        session_id = (
+            kwargs.get(
+                "session_id",
+                self.active_session_id if self.auto_resume else self.session_id,
+            )
+            or self.session_id
+        )
         result = await self._ainfer_with_retry(prompt, session_id)
         self.active_session_id = result.get("session_id") or session_id
         return result.get("output", "")

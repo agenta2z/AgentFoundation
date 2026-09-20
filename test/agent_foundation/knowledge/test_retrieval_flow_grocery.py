@@ -8,6 +8,7 @@ with a mock LLM function.
 Uses the file-based mock knowledge store at ``_mock_knowledge_store/`` to validate
 real term-overlap search with stemming, and the multi-edge graph walk fix.
 """
+
 import sys
 from pathlib import Path
 
@@ -29,12 +30,14 @@ if _test_knowledge_dir not in sys.path:
     sys.path.insert(0, _test_knowledge_dir)
 
 import pytest
-
-from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
-from agent_foundation.knowledge.retrieval.knowledge_consolidator import KnowledgeConsolidator
-from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
-
 from _grocery_kb_helpers import load_grocery_kb, QUERY, USER_ENTITY_ID
+from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
+    KnowledgeConsolidator,
+)
+from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
+from agent_foundation.knowledge.retrieval.post_processors import (
+    GroupedDictPostProcessor,
+)
 
 
 # ── Test class ──────────────────────────────────────────────────────────────
@@ -91,8 +94,7 @@ class TestGroceryRetrievalFlow:
         assert len(ctx) >= 1
         search_hits = [e for e in ctx if e["relation_type"] == "SEARCH_HIT"]
         safeway_hits = [
-            e for e in search_hits
-            if e["target_node_id"] == "service:safeway"
+            e for e in search_hits if e["target_node_id"] == "service:safeway"
         ]
         assert len(safeway_hits) >= 1
 
@@ -117,9 +119,7 @@ class TestGroceryRetrievalFlow:
         """After multi-edge fix, both MEMBER_OF and SHOPS_AT should appear."""
         ctx = grocery_kb.retrieve_identity_graph(USER_ENTITY_ID)
         safeway_rels = [
-            e["relation_type"]
-            for e in ctx
-            if e["target_node_id"] == "service:safeway"
+            e["relation_type"] for e in ctx if e["target_node_id"] == "service:safeway"
         ]
         assert "MEMBER_OF" in safeway_rels
         assert "SHOPS_AT" in safeway_rels

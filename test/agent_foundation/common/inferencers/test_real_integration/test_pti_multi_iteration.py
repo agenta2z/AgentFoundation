@@ -7,7 +7,6 @@ Verifies real iterative refinement loop with real analyzer feedback driving
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -60,8 +59,12 @@ async def test_pti_single_iteration_real_llm(tmp_workspace):
     """Single PTI iteration with real LLM planner + executor.
     Validates plan → executor data flow with real artifacts."""
     pti = PlanThenImplementInferencer(
-        planner_inferencer=_make_claude(tmp_workspace, append_system_prompt=PLANNER_SYSTEM_PROMPT),
-        executor_inferencer=_make_claude(tmp_workspace, append_system_prompt=EXECUTOR_SYSTEM_PROMPT),
+        planner_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=PLANNER_SYSTEM_PROMPT
+        ),
+        executor_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=EXECUTOR_SYSTEM_PROMPT
+        ),
         workspace=str(tmp_workspace["workspace"]),
         planner_outputs_plan_to_file=True,
     )
@@ -83,9 +86,15 @@ async def test_pti_multi_iteration_with_analyzer(tmp_workspace):
     Verifies iteration_records populated, workspace artifacts present.
     """
     pti = PlanThenImplementInferencer(
-        planner_inferencer=_make_claude(tmp_workspace, append_system_prompt=PLANNER_SYSTEM_PROMPT),
-        executor_inferencer=_make_claude(tmp_workspace, append_system_prompt=EXECUTOR_SYSTEM_PROMPT),
-        analyzer_inferencer=_make_claude(tmp_workspace, append_system_prompt=ANALYZER_SYSTEM_PROMPT),
+        planner_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=PLANNER_SYSTEM_PROMPT
+        ),
+        executor_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=EXECUTOR_SYSTEM_PROMPT
+        ),
+        analyzer_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=ANALYZER_SYSTEM_PROMPT
+        ),
         enable_analysis=True,
         enable_multiple_iterations=True,
         max_meta_iterations=3,

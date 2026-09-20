@@ -5,47 +5,47 @@ deduplication, merge strategies, validation, skill synthesis,
 knowledge lifecycle management, and supporting infrastructure.
 """
 
-from .taxonomy import (
-    DOMAIN_TAXONOMY,
-    get_all_domains,
-    get_domain_tags,
-    validate_domain,
-    validate_tags,
-    format_taxonomy_for_prompt,
-)
 from .chunker import (
-    DocumentChunk,
-    ChunkerConfig,
-    MarkdownChunker,
     chunk_markdown_file,
+    ChunkerConfig,
+    DocumentChunk,
     estimate_tokens,
+    MarkdownChunker,
+)
+from .debug_session import (
+    get_ingestion_runtime_dir,
+    get_knowledge_base_dir,
+    IngestionDebugSession,
+    list_all_ingestion_sessions,
 )
 from .deduplicator import DedupConfig, ThreeTierDeduplicator
+from .document_ingester import (
+    DocumentIngester,
+    ingest_directory,
+    ingest_markdown_files,
+    IngesterConfig,
+    IngestionResult,
+)
+from .knowledge_deleter import ConfirmationRequiredError, DeleteConfig, KnowledgeDeleter
+from .knowledge_updater import KnowledgeUpdater, UpdateConfig
 from .merge_strategy import MergeStrategyConfig, MergeStrategyManager
-from .validator import ValidationConfig, KnowledgeValidator
+from .post_ingestion_merge_job import PostIngestionMergeJob
 from .skill_synthesizer import (
     SkillSynthesisConfig,
     SkillSynthesisResult,
     SkillSynthesizer,
 )
-from .knowledge_updater import UpdateConfig, KnowledgeUpdater
-from .knowledge_deleter import DeleteConfig, ConfirmationRequiredError, KnowledgeDeleter
-from .document_ingester import (
-    DocumentIngester,
-    IngestionResult,
-    IngesterConfig,
-    ingest_markdown_files,
-    ingest_directory,
+from .space_classifier import ClassificationResult, SpaceClassifier, SpaceRule
+from .space_migration import MigrationReport, SpaceMigrationUtility
+from .taxonomy import (
+    DOMAIN_TAXONOMY,
+    format_taxonomy_for_prompt,
+    get_all_domains,
+    get_domain_tags,
+    validate_domain,
+    validate_tags,
 )
-from .post_ingestion_merge_job import PostIngestionMergeJob
-from .debug_session import (
-    IngestionDebugSession,
-    get_knowledge_base_dir,
-    get_ingestion_runtime_dir,
-    list_all_ingestion_sessions,
-)
-from .space_classifier import SpaceClassifier, SpaceRule, ClassificationResult
-from .space_migration import SpaceMigrationUtility, MigrationReport
+from .validator import KnowledgeValidator, ValidationConfig
 
 __all__ = [
     # Taxonomy
@@ -102,4 +102,3 @@ __all__ = [
     "SpaceMigrationUtility",
     "MigrationReport",
 ]
-

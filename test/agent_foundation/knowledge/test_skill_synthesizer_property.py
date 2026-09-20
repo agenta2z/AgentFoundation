@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 15.1, 15.3**
 """
+
 import json
 import sys
 from pathlib import Path
@@ -22,8 +23,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.skill_synthesizer import (
     SkillSynthesisConfig,
     SkillSynthesizer,
@@ -33,6 +32,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Test Helpers ──────────────────────────────────────────────────────────────
@@ -41,10 +41,12 @@ from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePie
 class InMemoryPieceStore(KnowledgePieceStore):
     """Minimal in-memory store for property testing with controllable search scores."""
 
-    def __init__(self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.8):
+    def __init__(
+        self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.8
+    ):
         self._pieces: dict[str, KnowledgePiece] = {}
         self._score = score
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:
@@ -84,26 +86,34 @@ class InMemoryPieceStore(KnowledgePieceStore):
         return results
 
 
-def _make_piece(content: str = "test content", tags: Optional[List[str]] = None, domain: str = "general") -> KnowledgePiece:
+def _make_piece(
+    content: str = "test content",
+    tags: Optional[List[str]] = None,
+    domain: str = "general",
+) -> KnowledgePiece:
     return KnowledgePiece(content=content, tags=tags or [], domain=domain)
 
 
 def _make_success_llm_fn(skill_name: str = "synthesized-skill"):
     """Create a mock LLM function that always returns a valid skill synthesis."""
+
     def llm_fn(prompt: str) -> str:
-        return json.dumps({
-            "is_skill_worthy": True,
-            "confidence": 0.9,
-            "reasoning": "Pieces form a coherent skill",
-            "synthesized_skill": {
-                "name": skill_name,
-                "description": "A synthesized skill",
-                "steps": [
-                    {"step": 1, "description": "Step one"},
-                    {"step": 2, "description": "Step two"},
-                ],
-            },
-        })
+        return json.dumps(
+            {
+                "is_skill_worthy": True,
+                "confidence": 0.9,
+                "reasoning": "Pieces form a coherent skill",
+                "synthesized_skill": {
+                    "name": skill_name,
+                    "description": "A synthesized skill",
+                    "steps": [
+                        {"step": 1, "description": "Step one"},
+                        {"step": 2, "description": "Step two"},
+                    ],
+                },
+            }
+        )
+
     return llm_fn
 
 
@@ -259,8 +269,12 @@ class TestSynthesizedSkillPieceTypeInvariant:
     @given(
         content=_content_strategy,
         num_neighbors=st.integers(min_value=2, max_value=8),
-        score=st.floats(min_value=0.76, max_value=1.0, allow_nan=False, allow_infinity=False),
-        domain=st.sampled_from(["general", "model_optimization", "training_efficiency", "debugging"]),
+        score=st.floats(
+            min_value=0.76, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
+        domain=st.sampled_from(
+            ["general", "model_optimization", "training_efficiency", "debugging"]
+        ),
     )
     @settings(max_examples=100)
     def test_synthesized_piece_has_procedure_type_and_skills_info_type(
@@ -278,7 +292,9 @@ class TestSynthesizedSkillPieceTypeInvariant:
 
         # Use default config: min_pieces=3, min_avg_similarity=0.75
         # num_neighbors >= 2 ensures candidates + new_piece >= 3
-        pieces = [_make_piece(f"neighbor {i}", domain=domain) for i in range(num_neighbors)]
+        pieces = [
+            _make_piece(f"neighbor {i}", domain=domain) for i in range(num_neighbors)
+        ]
         store = InMemoryPieceStore(pieces=pieces, score=score)
 
         synthesizer = SkillSynthesizer(
@@ -297,9 +313,15 @@ class TestSynthesizedSkillPieceTypeInvariant:
     @given(
         content=_content_strategy,
         num_neighbors=st.integers(min_value=2, max_value=8),
-        score=st.floats(min_value=0.76, max_value=1.0, allow_nan=False, allow_infinity=False),
+        score=st.floats(
+            min_value=0.76, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
         tags=st.lists(
-            st.text(alphabet=st.characters(whitelist_categories=("L",)), min_size=2, max_size=15),
+            st.text(
+                alphabet=st.characters(whitelist_categories=("L",)),
+                min_size=2,
+                max_size=15,
+            ),
             min_size=0,
             max_size=5,
         ),

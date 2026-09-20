@@ -7,7 +7,6 @@ Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 11.1
 from __future__ import annotations
 
 import pytest
-
 from agent_foundation.automation.meta_agent.aligner import TraceAligner
 from agent_foundation.automation.meta_agent.models import (
     AlignedTraceSet,
@@ -94,12 +93,18 @@ class TestParameterizable:
     """Requirement 4.4: same type + target, different args → PARAMETERIZABLE."""
 
     def test_different_args_classified_parameterizable(self):
-        t1 = _trace("t1", [
-            _step("input_text", target="search-box", args={"text": "cats"}),
-        ])
-        t2 = _trace("t2", [
-            _step("input_text", target="search-box", args={"text": "dogs"}),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("input_text", target="search-box", args={"text": "cats"}),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("input_text", target="search-box", args={"text": "dogs"}),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
@@ -107,14 +112,20 @@ class TestParameterizable:
         assert result.positions[0].alignment_type == AlignmentType.PARAMETERIZABLE
 
     def test_mixed_deterministic_and_parameterizable(self):
-        t1 = _trace("t1", [
-            _step("click", target="btn"),
-            _step("input_text", target="field", args={"text": "alpha"}),
-        ])
-        t2 = _trace("t2", [
-            _step("click", target="btn"),
-            _step("input_text", target="field", args={"text": "beta"}),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="btn"),
+                _step("input_text", target="field", args={"text": "alpha"}),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="btn"),
+                _step("input_text", target="field", args={"text": "beta"}),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
@@ -123,12 +134,18 @@ class TestParameterizable:
         assert types[1] == AlignmentType.PARAMETERIZABLE
 
     def test_none_args_vs_present_args_is_parameterizable(self):
-        t1 = _trace("t1", [
-            _step("input_text", target="field", args=None),
-        ])
-        t2 = _trace("t2", [
-            _step("input_text", target="field", args={"text": "val"}),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("input_text", target="field", args=None),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("input_text", target="field", args={"text": "val"}),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
@@ -144,12 +161,18 @@ class TestCompletelyDifferentTraces:
     """Requirement 4.5: different type or target → VARIABLE."""
 
     def test_different_action_types_are_variable(self):
-        t1 = _trace("t1", [
-            _step("click", target="btn-a"),
-        ])
-        t2 = _trace("t2", [
-            _step("scroll", target="page"),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="btn-a"),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("scroll", target="page"),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
@@ -157,25 +180,33 @@ class TestCompletelyDifferentTraces:
         # appears as a gap in the other trace → VARIABLE or OPTIONAL.
         for pos in result.positions:
             assert pos.alignment_type in (
-                AlignmentType.VARIABLE, AlignmentType.OPTIONAL,
+                AlignmentType.VARIABLE,
+                AlignmentType.OPTIONAL,
             )
 
     def test_different_targets_same_type_are_variable(self):
-        t1 = _trace("t1", [
-            _step("click", target="btn-a"),
-            _step("click", target="btn-b"),
-        ])
-        t2 = _trace("t2", [
-            _step("click", target="btn-x"),
-            _step("click", target="btn-y"),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="btn-a"),
+                _step("click", target="btn-b"),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="btn-x"),
+                _step("click", target="btn-y"),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
         # Targets differ so steps are not equivalent → gaps → VARIABLE.
         for pos in result.positions:
             assert pos.alignment_type in (
-                AlignmentType.VARIABLE, AlignmentType.OPTIONAL,
+                AlignmentType.VARIABLE,
+                AlignmentType.OPTIONAL,
             )
 
 
@@ -189,22 +220,27 @@ class TestOptionalStep:
 
     def test_extra_step_classified_optional(self):
         # Trace 1 has an extra popup-dismiss step between click and input.
-        t1 = _trace("t1", [
-            _step("click", target="btn"),
-            _step("click", target="popup-dismiss"),
-            _step("input_text", target="field", args={"text": "hi"}),
-        ])
-        t2 = _trace("t2", [
-            _step("click", target="btn"),
-            _step("input_text", target="field", args={"text": "hi"}),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="btn"),
+                _step("click", target="popup-dismiss"),
+                _step("input_text", target="field", args={"text": "hi"}),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="btn"),
+                _step("input_text", target="field", args={"text": "hi"}),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
         # Find the position where one trace has a step and the other has None.
         optional_positions = [
-            p for p in result.positions
-            if p.alignment_type == AlignmentType.OPTIONAL
+            p for p in result.positions if p.alignment_type == AlignmentType.OPTIONAL
         ]
         assert len(optional_positions) >= 1
 
@@ -215,20 +251,27 @@ class TestOptionalStep:
         assert opt.steps["t1"].target == "popup-dismiss"
 
     def test_shared_steps_remain_deterministic(self):
-        t1 = _trace("t1", [
-            _step("click", target="btn"),
-            _step("click", target="popup-dismiss"),
-            _step("input_text", target="field", args={"text": "hi"}),
-        ])
-        t2 = _trace("t2", [
-            _step("click", target="btn"),
-            _step("input_text", target="field", args={"text": "hi"}),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="btn"),
+                _step("click", target="popup-dismiss"),
+                _step("input_text", target="field", args={"text": "hi"}),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="btn"),
+                _step("input_text", target="field", args={"text": "hi"}),
+            ],
+        )
 
         result = TraceAligner().align([t1, t2])
 
         deterministic = [
-            p for p in result.positions
+            p
+            for p in result.positions
             if p.alignment_type == AlignmentType.DETERMINISTIC
         ]
         # The shared click and input_text should be deterministic.
@@ -251,10 +294,13 @@ class TestEmptyTraces:
         assert result.alignment_score == 1.0
 
     def test_single_trace_all_deterministic(self):
-        t = _trace("t1", [
-            _step("click", target="a"),
-            _step("click", target="b"),
-        ])
+        t = _trace(
+            "t1",
+            [
+                _step("click", target="a"),
+                _step("click", target="b"),
+            ],
+        )
 
         result = TraceAligner().align([t])
 
@@ -313,22 +359,31 @@ class TestMerge:
         assert len(merged.positions) == len(existing.positions)
 
     def test_merge_positions_cover_all_traces(self):
-        t1 = _trace("t1", [
-            _step("click", target="a"),
-            _step("click", target="b"),
-        ])
-        t2 = _trace("t2", [
-            _step("click", target="a"),
-            _step("click", target="b"),
-        ])
+        t1 = _trace(
+            "t1",
+            [
+                _step("click", target="a"),
+                _step("click", target="b"),
+            ],
+        )
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="a"),
+                _step("click", target="b"),
+            ],
+        )
 
         aligner = TraceAligner()
         existing = aligner.align([t1, t2])
 
-        t3 = _trace("t3", [
-            _step("click", target="a"),
-            _step("click", target="b"),
-        ])
+        t3 = _trace(
+            "t3",
+            [
+                _step("click", target="a"),
+                _step("click", target="b"),
+            ],
+        )
         merged = aligner.merge(existing, [t3])
 
         # Every position should have keys for all three traces.
@@ -340,10 +395,13 @@ class TestMerge:
         aligner = TraceAligner()
         existing = aligner.align([t1])
 
-        t2 = _trace("t2", [
-            _step("click", target="a"),
-            _step("click", target="extra"),
-        ])
+        t2 = _trace(
+            "t2",
+            [
+                _step("click", target="a"),
+                _step("click", target="extra"),
+            ],
+        )
         merged = aligner.merge(existing, [t2])
 
         assert "t1" in merged.trace_ids

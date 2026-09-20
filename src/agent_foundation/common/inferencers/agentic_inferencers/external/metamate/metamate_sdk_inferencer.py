@@ -18,8 +18,12 @@ import asyncio
 import logging
 import time
 import uuid as uuid_mod
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.code_scope_judge import (
+    judge_code_scope,
+    resolve_scope_directive,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.common import (
     _TERMINAL_STATUSES,
     AUTO_CONTINUE_REPLY,
@@ -125,6 +129,10 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         timeout_seconds: Per-call timeout for ``engine_start_v2``.
         total_timeout_seconds: Max total time for entire operation.
         idle_timeout_seconds: Max idle time between chunks.
+        code_scope_judge: Async ``(task) -> CodeSearchScope`` that scopes the code
+            search. Defaults to :func:`judge_code_scope` (enabled); pass ``None``
+            to disable. ``_ainfer`` prepends its ``to_directive()`` to every task,
+            degrading to the default ``fbsource`` scope if the judge fails.
     """
 
     api_key: str = attrib(default=DEFAULT_API_KEY)
@@ -147,6 +155,21 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # full contract.
     use_standalone: Optional[bool] = attrib(default=None)
 
+    # Opt-in code-search scope judge (integration seam 2). Default ``None`` =
+    # disabled. Set to an async callable ``(task: str) -> CodeSearchScope`` — typically
+    # ``judge_code_scope`` from this package — to enable: ``_ainfer`` awaits it on
+    # each (already-rendered) task and prepends the returned ``to_directive()``, a
+    # host-owned directive that keeps remote ``code_search`` off ``repo:"all"`` (the
+    # ACL fan-out that dies "Unauthorized" under the ~512 MiB HHVM cap). The judge
+    # runs its OWN Claude inferencer, never Metamate, so enabling this does not
+    # recurse. On by default — an unscoped Metamate search is the failure this
+    # exists to prevent; pass ``None`` to disable. A judge failure degrades to the
+    # default ``fbsource`` directive (see ``resolve_scope_directive``) and can
+    # never break the inference it is scoping.
+    code_scope_judge: Optional[Callable[[str], Awaitable[Any]]] = attrib(
+        default=judge_code_scope
+    )
+
     # Internal state
     _conversation_uuid: Optional[str] = attrib(default=None, init=False, repr=False)
     _conversation_fbid: Optional[str] = attrib(default=None, init=False, repr=False)
@@ -162,6 +185,16 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             f"timeout={self.timeout_seconds}s",
             "Config",
         )
+
+    async def preflight(self) -> None:
+        """U2b: surface the missing MetamateGraphQLClient dependency EARLY.
+
+        ``resolve_metamate_client_cls`` raises ``MissingDependencyError`` (U2d)
+        when the Buck-only ``msl`` client isn't available; running it here lets
+        ``preflight_all`` aggregate it into ONE clear startup error instead of a
+        worker crashing ~40 min into the run.
+        """
+        resolve_metamate_client_cls(self.use_standalone)
 
     def reset_session(self) -> None:
         """Clear conversation state so the next call starts fresh.
@@ -379,6 +412,18 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             Response text string, or SDKInferencerResponse if
             ``return_sdk_response=True``.
         """
+        # Integration seam 2: let the scope judge decide the code-search scope for
+        # THIS task and prepend its host-owned directive. At this point
+        # ``inference_input`` is the already-rendered prompt string (rendered
+        # upstream in ``__ainfer_single_impl`` before ``_ainfer``), so the directive
+        # travels verbatim down to ``engine_start_v2(prompt=...)``. Setting
+        # ``code_scope_judge=None`` leaves the prompt untouched.
+        if self.code_scope_judge is not None and isinstance(inference_input, str):
+            directive = await resolve_scope_directive(
+                self.code_scope_judge, inference_input
+            )
+            inference_input = f"{directive}\n\n{inference_input}"
+
         new_session = kwargs.pop("new_session", False)
         explicit_session_id = kwargs.pop("session_id", None)
         return_sdk_response = kwargs.pop("return_sdk_response", False)

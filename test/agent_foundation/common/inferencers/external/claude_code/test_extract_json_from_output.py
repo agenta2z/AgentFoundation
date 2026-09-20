@@ -129,14 +129,10 @@ class ExtractJsonFromOutputTest(unittest.TestCase):
         self.assertIsNone(self.inferencer._extract_json_from_output(None))
 
     def test_plain_text_returns_none(self) -> None:
-        self.assertIsNone(
-            self.inferencer._extract_json_from_output("Hello, world!")
-        )
+        self.assertIsNone(self.inferencer._extract_json_from_output("Hello, world!"))
 
     def test_invalid_json_returns_none(self) -> None:
-        self.assertIsNone(
-            self.inferencer._extract_json_from_output("{invalid json}")
-        )
+        self.assertIsNone(self.inferencer._extract_json_from_output("{invalid json}"))
 
     def test_multiline_plain_text_returns_none(self) -> None:
         stdout = "Line 1\nLine 2\nLine 3\n"

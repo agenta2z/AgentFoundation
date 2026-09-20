@@ -13,18 +13,13 @@ in the same order.
 
 from __future__ import annotations
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationRule,
     EvaluationStrategy,
     TraceEvaluator,
 )
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +41,13 @@ def trace_step(draw) -> TraceStep:
 @st.composite
 def execution_trace(draw) -> ExecutionTrace:
     """Generate a random ExecutionTrace with random success value."""
-    trace_id = draw(st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"))))
+    trace_id = draw(
+        st.text(
+            min_size=1,
+            max_size=20,
+            alphabet=st.characters(whitelist_categories=("L", "N")),
+        )
+    )
     steps = draw(st.lists(trace_step(), min_size=0, max_size=5))
     success = draw(st.booleans())
     return ExecutionTrace(
@@ -161,9 +162,7 @@ def test_rule_based_returns_one_result_per_trace(
 
     **Validates: Requirements 12.1**
     """
-    evaluator = TraceEvaluator(
-        strategy=EvaluationStrategy.RULE_BASED, rules=rules
-    )
+    evaluator = TraceEvaluator(strategy=EvaluationStrategy.RULE_BASED, rules=rules)
     results = evaluator.evaluate(traces)
     assert len(results) == len(traces)
 
@@ -178,9 +177,7 @@ def test_rule_based_preserves_order(
 
     **Validates: Requirements 12.1**
     """
-    evaluator = TraceEvaluator(
-        strategy=EvaluationStrategy.RULE_BASED, rules=rules
-    )
+    evaluator = TraceEvaluator(strategy=EvaluationStrategy.RULE_BASED, rules=rules)
     results = evaluator.evaluate(traces)
     for trace, result in zip(traces, results):
         assert result.trace_id == trace.trace_id
@@ -199,9 +196,7 @@ def test_rule_based_error_rules_determine_pass_fail(
 
     **Validates: Requirements 12.3**
     """
-    evaluator = TraceEvaluator(
-        strategy=EvaluationStrategy.RULE_BASED, rules=rules
-    )
+    evaluator = TraceEvaluator(strategy=EvaluationStrategy.RULE_BASED, rules=rules)
     results = evaluator.evaluate(traces)
 
     error_rules = [r for r in rules if r.severity == "error"]

@@ -53,7 +53,9 @@ async def test_realtime_cache() -> bool:
         elapsed = time.time() - start
 
         print(f"\n  ainfer() completed in {elapsed:.2f}s")
-        print(f"  Success: {result.get('success') if isinstance(result, dict) else 'N/A'}")
+        print(
+            f"  Success: {result.get('success') if isinstance(result, dict) else 'N/A'}"
+        )
         output = result.get("output", "") if isinstance(result, dict) else str(result)
         print(f"  Output length: {len(output)} chars")
         print(f"  Output preview: {output[:200]}...")
@@ -92,14 +94,16 @@ async def test_realtime_cache() -> bool:
         print(f"\n  === Cache File Contents ===")
         for i, line in enumerate(cache_content.split("\n")):
             if i < 20:
-                print(f"    {i+1}: {line}")
+                print(f"    {i + 1}: {line}")
             else:
                 print(f"    ... ({len(cache_content.split(chr(10)))} total lines)")
                 break
         print(f"  === End Cache File ===")
 
         # Verify: cache has content AND the output text appears in the cache
-        output_in_cache = output.strip()[:50] in cache_content if output.strip() else False
+        output_in_cache = (
+            output.strip()[:50] in cache_content if output.strip() else False
+        )
         print(f"\n  Output text found in cache: {output_in_cache}")
 
         if cache_size > 0 and has_success_marker and output_in_cache:
@@ -117,13 +121,17 @@ async def test_realtime_cache() -> bool:
             return False
 
     except Exception as e:
-        print(f"\n❌ REAL-TIME CACHE TEST FAILED with exception: {type(e).__name__}: {e}")
+        print(
+            f"\n❌ REAL-TIME CACHE TEST FAILED with exception: {type(e).__name__}: {e}"
+        )
         import traceback
+
         traceback.print_exc()
         return False
     finally:
         # Cleanup
         import shutil
+
         shutil.rmtree(cache_dir, ignore_errors=True)
 
 
@@ -220,17 +228,24 @@ async def test_streaming_cache_incremental() -> bool:
     except Exception as e:
         print(f"\n❌ INCREMENTAL CACHE TEST FAILED: {type(e).__name__}: {e}")
         import traceback
+
         traceback.print_exc()
         return False
     finally:
         import shutil
+
         shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def main() -> int:
     results = []
     results.append(("Real-Time Cache (ainfer)", asyncio.run(test_realtime_cache())))
-    results.append(("Incremental Cache (ainfer_streaming)", asyncio.run(test_streaming_cache_incremental())))
+    results.append(
+        (
+            "Incremental Cache (ainfer_streaming)",
+            asyncio.run(test_streaming_cache_incremental()),
+        )
+    )
 
     print("\n" + "=" * 60)
     print("CACHE TEST SUMMARY")

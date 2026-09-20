@@ -5,16 +5,12 @@ from typing import List, Optional, Tuple
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.deduplicator import (
     DedupConfig,
     ThreeTierDeduplicator,
 )
 from agent_foundation.knowledge.retrieval.models.enums import DedupAction
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-    KnowledgeType,
-)
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import DedupResult
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 
@@ -24,7 +20,7 @@ class InMemoryPieceStore(KnowledgePieceStore):
 
     def __init__(self, pieces: Optional[List[KnowledgePiece]] = None):
         self._pieces: dict[str, KnowledgePiece] = {}
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:
@@ -143,7 +139,7 @@ class TestTier1HashCheck:
         piece = KnowledgePiece(content="Test content")
         # content_hash should be auto-computed, but let's ensure tier1 handles None
         piece.content_hash = None
-        result = dedup.deduplicate(piece)
+        dedup.deduplicate(piece)
 
         # After dedup, the piece should have a content_hash set
         assert piece.content_hash is not None
@@ -220,20 +216,35 @@ class TestTier2EmbeddingSimilarity:
 class TestTier3LLMJudge:
     """Tests for Tier 3 LLM judge (Requirements 12.5, 12.7)."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_render_prompt(self, monkeypatch):
+        # Handlebars rendering (pybars) is unavailable at Meta, so the real
+        # render_prompt raises; its output does not affect the judge-decode
+        # behavior under test (llm_fn is stubbed). Substitute a fixed prompt to
+        # isolate the migrated @agentic_function decode path.
+        monkeypatch.setattr(
+            "agent_foundation.knowledge.ingestion.deduplicator.render_prompt",
+            lambda *args, **kwargs: "DEDUP_JUDGE_PROMPT",
+        )
+
     def test_borderline_similarity_invokes_llm(self):
         """Score between thresholds → Tier 3 invoked (Requirement 12.5)."""
         existing = KnowledgePiece(content="Some content", entity_id="e1")
         store = InMemoryPieceStore([existing])
         store._score = 0.90  # Between 0.85 and 0.98
 
-        llm_response = json.dumps({
-            "action": "MERGE",
-            "reasoning": "Complementary info",
-            "contradiction_detected": False,
-        })
+        llm_response = json.dumps(
+            {
+                "action": "MERGE",
+                "reasoning": "Complementary info",
+                "contradiction_detected": False,
+            }
+        )
         llm_fn = MagicMock(return_value=llm_response)
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Related content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
@@ -251,7 +262,9 @@ class TestTier3LLMJudge:
 
         llm_fn = MagicMock(side_effect=RuntimeError("LLM unavailable"))
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Related content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
@@ -265,14 +278,18 @@ class TestTier3LLMJudge:
         store = InMemoryPieceStore([existing])
         store._score = 0.90
 
-        llm_response = json.dumps({
-            "action": "NO_OP",
-            "reasoning": "Near duplicate",
-            "contradiction_detected": False,
-        })
+        llm_response = json.dumps(
+            {
+                "action": "NO_OP",
+                "reasoning": "Near duplicate",
+                "contradiction_detected": False,
+            }
+        )
         llm_fn = MagicMock(return_value=llm_response)
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Related content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
@@ -285,14 +302,18 @@ class TestTier3LLMJudge:
         store = InMemoryPieceStore([existing])
         store._score = 0.90
 
-        llm_response = json.dumps({
-            "action": "ADD",
-            "reasoning": "Different topics",
-            "contradiction_detected": False,
-        })
+        llm_response = json.dumps(
+            {
+                "action": "ADD",
+                "reasoning": "Different topics",
+                "contradiction_detected": False,
+            }
+        )
         llm_fn = MagicMock(return_value=llm_response)
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Related content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
@@ -305,13 +326,17 @@ class TestTier3LLMJudge:
         store = InMemoryPieceStore([existing])
         store._score = 0.90
 
-        llm_response = json.dumps({
-            "action": "INVALID_ACTION",
-            "reasoning": "Bad response",
-        })
+        llm_response = json.dumps(
+            {
+                "action": "INVALID_ACTION",
+                "reasoning": "Bad response",
+            }
+        )
         llm_fn = MagicMock(return_value=llm_response)
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Related content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
@@ -352,19 +377,42 @@ class TestTier3LLMJudge:
         store = InMemoryPieceStore([existing])
         store._score = 0.90
 
-        llm_response = json.dumps({
-            "action": "ADD",
-            "reasoning": "Contradictory info",
-            "contradiction_detected": True,
-        })
+        llm_response = json.dumps(
+            {
+                "action": "ADD",
+                "reasoning": "Contradictory info",
+                "contradiction_detected": True,
+            }
+        )
         llm_fn = MagicMock(return_value=llm_response)
         config = DedupConfig(enable_tier1=False)
-        dedup = ThreeTierDeduplicator(store, _dummy_embedding_fn, llm_fn=llm_fn, config=config)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
 
         new_piece = KnowledgePiece(content="Contradicting content", entity_id="e1")
         result = dedup.deduplicate(new_piece)
 
         assert result.contradiction_detected is True
+
+    def test_llm_malformed_json_defaults_to_add(self):
+        """Malformed JSON reply → json.loads raises in the judge body → ADD."""
+        existing = KnowledgePiece(content="Some content", entity_id="e1")
+        store = InMemoryPieceStore([existing])
+        store._score = 0.90
+
+        llm_fn = MagicMock(return_value="not valid json {{{")
+        config = DedupConfig(enable_tier1=False)
+        dedup = ThreeTierDeduplicator(
+            store, _dummy_embedding_fn, llm_fn=llm_fn, config=config
+        )
+
+        new_piece = KnowledgePiece(content="Related content", entity_id="e1")
+        result = dedup.deduplicate(new_piece)
+
+        assert result.action == DedupAction.ADD
+        assert "error" in result.reason.lower()
+        assert result.similarity_score == 0.90
 
 
 class TestDedupResultFields:
@@ -439,3 +487,53 @@ class TestTierInteraction:
         result = dedup.deduplicate(new_piece)
 
         assert result.action == DedupAction.ADD
+
+
+class TestDedupJudgeBuilder:
+    """Tests for the migrated @agentic_function Tier-3 judge in isolation."""
+
+    def test_identity_template_passes_prompt_verbatim(self):
+        """The {{ prompt }} template forwards the rendered prompt unchanged.
+
+        The old inline judge passed the rendered prompt straight to llm_fn; the
+        migrated judge routes it through the decorator's Jinja template. This
+        proves that passthrough neither HTML-escapes nor re-evaluates embedded
+        template metacharacters, so arbitrary knowledge-piece content is safe.
+        """
+        from agent_foundation.knowledge.ingestion.deduplicator import _build_dedup_judge
+
+        captured = {}
+
+        def spy(prompt: str) -> str:
+            captured["prompt"] = prompt
+            return json.dumps({"action": "ADD", "reasoning": "distinct topics"})
+
+        judge = _build_dedup_judge(spy)
+        sentinel = 'A<b>&"z" {{ inject_me }} 100% <=>'
+        result = judge(sentinel, existing_piece_id="x", similarity=0.9)
+
+        assert captured["prompt"] == sentinel
+        assert result.action == DedupAction.ADD
+        assert result.existing_piece_id is None
+        assert result.similarity_score == 0.9
+
+    def test_judge_maps_merge_and_preserves_existing_id(self):
+        """A MERGE verdict keeps existing_piece_id and reads contradiction flag."""
+        from agent_foundation.knowledge.ingestion.deduplicator import _build_dedup_judge
+
+        def stub(_prompt: str) -> str:
+            return json.dumps(
+                {
+                    "action": "MERGE",
+                    "reasoning": "overlapping",
+                    "contradiction_detected": True,
+                }
+            )
+
+        judge = _build_dedup_judge(stub)
+        result = judge("p", existing_piece_id="keep-me", similarity=0.9)
+
+        assert result.action == DedupAction.MERGE
+        assert result.existing_piece_id == "keep-me"
+        assert result.contradiction_detected is True
+        assert result.similarity_score == 0.9

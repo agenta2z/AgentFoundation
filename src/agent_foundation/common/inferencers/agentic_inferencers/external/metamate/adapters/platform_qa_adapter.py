@@ -20,7 +20,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
     FallbackClientInterface,
     MetamateClientInterface,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.exceptions import MetamateUnavailableError
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.exceptions import (
+    MetamateUnavailableError,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import (
     Citation,
     MetamateConfig,

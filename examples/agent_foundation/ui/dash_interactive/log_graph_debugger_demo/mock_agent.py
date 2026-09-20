@@ -9,22 +9,22 @@ This module provides mock implementations of agent components including:
 - ComplexAgent: Agent subclass with specific implementation for demos
 """
 
-from attr import attrs, attrib
-
 from agent_foundation.agents.agent import Agent
-from agent_foundation.agents.agent_response import AgentResponse, AgentAction
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse
 from agent_foundation.agents.agent_state import AgentStateItem
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
 class MockInteractive(InteractiveBase):
     """
     Mock interactive interface for the agent.
-    
+
     Inherits from InteractiveBase to ensure proper interface compliance.
     Useful for testing and demonstrations where no real user interaction is needed.
     """
+
     inputs: list = attrib(factory=list)
     input_index: int = attrib(default=0, init=False)
     responses: list = attrib(factory=list, init=False)
@@ -37,10 +37,12 @@ class MockInteractive(InteractiveBase):
             return result
         return "continue"
 
-    def _send_response(self, response, flag: InteractionFlags = InteractionFlags.TurnCompleted):
+    def _send_response(
+        self, response, flag: InteractionFlags = InteractionFlags.TurnCompleted
+    ):
         """Store the response in the responses list."""
         self.responses.append(response)
-    
+
     def reset_input(self, flag: InteractionFlags):
         """Reset input state (no-op for mock)."""
         pass
@@ -62,6 +64,7 @@ class ComplexAgentReasoner:
     immediately after executing their action. The main agent then takes the
     merged results and writes the final report.
     """
+
     def __init__(self):
         self.call_count = 0
 
@@ -74,7 +77,7 @@ class ComplexAgentReasoner:
                 instant_response="Searching for information...",
                 next_actions=[
                     [AgentAction(type="SearchAction", target="quantum_computing")]
-                ]
+                ],
             )
         elif self.call_count == 2:
             # Iteration 2: Parallel analysis (3 branches)
@@ -85,9 +88,9 @@ class ComplexAgentReasoner:
                     [
                         AgentAction(type="AnalyzeAlgorithms", target="algorithms"),
                         AgentAction(type="AnalyzeHardware", target="hardware"),
-                        AgentAction(type="AnalyzeUseCases", target="use_cases")
+                        AgentAction(type="AnalyzeUseCases", target="use_cases"),
                     ]
-                ]
+                ],
             )
         elif self.call_count <= 5:
             # Calls 3-5: Branched agents (one per parallel branch)
@@ -95,36 +98,35 @@ class ComplexAgentReasoner:
             # This prevents branched agents from creating their own WorkGraphs
             return AgentResponse(
                 instant_response="Branch analysis complete",
-                next_actions=[]  # Empty = branched agent completes
+                next_actions=[],  # Empty = branched agent completes
             )
         elif self.call_count == 6:
             # Iteration 3 of main agent: Write final report based on merged analysis results
             return AgentResponse(
                 instant_response="Writing final report from merged analysis...",
-                next_actions=[
-                    [AgentAction(type="WriteReport", target="final_report")]
-                ]
+                next_actions=[[AgentAction(type="WriteReport", target="final_report")]],
             )
         else:
             # Iteration 4 of main agent (call 7+): Complete
             return AgentResponse(
                 instant_response="Task completed!",
-                next_actions=[]  # Empty = agent completes
+                next_actions=[],  # Empty = agent completes
             )
 
 
 class BranchedAgentReasoner:
     """
     Reasoner for branched agents - completes immediately after initial action.
-    
+
     This reasoner is used by the branched agents created during parallel execution.
     Each branched agent:
     1. Executes its assigned action (e.g., AnalyzeAlgorithms)
     2. Returns results immediately without further reasoning
     3. Results are collected and merged by the summary node
-    
+
     The main agent then continues with the merged results.
     """
+
     def __init__(self):
         self.call_count = 0
 
@@ -135,16 +137,19 @@ class BranchedAgentReasoner:
         # by the time this reasoner is called
         return AgentResponse(
             instant_response="Branch analysis complete",
-            next_actions=[]  # No further actions - complete immediately
+            next_actions=[],  # No further actions - complete immediately
         )
 
 
 class TrackingActor:
     """Mock actor that tracks executed actions."""
+
     def __init__(self):
         self.executed_actions = []
 
-    def __call__(self, action_type=None, action_target=None, action_args=None, **kwargs):
+    def __call__(
+        self, action_type=None, action_target=None, action_args=None, **kwargs
+    ):
         """
         Actor receives action attributes with 'action_' prefix.
         This matches the Agent's default actor_args_transformation.
@@ -163,4 +168,6 @@ class ComplexAgent(Agent):
             # Create a simple agent state
             agent_state = AgentStateItem()
             return raw_response, agent_state
-        return AgentResponse(instant_response=str(raw_response), next_actions=[]), AgentStateItem()
+        return AgentResponse(
+            instant_response=str(raw_response), next_actions=[]
+        ), AgentStateItem()

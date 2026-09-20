@@ -13,14 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
 from agent_foundation.automation.meta_agent.validator import GraphValidator
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +33,9 @@ class FakeGraph:
     def __init__(self, result: FakeExecutionResult):
         self._result = result
 
-    def execute(self, initial_variables: Optional[Dict[str, Any]] = None) -> FakeExecutionResult:
+    def execute(
+        self, initial_variables: Optional[Dict[str, Any]] = None
+    ) -> FakeExecutionResult:
         return self._result
 
 
@@ -95,9 +92,7 @@ def _find_first_mismatch(
     return None
 
 
-def _steps_are_identical(
-    expected: List[TraceStep], actual: List[TraceStep]
-) -> bool:
+def _steps_are_identical(expected: List[TraceStep], actual: List[TraceStep]) -> bool:
     """Return True when the two step lists match completely."""
     return _find_first_mismatch(expected, actual) is None
 
@@ -115,9 +110,7 @@ def test_identical_steps_always_pass(steps: List[TraceStep]):
     **Validates: Requirements 8.2**
     """
     graph = FakeGraph(FakeExecutionResult(success=True, outputs={"steps": steps}))
-    expected = ExecutionTrace(
-        trace_id="t1", task_description="test", steps=steps
-    )
+    expected = ExecutionTrace(trace_id="t1", task_description="test", steps=steps)
 
     validator = GraphValidator()
     results = validator.validate(
@@ -135,7 +128,9 @@ def test_identical_steps_always_pass(steps: List[TraceStep]):
 
 
 @settings(max_examples=300, deadline=None)
-@given(actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8))
+@given(
+    actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8)
+)
 def test_pass_iff_match(actual: List[TraceStep], expected: List[TraceStep]):
     """Property 20: passed=True iff execution matches expected.
 
@@ -165,8 +160,12 @@ def test_pass_iff_match(actual: List[TraceStep], expected: List[TraceStep]):
 
 
 @settings(max_examples=300, deadline=None)
-@given(actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8))
-def test_failed_has_divergence_point(actual: List[TraceStep], expected: List[TraceStep]):
+@given(
+    actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8)
+)
+def test_failed_has_divergence_point(
+    actual: List[TraceStep], expected: List[TraceStep]
+):
     """Property 20: When passed=False, divergence_point is non-None.
 
     **Validates: Requirements 8.3**
@@ -192,8 +191,12 @@ def test_failed_has_divergence_point(actual: List[TraceStep], expected: List[Tra
 
 
 @settings(max_examples=300, deadline=None)
-@given(actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8))
-def test_divergence_point_is_correct_index(actual: List[TraceStep], expected: List[TraceStep]):
+@given(
+    actual=step_list(min_size=0, max_size=8), expected=step_list(min_size=0, max_size=8)
+)
+def test_divergence_point_is_correct_index(
+    actual: List[TraceStep], expected: List[TraceStep]
+):
     """Property 20: divergence_point equals the first mismatch index.
 
     **Validates: Requirements 8.3**

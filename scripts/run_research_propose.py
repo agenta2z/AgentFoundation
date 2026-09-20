@@ -40,43 +40,50 @@ def main() -> int:
         "--docs-path", default=None, help="Optional documentation directory."
     )
     parser.add_argument(
-        "--separate-proposal-files", action="store_true",
+        "--separate-proposal-files",
+        action="store_true",
         help="Write each proposal to its own file.",
     )
     parser.add_argument(
-        "--research-only", action="store_true",
+        "--research-only",
+        action="store_true",
         help="Run breakdown + research only (skip proposals + unified plan).",
     )
     parser.add_argument(
-        "--breakdown-only", action="store_true",
+        "--breakdown-only",
+        action="store_true",
         help="Run only the task breakdown (skip research + proposals).",
     )
     parser.add_argument(
-        "--max-breakdown", default=None,
+        "--max-breakdown",
+        default=None,
         help="Guidance for subtask count, e.g. '5 to 20'.",
     )
     parser.add_argument(
-        "--max-researches", type=int, default=None,
+        "--max-researches",
+        type=int,
+        default=None,
         help="Hard cap on research workers.",
     )
+    parser.add_argument("--model", default=None, help="Override the LLM model.")
     parser.add_argument(
-        "--model", default=None, help="Override the LLM model."
-    )
-    parser.add_argument(
-        "--log-level", default="INFO",
+        "--log-level",
+        default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Root logger level (default: INFO).",
     )
     parser.add_argument(
-        "--resume", default=None,
+        "--resume",
+        default=None,
         help="Absolute path of a prior workspace to resume from. "
-             "Completed stages (breakdown, finished worker flows) skip; "
-             "in-flight steps restart at their last saved checkpoint.",
+        "Completed stages (breakdown, finished worker flows) skip; "
+        "in-flight steps restart at their last saved checkpoint.",
     )
     parser.add_argument(
-        "--copy-workspace", action="store_true",
+        "--copy-workspace",
+        action="store_true",
         help="With --resume, copy the workspace to a sibling _resume_<ts> dir "
-             "and run from the copy instead of modifying the original in place.",
+        "and run from the copy instead of modifying the original in place.",
     )
     args = parser.parse_args()
 
@@ -104,9 +111,12 @@ def main() -> int:
     )
 
     tool = load_tool("research_propose")
-    log.info("Loaded tool: %s (aliases=%s, env_prefix=%s)",
-             tool.name, tool.aliases,
-             (tool.derived_from or {}).get("defaults", {}).get("env_prefix"))
+    log.info(
+        "Loaded tool: %s (aliases=%s, env_prefix=%s)",
+        tool.name,
+        tool.aliases,
+        (tool.derived_from or {}).get("defaults", {}).get("env_prefix"),
+    )
 
     arguments: dict[str, object] = {"request": args.request}
     if args.workflow_target_path:
@@ -135,8 +145,10 @@ def main() -> int:
     if args.copy_workspace:
         arguments["copy_workspace"] = True
 
-    log.info("Invoking research_propose with arguments:\n%s",
-             json.dumps(arguments, indent=2, default=str))
+    log.info(
+        "Invoking research_propose with arguments:\n%s",
+        json.dumps(arguments, indent=2, default=str),
+    )
 
     async def _run():
         result = await derived_tool_execute(
@@ -147,8 +159,10 @@ def main() -> int:
         )
         text = getattr(result, "result", None) or str(result)
         updates = getattr(result, "context_updates", {}) or {}
-        log.info("Run complete. context_updates=%s",
-                 json.dumps(updates, indent=2, default=str))
+        log.info(
+            "Run complete. context_updates=%s",
+            json.dumps(updates, indent=2, default=str),
+        )
         print("\n=== Result ===\n")
         print(text)
         ws = updates.get("workspace_path")

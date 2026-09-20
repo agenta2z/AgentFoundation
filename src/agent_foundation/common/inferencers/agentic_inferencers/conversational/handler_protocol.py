@@ -22,7 +22,15 @@ MUST NOT add dynamic attributes to `tool`; MUST NOT mutate `ctx.prior_context`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar, Mapping, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Mapping,
+    Protocol,
+    runtime_checkable,
+    TYPE_CHECKING,
+)
 
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
     ConversationTool,
@@ -39,6 +47,9 @@ from agent_foundation.resources.tools.models import ToolDefinition
 if TYPE_CHECKING:
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
         ConversationalInferencer,
+    )
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_registry import (
+        ConversationToolHandlerRegistry,
     )
 
 
@@ -60,6 +71,14 @@ class HandlerContext:
     action_tools: list[dict[str, Any]] | None
     tool_registry: dict[str, ToolDefinition] | None
     resolve_tool_name: Callable[[str], str] | None
+    # Optional (Phase A2 additions):
+    # `session_root`: for composite typed inputs (`finalize_input_value` in
+    # SingleChoice/Clarification handlers). None on paths without a session root.
+    # `handler_registry`: for the module-level `_build_input_mode(tool, ctx)` to
+    # dispatch through `ctx.handler_registry.require(tool.tool_type)`. Handlers
+    # themselves never read this — only the top-level dispatcher does.
+    session_root: str | None = None
+    handler_registry: ConversationToolHandlerRegistry | None = None
 
 
 class HandlerResultMergeConflict(Exception):
@@ -114,10 +133,18 @@ class HandlerResult:
     If two effects target the same inferencer state with conflicting values,
     the SECOND effect's `apply()` should raise `HandlerResultMergeConflict`
     (each effect class enforces its own semantics).
+
+    `bindings` carries per-choice composite input values decoded from the
+    response (e.g. ``{"input_field_name": "value"}`` from a
+    ``ChoiceItem.input: InputFieldSpec``). The loop merges these into the
+    aggregate ``collected`` dict alongside the primary answer text. This is a
+    decode RESULT, not a side-effect — handlers stay pure functions of
+    ``(tool, response, ctx)`` per Design Principle #13.
     """
 
     text: str = ""
     effects: list[InferencerEffect] = field(default_factory=list)
+    bindings: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable

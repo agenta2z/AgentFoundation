@@ -5,8 +5,8 @@ from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.graph.node_text_builder import (
-    NodeTextBuilder,
     default_node_text_builder,
+    NodeTextBuilder,
 )
 from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
 from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (

@@ -1,8 +1,8 @@
 """Tests for --use-proposal parameter in task executor."""
+
 import json
 
 import pytest
-
 from agent_foundation.common.data_models.proposal.model import (
     Proposal,
     ProposalGroup,
@@ -21,25 +21,42 @@ def proposals_json(tmp_path):
         total_count=3,
         groups=[
             ProposalGroup(
-                phase=1, label="Quick Wins",
+                phase=1,
+                label="Quick Wins",
                 proposals=[
-                    Proposal(id="P1", rank=1, title="Add caching",
-                             impact="high", complexity="low",
-                             problem="API latency is 500ms",
-                             approach="Add Redis caching layer",
-                             cross_refs="synergistic with P2"),
-                    Proposal(id="P2", rank=2, title="Batch queries",
-                             impact="medium", complexity="low",
-                             approach="Combine N+1 queries"),
+                    Proposal(
+                        id="P1",
+                        rank=1,
+                        title="Add caching",
+                        impact="high",
+                        complexity="low",
+                        problem="API latency is 500ms",
+                        approach="Add Redis caching layer",
+                        cross_refs="synergistic with P2",
+                    ),
+                    Proposal(
+                        id="P2",
+                        rank=2,
+                        title="Batch queries",
+                        impact="medium",
+                        complexity="low",
+                        approach="Combine N+1 queries",
+                    ),
                 ],
             ),
             ProposalGroup(
-                phase=2, label="Core",
+                phase=2,
+                label="Core",
                 proposals=[
-                    Proposal(id="P3", rank=3, title="Rewrite auth",
-                             impact="high", complexity="high",
-                             dependencies=["P1"],
-                             approach="JWT-based auth system"),
+                    Proposal(
+                        id="P3",
+                        rank=3,
+                        title="Rewrite auth",
+                        impact="high",
+                        complexity="high",
+                        dependencies=["P1"],
+                        approach="JWT-based auth system",
+                    ),
                 ],
             ),
         ],
@@ -102,14 +119,28 @@ class TestResolveProposalPlan:
         """When proposal_file points to a real file, its content is inlined."""
         proposals_dir = tmp_path / "proposals"
         proposals_dir.mkdir()
-        (proposals_dir / "P1.md").write_text("# Detailed analysis\nFull research content here.")
+        (proposals_dir / "P1.md").write_text(
+            "# Detailed analysis\nFull research content here."
+        )
 
         idx = ProposalIndex(
-            version="1", total_count=1,
-            groups=[ProposalGroup(phase=1, label="Test", proposals=[
-                Proposal(id="P1", rank=1, title="With detail file",
-                         approach="summary", proposal_file="proposals/P1.md"),
-            ])],
+            version="1",
+            total_count=1,
+            groups=[
+                ProposalGroup(
+                    phase=1,
+                    label="Test",
+                    proposals=[
+                        Proposal(
+                            id="P1",
+                            rank=1,
+                            title="With detail file",
+                            approach="summary",
+                            proposal_file="proposals/P1.md",
+                        ),
+                    ],
+                )
+            ],
         )
         path = tmp_path / "proposals.json"
         write_proposal_index(path, idx)
@@ -122,11 +153,22 @@ class TestResolveProposalPlan:
     def test_proposal_file_missing_shows_path(self, tmp_path):
         """When proposal_file points to a missing file, show the path as reference."""
         idx = ProposalIndex(
-            version="1", total_count=1,
-            groups=[ProposalGroup(phase=1, label="Test", proposals=[
-                Proposal(id="P1", rank=1, title="Missing file",
-                         proposal_file="proposals/P1.md"),
-            ])],
+            version="1",
+            total_count=1,
+            groups=[
+                ProposalGroup(
+                    phase=1,
+                    label="Test",
+                    proposals=[
+                        Proposal(
+                            id="P1",
+                            rank=1,
+                            title="Missing file",
+                            proposal_file="proposals/P1.md",
+                        ),
+                    ],
+                )
+            ],
         )
         path = tmp_path / "proposals.json"
         write_proposal_index(path, idx)
@@ -138,11 +180,22 @@ class TestResolveProposalPlan:
     def test_no_proposal_file_uses_summary_only(self, tmp_path):
         """When proposal_file is empty, only summary fields are used."""
         idx = ProposalIndex(
-            version="1", total_count=1,
-            groups=[ProposalGroup(phase=1, label="Test", proposals=[
-                Proposal(id="P1", rank=1, title="No file",
-                         approach="Just the summary approach"),
-            ])],
+            version="1",
+            total_count=1,
+            groups=[
+                ProposalGroup(
+                    phase=1,
+                    label="Test",
+                    proposals=[
+                        Proposal(
+                            id="P1",
+                            rank=1,
+                            title="No file",
+                            approach="Just the summary approach",
+                        ),
+                    ],
+                )
+            ],
         )
         path = tmp_path / "proposals.json"
         write_proposal_index(path, idx)
@@ -158,6 +211,8 @@ class TestResolveProposalPlan:
         # The check is: if use_proposal and init_plan_path → error.
         # We just verify the guard exists in the code.
         import inspect
+
         from agent_foundation.resources.tools.task.executor import execute
+
         src = inspect.getsource(execute)
         assert "mutually exclusive" in src

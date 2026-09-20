@@ -1,5 +1,3 @@
-
-
 """SessionStoreService — read-only access to the server's session file store.
 
 The RankEvolve server persists session state to disk as session_state.json
@@ -126,7 +124,12 @@ class SessionStoreService:
                 if files:
                     try:
                         content = files[0].read_text(encoding="utf-8")
-                        if key in ("metadata", "template_feed", "api_payload", "template_config"):
+                        if key in (
+                            "metadata",
+                            "template_feed",
+                            "api_payload",
+                            "template_config",
+                        ):
                             try:
                                 content = json.loads(content)
                             except (json.JSONDecodeError, ValueError):

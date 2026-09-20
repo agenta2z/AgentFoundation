@@ -1,9 +1,9 @@
 """Commit 3 (D3): pluggable proposal-parser registry."""
-import pytest
 
+import pytest
 from agent_foundation.common.data_models.proposal.parsers import (
-    ProposalParser,
     get_proposal_parser,
+    ProposalParser,
     register_proposal_parser,
 )
 
@@ -50,8 +50,8 @@ def test_parser_satisfies_protocol():
 
 def test_reexported_from_package():
     from agent_foundation.common.data_models.proposal import (
-        ProposalParser as PP,
         get_proposal_parser as gpp,
+        ProposalParser as PP,
         register_proposal_parser as rpp,
     )
 

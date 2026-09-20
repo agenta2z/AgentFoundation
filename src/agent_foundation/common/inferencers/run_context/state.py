@@ -70,6 +70,7 @@ def encode_state(value: Any) -> Any:
     # Defense-in-depth: attrs objects without to_json() → convert to dict so
     # json.dump doesn't truncate the file mid-write on a TypeError.
     import attrs as _attrs_mod
+
     if _attrs_mod.has(type(value)):
         return {
             a.name: encode_state(getattr(value, a.name))
@@ -149,7 +150,9 @@ class MultiFlowState(InferencerStateBase):
     winner_idx: int | None = None
     reviewer_alias: str | None = None
     fixer_alias: str | None = None
-    ranking: list[int] | None = None  # None when unset (byte-identical with the old _last_ranking)
+    ranking: list[int] | None = (
+        None  # None when unset (byte-identical with the old _last_ranking)
+    )
     # Runtime sub-queries published by ``propagate_runtime_input``; read by the
     # inherited BTA accessor ``_get_effective_predefined_sub_queries`` on its typed
     # branch.  Renamed from the unused ``cached_sub_queries`` (G4 — zero readers).

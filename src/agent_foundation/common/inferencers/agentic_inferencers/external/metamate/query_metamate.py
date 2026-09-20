@@ -49,18 +49,37 @@ DEFAULT_STREAM_TYPE: str = "SKYWALKER_PER_REQUEST"
 DEEP_RESEARCH_AGENT: str = "SPACES_DEEP_RESEARCH_AGENT"
 
 # Terminal statuses from the MessageStatus Thrift enum (sdk.thrift)
-_TERMINAL_STATUSES: frozenset[str] = frozenset({
-    "COMPLETED", "STOPPED", "TRUNCATED", "ERROR",
-    "CANCELLED", "CANCELED", "FAILED", "TIMEOUT",
-})
+_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {
+        "COMPLETED",
+        "STOPPED",
+        "TRUNCATED",
+        "ERROR",
+        "CANCELLED",
+        "CANCELED",
+        "FAILED",
+        "TIMEOUT",
+    }
+)
 
 # Phrases indicating the agent is asking to confirm rather than delivering content
 _CONTINUATION_PHRASES: list[str] = [
-    "should i proceed", "shall i proceed", "would you like me to",
-    "do you want me to", "use your own judgment", "please proceed",
-    "let me know if", "want me to research", "want me to look into",
-    "narrow this", "tell me your", "tell me whether", "tell me which",
-    "which one are you", "are you most interested in", "i can tailor",
+    "should i proceed",
+    "shall i proceed",
+    "would you like me to",
+    "do you want me to",
+    "use your own judgment",
+    "please proceed",
+    "let me know if",
+    "want me to research",
+    "want me to look into",
+    "narrow this",
+    "tell me your",
+    "tell me whether",
+    "tell me which",
+    "which one are you",
+    "are you most interested in",
+    "i can tailor",
     "more actionable",
 ]
 
@@ -323,7 +342,10 @@ def query_metamate(
     # agent is still generating.
     max_poll = float(timeout_seconds) if timeout_seconds else 600.0
     bridge_outputs, text = _poll_for_response(
-        client, conv_uuid, poll_interval=3.0, max_wait=max_poll,
+        client,
+        conv_uuid,
+        poll_interval=3.0,
+        max_wait=max_poll,
     )
 
     # ---------------------------------------------------------------
@@ -338,8 +360,7 @@ def query_metamate(
     ):
         continuations_sent += 1
         logger.info(
-            "Agent asked for clarification (turn %d/%d). "
-            "Auto-replying: \"%s\"",
+            'Agent asked for clarification (turn %d/%d). Auto-replying: "%s"',
             continuations_sent,
             max_continuations,
             AUTO_CONTINUE_REPLY[:60] + "…",
@@ -366,7 +387,10 @@ def query_metamate(
         )
 
         bridge_outputs, text = _poll_for_response(
-            client, conv_uuid, poll_interval=3.0, max_wait=remaining,
+            client,
+            conv_uuid,
+            poll_interval=3.0,
+            max_wait=remaining,
         )
 
     elapsed = time.time() - start

@@ -8,7 +8,6 @@ control reviewer behavior (always approve, always reject, etc.).
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -19,10 +18,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
     DualInferencer,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants

@@ -12,21 +12,21 @@ Usage:
     python test_queue_interactive_multiprocessing.py
 """
 
-import sys
-from pathlib import Path
-import tempfile
-import shutil
-import time
 import multiprocessing as mp
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
 
 # Add src to path
 # From: test/agent_foundation/ui/test_queue_interactive_multiprocessing.py
 # To: src/
 project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root / 'src'))
+sys.path.insert(0, str(project_root / "src"))
 
 # Also add rich_python_utils to path if available
-rich_python_utils_path = project_root.parent / 'SciencePythonUtils' / 'src'
+rich_python_utils_path = project_root.parent / "SciencePythonUtils" / "src"
 if rich_python_utils_path.exists():
     sys.path.insert(0, str(rich_python_utils_path))
 
@@ -34,8 +34,9 @@ from agent_foundation.ui.queue_interactive import QueueInteractive
 
 try:
     from rich_python_utils.service_utils.queue_service.storage_based_queue_service import (
-        StorageBasedQueueService
+        StorageBasedQueueService,
     )
+
     QUEUE_SERVICES_AVAILABLE = True
 except ImportError:
     QUEUE_SERVICES_AVAILABLE = False
@@ -60,12 +61,12 @@ def user_process(root_path, num_questions):
     for i in range(num_questions):
         question = questions[i % len(questions)]
         print(f"[User Process] Asking: {question}")
-        queue_service.put('user_input', question)
+        queue_service.put("user_input", question)
         time.sleep(0.5)
 
         # Wait for response
         start_time = time.time()
-        response = queue_service.get('agent_response', blocking=True, timeout=5.0)
+        response = queue_service.get("agent_response", blocking=True, timeout=5.0)
         elapsed = time.time() - start_time
 
         if response:
@@ -90,10 +91,10 @@ def agent_process(root_path, num_responses):
         user_name="User",
         input_queue=queue_service,
         response_queue=queue_service,
-        input_queue_id='user_input',
-        response_queue_id='agent_response',
+        input_queue_id="user_input",
+        response_queue_id="agent_response",
         blocking=True,
-        timeout=10.0
+        timeout=10.0,
     )
 
     responses = {
@@ -105,7 +106,7 @@ def agent_process(root_path, num_responses):
     }
 
     for i in range(num_responses):
-        print(f"[Agent Process] Waiting for question {i+1}...")
+        print(f"[Agent Process] Waiting for question {i + 1}...")
         question = interactive.get_input()
 
         if question:
@@ -127,9 +128,9 @@ def test_basic_cross_process():
         print("\n[SKIP] Test 1: Queue services not available")
         return
 
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 1: Basic Cross-Process Communication")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -162,8 +163,8 @@ def test_basic_cross_process():
 
         # Verify queues are empty
         queue_service = StorageBasedQueueService(root_path=tmpdir)
-        input_size = queue_service.size('user_input')
-        response_size = queue_service.size('agent_response')
+        input_size = queue_service.size("user_input")
+        response_size = queue_service.size("agent_response")
         queue_service.close()
 
         print(f"\n3. Final queue sizes:")
@@ -171,7 +172,9 @@ def test_basic_cross_process():
         print(f"   Response queue: {response_size} items")
 
         assert input_size == 0, f"Input queue should be empty, has {input_size} items"
-        assert response_size == 0, f"Response queue should be empty, has {response_size} items"
+        assert response_size == 0, (
+            f"Response queue should be empty, has {response_size} items"
+        )
 
         print("\n[PASS] Test 1 completed successfully!")
 
@@ -199,8 +202,8 @@ def monitor_process(root_path, num_expected):
             print(f"[Monitor] Timeout after {elapsed:.1f}s")
             break
 
-        input_size = queue_service.size('user_input')
-        response_size = queue_service.size('agent_response')
+        input_size = queue_service.size("user_input")
+        response_size = queue_service.size("agent_response")
 
         # Count completed exchanges (both queues processed)
         if input_size == 0 and response_size == 0:
@@ -221,9 +224,9 @@ def test_monitored_conversation():
         print("\n[SKIP] Test 2: Queue services not available")
         return
 
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 2: Monitored Cross-Process Conversation")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -270,10 +273,10 @@ def concurrent_agent(root_path, agent_id, num_questions):
         user_name="User",
         input_queue=queue_service,
         response_queue=queue_service,
-        input_queue_id='shared_input',
-        response_queue_id='shared_response',
+        input_queue_id="shared_input",
+        response_queue_id="shared_response",
         blocking=True,
-        timeout=2.0
+        timeout=2.0,
     )
 
     processed = 0
@@ -286,7 +289,7 @@ def concurrent_agent(root_path, agent_id, num_questions):
             processed += 1
         else:
             # Timeout - check if we're done
-            if queue_service.size('shared_input') == 0:
+            if queue_service.size("shared_input") == 0:
                 break
 
     queue_service.close()
@@ -299,9 +302,9 @@ def test_multiple_agents_single_queue():
         print("\n[SKIP] Test 3: Queue services not available")
         return
 
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("TEST 3: Multiple Agents, Single Queue (Load Balancing)")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -311,7 +314,7 @@ def test_multiple_agents_single_queue():
 
         num_questions = 12
         for i in range(num_questions):
-            queue_service.put('shared_input', f"Question {i+1}")
+            queue_service.put("shared_input", f"Question {i + 1}")
         print(f"   [OK] Added {num_questions} questions to shared queue")
 
         queue_service.close()
@@ -323,8 +326,7 @@ def test_multiple_agents_single_queue():
         agents = []
         for agent_id in range(1, num_agents + 1):
             agent_proc = mp.Process(
-                target=concurrent_agent,
-                args=(tmpdir, agent_id, questions_per_agent)
+                target=concurrent_agent, args=(tmpdir, agent_id, questions_per_agent)
             )
             agent_proc.start()
             agents.append(agent_proc)
@@ -336,16 +338,16 @@ def test_multiple_agents_single_queue():
         print("\n3. Checking results...")
         queue_service = StorageBasedQueueService(root_path=tmpdir)
 
-        input_remaining = queue_service.size('shared_input')
-        responses_received = queue_service.size('shared_response')
+        input_remaining = queue_service.size("shared_input")
+        responses_received = queue_service.size("shared_response")
 
         print(f"   Input remaining: {input_remaining}")
         print(f"   Responses received: {responses_received}")
 
         # Collect all responses
         responses = []
-        while queue_service.size('shared_response') > 0:
-            resp = queue_service.get('shared_response', blocking=False)
+        while queue_service.size("shared_response") > 0:
+            resp = queue_service.get("shared_response", blocking=False)
             if resp:
                 responses.append(resp)
                 print(f"   - {resp}")
@@ -353,8 +355,9 @@ def test_multiple_agents_single_queue():
         queue_service.close()
 
         # Should have processed most/all questions
-        assert len(responses) >= num_questions * 0.8, \
+        assert len(responses) >= num_questions * 0.8, (
             f"Expected at least {int(num_questions * 0.8)} responses, got {len(responses)}"
+        )
 
         print(f"\n   [OK] Processed {len(responses)}/{num_questions} questions")
         print("\n[PASS] Test 3 completed successfully!")
@@ -380,8 +383,8 @@ def main():
         sys.exit(1)
 
     # Set start method for multiprocessing
-    if sys.platform == 'win32':
-        mp.set_start_method('spawn', force=True)
+    if sys.platform == "win32":
+        mp.set_start_method("spawn", force=True)
 
     tests = [
         test_basic_cross_process,
@@ -399,21 +402,23 @@ def main():
         except Exception as e:
             print(f"\n[FAIL] {test_func.__name__}: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
 
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print(f"Test Results: {passed} passed, {failed} failed")
-    print("="*80 + "\n")
+    print("=" * 80 + "\n")
 
     sys.exit(0 if failed == 0 else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

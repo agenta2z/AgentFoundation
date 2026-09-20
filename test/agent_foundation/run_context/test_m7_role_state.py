@@ -1,16 +1,18 @@
 """M7: switch_role mirrors role into ctx.node.call (RoleState); purity gate certifies."""
 
 from agent_foundation.common.inferencers.run_context import (
-    RoleState,
-    RunStateStore,
     decode_state,
     encode_state,
+    RoleState,
+    RunStateStore,
 )
 from agent_foundation.common.inferencers.run_context.purity import purity_snapshot
 
 
 def test_role_state_round_trips_with_discriminator():
-    rs = RoleState(new_role="reviewer", template_key="review", changes={"template_key": "review"})
+    rs = RoleState(
+        new_role="reviewer", template_key="review", changes={"template_key": "review"}
+    )
     enc = encode_state(rs)
     assert enc["_state_class"] == "RoleState"
     back = decode_state(enc)

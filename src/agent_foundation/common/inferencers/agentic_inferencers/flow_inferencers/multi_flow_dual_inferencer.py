@@ -62,25 +62,24 @@ import enum
 import logging
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
-    MultiFlowInferencer,
     _VisibilitySpec,
+    MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.flow_parsers import (
     parse_finalplan_tag,
     parse_ranking_tag,
     parse_winner_tag,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.template_defaults import (
-    FOLLOWUP_AGGREGATION_DEFAULTS,
     AGGREGATION_DEFAULTS,
+    FOLLOWUP_AGGREGATION_DEFAULTS,
 )
+from attr import attrib, attrs
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
 
@@ -91,16 +90,22 @@ _logger = logging.getLogger(__name__)
 class ReviewerStrategy(str, enum.Enum):
     """Rule-based reviewer-selection strategy (an LLM ``reviewer_alias`` overrides it)."""
 
-    CONFIGURED = "configured"            # review_default + review_priority_pool (avoid self-review)
-    RUNNER_UP = "runner_up"              # runner-up flow's inferencer (ranking pos 1 / first non-winner)
-    ALL_NON_WINNERS = "all_non_winners"  # §3 panel: every non-winner flow becomes a reviewer
+    CONFIGURED = (
+        "configured"  # review_default + review_priority_pool (avoid self-review)
+    )
+    RUNNER_UP = (
+        "runner_up"  # runner-up flow's inferencer (ranking pos 1 / first non-winner)
+    )
+    ALL_NON_WINNERS = (
+        "all_non_winners"  # §3 panel: every non-winner flow becomes a reviewer
+    )
 
 
 class FixerStrategy(str, enum.Enum):
     """Rule-based fixer-selection strategy (an LLM ``fixer_alias`` overrides it)."""
 
-    BASE = "base"                        # keep the configured fixer_inferencer
-    WINNER = "winner"                    # winning flow's inferencer
+    BASE = "base"  # keep the configured fixer_inferencer
+    WINNER = "winner"  # winning flow's inferencer
 
 
 @attrs
@@ -162,11 +167,23 @@ class MultiFlowDualInferencer(DualInferencer):
         "flow_configs.*.followup_inferencer": FOLLOWUP_AGGREGATION_DEFAULTS,
     }
 
-    _workspace_propagation_skip: frozenset = frozenset({"multi_flow_aggregator_inferencer"})
+    _workspace_propagation_skip: frozenset = frozenset(
+        {"multi_flow_aggregator_inferencer"}
+    )
 
     # ─── MultiFlow-specific config (forwarded into the auto-constructed MultiFlow) ───
     flow_configs: List[dict] = attrib(factory=list)
     visible_flows: _VisibilitySpec = attrib(default="all")
+
+    # K-of-N flow quorum: minimum number of the N peer flows that must succeed
+    # for this worker to aggregate + proceed. Forwarded to the inner MultiFlow
+    # (see __attrs_post_init__), whose bridge sets BTA's ``min_successful_workers``
+    # so BTA wraps each flow — a terminal failure becomes a filtered *sentinel*
+    # instead of an exception that aborts the whole worker. Default 0 preserves
+    # historical no-quorum behavior (any one flow's failure sinks the worker); set
+    # >0 (e.g. 2 of 3) to tolerate a struggling/optional flow (a remote inferencer
+    # with no local access, or a flaky CLI) without losing the run.
+    min_successful_flows: int = attrib(default=0)
 
     multi_flow_aggregator_inferencer: Optional[InferencerBase] = attrib(default=None)
     multi_flow_aggregator_prompt: Optional[str] = attrib(default=None)
@@ -376,7 +393,10 @@ class MultiFlowDualInferencer(DualInferencer):
                 agg.template_extra_feed.setdefault("include_winner_pick", True)
 
         # reviewer_match_second: inject ranking template flag + default parser.
-        if self.reviewer_match_second and self.multi_flow_aggregator_inferencer is not None:
+        if (
+            self.reviewer_match_second
+            and self.multi_flow_aggregator_inferencer is not None
+        ):
             agg = self.multi_flow_aggregator_inferencer
             if hasattr(agg, "template_extra_feed"):
                 if agg.template_extra_feed is None:
@@ -394,6 +414,9 @@ class MultiFlowDualInferencer(DualInferencer):
         self.base_inferencer = MultiFlowInferencer(
             flow_configs=self.flow_configs,
             visible_flows=self.visible_flows,
+            # K-of-N quorum: MultiFlow's __attrs_post_init__ bridges this to BTA's
+            # min_successful_workers (sentinel wrap + filter). See attrib above.
+            min_successful_flows=self.min_successful_flows,
             aggregator_inferencer=self.multi_flow_aggregator_inferencer,
             aggregator_prompt=self.multi_flow_aggregator_prompt,
             aggregator_prompt_builder=self.multi_flow_aggregator_prompt_builder,
@@ -449,7 +472,8 @@ class MultiFlowDualInferencer(DualInferencer):
         # at runtime after each propose step.
         if self.reviewer_match_second or self.fixer_match_winner:
             self._workspace_propagation_skip = frozenset(
-                self._workspace_propagation_skip | {"review_inferencer", "fixer_inferencer"}
+                self._workspace_propagation_skip
+                | {"review_inferencer", "fixer_inferencer"}
             )
 
         # Defer to DualInferencer for prompt-template setup, parser defaults,
@@ -462,7 +486,6 @@ class MultiFlowDualInferencer(DualInferencer):
                 "(review_inferencer, review_default, or reviewer_strategy=runner_up/all_non_winners "
                 "are all unset). The review step will fail at runtime."
             )
-
 
     # ------------------------------------------------------------------
     # Part B — Workspace isolation for runtime role swaps (added 2026-05-09)
@@ -477,17 +500,30 @@ class MultiFlowDualInferencer(DualInferencer):
         for unrecognised roles (no template override).
         """
         from agent_foundation.common.inferencers.template_defaults import (
-            REVIEW_TEMPLATE_DEFAULTS, FOLLOWUP_TEMPLATE_DEFAULTS)
+            FOLLOWUP_TEMPLATE_DEFAULTS,
+            REVIEW_TEMPLATE_DEFAULTS,
+        )
+
         if role_name in ("reviewer", "review_inferencer"):
-            return (self.review_template_key or REVIEW_TEMPLATE_DEFAULTS.template_key,
-                    self.review_template_root_space or getattr(REVIEW_TEMPLATE_DEFAULTS, 'template_root_space', None))
+            return (
+                self.review_template_key or REVIEW_TEMPLATE_DEFAULTS.template_key,
+                self.review_template_root_space
+                or getattr(REVIEW_TEMPLATE_DEFAULTS, "template_root_space", None),
+            )
         elif role_name in ("fixer", "fixer_inferencer"):
-            return (self.followup_template_key or FOLLOWUP_TEMPLATE_DEFAULTS.template_key,
-                    self.followup_template_root_space or getattr(FOLLOWUP_TEMPLATE_DEFAULTS, 'template_root_space', None))
+            return (
+                self.followup_template_key or FOLLOWUP_TEMPLATE_DEFAULTS.template_key,
+                self.followup_template_root_space
+                or getattr(FOLLOWUP_TEMPLATE_DEFAULTS, "template_root_space", None),
+            )
         return (None, None)
 
     def _reassign_role_workspace(
-        self, inferencer, role_name: str, *, panelist_slot: Optional[str] = None,
+        self,
+        inferencer,
+        role_name: str,
+        *,
+        panelist_slot: Optional[str] = None,
     ) -> None:
         """Force a fresh workspace + session because role has changed.
 
@@ -526,12 +562,16 @@ class MultiFlowDualInferencer(DualInferencer):
         # round_NN/children/fix/) and assigns it before ainfer(). Creating a pre-round
         # workspace here produced empty scaffold dirs (children/review/, children/fix/)
         # that were never populated and only caused confusion.
-        kwargs = dict(
-            output_is_deliverable=(True if role_name == "fixer_inferencer" else None),
-        )
+        # No deliverable flag: promotion of the winning fixer's outputs/ happens
+        # via the orchestrator's _finalize_output/_symlink_child_output, not a
+        # per-role switch_role flag.
+        kwargs = {}
         # Pass template kwargs only when the inferencer supports them
         # (TemplatedInferencerBase subclasses accept template_key etc.)
-        from agent_foundation.common.inferencers.templated_inferencer_base import TemplatedInferencerBase
+        from agent_foundation.common.inferencers.templated_inferencer_base import (
+            TemplatedInferencerBase,
+        )
+
         if isinstance(inferencer, TemplatedInferencerBase):
             new_key, new_root = self._resolve_role_template(role_name)
             kwargs["template_key"] = new_key
@@ -545,19 +585,20 @@ class MultiFlowDualInferencer(DualInferencer):
         # trip the creator-collision guard on the consensus re-run. It also fixes a
         # latent template-locality bug: the dispatch renders at ``./review``/``./fix``
         # and (no ancestor walk-up) would otherwise miss the worker-node RoleState.
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
-        _role_slot = panelist_slot or {"review_inferencer": "review", "fixer_inferencer": "fix"}.get(
-            role_name, role_name
-        )
+        _role_slot = panelist_slot or {
+            "review_inferencer": "review",
+            "fixer_inferencer": "fix",
+        }.get(role_name, role_name)
         # For compound slots (e.g. "review/panelist_01"), chain .child() calls
         # to build a nested context path. _rc_child() sanitizes "/" to "_" which
         # would create a flat path that doesn't match the nested execution path.
         if "/" in _role_slot:
-            from agent_foundation.common.inferencers.run_context import active_run_context
+            from agent_foundation.common.inferencers.run_context import (
+                active_run_context,
+            )
+
             _ctx = active_run_context()
             _rc = _ctx
             if _ctx is not None:
@@ -585,7 +626,66 @@ class MultiFlowDualInferencer(DualInferencer):
             # which the legacy ``_role_get`` reads — byte-identical.)
             if _rc is not None:
                 self._role_set(role_name, inferencer, _rc)
+            # v5 Phase 1.2 — RoleSwitch / RoleSwitchComplete structured
+            # events. Bracketing switch_role lets a post-scan rebuild every
+            # flow's role-transition timeline across rounds and PROVE that
+            # `active_session_id` is reset before the next inference call
+            # (which is the user's specific question about MFDual semantics).
+            # Env-gated on RESEARCH_PROPOSE__VERBOSE_CORRELATION.
+            from agent_foundation.common.inferencers.inferencer_base import (
+                _is_verbose_correlation,
+            )
+
+            _emit_role_events = _is_verbose_correlation()
+            if _emit_role_events:
+                try:
+                    _old_ws_obj = getattr(inferencer, "_workspace", None)
+                    _old_ws = (
+                        getattr(_old_ws_obj, "root", None)
+                        if _old_ws_obj is not None
+                        else None
+                    )
+                    self.log_info(
+                        {
+                            "flow_id": getattr(inferencer, "id", None),
+                            "instance_id": id(inferencer),
+                            "class": type(inferencer).__name__,
+                            "old_role": getattr(inferencer, "_current_role", None),
+                            "new_role": role_name,
+                            "old_session_id": getattr(
+                                inferencer, "active_session_id", None
+                            ),
+                            "old_workspace": _old_ws,
+                            "ctx_slot": _role_slot,
+                        },
+                        "RoleSwitch",
+                    )
+                except Exception:
+                    pass  # never let audit log abort the actual switch
             inferencer.switch_role(new_role=role_name, **kwargs)
+            if _emit_role_events:
+                try:
+                    _new_ws_obj = getattr(inferencer, "_workspace", None)
+                    _new_ws = (
+                        getattr(_new_ws_obj, "root", None)
+                        if _new_ws_obj is not None
+                        else None
+                    )
+                    self.log_info(
+                        {
+                            "flow_id": getattr(inferencer, "id", None),
+                            "instance_id": id(inferencer),
+                            "new_role": role_name,
+                            "new_session_id": getattr(
+                                inferencer, "active_session_id", None
+                            ),
+                            "new_workspace": _new_ws,
+                            "ctx_slot": _role_slot,
+                        },
+                        "RoleSwitchComplete",
+                    )
+                except Exception:
+                    pass
         finally:
             if _tok is not None:
                 exit_run(_tok)
@@ -735,7 +835,8 @@ class MultiFlowDualInferencer(DualInferencer):
             _candidates = non_winners if (winner is not None and non_winners) else None
             if _candidates is None:
                 _all_flows = [
-                    cfg.get("initial_inferencer") for cfg in mfi.flow_configs
+                    cfg.get("initial_inferencer")
+                    for cfg in mfi.flow_configs
                     if cfg.get("initial_inferencer") is not None
                 ]
                 if _all_flows:
@@ -776,7 +877,9 @@ class MultiFlowDualInferencer(DualInferencer):
                     except KeyError as exc:
                         _logger.warning(
                             "MultiFlowDual: priority_pool entry %r could not be "
-                            "resolved: %s — skipping", cand, exc,
+                            "resolved: %s — skipping",
+                            cand,
+                            exc,
                         )
                         continue
                     if cand_inf is not None and cand_inf is not winner:
@@ -819,10 +922,15 @@ class MultiFlowDualInferencer(DualInferencer):
                 # render templates. Without this, fixer defaults to base_inferencer
                 # (the MFI orchestrator), which is not a TemplatedInferencerBase
                 # and triggers _RoleDisabledError → fix step silently skipped.
-                _fallback_flows = [
-                    cfg.get("initial_inferencer") for cfg in mfi.flow_configs
-                    if cfg.get("initial_inferencer") is not None
-                ] if mfi is not None else []
+                _fallback_flows = (
+                    [
+                        cfg.get("initial_inferencer")
+                        for cfg in mfi.flow_configs
+                        if cfg.get("initial_inferencer") is not None
+                    ]
+                    if mfi is not None
+                    else []
+                )
                 if _fallback_flows:
                     chosen_fix = _fallback_flows[0]
                     self.log_warning(
@@ -924,7 +1032,10 @@ class MultiFlowDualInferencer(DualInferencer):
         # C5: resolve the per-run roles via _role_get (ctx scratch under a real ctx,
         # else the instance attribute) — never read self.review_inferencer directly here,
         # which under a shared-instance ctx is the static definition, not the selection.
-        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            indexed_child_name,
+        )
+
         _panel_list = self._role_get("reviewers") or []
         _has_panel = bool(_panel_list)
         # Primary reviewer: in panel mode, the execution path is
@@ -932,18 +1043,24 @@ class MultiFlowDualInferencer(DualInferencer):
         # Single reviewer: the execution path is just review/.
         if _has_panel:
             self._reassign_role_workspace(
-                self._role_get("review_inferencer"), "review_inferencer",
+                self._role_get("review_inferencer"),
+                "review_inferencer",
                 panelist_slot=f"review/{indexed_child_name('panelist', 0)}",
             )
         else:
-            self._reassign_role_workspace(self._role_get("review_inferencer"), "review_inferencer")
-        self._reassign_role_workspace(self._role_get("fixer_inferencer"), "fixer_inferencer")
+            self._reassign_role_workspace(
+                self._role_get("review_inferencer"), "review_inferencer"
+            )
+        self._reassign_role_workspace(
+            self._role_get("fixer_inferencer"), "fixer_inferencer"
+        )
         # §3 panel: the extra non-winner panelists (reviewers list) must ALSO be
         # switched into the reviewer role/template — else they would review with
         # their original flow role.
         for _i, _panelist in enumerate(_panel_list, start=1):
             self._reassign_role_workspace(
-                _panelist, "review_inferencer",
+                _panelist,
+                "review_inferencer",
                 panelist_slot=f"review/{indexed_child_name('panelist', _i)}",
             )
         # NOTE: reset_session is handled by switch_role() inside

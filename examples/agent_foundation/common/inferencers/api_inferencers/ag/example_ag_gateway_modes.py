@@ -26,11 +26,11 @@ import time
 
 from agent_foundation.apis.ag import (
     AIGatewayClaudeModels,
-    GatewayMode,
     check_direct_available,
     check_proximity_available,
     check_slauth_server_available,
     detect_available_mode,
+    GatewayMode,
     generate_text,
 )
 from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
@@ -41,6 +41,7 @@ from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_infere
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 1: Check which gateway modes are available on your machine
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def example_check_availability():
     direct_ok, direct_reason = check_direct_available()
@@ -80,6 +81,7 @@ def example_check_availability():
 # Example 2: Basic text generation using generate_text() with explicit mode
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def example_basic_generate(mode: str):
     prompt = "What is the Atlassian AI Gateway? Answer in two sentences."
 
@@ -113,6 +115,7 @@ def example_basic_generate(mode: str):
 # Example 3: Using the AgClaudeApiInferencer class (recommended for agents)
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def example_inferencer(mode: str):
     inferencer = AgClaudeApiInferencer(
         model_id=str(AIGatewayClaudeModels.CLAUDE_46_OPUS),
@@ -145,6 +148,7 @@ def example_inferencer(mode: str):
 # Example 4: Auto mode with runtime fallback
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def example_auto_mode():
     prompt = "What is 2+2? Answer with just the number."
 
@@ -173,6 +177,7 @@ def example_auto_mode():
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 5: Multi-turn conversation with system prompt
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def example_conversation(mode: str):
     system_prompt = "You are a helpful assistant who explains things simply."
@@ -213,6 +218,7 @@ def example_conversation(mode: str):
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 6: Comparing models side by side
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def example_compare_models(mode: str):
     prompt = "Explain recursion in one sentence."
@@ -269,7 +275,8 @@ if __name__ == "__main__":
         description="Tutorial: AgClaudeApiInferencer with different AI Gateway modes",
     )
     parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["direct", "proximity", "slauth_server", "auto"],
         default=None,
         help="Force a specific gateway mode. If omitted, auto-detects the best available.",
@@ -281,7 +288,9 @@ if __name__ == "__main__":
     print("║   AgClaudeApiInferencer — Multi-Mode AI Gateway Tutorial           ║")
     print("╚══════════════════════════════════════════════════════════════════════╝")
     print()
-    print(f"  User: {os.environ.get('AI_GATEWAY_USER_ID') or os.environ.get('USER', '(unknown)')}")
+    print(
+        f"  User: {os.environ.get('AI_GATEWAY_USER_ID') or os.environ.get('USER', '(unknown)')}"
+    )
     print()
 
     # Step 1: Check what's available
@@ -304,6 +313,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

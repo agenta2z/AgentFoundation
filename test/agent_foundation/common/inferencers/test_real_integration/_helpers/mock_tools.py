@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 @dataclass
 class ToolExecutionResult:
     """Compatible with conversational tool execution result shape."""
+
     result: str
     context_updates: dict = field(default_factory=dict)
 

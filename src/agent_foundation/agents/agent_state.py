@@ -1,17 +1,18 @@
 from enum import StrEnum
-from typing import Union, Any, Iterable, List
+from typing import Any, Iterable, List, Union
 
-from attr import attrs, attrib
-
-from agent_foundation.agents.agent_response import AgentResponse, AgentAction
-from agent_foundation.common.inferencers.agentic_inferencers.common import InferencerResponse
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse
+from agent_foundation.common.inferencers.agentic_inferencers.common import (
+    InferencerResponse,
+)
+from attr import attrib, attrs
 from rich_python_utils.common_utils import get_
 
 
 class AgentTaskStatusFlags(StrEnum):
-    Completed = 'Completed'
-    Ongoing = 'Ongoing'
-    Pending = 'Pending'
+    Completed = "Completed"
+    Ongoing = "Ongoing"
+    Pending = "Pending"
 
 
 @attrs
@@ -81,16 +82,14 @@ class AgentStates:
         elif isinstance(action, str):
             return action
         else:
-            return get_(action, key1='type', key2='action_type', default=action)
-
+            return get_(action, key1="type", key2="action_type", default=action)
 
     @staticmethod
     def _resolve_action_source(action):
         if isinstance(action, AgentAction):
             return action.source
         else:
-            return get_(action, key1='source', key2='action_source', default=None)
-
+            return get_(action, key1="source", key2="action_source", default=None)
 
     def set_last_action(self, action, anchor_actions_types: Iterable = None):
         last_action_type = self._resolve_action_type(action)
@@ -103,4 +102,3 @@ class AgentStates:
         action_source = self._resolve_action_source(action)
         if action_source:
             self.last_action_source = action_source
-

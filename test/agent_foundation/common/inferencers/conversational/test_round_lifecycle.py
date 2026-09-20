@@ -19,12 +19,11 @@ so the loop takes the ``ainfer`` path (mirrors test_unbounded_iterations.py).
 """
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +87,7 @@ class _ToolResult:
 def _make_executor(result_text="action done"):
     async def _executor(name, arguments):
         return _ToolResult(result_text)
+
     return _executor
 
 
@@ -143,6 +143,7 @@ class TestRoundStartFiresPerIterationIncludingContinuation:
         base = _ScriptedBase()
         base._setup_script([_ACTION_TOOL_ROUND, _FINAL_TEXT_ROUND])
         from agent_foundation.resources.tools.models import ToolDefinition
+
         ci = ConversationalInferencer(
             base_inferencer=base,
             tool_executor=_make_executor(),
@@ -180,6 +181,7 @@ class TestRoundStartFiresPerIterationIncludingContinuation:
         base = _ScriptedBase()
         base._setup_script([pure_tool, _FINAL_TEXT_ROUND])
         from agent_foundation.resources.tools.models import ToolDefinition
+
         ci = ConversationalInferencer(
             base_inferencer=base,
             tool_executor=_make_executor(),
@@ -192,7 +194,7 @@ class TestRoundStartFiresPerIterationIncludingContinuation:
             "go", on_round_start=on_start, on_round_complete=on_complete
         )
 
-        assert completes[0]["dtext"] == ""           # pure-tool round
+        assert completes[0]["dtext"] == ""  # pure-tool round
         assert completes[1]["dtext"] == _FINAL_TEXT_ROUND  # text round
 
 

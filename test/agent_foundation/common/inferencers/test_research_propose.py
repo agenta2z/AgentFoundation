@@ -1,5 +1,3 @@
-
-
 """Manual E2E integration test for /research-propose workflow.
 
 Exercises the full ResearchProposeBridge flow (BreakdownThenAggregate pipeline):

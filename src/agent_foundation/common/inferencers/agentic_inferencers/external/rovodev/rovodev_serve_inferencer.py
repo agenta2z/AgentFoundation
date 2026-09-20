@@ -24,17 +24,16 @@ import signal
 from typing import Any, AsyncIterator, Optional
 
 import httpx
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
     ACLI_BINARY,
-    RovoDevNotFoundError,
     find_acli_binary,
     find_available_port,
+    RovoDevNotFoundError,
 )
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -43,28 +42,28 @@ logger = logging.getLogger(__name__)
 class RovoDevServeInferencer(StreamingInferencerBase):
     """Rovo Dev inferencer using ``acli rovodev serve`` for streaming HTTP/SSE.
 
-    Starts a local FastAPI server via ``acli rovodev serve <port>`` and
-    communicates via REST API endpoints:
+        Starts a local FastAPI server via ``acli rovodev serve <port>`` and
+        communicates via REST API endpoints:
 
-    - ``POST /v3/set_chat_message`` — send a prompt
-    - ``GET /v3/stream_chat`` — receive SSE streaming response
-    - ``POST /v3/reset`` — reset session
-    - ``GET /healthcheck`` — server health
+        - ``POST /v3/set_chat_message`` — send a prompt
+        - ``GET /v3/stream_chat`` — receive SSE streaming response
+        - ``POST /v3/reset`` — reset session
+        - ``GET /healthcheck`` — server health
 
-    Attributes:
-        acli_path: Path to acli binary (auto-detected if None).
-        target_path: Workspace directory for the agent (inherited from
-            ``InferencerBase``). Read at call time via ``effective_cwd``
-            so orchestrator-spawned children pick up ``workspace.root``
-            when target_path is None.
-        config_file: Path to rovodev config file.
-        site_url: Atlassian site URL for billing.
-        port: Serve port (auto-selected if None).
-        disable_session_token: Disable auth on serve API.
-startup_timeout: Max seconds to wait for server startup.
-        non_interactive: Non-interactive mode.
-        respect_configured_permissions: Respect config file permissions.
-        agent_mode: Agent mode ("ask", "plan", or "default").
+        Attributes:
+            acli_path: Path to acli binary (auto-detected if None).
+            target_path: Workspace directory for the agent (inherited from
+                ``InferencerBase``). Read at call time via ``effective_cwd``
+                so orchestrator-spawned children pick up ``workspace.root``
+                when target_path is None.
+            config_file: Path to rovodev config file.
+            site_url: Atlassian site URL for billing.
+            port: Serve port (auto-selected if None).
+            disable_session_token: Disable auth on serve API.
+    startup_timeout: Max seconds to wait for server startup.
+            non_interactive: Non-interactive mode.
+            respect_configured_permissions: Respect config file permissions.
+            agent_mode: Agent mode ("ask", "plan", or "default").
     """
 
     # RovoDevServe spawns ``acli rovodev serve`` which exposes file-edit /
@@ -119,6 +118,7 @@ startup_timeout: Max seconds to wait for server startup.
     def __attrs_post_init__(self) -> None:
         if self.acli_path is None:
             import shutil
+
             self.acli_path = shutil.which(ACLI_BINARY)
         super().__attrs_post_init__()
 
@@ -161,6 +161,7 @@ startup_timeout: Max seconds to wait for server startup.
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
             clean_env_for_subprocess,
         )
+
         env = clean_env_for_subprocess()
 
         self._server_process = await asyncio.create_subprocess_exec(
@@ -181,14 +182,18 @@ startup_timeout: Max seconds to wait for server startup.
             if self._server_process.returncode is not None:
                 stderr = ""
                 if self._server_process.stderr:
-                    stderr = (await self._server_process.stderr.read()).decode(errors="replace")
+                    stderr = (await self._server_process.stderr.read()).decode(
+                        errors="replace"
+                    )
                 raise RovoDevNotFoundError(
                     f"Serve process exited during startup (rc={self._server_process.returncode}): {stderr[:500]}"
                 )
             try:
                 resp = await self._http_client.get("/healthcheck")
                 if resp.status_code == 200:
-                    logger.info("Server ready at %s (attempt %d)", self._base_url, i + 1)
+                    logger.info(
+                        "Server ready at %s (attempt %d)", self._base_url, i + 1
+                    )
                     return
             except (httpx.ConnectError, httpx.ReadError):
                 pass
@@ -285,9 +290,7 @@ startup_timeout: Max seconds to wait for server startup.
 
         # Send the prompt
         prompt = self._extract_prompt(inference_input)
-        await self._http_client.post(
-            "/v3/set_chat_message", json={"message": prompt}
-        )
+        await self._http_client.post("/v3/set_chat_message", json={"message": prompt})
 
         # Stream SSE response
         async with self._http_client.stream("GET", "/v3/stream_chat") as response:
@@ -308,6 +311,7 @@ startup_timeout: Max seconds to wait for server startup.
                     if event_type == "text_delta":
                         try:
                             import json
+
                             data = json.loads(data_str)
                             text = data.get("delta", data_str)
                         except (ValueError, KeyError):

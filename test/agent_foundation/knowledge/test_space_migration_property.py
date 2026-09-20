@@ -10,6 +10,7 @@ second run SHALL report zero updates.
 
 **Validates: Requirements 8.6**
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -26,17 +27,14 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import given, settings, HealthCheck, strategies as st
-
 from agent_foundation.knowledge.ingestion.space_classifier import SpaceClassifier
-from agent_foundation.knowledge.ingestion.space_migration import (
-    SpaceMigrationUtility,
-)
+from agent_foundation.knowledge.ingestion.space_migration import SpaceMigrationUtility
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from hypothesis import given, HealthCheck, settings, strategies as st
 from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphEdge,
     GraphNode,
@@ -50,12 +48,16 @@ _valid_space = st.sampled_from(["main", "personal", "developmental"])
 # Entity IDs that exercise different classifier branches
 _entity_id_strategy = st.one_of(
     st.none(),
-    st.just("user:").flatmap(lambda prefix: st.text(min_size=1, max_size=20).filter(
-        lambda s: s.strip()
-    ).map(lambda s: prefix + s)),
-    st.just("service:").flatmap(lambda prefix: st.text(min_size=1, max_size=20).filter(
-        lambda s: s.strip()
-    ).map(lambda s: prefix + s)),
+    st.just("user:").flatmap(
+        lambda prefix: st.text(min_size=1, max_size=20)
+        .filter(lambda s: s.strip())
+        .map(lambda s: prefix + s)
+    ),
+    st.just("service:").flatmap(
+        lambda prefix: st.text(min_size=1, max_size=20)
+        .filter(lambda s: s.strip())
+        .map(lambda s: prefix + s)
+    ),
 )
 
 _validation_status = st.sampled_from(["passed", "not_validated", "failed", "pending"])
@@ -68,21 +70,37 @@ def _piece_strategy(draw):
     """Generate a KnowledgePiece with random entity_id and spaces."""
     piece_id = draw(st.uuids().map(str))
     entity_id = draw(_entity_id_strategy)
-    spaces = draw(st.lists(_valid_space, min_size=1, max_size=3).map(
-        lambda xs: list(dict.fromkeys(xs))
-    ))
+    spaces = draw(
+        st.lists(_valid_space, min_size=1, max_size=3).map(
+            lambda xs: list(dict.fromkeys(xs))
+        )
+    )
     validation_status = draw(_validation_status)
     info_type = draw(_info_type)
 
     content = draw(st.text(min_size=1, max_size=50).filter(lambda s: s.strip()))
     knowledge_type = draw(st.sampled_from(list(KnowledgeType)))
-    tags = draw(st.lists(st.text(min_size=1, max_size=10).filter(lambda s: s.strip()), max_size=3))
-    source = draw(st.one_of(st.none(), st.text(min_size=1, max_size=20).filter(lambda s: s.strip())))
+    tags = draw(
+        st.lists(
+            st.text(min_size=1, max_size=10).filter(lambda s: s.strip()), max_size=3
+        )
+    )
+    source = draw(
+        st.one_of(
+            st.none(), st.text(min_size=1, max_size=20).filter(lambda s: s.strip())
+        )
+    )
     domain = draw(st.sampled_from(["general", "health", "finance", "tech"]))
-    secondary_domains = draw(st.lists(st.sampled_from(["general", "health", "finance", "tech"]), max_size=2))
+    secondary_domains = draw(
+        st.lists(st.sampled_from(["general", "health", "finance", "tech"]), max_size=2)
+    )
     is_active = draw(st.booleans())
     version = draw(st.integers(min_value=1, max_value=10))
-    summary = draw(st.one_of(st.none(), st.text(min_size=1, max_size=30).filter(lambda s: s.strip())))
+    summary = draw(
+        st.one_of(
+            st.none(), st.text(min_size=1, max_size=30).filter(lambda s: s.strip())
+        )
+    )
 
     return KnowledgePiece(
         content=content,
@@ -105,18 +123,26 @@ def _piece_strategy(draw):
 @st.composite
 def _metadata_strategy(draw):
     """Generate an EntityMetadata with random entity_id and spaces."""
-    entity_id = draw(st.one_of(
-        st.just("user:").flatmap(lambda p: st.text(min_size=1, max_size=10).filter(
-            lambda s: s.strip()
-        ).map(lambda s: p + s)),
-        st.just("service:").flatmap(lambda p: st.text(min_size=1, max_size=10).filter(
-            lambda s: s.strip()
-        ).map(lambda s: p + s)),
-    ))
+    entity_id = draw(
+        st.one_of(
+            st.just("user:").flatmap(
+                lambda p: st.text(min_size=1, max_size=10)
+                .filter(lambda s: s.strip())
+                .map(lambda s: p + s)
+            ),
+            st.just("service:").flatmap(
+                lambda p: st.text(min_size=1, max_size=10)
+                .filter(lambda s: s.strip())
+                .map(lambda s: p + s)
+            ),
+        )
+    )
     entity_type = draw(st.sampled_from(["user", "app", "tool"]))
-    spaces = draw(st.lists(_valid_space, min_size=1, max_size=3).map(
-        lambda xs: list(dict.fromkeys(xs))
-    ))
+    spaces = draw(
+        st.lists(_valid_space, min_size=1, max_size=3).map(
+            lambda xs: list(dict.fromkeys(xs))
+        )
+    )
     return EntityMetadata(
         entity_id=entity_id,
         entity_type=entity_type,
@@ -127,18 +153,26 @@ def _metadata_strategy(draw):
 @st.composite
 def _graph_node_strategy(draw):
     """Generate a GraphNode with random node_id and spaces property."""
-    node_id = draw(st.one_of(
-        st.just("user:").flatmap(lambda p: st.text(min_size=1, max_size=10).filter(
-            lambda s: s.strip()
-        ).map(lambda s: p + s)),
-        st.just("service:").flatmap(lambda p: st.text(min_size=1, max_size=10).filter(
-            lambda s: s.strip()
-        ).map(lambda s: p + s)),
-    ))
+    node_id = draw(
+        st.one_of(
+            st.just("user:").flatmap(
+                lambda p: st.text(min_size=1, max_size=10)
+                .filter(lambda s: s.strip())
+                .map(lambda s: p + s)
+            ),
+            st.just("service:").flatmap(
+                lambda p: st.text(min_size=1, max_size=10)
+                .filter(lambda s: s.strip())
+                .map(lambda s: p + s)
+            ),
+        )
+    )
     node_type = draw(st.sampled_from(["user", "service"]))
-    spaces = draw(st.lists(_valid_space, min_size=1, max_size=3).map(
-        lambda xs: list(dict.fromkeys(xs))
-    ))
+    spaces = draw(
+        st.lists(_valid_space, min_size=1, max_size=3).map(
+            lambda xs: list(dict.fromkeys(xs))
+        )
+    )
     return GraphNode(
         node_id=node_id,
         node_type=node_type,
@@ -146,8 +180,9 @@ def _graph_node_strategy(draw):
     )
 
 
-def _build_kb_mock(pieces_by_scope, metadata_list, entity_ids, nodes_by_id,
-                   relations_by_entity):
+def _build_kb_mock(
+    pieces_by_scope, metadata_list, entity_ids, nodes_by_id, relations_by_entity
+):
     """Build a mock KnowledgeBase with the given data.
 
     The mock stores are backed by the actual mutable objects so that
@@ -415,13 +450,15 @@ class TestMigrationIdempotence:
 # ── Helpers for Property 12 ──────────────────────────────────────────────────
 
 # Fields that migration is allowed to change
-_SPACE_FIELDS = frozenset({
-    "space",
-    "spaces",
-    "pending_space_suggestions",
-    "space_suggestion_reasons",
-    "space_suggestion_status",
-})
+_SPACE_FIELDS = frozenset(
+    {
+        "space",
+        "spaces",
+        "pending_space_suggestions",
+        "space_suggestion_reasons",
+        "space_suggestion_status",
+    }
+)
 
 
 def _snapshot_non_space_fields(piece: KnowledgePiece) -> dict:

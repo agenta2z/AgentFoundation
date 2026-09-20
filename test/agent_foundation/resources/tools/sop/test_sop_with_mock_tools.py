@@ -40,6 +40,7 @@ def _build_base():
         from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
             ClaudeCodeCliInferencer,
         )
+
         return ClaudeCodeCliInferencer(
             model_name="sonnet",
             target_path=str(Path.home() / "MyProjects"),
@@ -49,6 +50,7 @@ def _build_base():
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
         RovoDevCliInferencer,
     )
+
     return RovoDevCliInferencer(model_name="sonnet", yolo=True)
 
 
@@ -67,9 +69,13 @@ def _mock_tool_executor_factory(*, delay: float = 0.0):
 
         if canonical == "sop":
             from agent_foundation.resources.tools.sop.executor import execute
-            return await execute(arguments, {
-                "extra_sop_dirs": [EXTRA_SOP_DIRS],
-            })
+
+            return await execute(
+                arguments,
+                {
+                    "extra_sop_dirs": [EXTRA_SOP_DIRS],
+                },
+            )
 
         if canonical == "create_role":
             return ToolExecutionResult(
@@ -147,7 +153,9 @@ async def _enter_sop(ci, sop_name="role_creation", yolo=True):
 @pytest.mark.integration
 def test_sop_sync_all_phases_advance(tmp_path):
     """Real LLM + mock tools (sync): SOP advances through all 5 phases."""
-    from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
+    from rich_python_utils.common_objects.workflow.common.phase_status import (
+        PhaseStatus,
+    )
 
     async def _run():
         ci = _build_ci(yolo=True, async_tools=False)
@@ -166,7 +174,9 @@ def test_sop_sync_all_phases_advance(tmp_path):
 
         print(f"[sync] Final phase: {ci.sop_state.current_phase}")
         print(f"[sync] Phase status: {ci.sop_state.phase_status}")
-        print(f"[sync] Completed: {[c if isinstance(c, str) else getattr(c, 'phase', c) for c in ci.sop_state.completed_phases]}")
+        print(
+            f"[sync] Completed: {[c if isinstance(c, str) else getattr(c, 'phase', c) for c in ci.sop_state.completed_phases]}"
+        )
 
         assert ci.sop_state.phase_status == PhaseStatus.COMPLETED, (
             f"SOP not completed. Phase: {ci.sop_state.current_phase}, "
@@ -184,7 +194,9 @@ def test_sop_sync_all_phases_advance(tmp_path):
 @pytest.mark.integration
 def test_sop_async_inbox_drives_completion(tmp_path):
     """Real LLM + mock tools (async): inbox event loop auto-advances SOP."""
-    from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
+    from rich_python_utils.common_objects.workflow.common.phase_status import (
+        PhaseStatus,
+    )
 
     async def _run():
         ci = _build_ci(yolo=True, async_tools=True)
@@ -216,6 +228,7 @@ def test_sop_async_inbox_drives_completion(tmp_path):
 @pytest.mark.integration
 def test_sop_phase_0_advances_to_phase_1(tmp_path):
     """Real LLM: verify Phase 0 (multiple_choice + confirmation) advances to Phase 1."""
+
     async def _run():
         ci = _build_ci(yolo=True, async_tools=False)
         await _enter_sop(ci)

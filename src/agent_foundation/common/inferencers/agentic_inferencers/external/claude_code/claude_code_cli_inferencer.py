@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Claude Code CLI inferencer for executing Claude Code CLI commands."""
@@ -11,14 +10,11 @@ import subprocess
 import weakref
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
     EffortLevel,
     PermissionModeLiteral,
 )
-from agent_foundation.common.inferencers.streaming_inferencer_base import (
-    EmptyLineMode,
-)
+from agent_foundation.common.inferencers.streaming_inferencer_base import EmptyLineMode
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
 )
@@ -27,6 +23,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -208,9 +205,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         # Resolve the macOS-sandbox toggle to a concrete bool: an explicit
         # ctor value wins; otherwise fall back to the env var.
-        self.disable_osx_sandbox = resolve_disable_osx_sandbox(
-            self.disable_osx_sandbox
-        )
+        self.disable_osx_sandbox = resolve_disable_osx_sandbox(self.disable_osx_sandbox)
 
         self._resolve_claude_command()
 
@@ -603,9 +598,28 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         # when too many heavy claude processes start at once and starve each
         # other's startup past that window → EMPTY output. The semaphore is held
         # across the whole subprocess lifetime (spawn → exit), incl. the yields.
+        #
+        # While queued for a slot, emit an activity sentinel ("") every 60s so
+        # the outer streaming pipeline's DualTimer switches into
+        # tool_use_idle_timeout (default 7200s here) instead of cutting us off
+        # at text_idle_timeout (300s) before we've even spawned. Without this,
+        # a fan-out topology (e.g. BTA with N>>4 concurrent flows) convoy-
+        # collapses: queued calls die at text_idle, retries amplify the queue,
+        # the system never reaches steady state.
+        #
+        # Race-safety: ``asyncio.wait_for`` cancels the inner ``_sem.acquire()``
+        # on timeout; ``asyncio.Semaphore.acquire()`` releases its slot on
+        # ``CancelledError`` (CPython ``Lib/asyncio/locks.py`` ``Semaphore``
+        # explicitly wakes the next waiter if the slot was already given to a
+        # cancelled future), so this loop cannot leak capacity.
         _sem = self._concurrency_semaphore()
         if _sem is not None:
-            await _sem.acquire()
+            while True:
+                try:
+                    await asyncio.wait_for(_sem.acquire(), timeout=60.0)
+                    break
+                except asyncio.TimeoutError:
+                    yield ""
 
         # Whether claude produced any assistant text. If it produced NONE and
         # stderr shows the stdin-startup abort, raise after releasing the
@@ -699,7 +713,9 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                     stderr_bytes = await stderr_task
                 except Exception:
                     stderr_bytes = b""
-                self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+                self._last_streaming_stderr = stderr_bytes.decode(
+                    "utf-8", errors="replace"
+                )
                 # If cleanup ran due to timeout/cancellation, the subprocess may
                 # still be alive — terminate it so process.wait() doesn't block
                 # forever waiting on a hung claude.exe.
@@ -714,7 +730,9 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                         "[%s] streaming subprocess exited with code %s. stderr: %s",
                         self.__class__.__name__,
                         process.returncode,
-                        self._last_streaming_stderr[:500] if self._last_streaming_stderr else "(empty)",
+                        self._last_streaming_stderr[:500]
+                        if self._last_streaming_stderr
+                        else "(empty)",
                     )
                 # Detect claude's stdin-startup abort: no assistant text AND
                 # stderr shows the launcher gave up on stdin. Transient under
@@ -724,8 +742,10 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 if (
                     use_stdin
                     and not _produced_text
-                    and ("no stdin data received" in _err
-                         or "Input must be provided" in _err)
+                    and (
+                        "no stdin data received" in _err
+                        or "Input must be provided" in _err
+                    )
                 ):
                     _stdin_race = True
         finally:
@@ -739,9 +759,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 "concurrency; raising so the retry chain re-runs the call."
             )
 
-    def _resolve_subprocess_timeout(
-        self, override: Optional[float] = None
-    ) -> float:
+    def _resolve_subprocess_timeout(self, override: Optional[float] = None) -> float:
         """Resolve the subprocess timeout in seconds.
 
         Args:
@@ -1003,7 +1021,13 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        cache_file = self._open_cache_file(prompt) if self.cache_folder else None
+        # v5 Fix #3 — gate on the resolved cache folder so ctx-dispatched
+        # leaves (workspace published via ctx.handles["workspace_override"])
+        # also write streaming cache. See StreamingInferencerBase._effective_cache_folder.
+        _cache_folder = self._effective_cache_folder()
+        cache_file = (
+            self._open_cache_file(prompt, _cache_folder) if _cache_folder else None
+        )
         cache_success = False
         cache_error = None
 

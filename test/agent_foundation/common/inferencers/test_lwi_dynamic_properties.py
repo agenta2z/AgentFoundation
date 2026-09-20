@@ -7,8 +7,7 @@ Each test is tagged with the feature and property number it validates.
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from hypothesis import given, settings, HealthCheck
-from hypothesis import strategies as st
+from hypothesis import given, HealthCheck, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +47,11 @@ def _make_sequential_inferencer(results_list):
 @given(
     step_count=st.integers(min_value=1, max_value=15),
     result_strings=st.lists(
-        st.text(min_size=1, max_size=50, alphabet=st.characters(whitelist_categories=("L", "N"))),
+        st.text(
+            min_size=1,
+            max_size=50,
+            alphabet=st.characters(whitelist_categories=("L", "N")),
+        ),
         min_size=15,
         max_size=15,
     ),

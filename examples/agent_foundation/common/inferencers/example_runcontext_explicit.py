@@ -18,12 +18,12 @@ from __future__ import annotations
 import json
 
 from agent_foundation.common.inferencers.run_context import (
-    MultiFlowState,
-    RunContext,
-    RunStateStore,
     active_run_context,
     enter_run,
     exit_run,
+    MultiFlowState,
+    RunContext,
+    RunStateStore,
 )
 
 
@@ -46,8 +46,11 @@ def main() -> None:
     worker0.handles.live_session_id = "sess-A"
     worker1.handles.live_session_id = "sess-B"
     assert worker0.handles.live_session_id != worker1.handles.live_session_id
-    print("isolated session ids:", worker0.handles.live_session_id,
-          worker1.handles.live_session_id)
+    print(
+        "isolated session ids:",
+        worker0.handles.live_session_id,
+        worker1.handles.live_session_id,
+    )
 
     # 5. The bridge makes the active context readable without threading it as a param.
     token = enter_run(worker0)

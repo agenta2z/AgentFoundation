@@ -6,6 +6,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 14.1**
 """
+
 import sys
 from pathlib import Path
 
@@ -19,13 +20,12 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.validator import (
     KnowledgeValidator,
     ValidationConfig,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -34,17 +34,19 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import Knowledg
 SAFE_ALPHABET = "abcdfghjklmnquvwxyz ABCDFGHJKLMNQUVWXYZ\n"
 
 # Security pattern fragments to inject into content
-SECURITY_FRAGMENTS = st.sampled_from([
-    "api_key=SECRET123",
-    "api-key=mysecret",
-    "secret=hunter2",
-    "password=p@ssw0rd",
-    "token=abc123xyz",
-    "credential:hidden",
-    "API_KEY:val",
-    "Bearer eyJhbGciOiJIUzI1NiJ9",
-    "bearer abc123",
-])
+SECURITY_FRAGMENTS = st.sampled_from(
+    [
+        "api_key=SECRET123",
+        "api-key=mysecret",
+        "secret=hunter2",
+        "password=p@ssw0rd",
+        "token=abc123xyz",
+        "credential:hidden",
+        "API_KEY:val",
+        "Bearer eyJhbGciOiJIUzI1NiJ9",
+        "bearer abc123",
+    ]
+)
 
 
 @st.composite
@@ -67,6 +69,7 @@ def clean_content(draw):
     # Ensure no accidental pattern matches by checking against defaults
     config = ValidationConfig()
     import re
+
     for pattern in config.security_patterns + config.privacy_patterns:
         assume(not re.search(pattern, text))
     return text

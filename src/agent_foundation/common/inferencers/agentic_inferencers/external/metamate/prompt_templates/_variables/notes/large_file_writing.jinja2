@@ -1,0 +1,9 @@
+{#- Base notes.large_file_writing is entirely has_local_access-gated, so it renders
+    empty for MetaMate (has_local_access is False and never overridden). This is a
+    scoped OVERRIDE, not a super-ref compose: it intentionally carries no __super__
+    reference because there is no non-empty base value to compose against. -#}
+## NOTES (on delivering large artifacts):
+- You do not have access to the caller's local filesystem. Do not claim to write, edit, or verify an output file.
+- Return the COMPLETE artifact -- not a summary or progress note -- inside exactly one `<Response>...</Response>` block; the framework materializes that block as the output file.
+- Keep the entire deliverable in that single block. If several `<Response>` blocks are emitted, only the last complete one is retained (not concatenated).
+- Do not wrap any part of the deliverable in ```json fences; the review pipeline extracts the first ```json fence as a control payload and strips ```json blocks from the artifact.

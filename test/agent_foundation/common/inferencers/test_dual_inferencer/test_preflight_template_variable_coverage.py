@@ -203,7 +203,8 @@ class TestTemplateVariableCoverageReview(unittest.TestCase):
         self.dual_extra_feed = {
             "proposal": "BASE_PROPOSAL_TEXT",
             "main_response": "BASE_PROPOSAL_TEXT",
-            "prior_output_path": "/task/base/outputs/final_deliverables/output.md",
+            # Part 2: deliverables live directly in outputs/ (final_deliverables/ retired).
+            "prior_output_path": "/task/base/outputs/output.md",
             "round_index": 0,
             "iteration": 1,
             "attempt": 1,
@@ -300,7 +301,8 @@ class TestTemplateVariableCoverageFollowup(unittest.TestCase):
         self.dual_extra_feed = {
             "proposal": "BASE_PROPOSAL_TEXT",
             "main_response": "BASE_PROPOSAL_TEXT",
-            "prior_output_path": "/task/base/outputs/final_deliverables/output.md",
+            # Part 2: deliverables live directly in outputs/ (final_deliverables/ retired).
+            "prior_output_path": "/task/base/outputs/output.md",
             "reviewer_response": '{"issues": [], "verdict": "APPROVE"}',
             "round_index": 1,
             "iteration": 1,
@@ -343,7 +345,7 @@ class TestTemplateVariableCoverageFollowup(unittest.TestCase):
         self.leaf._render_prompt("X", extra_feed=self.dual_extra_feed)
         self.assertEqual(
             self.tm.last_feed["prior_output_path"],
-            "/task/base/outputs/final_deliverables/output.md",
+            "/task/base/outputs/output.md",
         )
 
     def test_reviewer_response_populated(self):
@@ -373,12 +375,12 @@ class TestMergePriority(unittest.TestCase):
             template_manager=self.tm,
             template_variables={"shared_key": "from_template_variables"},
             template_extra_feed={
-                "shared_key": "from_class_extra_feed",   # wins over template_variables
+                "shared_key": "from_class_extra_feed",  # wins over template_variables
                 "class_only": "class_level_value",
             },
         )
         extra = {
-            "shared_key": "from_dual_extra_feed",        # wins over class extra_feed
+            "shared_key": "from_dual_extra_feed",  # wins over class extra_feed
             "dual_only": "dual_level_value",
         }
         leaf._render_prompt("MY_INPUT", extra_feed=extra)

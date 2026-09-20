@@ -11,7 +11,6 @@ real CLI calls.
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -26,11 +25,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.li
     WorkflowStepConfig,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    PUZZLE_PROMPT,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, PUZZLE_PROMPT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -132,15 +127,17 @@ async def test_three_step_coding_puzzle(tmp_workspace):
     assert "review_output" in result, "review_output should be in state"
 
     # All outputs should be non-empty strings from real CLI calls
-    assert result["plan_output"] is not None and str(result["plan_output"]).strip() != "", (
-        "plan_output should contain real CLI output"
-    )
-    assert result["implement_output"] is not None and str(result["implement_output"]).strip() != "", (
-        "implement_output should contain real CLI output"
-    )
-    assert result["review_output"] is not None and str(result["review_output"]).strip() != "", (
-        "review_output should contain real CLI output"
-    )
+    assert (
+        result["plan_output"] is not None and str(result["plan_output"]).strip() != ""
+    ), "plan_output should contain real CLI output"
+    assert (
+        result["implement_output"] is not None
+        and str(result["implement_output"]).strip() != ""
+    ), "implement_output should contain real CLI output"
+    assert (
+        result["review_output"] is not None
+        and str(result["review_output"]).strip() != ""
+    ), "review_output should contain real CLI output"
 
 
 # ===========================================================================
@@ -200,9 +197,9 @@ async def test_step_with_dual_inferencer_child(tmp_workspace):
     assert "consensus_output" in result, "consensus_output should be in state"
 
     # Draft output should be non-empty
-    assert result["draft_output"] is not None and str(result["draft_output"]).strip() != "", (
-        "draft_output should contain real CLI output"
-    )
+    assert (
+        result["draft_output"] is not None and str(result["draft_output"]).strip() != ""
+    ), "draft_output should contain real CLI output"
 
     # Consensus output should be non-empty (DualInferencer ran its loop)
     consensus = result["consensus_output"]
@@ -212,7 +209,6 @@ async def test_step_with_dual_inferencer_child(tmp_workspace):
     if hasattr(consensus, "consensus_achieved"):
         assert isinstance(consensus.consensus_achieved, bool)
         assert consensus.base_response is not None
-
 
 
 # ===========================================================================
@@ -256,9 +252,7 @@ async def test_checkpoint_resume(tmp_workspace):
         WorkflowStepConfig(
             name="step3",
             inferencer=_make_claude(tmp_workspace),
-            input_builder=lambda state: (
-                f"Summarize: {state.get('step2_output', '')}"
-            ),
+            input_builder=lambda state: (f"Summarize: {state.get('step2_output', '')}"),
             output_state_key="step3_output",
             enable_result_save=True,
         ),
@@ -302,9 +296,7 @@ async def test_checkpoint_resume(tmp_workspace):
         WorkflowStepConfig(
             name="step3",
             inferencer=step3_resume,
-            input_builder=lambda state: (
-                f"Summarize: {state.get('step2_output', '')}"
-            ),
+            input_builder=lambda state: (f"Summarize: {state.get('step2_output', '')}"),
             output_state_key="step3_output",
             enable_result_save=True,
         ),
@@ -328,9 +320,9 @@ async def test_checkpoint_resume(tmp_workspace):
 
     # step2_output should be present (re-executed after resume — Req 31.1)
     assert "step2_output" in result, "step2_output should be in state after resume"
-    assert result["step2_output"] is not None and str(result["step2_output"]).strip() != "", (
-        "step2_output should contain real CLI output after resume"
-    )
+    assert (
+        result["step2_output"] is not None and str(result["step2_output"]).strip() != ""
+    ), "step2_output should contain real CLI output after resume"
 
 
 # ===========================================================================
@@ -415,12 +407,14 @@ async def test_loop_back_with_real_cli(tmp_workspace):
     )
 
     # All outputs should contain real CLI content
-    assert result["draft_output"] is not None and str(result["draft_output"]).strip() != "", (
-        "draft_output should contain real CLI output"
-    )
-    assert result["refine_output"] is not None and str(result["refine_output"]).strip() != "", (
-        "refine_output should contain real CLI output"
-    )
-    assert result["review_output"] is not None and str(result["review_output"]).strip() != "", (
-        "review_output should contain real CLI output"
-    )
+    assert (
+        result["draft_output"] is not None and str(result["draft_output"]).strip() != ""
+    ), "draft_output should contain real CLI output"
+    assert (
+        result["refine_output"] is not None
+        and str(result["refine_output"]).strip() != ""
+    ), "refine_output should contain real CLI output"
+    assert (
+        result["review_output"] is not None
+        and str(result["review_output"]).strip() != ""
+    ), "review_output should contain real CLI output"

@@ -6,6 +6,7 @@ Covers:
 - ConversationalInferencer: uses clean output for parsing + add_message()
 - WebSocketInteractive: on_clean_output_available() sends stream_correction
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,8 +20,9 @@ import pytest
 
 # Add OpenStartup src to path for WebSocketInteractive tests
 # Path: test/agent_foundation/inferencers/ -> test/ -> AgentFoundation/ -> CoreProjects/ -> OpenStartup/src
-_OPENTEAM_SRC = Path(__file__).parent.parent.parent.parent.parent / \
-    "OpenStartup" / "src"
+_OPENTEAM_SRC = (
+    Path(__file__).parent.parent.parent.parent.parent / "OpenStartup" / "src"
+)
 if _OPENTEAM_SRC.exists() and str(_OPENTEAM_SRC) not in sys.path:
     sys.path.insert(0, str(_OPENTEAM_SRC))
 
@@ -28,12 +30,16 @@ if _OPENTEAM_SRC.exists() and str(_OPENTEAM_SRC) not in sys.path:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_ws_interactive():
     """Create a WebSocketInteractive with a capturing send_callback."""
     from openteam.server.services.websocket_interactive import WebSocketInteractive
+
     sent = []
+
     async def send_cb(msg):
         sent.append(msg)
+
     q = asyncio.Queue()
     ws = WebSocketInteractive(send_cb, q)
     return ws, sent
@@ -43,13 +49,14 @@ def _make_ws_interactive():
 # StreamingInferencerBase — base class behaviour
 # ===========================================================================
 
-class TestStreamingInferencerBase:
 
+class TestStreamingInferencerBase:
     def test_streams_differ_default_false(self):
         """Base class streams_differ_from_final_output is False."""
         from agent_foundation.common.inferencers.streaming_inferencer_base import (
             StreamingInferencerBase,
         )
+
         assert StreamingInferencerBase.streams_differ_from_final_output is False
 
     def test_get_final_output_returns_none(self):
@@ -57,6 +64,7 @@ class TestStreamingInferencerBase:
         from agent_foundation.common.inferencers.streaming_inferencer_base import (
             StreamingInferencerBase,
         )
+
         # Create a minimal concrete subclass (can't instantiate base directly)
         class _Concrete(StreamingInferencerBase):
             def _infer(self, *a, **kw):
@@ -78,12 +86,13 @@ class TestStreamingInferencerBase:
 # RovoDevCliInferencer — override behaviour
 # ===========================================================================
 
-class TestRovoDevCliInferencerGetFinalOutput:
 
+class TestRovoDevCliInferencerGetFinalOutput:
     def _make_inferencer(self, **kwargs):
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
             RovoDevCliInferencer,
         )
+
         defaults = dict(target_path="/tmp", enable_legacy=True)
         defaults.update(kwargs)
         return RovoDevCliInferencer(**defaults)
@@ -93,6 +102,7 @@ class TestRovoDevCliInferencerGetFinalOutput:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
             RovoDevCliInferencer,
         )
+
         assert RovoDevCliInferencer.streams_differ_from_final_output is True
 
     def test_legacy_reads_from_last_clean_output(self):
@@ -101,7 +111,9 @@ class TestRovoDevCliInferencerGetFinalOutput:
         This is set by ainfer_streaming() BEFORE the temp file is deleted,
         so get_final_output() works even after file cleanup.
         """
-        clean_text = 'Clean LLM output\n```json ToolsToInvoke\n{"type": "conversation"}\n```'
+        clean_text = (
+            'Clean LLM output\n```json ToolsToInvoke\n{"type": "conversation"}\n```'
+        )
         inf = self._make_inferencer()
         inf._last_clean_output = clean_text
         result = inf.get_final_output()
@@ -126,10 +138,7 @@ class TestRovoDevCliInferencerGetFinalOutput:
         """Non-legacy mode extracts clean output from trailing JSON in _last_raw_stdout."""
         inf = self._make_inferencer(enable_legacy=False)
         clean_text = "Hello from the LLM"
-        inf._last_raw_stdout = (
-            "some TUI noise\n"
-            f'{{"response": "{clean_text}"}}\n'
-        )
+        inf._last_raw_stdout = f'some TUI noise\n{{"response": "{clean_text}"}}\n'
         result = inf.get_final_output()
         assert result == clean_text
 
@@ -155,6 +164,7 @@ class TestRovoDevCliInferencerGetFinalOutput:
             async def chunks():
                 yield "chunk1"
                 yield "chunk2"
+
             result = []
             async for c in inf._yield_filter(chunks()):
                 result.append(c)
@@ -170,8 +180,8 @@ class TestRovoDevCliInferencerGetFinalOutput:
 # WebSocketInteractive — on_clean_output_available
 # ===========================================================================
 
-class TestWebSocketInteractiveCleanOutput:
 
+class TestWebSocketInteractiveCleanOutput:
     def test_initial_clean_output_is_none(self):
         """clean_output property is None before on_clean_output_available()."""
         ws, _ = _make_ws_interactive()
@@ -210,6 +220,7 @@ class TestWebSocketInteractiveCleanOutput:
 # ConversationalInferencer — uses clean output for parsing
 # ===========================================================================
 
+
 class TestConversationalInferencerCleanOutput:
     """Verify that run_agentic_loop uses get_final_output() for parsing."""
 
@@ -232,7 +243,9 @@ class TestConversationalInferencerCleanOutput:
         # We verify the contract directly: if streams_differ_from_final_output=True
         # and get_final_output() returns a value, that value should be used.
         # Full integration test of run_agentic_loop is covered by end-to-end testing.
-        clean_text = "This is the clean LLM response with ```json ToolsToInvoke``` intact."
+        clean_text = (
+            "This is the clean LLM response with ```json ToolsToInvoke``` intact."
+        )
         mock_base = self._build_mock_base_inferencer(clean_text)
 
         assert mock_base.streams_differ_from_final_output is True
@@ -248,8 +261,8 @@ class TestConversationalInferencerCleanOutput:
 # OpenStartup — run existing unit tests to ensure no regressions
 # ===========================================================================
 
-class TestNoRegressions:
 
+class TestNoRegressions:
     def test_websocket_interactive_stream_token_batches_still_works(self):
         """stream_token_batches still works correctly after adding on_clean_output_available."""
         ws, sent = _make_ws_interactive()
@@ -258,6 +271,7 @@ class TestNoRegressions:
             async def tokens():
                 yield "hello", {}
                 yield " world", {}
+
             result = await ws.stream_token_batches(tokens(), session_id="test")
             return result
 
@@ -271,6 +285,7 @@ class TestNoRegressions:
         from agent_foundation.common.inferencers.streaming_inferencer_base import (
             StreamingInferencerBase,
         )
+
         # Verify at class level — no need to instantiate
         assert StreamingInferencerBase.streams_differ_from_final_output is False
 
@@ -278,9 +293,11 @@ class TestNoRegressions:
         class _APIInferencer(StreamingInferencerBase):
             def _infer(self, *a, **kw):
                 return ""
+
             async def _ainfer_streaming(self, *a, **kw):
                 return
                 yield
+
             async def _yield_filter(self, chunks, **kw):
                 async for c in chunks:
                     yield c

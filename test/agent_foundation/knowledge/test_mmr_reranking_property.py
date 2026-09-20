@@ -6,6 +6,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 6.2, 6.4**
 """
+
 import sys
 from pathlib import Path
 
@@ -18,14 +19,13 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.mmr_reranking import (
     apply_mmr_reranking,
     MMRConfig,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -52,7 +52,9 @@ def scored_piece_with_embedding(draw, dim=None):
         content=draw(st.text(min_size=1, max_size=30).filter(lambda s: s.strip())),
         embedding=emb,
     )
-    score = draw(st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+    )
     return ScoredPiece(piece=piece, score=score)
 
 
@@ -63,7 +65,9 @@ def scored_piece_without_embedding(draw):
         content=draw(st.text(min_size=1, max_size=30).filter(lambda s: s.strip())),
         embedding=None,
     )
-    score = draw(st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+    )
     return ScoredPiece(piece=piece, score=score)
 
 
@@ -72,10 +76,16 @@ def mmr_inputs(draw):
     """Generate a list of ScoredPieces (with embeddings), an MMRConfig, and top_k."""
     dim = draw(st.integers(min_value=2, max_value=8))
     n = draw(st.integers(min_value=1, max_value=15))
-    pieces = draw(st.lists(scored_piece_with_embedding(dim=dim), min_size=n, max_size=n))
+    pieces = draw(
+        st.lists(scored_piece_with_embedding(dim=dim), min_size=n, max_size=n)
+    )
     config = MMRConfig(
         enabled=True,
-        lambda_param=draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)),
+        lambda_param=draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        ),
     )
     top_k = draw(st.integers(min_value=1, max_value=max(len(pieces), 1)))
     return pieces, config, top_k
@@ -85,13 +95,21 @@ def mmr_inputs(draw):
 def mmr_inputs_mixed(draw):
     """Generate a mixed list of ScoredPieces (some with, some without embeddings)."""
     dim = draw(st.integers(min_value=2, max_value=8))
-    with_emb = draw(st.lists(scored_piece_with_embedding(dim=dim), min_size=0, max_size=10))
-    without_emb = draw(st.lists(scored_piece_without_embedding(), min_size=0, max_size=5))
+    with_emb = draw(
+        st.lists(scored_piece_with_embedding(dim=dim), min_size=0, max_size=10)
+    )
+    without_emb = draw(
+        st.lists(scored_piece_without_embedding(), min_size=0, max_size=5)
+    )
     pieces = with_emb + without_emb
     assume(len(pieces) >= 1)
     config = MMRConfig(
         enabled=True,
-        lambda_param=draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)),
+        lambda_param=draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        ),
     )
     top_k = draw(st.integers(min_value=1, max_value=max(len(pieces), 1)))
     return pieces, config, top_k
@@ -171,7 +189,9 @@ class TestMMROutputConstraints:
             st.lists(scored_piece_with_embedding(dim=dim), min_size=n, max_size=n)
         )
         # top_k >= len(pieces) so the short-circuit path triggers
-        top_k = data.draw(st.integers(min_value=len(pieces), max_value=len(pieces) + 10))
+        top_k = data.draw(
+            st.integers(min_value=len(pieces), max_value=len(pieces) + 10)
+        )
         config = MMRConfig(enabled=True, lambda_param=0.7)
         result = apply_mmr_reranking(pieces, config, top_k)
         expected = pieces[:top_k]

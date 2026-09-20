@@ -78,8 +78,8 @@ async def list_skills(session_id: str, thinking: str | None, timeout: int) -> No
         session_id=session_id,
         thinking=thinking,
         timeout_seconds=timeout,
-        enable_turn_separation=False,       # flat stream for easy parsing
-        always_initialize_new_session=True, # auto warm-up on new sessions
+        enable_turn_separation=False,  # flat stream for easy parsing
+        always_initialize_new_session=True,  # auto warm-up on new sessions
         auto_resume=True,
     )
 
@@ -159,7 +159,7 @@ def main() -> None:
         "--session-id",
         default="skills-list-demo",
         help="Session ID to use (default: 'skills-list-demo'). "
-             "Reuse the same ID to skip the warm-up turn on repeat runs.",
+        "Reuse the same ID to skip the warm-up turn on repeat runs.",
     )
     parser.add_argument(
         "--thinking",
@@ -176,14 +176,18 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        asyncio.run(list_skills(
-            session_id=args.session_id,
-            thinking=args.thinking,
-            timeout=args.timeout,
-        ))
+        asyncio.run(
+            list_skills(
+                session_id=args.session_id,
+                thinking=args.thinking,
+                timeout=args.timeout,
+            )
+        )
     except OpenClawNotFoundError as e:
         print(f"\n❌ OpenClaw not reachable: {e}")
-        print("   Ensure './run.sh start' is running and gateway is at ws://127.0.0.1:18789")
+        print(
+            "   Ensure './run.sh start' is running and gateway is at ws://127.0.0.1:18789"
+        )
         sys.exit(1)
     except OpenClawError as e:
         print(f"\n❌ OpenClaw error: {e}")

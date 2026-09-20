@@ -8,6 +8,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 13.2, 13.4, 13.5**
 """
+
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -22,8 +23,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.merge_strategy import (
     MergeStrategyConfig,
     MergeStrategyManager,
@@ -40,6 +39,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
 )
 from agent_foundation.knowledge.retrieval.models.results import MergeCandidate
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Test Helpers ──────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ class InMemoryPieceStore(KnowledgePieceStore):
 
     def __init__(self, pieces: Optional[List[KnowledgePiece]] = None):
         self._pieces: dict[str, KnowledgePiece] = {}
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:
@@ -283,10 +283,12 @@ class TestPostIngestionStrategyDefersProcessing:
 
     @given(
         content=_content_strategy,
-        post_strategy=st.sampled_from([
-            MergeStrategy.POST_INGESTION_AUTO,
-            MergeStrategy.POST_INGESTION_SUGGESTION,
-        ]),
+        post_strategy=st.sampled_from(
+            [
+                MergeStrategy.POST_INGESTION_AUTO,
+                MergeStrategy.POST_INGESTION_SUGGESTION,
+            ]
+        ),
         candidate_id=st.text(
             alphabet=st.characters(whitelist_categories=("L", "N")),
             min_size=3,

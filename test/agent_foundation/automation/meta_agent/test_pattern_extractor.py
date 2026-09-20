@@ -6,16 +6,13 @@ Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 from __future__ import annotations
 
 import pytest
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    PatternExtractor,
-)
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
 from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
@@ -25,6 +22,7 @@ from agent_foundation.automation.meta_agent.target_converter import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _step(action_type: str, target=None, args=None, **kwargs) -> TraceStep:
     return TraceStep(action_type=action_type, target=target, args=args, **kwargs)
@@ -44,7 +42,9 @@ def _pos(
     )
 
 
-def _aligned_set(positions: list[AlignedPosition], trace_ids: list[str]) -> AlignedTraceSet:
+def _aligned_set(
+    positions: list[AlignedPosition], trace_ids: list[str]
+) -> AlignedTraceSet:
     return AlignedTraceSet(
         positions=positions,
         trace_ids=trace_ids,
@@ -56,16 +56,33 @@ def _aligned_set(positions: list[AlignedPosition], trace_ids: list[str]) -> Alig
 # Loop detection  (Requirement 5.2)
 # ---------------------------------------------------------------------------
 
+
 class TestLoopDetection:
     """Loop detection finds repeated subsequences."""
 
     def test_simple_abab_loop(self):
         """[A, B, A, B] should be detected as a loop of body [A, B] with 2 iterations."""
         positions = [
-            _pos(0, AlignmentType.DETERMINISTIC, {"t1": _step("click"), "t2": _step("click")}),
-            _pos(1, AlignmentType.DETERMINISTIC, {"t1": _step("input_text"), "t2": _step("input_text")}),
-            _pos(2, AlignmentType.DETERMINISTIC, {"t1": _step("click"), "t2": _step("click")}),
-            _pos(3, AlignmentType.DETERMINISTIC, {"t1": _step("input_text"), "t2": _step("input_text")}),
+            _pos(
+                0,
+                AlignmentType.DETERMINISTIC,
+                {"t1": _step("click"), "t2": _step("click")},
+            ),
+            _pos(
+                1,
+                AlignmentType.DETERMINISTIC,
+                {"t1": _step("input_text"), "t2": _step("input_text")},
+            ),
+            _pos(
+                2,
+                AlignmentType.DETERMINISTIC,
+                {"t1": _step("click"), "t2": _step("click")},
+            ),
+            _pos(
+                3,
+                AlignmentType.DETERMINISTIC,
+                {"t1": _step("input_text"), "t2": _step("input_text")},
+            ),
         ]
         aligned = _aligned_set(positions, ["t1", "t2"])
         patterns = PatternExtractor().extract(aligned)
@@ -109,6 +126,7 @@ class TestLoopDetection:
 # Branch detection  (Requirement 5.3)
 # ---------------------------------------------------------------------------
 
+
 class TestBranchDetection:
     """Branch detection finds BRANCH_POINT positions with multiple action types."""
 
@@ -150,6 +168,7 @@ class TestBranchDetection:
 # ---------------------------------------------------------------------------
 # Parameterizable step  (Requirement 5.6)
 # ---------------------------------------------------------------------------
+
 
 class TestParameterizableStep:
     """Parameterizable steps split variable vs constant args correctly."""
@@ -215,10 +234,10 @@ class TestParameterizableStep:
         assert len(info.constant_args) == 0
 
 
-
 # ---------------------------------------------------------------------------
 # All positions accounted for  (Requirement 5.1)
 # ---------------------------------------------------------------------------
+
 
 class TestAllPositionsAccountedFor:
     """Every position index appears in exactly one output category."""
@@ -226,12 +245,22 @@ class TestAllPositionsAccountedFor:
     def test_mixed_types_all_covered(self):
         """A mix of DETERMINISTIC, PARAMETERIZABLE, VARIABLE, OPTIONAL positions."""
         positions = [
-            _pos(0, AlignmentType.DETERMINISTIC, {"t1": _step("click"), "t2": _step("click")}),
-            _pos(1, AlignmentType.PARAMETERIZABLE, {
-                "t1": _step("input_text", args={"text": "a"}),
-                "t2": _step("input_text", args={"text": "b"}),
-            }),
-            _pos(2, AlignmentType.VARIABLE, {"t1": _step("click"), "t2": _step("scroll")}),
+            _pos(
+                0,
+                AlignmentType.DETERMINISTIC,
+                {"t1": _step("click"), "t2": _step("click")},
+            ),
+            _pos(
+                1,
+                AlignmentType.PARAMETERIZABLE,
+                {
+                    "t1": _step("input_text", args={"text": "a"}),
+                    "t2": _step("input_text", args={"text": "b"}),
+                },
+            ),
+            _pos(
+                2, AlignmentType.VARIABLE, {"t1": _step("click"), "t2": _step("scroll")}
+            ),
             _pos(3, AlignmentType.OPTIONAL, {"t1": _step("click"), "t2": None}),
         ]
         aligned = _aligned_set(positions, ["t1", "t2"])
@@ -267,6 +296,7 @@ class TestAllPositionsAccountedFor:
 # User input boundary detection  (Requirement 5.1 — wait(True))
 # ---------------------------------------------------------------------------
 
+
 class TestUserInputBoundary:
     """User input boundaries are detected from wait actions with target=True."""
 
@@ -283,9 +313,13 @@ class TestUserInputBoundary:
     def test_wait_true_in_args_detected(self):
         """A wait step with args={'wait': True} is a user input boundary."""
         positions = [
-            _pos(0, AlignmentType.DETERMINISTIC, {
-                "t1": _step("wait", args={"wait": True}),
-            }),
+            _pos(
+                0,
+                AlignmentType.DETERMINISTIC,
+                {
+                    "t1": _step("wait", args={"wait": True}),
+                },
+            ),
         ]
         aligned = _aligned_set(positions, ["t1"])
         patterns = PatternExtractor().extract(aligned)
@@ -307,22 +341,31 @@ class TestUserInputBoundary:
 # Target consolidation  (Requirement 5.5)
 # ---------------------------------------------------------------------------
 
+
 class TestTargetConsolidation:
     """Deterministic steps get the best target from multiple observations."""
 
     def test_consolidates_targets_across_runs(self):
         """Multiple TargetSpec observations are merged into TargetSpecWithFallback."""
-        t1_target = TargetSpecWithFallback(strategies=[
-            TargetSpec(strategy="id", value="btn-submit"),
-        ])
-        t2_target = TargetSpecWithFallback(strategies=[
-            TargetSpec(strategy="css", value="button.submit"),
-        ])
+        t1_target = TargetSpecWithFallback(
+            strategies=[
+                TargetSpec(strategy="id", value="btn-submit"),
+            ]
+        )
+        t2_target = TargetSpecWithFallback(
+            strategies=[
+                TargetSpec(strategy="css", value="button.submit"),
+            ]
+        )
         positions = [
-            _pos(0, AlignmentType.DETERMINISTIC, {
-                "t1": _step("click", target=t1_target),
-                "t2": _step("click", target=t2_target),
-            }),
+            _pos(
+                0,
+                AlignmentType.DETERMINISTIC,
+                {
+                    "t1": _step("click", target=t1_target),
+                    "t2": _step("click", target=t2_target),
+                },
+            ),
         ]
         aligned = _aligned_set(positions, ["t1", "t2"])
         patterns = PatternExtractor().extract(aligned)
@@ -343,17 +386,22 @@ class TestTargetConsolidation:
 # Variable step variant recording  (Requirement 5.4)
 # ---------------------------------------------------------------------------
 
+
 class TestVariableStepVariants:
     """Variable steps record observed variants and frequencies."""
 
     def test_variants_recorded_in_metadata(self):
         """Variant counts are stored in the first non-None step's metadata."""
         positions = [
-            _pos(0, AlignmentType.VARIABLE, {
-                "t1": _step("click"),
-                "t2": _step("scroll"),
-                "t3": _step("click"),
-            }),
+            _pos(
+                0,
+                AlignmentType.VARIABLE,
+                {
+                    "t1": _step("click"),
+                    "t2": _step("scroll"),
+                    "t3": _step("click"),
+                },
+            ),
         ]
         aligned = _aligned_set(positions, ["t1", "t2", "t3"])
         patterns = PatternExtractor().extract(aligned)
@@ -370,6 +418,7 @@ class TestVariableStepVariants:
 # ---------------------------------------------------------------------------
 # Empty / edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Edge cases for the pattern extractor."""

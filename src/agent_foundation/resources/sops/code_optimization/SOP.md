@@ -16,7 +16,7 @@ When asking for the workflow target path, use a `clarification` conversation too
 
 Once confirmed, perform in-depth analysis of the target codebase at `{{ workflow_target_path }}` to understand its design, architecture, dependencies, data flow, hotspots, and extension points. Produces structured documentation of findings with a navigable HTML documentation site.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - /understand-codebase <codebase_path>
 
 ### Phase 1b -- Codebase Documentation Review
@@ -49,7 +49,7 @@ Investigate the production system and operational signals associated with the ta
 
 **IMPORTANT**: Many of these require MFA / interactive auth; if blocked, use a `clarification` conversation tool asking the user to address authentication. If unable to resolve, declare the limitation explicitly and fall back to IaC + ticket-based inference.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - /investigate-system <codebase_path> --docs <codebase_docs_path>
 
 **Tools**[__optional__]:
@@ -81,13 +81,13 @@ For each opportunity surfaced, the SOP MUST record:
 - **Reproducible command** (curl recipe, JQL query, Cypher query) so the finding can be re-verified later
 - **Currently painful vs. historically painful** distinction (verified via live state, not just docs)
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - /research-propose <goal> --docs <reference_documentation>
 
 ### Phase 3b -- Proposal Review & Selection
 [__depends on__ Phase 3]
 
-[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `proposal_selection` conversation tool (or `confirmation` if proposal_selection is unavailable). The user selects which proposals to advance to Phase 4.
+[__requires user input__] After the research & proposal phase completes, present the unified proposals to the user for review and selection. Use a `proposal_selection` conversation tool. The user selects which proposals to advance to Phase 4.
 
 ## Phase 4 -- Create Jira Epic & Issues
 [__depends on__ Phase 3b]
@@ -105,7 +105,7 @@ Create a Jira Epic on the team's board to track all selected proposals, then cre
    - **Leave Assignee unset** — human assignment serves as approval to proceed
 3. **Report** the created Epic key and child issue keys to the user via a `confirmation` conversation tool.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - Jira issue creation (via MCP-Atlassian or equivalent)
 - confirmation
 
@@ -122,7 +122,7 @@ For each child issue under the Epic:
 
 Continue polling as long as unassigned issues remain under the Epic.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - Jira issue monitoring (via MCP-Atlassian or equivalent)
 
 ## Phase 6 -- Implement & Open Pull Request
@@ -142,7 +142,7 @@ For each approved (assigned) Jira issue, perform proper, elegant implementation:
 
 If implementation is blocked (compile errors, ambiguous spec, auth failure), transition the Jira issue back to `To Do` and post a comment explaining why. Do NOT leave issues stuck in `In Progress` without a linked PR.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - /task <request>
 - Jira issue transition (via MCP-Atlassian or equivalent)
 - PR creation (via MCP-Bitbucket or equivalent)
@@ -158,7 +158,7 @@ Monitor all open PRs linked to the Epic's issues. For each open PR:
 - **Declined/Superseded**: transition the linked Jira issue back to `To Do`, post a comment explaining.
 - **Stale** (no updates for 7+ days): rebase to latest main, post a comment requesting review.
 
-**Tools**[__must__]:
+**Tools**[__required__]:
 - /monitor --type pull_request
 
 **Tools**[__optional__]:

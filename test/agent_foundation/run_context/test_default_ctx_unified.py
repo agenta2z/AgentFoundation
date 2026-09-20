@@ -16,14 +16,13 @@ fallback (a direct ``_infer``/setup call with no run to attach a context to) —
 default mechanism. These tests pin that model so it can't silently regress into two paths.
 """
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
+    RunContext,
 )
+from attr import attrs
 
 
 @attrs(slots=False)

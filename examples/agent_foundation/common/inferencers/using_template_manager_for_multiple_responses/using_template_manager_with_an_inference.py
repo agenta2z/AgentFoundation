@@ -6,12 +6,11 @@ from typing import Iterator
 from agent_foundation.common.inferencers.http_request_inferencer import (
     HttpRequestInferencer,
 )
-from rich_python_utils.io_utils.json_io import write_json
-from rich_python_utils.string_utils.formatting.template_manager import (
-    TemplateManager,
-)
 from rich_python_utils.datetime_utils.common import timestamp
+from rich_python_utils.io_utils.json_io import write_json
 from rich_python_utils.string_utils.common import cut
+from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
+
 
 def extract_last_json_block(response: str):
     json_str = cut(
@@ -19,7 +18,7 @@ def extract_last_json_block(response: str):
         cut_before_last="```json",
         cut_after_last="```",
         keep_cut_before=False,
-        keep_cut_after=False
+        keep_cut_after=False,
     )
     return json.loads(json_str)["refined_query_list"]
 
@@ -41,7 +40,7 @@ reasoner = HttpRequestInferencer(
     max_retry=3,
     logger=logger,
     debug_mode=debug_mode,
-    response_post_processor=extract_last_json_block
+    response_post_processor=extract_last_json_block,
 )
 
 inference_input = """```character

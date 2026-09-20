@@ -18,8 +18,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
-    RovoDevCliInferencer,
     _current_output_file,
+    RovoDevCliInferencer,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
     TerminalInferencerResponse,
@@ -114,7 +114,6 @@ class TestGetCleanOutputForCacheSideEffect(unittest.TestCase):
 
 
 class TestAinferOverrideWrapsCleanOutput(unittest.TestCase):
-
     def _run(self, coro):
         return asyncio.get_event_loop().run_until_complete(coro)
 
@@ -177,7 +176,6 @@ class TestAinferOverrideWrapsCleanOutput(unittest.TestCase):
 
 
 class TestAinferAcceptsWrappedResponse(unittest.TestCase):
-
     def _run(self, coro):
         return asyncio.get_event_loop().run_until_complete(coro)
 
@@ -188,8 +186,15 @@ class TestAinferAcceptsWrappedResponse(unittest.TestCase):
                 output="clean", raw_output="noisy", success=True
             )
 
-            with patch.object(inf, "_ainfer_single", new_callable=AsyncMock, return_value=expected), \
-                 patch("agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id", return_value=None):
+            with (
+                patch.object(
+                    inf, "_ainfer_single", new_callable=AsyncMock, return_value=expected
+                ),
+                patch(
+                    "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
+                    return_value=None,
+                ),
+            ):
                 result = self._run(inf.ainfer("test"))
 
             self.assertIsInstance(result, TerminalInferencerResponse)
@@ -201,8 +206,18 @@ class TestAinferAcceptsWrappedResponse(unittest.TestCase):
             inf = _make_inferencer(Path(tmp))
             inf._last_clean_output = "clean from get_final_output"
 
-            with patch.object(inf, "_ainfer_single", new_callable=AsyncMock, return_value="raw string"), \
-                 patch("agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id", return_value=None):
+            with (
+                patch.object(
+                    inf,
+                    "_ainfer_single",
+                    new_callable=AsyncMock,
+                    return_value="raw string",
+                ),
+                patch(
+                    "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
+                    return_value=None,
+                ),
+            ):
                 result = self._run(inf.ainfer("test"))
 
             self.assertIsInstance(result, TerminalInferencerResponse)
@@ -215,7 +230,6 @@ class TestAinferAcceptsWrappedResponse(unittest.TestCase):
 
 
 class TestSingleReadArchitecture(unittest.TestCase):
-
     def test_subclass_finally_skips_read_when_already_set(self):
         """When _get_clean_output_for_cache already stored _last_clean_output,
         the subclass finally should NOT re-read the file."""
@@ -227,7 +241,9 @@ class TestSingleReadArchitecture(unittest.TestCase):
             token = _current_output_file.set(str(output_file))
             try:
                 cache_result = inf._get_clean_output_for_cache()
-                self.assertEqual(inf._last_clean_output, "Clean content from output file")
+                self.assertEqual(
+                    inf._last_clean_output, "Clean content from output file"
+                )
 
                 output_file.write_text("MODIFIED — should NOT be re-read")
 
@@ -249,7 +265,9 @@ class TestSingleReadArchitecture(unittest.TestCase):
             output_file = Path(tmp) / "output.md"
             output_file.write_text("Fallback content")
 
-            self.assertFalse(hasattr(inf, "_last_clean_output") and inf._last_clean_output)
+            self.assertFalse(
+                hasattr(inf, "_last_clean_output") and inf._last_clean_output
+            )
 
             if not getattr(inf, "_last_clean_output", None):
                 content = output_file.read_text().strip()
@@ -264,13 +282,12 @@ class TestSingleReadArchitecture(unittest.TestCase):
 
 
 class TestResponseFieldCorrectness(unittest.TestCase):
-
     def test_output_field_is_clean_not_noisy(self):
         """The output field of TerminalInferencerResponse should contain
         the clean --output-file content, not the noisy TUI transcript."""
         with tempfile.TemporaryDirectory() as tmp:
             inf = _make_inferencer(Path(tmp))
-            clean = "<Response>\n```json\n{\"approve\": true}\n```\n</Response>"
+            clean = '<Response>\n```json\n{"approve": true}\n```\n</Response>'
             noisy = "Working in /tmp\n[MCP] errors\n" + clean + "\nSession: 46K/1M"
 
             inf._last_clean_output = clean

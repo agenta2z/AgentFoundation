@@ -1,6 +1,7 @@
 """
 Unit tests for knowledge module utility functions: sanitize_id, unsanitize_id, parse_entity_type.
 """
+
 import sys
 from pathlib import Path
 
@@ -14,10 +15,15 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from agent_foundation.knowledge.retrieval.utils import sanitize_id, unsanitize_id, parse_entity_type
+from agent_foundation.knowledge.retrieval.utils import (
+    parse_entity_type,
+    sanitize_id,
+    unsanitize_id,
+)
 
 
 # ── sanitize_id ──────────────────────────────────────────────────────────────
+
 
 class TestSanitizeId:
     """Tests for sanitize_id percent-encoding."""
@@ -57,6 +63,7 @@ class TestSanitizeId:
 
 # ── unsanitize_id ────────────────────────────────────────────────────────────
 
+
 class TestUnsanitizeId:
     """Tests for unsanitize_id percent-decoding."""
 
@@ -88,6 +95,7 @@ class TestUnsanitizeId:
 
 
 # ── sanitize/unsanitize round-trip ───────────────────────────────────────────
+
 
 class TestSanitizeRoundTrip:
     """Tests that sanitize_id and unsanitize_id are inverses."""
@@ -126,6 +134,7 @@ class TestSanitizeRoundTrip:
 
 
 # ── parse_entity_type ────────────────────────────────────────────────────────
+
 
 class TestParseEntityType:
     """Tests for parse_entity_type extraction."""

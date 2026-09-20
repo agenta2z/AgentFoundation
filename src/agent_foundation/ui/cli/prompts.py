@@ -4,6 +4,7 @@ Each function lazily imports its Rich / prompt_toolkit dependency so
 the rest of the codebase can ``import agent_foundation.ui.cli`` without
 pulling in heavy terminal libraries.
 """
+
 from __future__ import annotations
 
 from typing import List, Optional
@@ -16,6 +17,7 @@ def ask_confirm(prompt: str = "Continue?", default: bool = False) -> bool:
     """
     try:
         from rich.prompt import Confirm
+
         return Confirm.ask(prompt, default=default)
     except ImportError:
         suffix = " [Y/n]" if default else " [y/N]"
@@ -31,9 +33,9 @@ def ask_single_choice(prompt: str, options: List[str]) -> str:
     Falls back to plain ``input()`` when Rich is not installed.
     """
     try:
+        from agent_foundation.ui.cli.theme import ThemeManager
         from rich.console import Console
         from rich.prompt import IntPrompt
-        from agent_foundation.ui.cli.theme import ThemeManager
 
         console = Console(theme=ThemeManager.get_theme())
         console.print(f"\n[bold]{prompt}[/bold]")

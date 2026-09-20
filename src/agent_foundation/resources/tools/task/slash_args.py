@@ -12,9 +12,16 @@ from typing import Any
 _REPEATABLE_KEYS = {"override"}
 
 TASK_BOOL_FLAGS = {
-    "plan", "execute", "full", "confirm",
-    "no_dual", "no_aggregate", "analysis", "multi_iter",
-    "in_place", "copy_workspace",
+    "plan",
+    "execute",
+    "full",
+    "confirm",
+    "no_dual",
+    "no_aggregate",
+    "analysis",
+    "multi_iter",
+    "in_place",
+    "copy_workspace",
 }
 
 TASK_MODE_ALIASES = {
@@ -47,7 +54,11 @@ def parse_slash_args(
     while i < len(parts):
         if parts[i].startswith("--"):
             key = parts[i].lstrip("-").replace("-", "_")
-            if key in bool_flags or i + 1 >= len(parts) or parts[i + 1].startswith("--"):
+            if (
+                key in bool_flags
+                or i + 1 >= len(parts)
+                or parts[i + 1].startswith("--")
+            ):
                 result[key] = True
                 consumed.add(i)
                 i += 1
@@ -62,7 +73,8 @@ def parse_slash_args(
         else:
             i += 1
     positional = [
-        parts[j] for j in range(len(parts))
+        parts[j]
+        for j in range(len(parts))
         if j not in consumed and not parts[j].startswith("--")
     ]
     if positional:

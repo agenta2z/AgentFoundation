@@ -15,15 +15,16 @@ import sys
 from abc import abstractmethod
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     TerminalInferencerBase,
 )
+from attr import attrib, attrs
 
 _MAX_STDOUT_LINE_BYTES: int = 16 * 1024 * 1024  # 16 MB
+_STDOUT_DRAIN_CHUNK_BYTES: int = 64 * 1024  # per-read() size during the post-exit drain
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
     TerminalInferencerResponse,
 )
@@ -290,9 +291,7 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                         process.stdout.read(_MAX_STDOUT_LINE_BYTES)
                     )
                 else:
-                    read_task = asyncio.create_task(
-                        process.stdout.readuntil(b"\n")
-                    )
+                    read_task = asyncio.create_task(process.stdout.readuntil(b"\n"))
 
                 done, _ = await asyncio.wait(
                     {read_task, exit_task},
@@ -303,7 +302,11 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                     try:
                         line = read_task.result()
                     except asyncio.IncompleteReadError as e:
-                        logger.info("[%s] _exit_detect: IncompleteReadError (partial=%d bytes)", self.__class__.__name__, len(e.partial) if e.partial else 0)
+                        logger.info(
+                            "[%s] _exit_detect: IncompleteReadError (partial=%d bytes)",
+                            self.__class__.__name__,
+                            len(e.partial) if e.partial else 0,
+                        )
                         if e.partial:
                             yield e.partial.decode("utf-8", errors="replace")
                         break
@@ -317,16 +320,25 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                         _fell_back_to_chunked = True
                         continue
                     if not line:  # EOF
-                        logger.info("[%s] _exit_detect: EOF on stdout", self.__class__.__name__)
+                        logger.info(
+                            "[%s] _exit_detect: EOF on stdout", self.__class__.__name__
+                        )
                         break
                     yield line.decode("utf-8", errors="replace")
 
                     # If exit also fired simultaneously, drain and break
                     if exit_task in done:
-                        logger.info("[%s] _exit_detect: read+exit simultaneous — breaking", self.__class__.__name__)
+                        logger.info(
+                            "[%s] _exit_detect: read+exit simultaneous — breaking",
+                            self.__class__.__name__,
+                        )
                         break
                 elif exit_task in done:
-                    logger.info("[%s] _exit_detect: exit fired while read pending — draining (timeout=%.1fs)", self.__class__.__name__, self.subprocess_exit_drain_timeout)
+                    logger.info(
+                        "[%s] _exit_detect: exit fired while read pending — draining (timeout=%.1fs)",
+                        self.__class__.__name__,
+                        self.subprocess_exit_drain_timeout,
+                    )
                     # Process exited but readline is stuck on pipe.
                     # Cancel the stuck read and drain buffered output.
                     read_task.cancel()
@@ -335,19 +347,36 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
                     except asyncio.CancelledError:
                         pass
 
-                    # Drain any remaining buffered output with timeout
-                    try:
-                        remaining = await asyncio.wait_for(
-                            process.stdout.read(),
-                            timeout=self.subprocess_exit_drain_timeout,
-                        )
-                        if remaining:
-                            yield remaining.decode("utf-8", errors="replace")
-                    except (asyncio.TimeoutError, Exception):
-                        logger.debug(
-                            "[%s] stdout drain timed out after process exit",
-                            self.__class__.__name__,
-                        )
+                    # Drain remaining output in bounded CHUNKS until real EOF or an
+                    # idle-quiet window. The parent exited, but a child that inherited
+                    # the pipe (e.g. dm-core, or an MCP server) may still hold it open
+                    # and keep producing. A single ``read()``-to-EOF here is
+                    # all-or-nothing: it blocks on the child-held pipe and, on timeout,
+                    # drops the ENTIRE backlog (verified repro: 78/80 post-exit lines
+                    # lost). Looping ``read(N)`` captures each chunk as it arrives and
+                    # stops only on EOF or ``subprocess_exit_drain_timeout`` of NO new
+                    # data (an idle, pipe-holding MCP child), so real trailing output
+                    # survives without reintroducing the indefinite hang this method
+                    # prevents.
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(
+                                process.stdout.read(_STDOUT_DRAIN_CHUNK_BYTES),
+                                timeout=self.subprocess_exit_drain_timeout,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.debug(
+                                "[%s] stdout drain: no new data for %.1fs after exit "
+                                "— stopping",
+                                self.__class__.__name__,
+                                self.subprocess_exit_drain_timeout,
+                            )
+                            break
+                        except Exception:
+                            break
+                        if not chunk:  # real EOF — all writers closed the pipe
+                            break
+                        yield chunk.decode("utf-8", errors="replace")
                     break
         finally:
             if not exit_task.done():
@@ -376,7 +405,9 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
         """
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
-        logger.info("[%s] subprocess command: %s", self.__class__.__name__, full_command[:500])
+        logger.info(
+            "[%s] subprocess command: %s", self.__class__.__name__, full_command[:500]
+        )
 
         process = await asyncio.create_subprocess_shell(
             full_command,
@@ -395,14 +426,17 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
         finally:
             # Read stderr with timeout (may also be held by children)
             try:
-                stderr_bytes = await asyncio.wait_for(
-                    process.stderr.read(), timeout=self.subprocess_exit_drain_timeout
-                ) if process.stderr else b""
+                stderr_bytes = (
+                    await asyncio.wait_for(
+                        process.stderr.read(),
+                        timeout=self.subprocess_exit_drain_timeout,
+                    )
+                    if process.stderr
+                    else b""
+                )
             except (asyncio.TimeoutError, Exception):
                 stderr_bytes = b""
-                logger.debug(
-                    "[%s] stderr read timed out", self.__class__.__name__
-                )
+                logger.debug("[%s] stderr read timed out", self.__class__.__name__)
             self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
             await self._safe_process_cleanup(process)
             self._last_streaming_output = "".join(collected_stdout)
@@ -446,9 +480,7 @@ class TerminalSessionInferencerBase(TerminalInferencerBase, StreamingInferencerB
         Returns:
             Parsed result dictionary from ``parse_output()``.
         """
-        accumulated = await super()._ainfer(
-            inference_input, inference_config, **kwargs
-        )
+        accumulated = await super()._ainfer(inference_input, inference_config, **kwargs)
 
         stdout = self._last_streaming_output or str(accumulated)
         stderr = self._last_streaming_stderr
@@ -586,7 +618,8 @@ from agent_foundation.common.inferencers.templated_inferencer_base import (
 
 @attrs
 class TerminalSessionTemplatedInferencerBase(
-    TerminalSessionInferencerBase, TemplatedInferencerBase,
+    TerminalSessionInferencerBase,
+    TemplatedInferencerBase,
 ):
     """Terminal + streaming + templates.
 

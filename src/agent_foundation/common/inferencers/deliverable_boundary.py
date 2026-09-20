@@ -14,9 +14,12 @@ The architectural rule (see §14 of the plan):
 Key concepts
 ------------
 
-- **Boundary** — an inferencer with ``is_deliverable_boundary=True``.
-- **Pass-through** — a non-boundary inferencer that surfaces its active
-  child's deliverables without aggregation/namespacing.
+- **Boundary child** — Part 2 (two-axis model): boundary flags are retired.
+  A child is treated as a deliverable source iff it ``has_deliverables``
+  (its ``outputs/`` is non-empty) AND it passes the caller-supplied
+  ``boundary_filter`` (role-based selection). Deliverables live in ``outputs/``.
+- **Pass-through** — a parent inferencer that surfaces its active child's
+  deliverables without aggregation/namespacing.
 - **Namespace strategy** — how a parent boundary subfolder collected child
   deliverables (``by_child_name``, ``flat``, ``by_role``).
 - **Conflict strategy** — how same-named files are resolved during aggregation
@@ -49,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 NamespaceStrategy = str  # "by_child_name" | "flat" | "by_role"
-ConflictStrategy = str   # "skip_existing" | "largest" | "first_wins" | "error"
+ConflictStrategy = str  # "skip_existing" | "largest" | "first_wins" | "error"
 
 NAMESPACE_BY_CHILD_NAME = "by_child_name"
 NAMESPACE_FLAT = "flat"
@@ -80,20 +83,22 @@ class DeliverableConflictError(RuntimeError):
 class ChildBoundaryDeliverables:
     """A discovered child boundary's published deliverables."""
 
-    child_name: str                  # e.g. "worker_0" or "planner"
-    child_workspace_root: str        # absolute path to child's workspace root
-    deliverable_files: List[str]     # paths relative to child's deliverables_dir
-    child_workspace: Any = None      # the InferencerWorkspace object (for surface_outputs_from)
+    child_name: str  # e.g. "worker_0" or "planner"
+    child_workspace_root: str  # absolute path to child's workspace root
+    deliverable_files: List[str]  # paths relative to child's deliverables_dir
+    child_workspace: Any = (
+        None  # the InferencerWorkspace object (for surface_outputs_from)
+    )
 
 
 @dataclass
 class AggregateReport:
     """Summary of an aggregate_into_self_deliverables call."""
 
-    copied: List[Tuple[str, str]] = field(default_factory=list)        # (src_rel, dst_rel)
-    conflicted: List[str] = field(default_factory=list)                # dst paths that had conflicts
-    skipped: List[str] = field(default_factory=list)                   # dst paths that were skipped
-    errors: List[str] = field(default_factory=list)                    # error messages (if any)
+    copied: List[Tuple[str, str]] = field(default_factory=list)  # (src_rel, dst_rel)
+    conflicted: List[str] = field(default_factory=list)  # dst paths that had conflicts
+    skipped: List[str] = field(default_factory=list)  # dst paths that were skipped
+    errors: List[str] = field(default_factory=list)  # error messages (if any)
 
 
 # ---------------------------------------------------------------------------
@@ -114,24 +119,27 @@ def collect_child_boundary_deliverables(
 ) -> List[ChildBoundaryDeliverables]:
     """Collect deliverables from immediate child boundaries.
 
-    Boundary detection cascade:
+    Part 2 (two-axis model): boundary flags are retired. A child is selected
+    when it ``has_deliverables`` (its ``outputs/`` is non-empty) AND it passes
+    the caller-supplied ``boundary_filter``; deliverables live directly in
+    ``outputs/``. Detection runs in two passes:
 
       1. If ``parent_inferencer`` is provided, walk its direct child inferencer
-         attribs and check each for ``is_deliverable_boundary=True``
-         (in-process, primary signal).
+         attribs and keep each whose workspace ``has_deliverables`` (in-process,
+         primary signal).
       2. Otherwise (or as fallback for resume scenarios), walk
-         ``parent_workspace.children_dir`` on disk, treating any subdir whose
-         ``outputs/final_deliverables/`` exists AND is non-empty as a
-         boundary.
-      3. Either way, NEVER recurse past a boundary — the helper hard-stops
-         at the first boundary in each branch (this is the one-boundary-up
-         rule from §2.4 of the design doc).
+         ``parent_workspace.children_dir`` on disk, treating any subdir with a
+         non-empty ``outputs/`` as a deliverable source.
+
+    In both passes the ``boundary_filter`` performs role-based SELECTION (e.g.
+    PTI names its planner/executor/analyzer children), and each child is
+    surfaced exactly once (deduped by name).
 
     Args:
         parent_workspace: The parent inferencer's workspace. Must have a
             valid ``children_dir`` attribute.
         parent_inferencer: Optional. If provided, used as the primary
-            boundary-detection signal (in-process). When None, falls back to
+            detection signal (in-process). When None, falls back to
             on-disk detection.
         boundary_filter: Optional callable filtering child boundaries by
             (child_name, child_workspace) → bool.
@@ -160,20 +168,17 @@ def collect_child_boundary_deliverables(
             child_ws = getattr(child_inf, "_workspace", None)
             if child_ws is None:
                 continue
-            is_boundary = getattr(child_inf, "is_deliverable_boundary", False)
-            has_self_promoted = (
-                not is_boundary
-                and getattr(child_ws, "has_deliverables", False)
-            )
-            if not is_boundary and not has_self_promoted:
+            # Part 2 (two-axis): boundary flags are retired. A child is a
+            # deliverable source iff its ``outputs/`` is non-empty; role-based
+            # SELECTION is delegated to the caller-supplied ``boundary_filter``
+            # (PTI names its planner/executor/analyzer children).
+            if not getattr(child_ws, "has_deliverables", False):
                 continue
             # The workspace's basename is the canonical "name" for namespacing
             child_dir_name = os.path.basename(child_ws.root)
             if child_dir_name in seen_names:
                 continue
-            # boundary_filter applies to boundaries only; self-promoted
-            # leaves bypass it (e.g., aggregator bypasses "worker_*" filter)
-            if is_boundary and not boundary_filter(child_dir_name, child_ws):
+            if not boundary_filter(child_dir_name, child_ws):
                 continue
             files = _list_deliverable_files(child_ws)
             if not files:
@@ -197,23 +202,15 @@ def collect_child_boundary_deliverables(
             child_root = os.path.join(parent_workspace.children_dir, child_name)
             if not os.path.isdir(child_root):
                 continue
-            # Reconstruct the child workspace so deliverables_dir is consistent.
-            # Inherit the parent's use_final_deliverables_folder setting (since
-            # propagation already enforced this at construction time).
-            child_ws = InferencerWorkspace(
-                root=child_root,
-                use_final_deliverables_folder=(
-                    parent_workspace.use_final_deliverables_folder
-                ),
-            )
-            d = child_ws.deliverables_dir
-            if d is None or not os.path.isdir(d):
+            # Reconstruct the child workspace (Part 2: deliverables live in outputs/).
+            child_ws = InferencerWorkspace(root=child_root)
+            d = child_ws.outputs_dir
+            if not os.path.isdir(d):
                 continue
             files = _list_deliverable_files(child_ws)
             if not files:
                 continue
-            is_self_promoted = os.path.exists(os.path.join(d, ".self_promoted"))
-            if not is_self_promoted and not boundary_filter(child_name, child_ws):
+            if not boundary_filter(child_name, child_ws):
                 continue
             discovered.append(
                 ChildBoundaryDeliverables(
@@ -261,7 +258,7 @@ def aggregate_into_self_deliverables(
     Returns:
         AggregateReport with copied/conflicted/skipped lists.
     """
-    if parent_workspace is None or parent_workspace.deliverables_dir is None:
+    if parent_workspace is None or not getattr(parent_workspace, "outputs_dir", None):
         return AggregateReport()
 
     report = AggregateReport()
@@ -284,20 +281,18 @@ def aggregate_into_self_deliverables(
         elif namespace_strategy == NAMESPACE_FLAT:
             namespace = namespace_root or None
         else:
-            raise ValueError(
-                f"Unknown namespace_strategy: {namespace_strategy!r}"
-            )
+            raise ValueError(f"Unknown namespace_strategy: {namespace_strategy!r}")
 
         # Iterate the child's deliverable files explicitly so we can apply
         # conflict_strategy correctly.
-        child_dir = child.child_workspace.deliverables_dir
+        child_dir = child.child_workspace.outputs_dir
         for rel in child.deliverable_files:
             src_abs = os.path.join(child_dir, rel)
             if namespace:
                 dst_rel = os.path.join(namespace, rel)
             else:
                 dst_rel = rel
-            dst_abs = os.path.join(parent_workspace.deliverables_dir, dst_rel)
+            dst_abs = os.path.join(parent_workspace.outputs_dir, dst_rel)
 
             # Apply conflict strategy
             if dst_rel in seen_dst_to_src:
@@ -306,8 +301,7 @@ def aggregate_into_self_deliverables(
                 prev = seen_dst_to_src[dst_rel]
                 if conflict_strategy == CONFLICT_ERROR:
                     raise DeliverableConflictError(
-                        f"Conflict on {dst_rel!r}: "
-                        f"{prev[2]!r} vs {child.child_name!r}"
+                        f"Conflict on {dst_rel!r}: {prev[2]!r} vs {child.child_name!r}"
                     )
                 elif conflict_strategy == CONFLICT_FIRST_WINS:
                     report.conflicted.append(dst_rel)
@@ -348,18 +342,23 @@ def aggregate_into_self_deliverables(
 
             os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
             import shutil
+
             shutil.copy2(src_abs, dst_abs)
             report.copied.append((src_abs, dst_rel))
             seen_dst_to_src[dst_rel] = (
-                src_abs, os.path.getsize(src_abs), child.child_name
+                src_abs,
+                os.path.getsize(src_abs),
+                child.child_name,
             )
 
     # v1.7 AC7: log boundary events even when nothing was copied (full skip,
     # all conflicts) — empty events still need observability for debugging.
     logger.info(
         "Boundary aggregate: %d copied, %d conflicted, %d skipped → %s",
-        len(report.copied), len(report.conflicted), len(report.skipped),
-        parent_workspace.deliverables_dir,
+        len(report.copied),
+        len(report.conflicted),
+        len(report.skipped),
+        parent_workspace.outputs_dir,
     )
     return report
 
@@ -384,7 +383,9 @@ def surface_boundary_deliverables(
     if parent_workspace is None or child_workspace is None:
         return []
     return parent_workspace.surface_outputs_from(
-        child_workspace, namespace=namespace, skip_existing=skip_existing,
+        child_workspace,
+        namespace=namespace,
+        skip_existing=skip_existing,
     )
 
 
@@ -402,9 +403,8 @@ def _iter_inferencer_children(inferencer: Any) -> List[Tuple[str, Any]]:
     that method.
     """
     # Avoid circular import
-    from agent_foundation.common.inferencers.inferencer_base import (
-        InferencerBase,
-    )
+    from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
     if hasattr(inferencer, "_iter_child_inferencers"):
         try:
             # _iter_child_inferencers() yields just InferencerBase objects.
@@ -417,6 +417,7 @@ def _iter_inferencer_children(inferencer: Any) -> List[Tuple[str, Any]]:
             for child in inferencer._iter_child_inferencers():
                 # Try to find the attr name by scanning fields()
                 from attr import fields
+
                 attr_name = None
                 for f in fields(type(inferencer)):
                     if getattr(inferencer, f.name, None) is child:
@@ -426,7 +427,8 @@ def _iter_inferencer_children(inferencer: Any) -> List[Tuple[str, Any]]:
                     # Fallback: use workspace basename or class name
                     ws = getattr(child, "_workspace", None)
                     attr_name = (
-                        os.path.basename(ws.root) if ws is not None
+                        os.path.basename(ws.root)
+                        if ws is not None
                         else type(child).__name__
                     )
                 result.append((attr_name, child))
@@ -436,6 +438,7 @@ def _iter_inferencer_children(inferencer: Any) -> List[Tuple[str, Any]]:
             pass
     try:
         from attr import fields
+
         result = []
         for f in fields(type(inferencer)):
             v = getattr(inferencer, f.name, None)
@@ -447,8 +450,8 @@ def _iter_inferencer_children(inferencer: Any) -> List[Tuple[str, Any]]:
 
 
 def _list_deliverable_files(workspace: Any) -> List[str]:
-    """Return all file paths in workspace.deliverables_dir, recursively."""
-    d = workspace.deliverables_dir
+    """Return all deliverable file paths under ``workspace.outputs_dir``, recursively."""
+    d = workspace.outputs_dir
     if not (d and os.path.isdir(d)):
         return []
     result = []

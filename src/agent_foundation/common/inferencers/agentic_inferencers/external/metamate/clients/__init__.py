@@ -10,12 +10,16 @@ the Metamate platform, including:
 - FallbackClient: Fallback implementation
 """
 
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.fallback_client import FallbackClient
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.fallback_client import (
+    FallbackClient,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.interfaces import (
     FallbackClientInterface,
     MetamateClientInterface,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.metamate_client import MetamateClient
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.metamate_client import (
+    MetamateClient,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.mock_metamate_client import (
     MockMetamateClient,
 )

@@ -8,6 +8,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 17.1, 17.3, 17.4, 17.5**
 """
+
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -22,8 +23,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.knowledge_deleter import (
     ConfirmationRequiredError,
     DeleteConfig,
@@ -35,6 +34,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Test Helpers ──────────────────────────────────────────────────────────────
@@ -313,7 +313,9 @@ class TestRestoreBlockedBySupersedingPiece:
         assert result.success is False
         assert result.operation == "restore"
         assert result.error is not None
-        assert "superseded" in result.error.lower() or "supersed" in result.error.lower()
+        assert (
+            "superseded" in result.error.lower() or "supersed" in result.error.lower()
+        )
 
     @given(
         old_content=_content_strategy,

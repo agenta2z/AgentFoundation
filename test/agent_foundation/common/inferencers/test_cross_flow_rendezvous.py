@@ -93,9 +93,7 @@ class TestCrossFlowRendezvous(unittest.TestCase):
                 await rdv.arrive_and_wait(idx)
                 passed.append(idx)
 
-            await asyncio.wait_for(
-                asyncio.gather(arrive(0), arrive(1)), timeout=1.0
-            )
+            await asyncio.wait_for(asyncio.gather(arrive(0), arrive(1)), timeout=1.0)
             self.assertEqual(sorted(passed), [0, 1])
 
         _run(body())
@@ -160,9 +158,7 @@ class TestCrossFlowRendezvous(unittest.TestCase):
                     await rdv.arrive_and_wait(idx)
                     order.append(f"{idx}:r{r}")
 
-            await asyncio.wait_for(
-                asyncio.gather(flow(0, 3), flow(1, 3)), timeout=2.0
-            )
+            await asyncio.wait_for(asyncio.gather(flow(0, 3), flow(1, 3)), timeout=2.0)
             # Every round saw both flows (6 entries), and no flow ran ahead a full
             # round: at each round boundary both indices appear before the next.
             self.assertEqual(len(order), 6)
@@ -211,7 +207,9 @@ class TestCrossFlowRendezvous(unittest.TestCase):
             results: dict[int, object] = {}
 
             async def flow(idx):
-                results[idx] = await rdv.arrive_and_wait(idx, snapshot_fn=lambda: box["v"])
+                results[idx] = await rdv.arrive_and_wait(
+                    idx, snapshot_fn=lambda: box["v"]
+                )
 
             t0 = asyncio.ensure_future(flow(0))
             await asyncio.sleep(0.02)  # flow 0 is now waiting at the barrier

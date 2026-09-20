@@ -15,7 +15,6 @@ import os
 from unittest.mock import patch
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -29,13 +28,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
-
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -399,6 +394,4 @@ async def test_setup_child_workflows_propagation(tmp_workspace):
     assert result.plan_output is not None and result.plan_output != "", (
         "plan_output should be populated"
     )
-    assert result.executor_output is not None, (
-        "executor_output should be populated"
-    )
+    assert result.executor_output is not None, "executor_output should be populated"

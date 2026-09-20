@@ -1,5 +1,3 @@
-
-
 """Interactive checkpoint utilities for flow inferencers.
 
 Shared utility module (not mixin) to avoid MRO issues with dual inheritance
@@ -21,13 +19,10 @@ from agent_foundation.ui.input_modes import (
     ChoiceOption,
     InputMode,
     InputModeConfig,
-    single_choice,
     multiple_choices,
+    single_choice,
 )
-from agent_foundation.ui.interactive_base import (
-    InteractionFlags,
-    InteractiveBase,
-)
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +122,9 @@ async def checkpoint_plan_review(
     ]
 
     result = await run_checkpoint(
-        interactive, prompt, options,
+        interactive,
+        prompt,
+        options,
         default_action=default_action,
         allow_custom=True,
     )
@@ -180,17 +177,18 @@ async def checkpoint_breakdown_review(
         )
 
     options = [
-        ChoiceOption(label=q[:80], value=str(i))
-        for i, q in enumerate(sub_queries)
+        ChoiceOption(label=q[:80], value=str(i)) for i, q in enumerate(sub_queries)
     ]
     prompt = (
         "## Sub-query Selection\n\n"
         "Select which sub-queries to execute:\n\n"
-        + "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_queries))
+        + "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(sub_queries))
     )
 
     input_mode = multiple_choices(
-        options, allow_custom=False, prompt=prompt,
+        options,
+        allow_custom=False,
+        prompt=prompt,
     )
     await interactive.asend_response(
         prompt,
@@ -259,6 +257,8 @@ async def checkpoint_results_review(
         ChoiceOption(label="Modify and re-run", value="modify"),
     ]
     return await run_checkpoint(
-        interactive, prompt, options,
+        interactive,
+        prompt,
+        options,
         default_action=default_action,
     )

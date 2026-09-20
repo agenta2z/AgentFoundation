@@ -1,31 +1,31 @@
 # Configuration file for the Sphinx documentation builder.
 
 # -- Project information -----------------------------------------------------
-project = 'Generative Recommenders & Wukong Documentation'
-copyright = '2024'
-author = 'Generated Documentation'
-release = '1.0.0'
+project = "Generative Recommenders & Wukong Documentation"
+copyright = "2024"
+author = "Generated Documentation"
+release = "1.0.0"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.viewcode',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.intersphinx',
+    "sphinx.ext.autodoc",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
 ]
 
-templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # -- Options for HTML output -------------------------------------------------
-html_theme = 'alabaster'
-html_static_path = ['_static']
+html_theme = "alabaster"
+html_static_path = ["_static"]
 
 # -- Intersphinx configuration -----------------------------------------------
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    'torch': ('https://pytorch.org/docs/stable', None),
-    'tensorflow': ('https://www.tensorflow.org/api_docs/python', None),
+    "python": ("https://docs.python.org/3", None),
+    "torch": ("https://pytorch.org/docs/stable", None),
+    "tensorflow": ("https://www.tensorflow.org/api_docs/python", None),
 }
 
 # -- Napoleon settings -------------------------------------------------------

@@ -119,7 +119,8 @@ class CliRealPermissionModeTest(unittest.TestCase):
             # Sanity: the subprocess itself must not have crashed.
             if return_code is not None:
                 self.assertEqual(
-                    return_code, 0,
+                    return_code,
+                    0,
                     f"claude exited non-zero in plan mode: rc={return_code}, "
                     f"output={output!r}",
                 )
@@ -371,7 +372,8 @@ class CliRealPermissionModeMatrixTest(unittest.TestCase):
         # Every mode must have produced a successful subprocess call.
         for mode, obs in observations.items():
             self.assertEqual(
-                obs["return_code"], 0,
+                obs["return_code"],
+                0,
                 f"mode={mode}: subprocess exited rc={obs['return_code']}",
             )
             self.assertTrue(
@@ -424,7 +426,8 @@ class InferencerDefaultPermissionModeTest(unittest.TestCase):
             target = tmpdir / f"cli_default_{uuid.uuid4().hex[:8]}.txt"
             inf = ClaudeCodeCliInferencer(target_path=str(tmpdir), effort="low")
             self.assertEqual(
-                inf.permission_mode, "bypassPermissions",
+                inf.permission_mode,
+                "bypassPermissions",
                 "CLI inferencer default should be 'bypassPermissions'",
             )
             inf(self.PROMPT_TEMPLATE.format(path=target.as_posix()))
@@ -463,7 +466,8 @@ class InferencerDefaultPermissionModeTest(unittest.TestCase):
                 "SDK inferencer default should be None",
             )
             self.assertIn(
-                "Write", inf.allowed_tools,
+                "Write",
+                inf.allowed_tools,
                 "SDK inferencer default allowed_tools should include 'Write' — "
                 "that is what authorizes writes despite permission_mode=None",
             )
@@ -568,8 +572,12 @@ class CliEffortBehavioralTest(unittest.TestCase):
             f"result_chars={char_ratio:.2f}× wall_s="
             f"{high_eff['wall_s'] / low['wall_s']:.2f}×"
         )
-        self.assertIsNotNone(low["output_tokens"], "could not parse usage from low call")
-        self.assertIsNotNone(high_eff["output_tokens"], "could not parse usage from max call")
+        self.assertIsNotNone(
+            low["output_tokens"], "could not parse usage from low call"
+        )
+        self.assertIsNotNone(
+            high_eff["output_tokens"], "could not parse usage from max call"
+        )
         # (1) Total compute scaled: max produces ≥1.5× the output_tokens of
         # low. A coalesced/no-op flag would land near 1.0×.
         self.assertGreater(
@@ -585,7 +593,8 @@ class CliEffortBehavioralTest(unittest.TestCase):
         # ~equal. Hidden thinking is the only behavior that produces the
         # observed pattern of token_ratio > char_ratio.
         self.assertGreater(
-            token_ratio, char_ratio,
+            token_ratio,
+            char_ratio,
             f"effort=max would only be 'longer-answer effective' (not "
             f"extended-thinking effective) if output_tokens scaled the same "
             f"as result_chars. Observed token_ratio={token_ratio:.2f}× vs "
@@ -595,7 +604,8 @@ class CliEffortBehavioralTest(unittest.TestCase):
         # (3) Wall-clock must also grow — extended thinking is real compute,
         # not free. A coalesced flag would not produce 2× longer calls.
         self.assertGreater(
-            high_eff["wall_s"], low["wall_s"] * 1.3,
+            high_eff["wall_s"],
+            low["wall_s"] * 1.3,
             f"effort=max should take >1.3× wall-clock of low. "
             f"Got max={high_eff['wall_s']}s vs low={low['wall_s']}s.",
         )
@@ -616,11 +626,7 @@ class SdkEffortBehavioralTest(unittest.TestCase):
 
     async def _measure_via_sdk(self, level):
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-        from claude_agent_sdk.types import (
-            AssistantMessage,
-            ResultMessage,
-            TextBlock,
-        )
+        from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             options = ClaudeAgentOptions(
@@ -661,8 +667,12 @@ class SdkEffortBehavioralTest(unittest.TestCase):
             f"result_chars={char_ratio:.2f}× wall_s="
             f"{high_eff['wall_s'] / low['wall_s']:.2f}×"
         )
-        self.assertIsNotNone(low["output_tokens"], "no usage in SDK ResultMessage at low")
-        self.assertIsNotNone(high_eff["output_tokens"], "no usage in SDK ResultMessage at high")
+        self.assertIsNotNone(
+            low["output_tokens"], "no usage in SDK ResultMessage at low"
+        )
+        self.assertIsNotNone(
+            high_eff["output_tokens"], "no usage in SDK ResultMessage at high"
+        )
         # (1) Total compute scaled.
         self.assertGreater(
             high_eff["output_tokens"],
@@ -673,14 +683,16 @@ class SdkEffortBehavioralTest(unittest.TestCase):
         # (2) Smoking-gun for hidden thinking via SDK transport: tokens grew
         # strictly more than visible characters.
         self.assertGreater(
-            token_ratio, char_ratio,
+            token_ratio,
+            char_ratio,
             f"SDK effort=high would only be 'longer-answer effective' if "
             f"output_tokens scaled the same as result_chars. Observed "
             f"token_ratio={token_ratio:.2f}× vs char_ratio={char_ratio:.2f}×.",
         )
         # (3) Wall-clock grew — real compute through the SDK transport.
         self.assertGreater(
-            high_eff["wall_s"], low["wall_s"] * 1.3,
+            high_eff["wall_s"],
+            low["wall_s"] * 1.3,
             f"SDK effort=high should take >1.3× wall-clock of low. "
             f"Got high={high_eff['wall_s']}s vs low={low['wall_s']}s.",
         )

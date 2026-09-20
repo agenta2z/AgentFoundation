@@ -11,7 +11,6 @@ breaks; no silent degradation.
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
@@ -22,9 +21,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.claude_cod
     ClaudeCodeCliInferencer,
 )
 
-from .conftest import DEFAULT_TIMEOUT, skip_claude
 from ._helpers.mock_tools import MockToolExecutor
 from ._helpers.scripted_interactive import ScriptedInteractive
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 
 WIDGET_ENFORCEMENT_PROMPT = """\
@@ -118,10 +117,12 @@ async def test_conversational_adapter_with_scripted_user_input(tmp_workspace):
         max_iterations=3,
         tool_executor=tool_executor,
     )
-    interactive = ScriptedInteractive(responses=[
-        {"user_input": "data.txt"},
-        {"user_input": "yes"},
-    ])
+    interactive = ScriptedInteractive(
+        responses=[
+            {"user_input": "data.txt"},
+            {"user_input": "yes"},
+        ]
+    )
     # Fallback: plain claude in case widget protocol can't drive the
     # tool-execution flow (documented Day-1 risk).
     fallback = ClaudeCodeCliInferencer(

@@ -163,7 +163,9 @@ async def run_demo(inferencer_kwargs: dict) -> None:
     # Verify sessions are different
     assert session_id_a != session_id_b, "Sessions should have different IDs!"
     print()
-    print(f"  ✓ Sessions are different: A={session_id_a[:12]}... B={session_id_b[:12]}...")
+    print(
+        f"  ✓ Sessions are different: A={session_id_a[:12]}... B={session_id_b[:12]}..."
+    )
 
     # =========================================================
     # STEP 3: Resume Session A — ask for the secret
@@ -187,7 +189,9 @@ async def run_demo(inferencer_kwargs: dict) -> None:
 
     recall_a = secret_a.lower() in response_a.lower()
     print()
-    print(f"  {'✅' if recall_a else '❌'} Expected '{secret_a}': {'FOUND' if recall_a else 'NOT FOUND'} in response")
+    print(
+        f"  {'✅' if recall_a else '❌'} Expected '{secret_a}': {'FOUND' if recall_a else 'NOT FOUND'} in response"
+    )
 
     # =========================================================
     # STEP 4: Resume Session B — ask for the secret
@@ -211,7 +215,9 @@ async def run_demo(inferencer_kwargs: dict) -> None:
 
     recall_b = secret_b.lower() in response_b.lower()
     print()
-    print(f"  {'✅' if recall_b else '❌'} Expected '{secret_b}': {'FOUND' if recall_b else 'NOT FOUND'} in response")
+    print(
+        f"  {'✅' if recall_b else '❌'} Expected '{secret_b}': {'FOUND' if recall_b else 'NOT FOUND'} in response"
+    )
 
     # =========================================================
     # SUMMARY
@@ -220,8 +226,12 @@ async def run_demo(inferencer_kwargs: dict) -> None:
     print("=" * 70)
     print("RESULTS")
     print("=" * 70)
-    print(f"  Session A ({session_id_a[:12]}...): secret='{secret_a}' → {'✅ RECALLED' if recall_a else '❌ FAILED'}")
-    print(f"  Session B ({session_id_b[:12]}...): secret='{secret_b}' → {'✅ RECALLED' if recall_b else '❌ FAILED'}")
+    print(
+        f"  Session A ({session_id_a[:12]}...): secret='{secret_a}' → {'✅ RECALLED' if recall_a else '❌ FAILED'}"
+    )
+    print(
+        f"  Session B ({session_id_b[:12]}...): secret='{secret_b}' → {'✅ RECALLED' if recall_b else '❌ FAILED'}"
+    )
     print()
 
     if recall_a and recall_b:

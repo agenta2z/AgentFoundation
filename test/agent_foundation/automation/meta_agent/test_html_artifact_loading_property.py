@@ -15,13 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.collector import TraceCollector
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -42,14 +38,21 @@ html_content_st = st.text(
 num_steps_st = st.integers(min_value=1, max_value=10)
 
 # Action types for JSONL entries
-action_type_st = st.sampled_from([
-    "click", "input_text", "visit_url", "scroll", "wait",
-])
+action_type_st = st.sampled_from(
+    [
+        "click",
+        "input_text",
+        "visit_url",
+        "scroll",
+        "wait",
+    ]
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class MockAgentForArtifacts:
     """Agent mock that returns a result pointing to a session directory."""
@@ -86,17 +89,17 @@ def _create_session_with_artifacts(
         "status": "completed",
         "session_dir": str(session_dir),
         "session_log_file": "session.jsonl",
-        "turns": [{
-            "turn_number": 1,
-            "start_timestamp": "2024-01-01T10:00:00",
-            "log_file": "turn_001",
-            "artifacts": [],
-            "end_timestamp": "2024-01-01T10:05:00",
-        }],
+        "turns": [
+            {
+                "turn_number": 1,
+                "start_timestamp": "2024-01-01T10:00:00",
+                "log_file": "turn_001",
+                "artifacts": [],
+                "end_timestamp": "2024-01-01T10:05:00",
+            }
+        ],
     }
-    (session_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2)
-    )
+    (session_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     # Create .parts/ directory
     parts_dir = turn_dir / "session.jsonl.parts"
@@ -123,9 +126,7 @@ def _create_session_with_artifacts(
 
             if html_after_contents[i] is not None:
                 fname = f"after_{i}.html"
-                (parts_dir / fname).write_text(
-                    html_after_contents[i], encoding="utf-8"
-                )
+                (parts_dir / fname).write_text(html_after_contents[i], encoding="utf-8")
                 entry["body_html_after_last_action"] = {
                     "__parts_file__": fname,
                     "__value_type__": "str",
@@ -158,9 +159,7 @@ class TestHtmlArtifactLoadingProperty:
         data=st.data(),
     )
     @settings(max_examples=100, deadline=None)
-    def test_html_after_loaded_from_parts(
-        self, num_steps: int, data: st.DataObject
-    ):
+    def test_html_after_loaded_from_parts(self, num_steps: int, data: st.DataObject):
         """
         For any trace with N steps where each step has an html_after
         artifact in .parts/, every TraceStep.html_after SHALL contain
@@ -202,9 +201,7 @@ class TestHtmlArtifactLoadingProperty:
         data=st.data(),
     )
     @settings(max_examples=100, deadline=None)
-    def test_html_before_loaded_from_parts(
-        self, num_steps: int, data: st.DataObject
-    ):
+    def test_html_before_loaded_from_parts(self, num_steps: int, data: st.DataObject):
         """
         For any trace with N steps where each step has an html_before
         artifact in .parts/, every TraceStep.html_before SHALL contain
@@ -296,9 +293,7 @@ class TestHtmlArtifactLoadingProperty:
         data=st.data(),
     )
     @settings(max_examples=100, deadline=None)
-    def test_html_before_chaining_fills_gaps(
-        self, num_steps: int, data: st.DataObject
-    ):
+    def test_html_before_chaining_fills_gaps(self, num_steps: int, data: st.DataObject):
         """
         For any trace where html_before is missing for step i but
         html_after is present for step i-1, the chaining logic SHALL
@@ -337,8 +332,8 @@ class TestHtmlArtifactLoadingProperty:
         # Steps 1..N-1 should have html_before chained from previous html_after
         for i in range(1, num_steps):
             assert steps[i].html_before == html_after_contents[i - 1], (
-                f"Step {i}: html_before should be chained from step {i-1}'s "
-                f"html_after ('{html_after_contents[i-1]}'), "
+                f"Step {i}: html_before should be chained from step {i - 1}'s "
+                f"html_after ('{html_after_contents[i - 1]}'), "
                 f"got '{steps[i].html_before}'"
             )
 

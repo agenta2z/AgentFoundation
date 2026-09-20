@@ -21,7 +21,9 @@ from typing import Any
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.clients.interfaces import (
     MetamateClientInterface,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.exceptions import MetamateError
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.exceptions import (
+    MetamateError,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import (
     Citation,
     DebugAssistantResults,

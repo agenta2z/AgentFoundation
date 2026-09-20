@@ -10,7 +10,7 @@ from pathlib import Path
 # Setup import paths
 _current_file = Path(__file__).resolve()
 _examples_dir = _current_file.parent
-while _examples_dir.name != 'examples' and _examples_dir.parent != _examples_dir:
+while _examples_dir.name != "examples" and _examples_dir.parent != _examples_dir:
     _examples_dir = _examples_dir.parent
 _project_root = _examples_dir.parent
 _src_dir = _project_root / "src"

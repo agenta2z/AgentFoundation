@@ -15,10 +15,10 @@ Backward-compatibility shim for ``agentic_retriever`` imports.
 # Re-export everything from the canonical location
 from agent_foundation.knowledge.retrieval.retrieval_pipeline import (  # noqa: F401
     AgenticRetrievalResult,
-    QueryExpander,
-    SubQuery,
     create_domain_decomposer,
     create_llm_decomposer,
+    QueryExpander,
+    SubQuery,
 )
 
 __all__ = [

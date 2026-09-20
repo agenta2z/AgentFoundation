@@ -1,20 +1,23 @@
 """
 Dash application with both chat interaction and log debugging capabilities.
 """
-from typing import Any, Callable, Dict, List, Optional
-from datetime import datetime
-from threading import Thread
-from queue import Queue, Empty
-import dash
-from dash import html, dcc
-from dash.dependencies import Input, Output, State, ALL
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 
-from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
+from datetime import datetime
+from queue import Empty, Queue
+from threading import Thread
+from typing import Any, Callable, Dict, List, Optional
+
+import dash
+import dash_bootstrap_components as dbc
 from agent_foundation.ui.dash_interactive.components.tabbed_panel import TabbedPanel
-from agent_foundation.ui.dash_interactive.utils.dummy_graph_executor import execute_and_collect_logs
+from agent_foundation.ui.dash_interactive.dash_interactive_app import DashInteractiveApp
+from agent_foundation.ui.dash_interactive.utils.dummy_graph_executor import (
+    execute_and_collect_logs,
+)
 from agent_foundation.ui.queue_interactive import QueueInteractive
+from dash import dcc, html
+from dash.dependencies import ALL, Input, Output, State
+from dash.exceptions import PreventUpdate
 
 
 class DashInteractiveAppWithLogs(DashInteractiveApp):
@@ -45,7 +48,7 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         message_handler: Optional[Callable[[str], str]] = None,
         queue_service=None,  # Optional StorageBasedQueueService for web agent integration
         custom_monitor_tabs: list = None,  # Optional list of custom monitor tabs
-        custom_main_tabs: list = None  # Optional list of custom main tabs
+        custom_main_tabs: list = None,  # Optional list of custom main tabs
     ):
         """
         Initialize the Dash interactive app with log debugging.
@@ -74,8 +77,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         self.agent_status_messages = {}  # session_id -> list of status messages
 
         # Custom monitor tabs - use provided tabs or empty list
-        self.custom_monitor_tabs = custom_monitor_tabs if custom_monitor_tabs is not None else []
-        
+        self.custom_monitor_tabs = (
+            custom_monitor_tabs if custom_monitor_tabs is not None else []
+        )
+
         # Custom main tabs - use provided tabs or empty list
         self.custom_main_tabs = custom_main_tabs if custom_main_tabs is not None else []
 
@@ -84,14 +89,16 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         self.tabbed_panel = TabbedPanel(
             component_id="main-panel",
             custom_monitor_tabs=self.custom_monitor_tabs,
-            custom_main_tabs=self.custom_main_tabs
+            custom_main_tabs=self.custom_main_tabs,
         )
 
         # Call parent constructor (will create chat_history, chat_window, layout, and callbacks)
-        super().__init__(title=title, port=port, debug=debug, message_handler=message_handler)
+        super().__init__(
+            title=title, port=port, debug=debug, message_handler=message_handler
+        )
 
         # Add custom JavaScript for Ctrl+Enter keyboard shortcut and split pane resizer
-        self.app.index_string = '''
+        self.app.index_string = """
         <!DOCTYPE html>
         <html>
             <head>
@@ -284,63 +291,59 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 </footer>
             </body>
         </html>
-        '''
+        """
 
     def _create_layout(self) -> html.Div:
         """Create the main application layout with extended features."""
         return html.Div(
             children=[
                 # Store components for maintaining state (from parent + extensions)
-                dcc.Store(id='sessions-store', data=[]),
-                dcc.Store(id='current-session-store', data=None),
-                dcc.Store(id='messages-store', data={}),
-                dcc.Store(id='log-data-store', data=None),
-                dcc.Store(id='page-visibility-store', data={'visible': True, 'timestamp': 0}),
-
+                dcc.Store(id="sessions-store", data=[]),
+                dcc.Store(id="current-session-store", data=None),
+                dcc.Store(id="messages-store", data={}),
+                dcc.Store(id="log-data-store", data=None),
+                dcc.Store(
+                    id="page-visibility-store", data={"visible": True, "timestamp": 0}
+                ),
                 # Interval components for auto-refresh
                 dcc.Interval(
-                    id='response-poll-interval',
+                    id="response-poll-interval",
                     interval=1000,  # Poll every 1 second for agent responses
-                    n_intervals=0
+                    n_intervals=0,
                 ),
                 dcc.Interval(
-                    id='log-refresh-interval',
+                    id="log-refresh-interval",
                     interval=3000,  # Refresh logs every 3 seconds
-                    n_intervals=0
+                    n_intervals=0,
                 ),
                 dcc.Interval(
-                    id='visibility-check-interval',
+                    id="visibility-check-interval",
                     interval=2000,  # Check visibility every 2 seconds
-                    n_intervals=0
+                    n_intervals=0,
                 ),
                 dcc.Interval(
-                    id='agent-status-poll-interval',
+                    id="agent-status-poll-interval",
                     interval=1000,  # Poll for agent status updates every 1 second
-                    n_intervals=0
+                    n_intervals=0,
                 ),
-
                 # Main container with flexbox layout
                 html.Div(
                     children=[
                         # Left sidebar - Chat history (from parent)
                         self.chat_history.layout(),
-
                         # Right panel - Tabbed interface (overridden)
-                        self.tabbed_panel.layout()
+                        self.tabbed_panel.layout(),
                     ],
                     style={
-                        'display': 'flex',
-                        'height': '100vh',
-                        'width': '100vw',
-                        'overflow': 'hidden',
-                        'fontFamily': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-                    }
-                )
+                        "display": "flex",
+                        "height": "100vh",
+                        "width": "100vw",
+                        "overflow": "hidden",
+                        "fontFamily": '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                    },
+                ),
             ],
-            style={
-                'margin': '0',
-                'padding': '0'
-            }
+            style={"margin": "0", "padding": "0"},
         )
 
     def _register_polling_callback(self):
@@ -353,20 +356,20 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         Triggers on both regular interval and page visibility changes to ensure
         responses are caught even when tab is inactive.
         """
+
         # Callback to poll response queue and add new messages to UI
         @self.app.callback(
-            Output('messages-store', 'data', allow_duplicate=True),
+            Output("messages-store", "data", allow_duplicate=True),
             [
-                Input('response-poll-interval', 'n_intervals'),
-                Input('page-visibility-store', 'data')
+                Input("response-poll-interval", "n_intervals"),
+                Input("page-visibility-store", "data"),
             ],
-            [
-                State('current-session-store', 'data'),
-                State('messages-store', 'data')
-            ],
-            prevent_initial_call=True
+            [State("current-session-store", "data"), State("messages-store", "data")],
+            prevent_initial_call=True,
         )
-        def poll_agent_responses(n_intervals, visibility_data, session_id, messages_store):
+        def poll_agent_responses(
+            n_intervals, visibility_data, session_id, messages_store
+        ):
             """Poll response queue and add new messages to UI."""
             if not session_id:
                 return messages_store
@@ -377,15 +380,17 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 new_responses = []
                 try:
                     while True:
-                        response_data = self.queue_service.get('agent_response', blocking=False, timeout=0)
+                        response_data = self.queue_service.get(
+                            "agent_response", blocking=False, timeout=0
+                        )
                         if response_data is None:
                             break
 
                         # Check if response is for current session
                         if isinstance(response_data, dict):
-                            response_session_id = response_data.get('session_id')
+                            response_session_id = response_data.get("session_id")
                             if response_session_id == session_id:
-                                response_content = response_data.get('response', '')
+                                response_content = response_data.get("response", "")
                                 new_responses.append(response_content)
                         elif isinstance(response_data, str):
                             # Backward compatibility: plain string response
@@ -399,17 +404,17 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                         if response == "[AGENT_COMPLETED]":
                             # Optional: Show completion indicator
                             assistant_msg = {
-                                'role': 'system',
-                                'content': 'Agent task completed.',
-                                'timestamp': datetime.now().strftime('%H:%M:%S')
+                                "role": "system",
+                                "content": "Agent task completed.",
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
                             }
                             messages_store[session_id].append(assistant_msg)
                             continue
 
                         assistant_msg = {
-                            'role': 'assistant',
-                            'content': response,
-                            'timestamp': datetime.now().strftime('%H:%M:%S')
+                            "role": "assistant",
+                            "content": response,
+                            "timestamp": datetime.now().strftime("%H:%M:%S"),
                         }
                         messages_store[session_id].append(assistant_msg)
 
@@ -434,17 +439,17 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                         if response == "[AGENT_COMPLETED]":
                             # Optional: Show completion indicator
                             assistant_msg = {
-                                'role': 'system',
-                                'content': 'Agent task completed.',
-                                'timestamp': datetime.now().strftime('%H:%M:%S')
+                                "role": "system",
+                                "content": "Agent task completed.",
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
                             }
                             messages_store[session_id].append(assistant_msg)
                             continue
 
                         assistant_msg = {
-                            'role': 'assistant',
-                            'content': response,
-                            'timestamp': datetime.now().strftime('%H:%M:%S')
+                            "role": "assistant",
+                            "content": response,
+                            "timestamp": datetime.now().strftime("%H:%M:%S"),
                         }
                         messages_store[session_id].append(assistant_msg)
 
@@ -474,9 +479,9 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return {visible: isVisible, timestamp: timestamp};
             }
             """,
-            Output('page-visibility-store', 'data'),
-            Input('visibility-check-interval', 'n_intervals'),
-            State('page-visibility-store', 'data')
+            Output("page-visibility-store", "data"),
+            Input("visibility-check-interval", "n_intervals"),
+            State("page-visibility-store", "data"),
         )
 
         # === Register parent session callbacks (reusable) ===
@@ -486,12 +491,9 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         # === Override message callbacks (different component IDs for tabbed interface) ===
         # Callback for loading messages of current session
         @self.app.callback(
-            Output('main-panel-chat-window-messages', 'children'),
-            [
-                Input('current-session-store', 'data'),
-                Input('messages-store', 'data')
-            ],
-            prevent_initial_call=False
+            Output("main-panel-chat-window-messages", "children"),
+            [Input("current-session-store", "data"), Input("messages-store", "data")],
+            prevent_initial_call=False,
         )
         def load_session_messages(session_id, messages_store):
             if session_id and session_id in messages_store:
@@ -502,60 +504,76 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         # Callback for sending messages
         @self.app.callback(
             [
-                Output('messages-store', 'data', allow_duplicate=True),
-                Output('main-panel-chat-window-input', 'value'),
-                Output('sessions-store', 'data', allow_duplicate=True),
-                Output('current-session-store', 'data', allow_duplicate=True),
-                Output('main-panel-chat-tab', 'style', allow_duplicate=True),
-                Output('main-panel-log-debug-tab', 'style', allow_duplicate=True),
-                Output('main-panel-chat-btn', 'style', allow_duplicate=True),
-                Output('main-panel-log-btn', 'style', allow_duplicate=True)
+                Output("messages-store", "data", allow_duplicate=True),
+                Output("main-panel-chat-window-input", "value"),
+                Output("sessions-store", "data", allow_duplicate=True),
+                Output("current-session-store", "data", allow_duplicate=True),
+                Output("main-panel-chat-tab", "style", allow_duplicate=True),
+                Output("main-panel-log-debug-tab", "style", allow_duplicate=True),
+                Output("main-panel-chat-btn", "style", allow_duplicate=True),
+                Output("main-panel-log-btn", "style", allow_duplicate=True),
             ],
+            [Input("main-panel-chat-window-send-btn", "n_clicks")],
             [
-                Input('main-panel-chat-window-send-btn', 'n_clicks')
+                State("main-panel-chat-window-input", "value"),
+                State("current-session-store", "data"),
+                State("messages-store", "data"),
+                State("sessions-store", "data"),
             ],
-            [
-                State('main-panel-chat-window-input', 'value'),
-                State('current-session-store', 'data'),
-                State('messages-store', 'data'),
-                State('sessions-store', 'data')
-            ],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
-        def send_message(send_clicks, message_text, session_id, messages_store, sessions):
+        def send_message(
+            send_clicks, message_text, session_id, messages_store, sessions
+        ):
             # Styles for showing chat tab (active)
             chat_tab_active_styles = (
-                {'display': 'block', 'height': '100%'},  # chat tab visible
-                {'display': 'none', 'height': '100%'},   # log tab hidden
-                {'padding': '12px 24px', 'backgroundColor': '#19C37D', 'color': '#ECECF1',
-                 'border': 'none', 'borderBottom': '2px solid #19C37D', 'cursor': 'pointer',
-                 'fontSize': '14px', 'fontWeight': '500', 'flex': '1'},  # chat button active
-                {'padding': '12px 24px', 'backgroundColor': '#40414F', 'color': '#8E8EA0',
-                 'border': 'none', 'borderBottom': '2px solid #40414F', 'cursor': 'pointer',
-                 'fontSize': '14px', 'fontWeight': '500', 'flex': '1'}   # log button inactive
+                {"display": "block", "height": "100%"},  # chat tab visible
+                {"display": "none", "height": "100%"},  # log tab hidden
+                {
+                    "padding": "12px 24px",
+                    "backgroundColor": "#19C37D",
+                    "color": "#ECECF1",
+                    "border": "none",
+                    "borderBottom": "2px solid #19C37D",
+                    "cursor": "pointer",
+                    "fontSize": "14px",
+                    "fontWeight": "500",
+                    "flex": "1",
+                },  # chat button active
+                {
+                    "padding": "12px 24px",
+                    "backgroundColor": "#40414F",
+                    "color": "#8E8EA0",
+                    "border": "none",
+                    "borderBottom": "2px solid #40414F",
+                    "cursor": "pointer",
+                    "fontSize": "14px",
+                    "fontWeight": "500",
+                    "flex": "1",
+                },  # log button inactive
             )
 
             if not message_text or not message_text.strip():
-                return messages_store, '', sessions, session_id, *chat_tab_active_styles
+                return messages_store, "", sessions, session_id, *chat_tab_active_styles
 
             # Create session if none exists
             if not session_id:
                 session_id = f"session_1_{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 new_session = {
-                    'id': session_id,
-                    'title': 'New Chat',
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
-                    'active': True
+                    "id": session_id,
+                    "title": "New Chat",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "active": True,
                 }
                 sessions.append(new_session)
                 messages_store[session_id] = []
 
             # Add user message
-            timestamp = datetime.now().strftime('%H:%M:%S')
+            timestamp = datetime.now().strftime("%H:%M:%S")
             user_msg = {
-                'role': 'user',
-                'content': message_text.strip(),
-                'timestamp': timestamp
+                "role": "user",
+                "content": message_text.strip(),
+                "timestamp": timestamp,
             }
 
             if session_id not in messages_store:
@@ -570,16 +588,21 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 try:
                     # Try calling with all parameters (newest signature)
                     import inspect
+
                     sig = inspect.signature(self.message_handler)
                     param_count = len(sig.parameters)
 
                     if param_count >= 3:
                         # Newest signature: handler(message, session_id, all_session_ids)
                         all_session_ids = list(messages_store.keys())
-                        response = self.message_handler(message_text.strip(), session_id, all_session_ids)
+                        response = self.message_handler(
+                            message_text.strip(), session_id, all_session_ids
+                        )
                     elif param_count >= 2:
                         # Old signature: handler(message, session_id)
-                        response = self.message_handler(message_text.strip(), session_id)
+                        response = self.message_handler(
+                            message_text.strip(), session_id
+                        )
                     else:
                         # Oldest signature: handler(message)
                         response = self.message_handler(message_text.strip())
@@ -604,16 +627,21 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 try:
                     # Try calling with all parameters (newest signature)
                     import inspect
+
                     sig = inspect.signature(self.message_handler)
                     param_count = len(sig.parameters)
 
                     if param_count >= 3:
                         # Newest signature: handler(message, session_id, all_session_ids)
                         all_session_ids = list(messages_store.keys())
-                        response = self.message_handler(message_text.strip(), session_id, all_session_ids)
+                        response = self.message_handler(
+                            message_text.strip(), session_id, all_session_ids
+                        )
                     elif param_count >= 2:
                         # Old signature: handler(message, session_id)
-                        response = self.message_handler(message_text.strip(), session_id)
+                        response = self.message_handler(
+                            message_text.strip(), session_id
+                        )
                     else:
                         # Oldest signature: handler(message)
                         response = self.message_handler(message_text.strip())
@@ -622,40 +650,44 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
 
                 # Add assistant response
                 assistant_msg = {
-                    'role': 'assistant',
-                    'content': response,
-                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                    "role": "assistant",
+                    "content": response,
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
                 }
                 messages_store[session_id].append(assistant_msg)
 
             # Update session title with first message if it's "New Chat"
             for session in sessions:
-                if session['id'] == session_id and session['title'].startswith('New Chat'):
+                if session["id"] == session_id and session["title"].startswith(
+                    "New Chat"
+                ):
                     words = message_text.split()[:5]
-                    session['title'] = ' '.join(words) + ('...' if len(words) >= 5 else '')
+                    session["title"] = " ".join(words) + (
+                        "..." if len(words) >= 5 else ""
+                    )
                     break
 
             # Mark this session as active in the sessions list
             for session in sessions:
-                session['active'] = (session['id'] == session_id)
+                session["active"] = session["id"] == session_id
 
             # Return with session_id and chat tab active styles to automatically select session and switch to Chat Interaction tab
-            return messages_store, '', sessions, session_id, *chat_tab_active_styles
+            return messages_store, "", sessions, session_id, *chat_tab_active_styles
 
         # === Tab switching callbacks ===
 
         @self.app.callback(
             [
-                Output('main-panel-chat-tab', 'style'),
-                Output('main-panel-log-debug-tab', 'style'),
-                Output('main-panel-chat-btn', 'style'),
-                Output('main-panel-log-btn', 'style')
+                Output("main-panel-chat-tab", "style"),
+                Output("main-panel-log-debug-tab", "style"),
+                Output("main-panel-chat-btn", "style"),
+                Output("main-panel-log-btn", "style"),
             ],
             [
-                Input('main-panel-chat-btn', 'n_clicks'),
-                Input('main-panel-log-btn', 'n_clicks')
+                Input("main-panel-chat-btn", "n_clicks"),
+                Input("main-panel-log-btn", "n_clicks"),
             ],
-            prevent_initial_call=False
+            prevent_initial_call=False,
         )
         def switch_tabs(chat_clicks, log_clicks):
             ctx = dash.callback_context
@@ -663,229 +695,349 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             # Default to chat tab
             if not ctx.triggered:
                 return (
-                    {'display': 'block', 'height': '100%'},
-                    {'display': 'none', 'height': '100%'},
+                    {"display": "block", "height": "100%"},
+                    {"display": "none", "height": "100%"},
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#19C37D',
-                        'color': '#ECECF1', 'border': 'none',
-                        'borderBottom': '2px solid #19C37D', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
+                        "padding": "12px 24px",
+                        "backgroundColor": "#19C37D",
+                        "color": "#ECECF1",
+                        "border": "none",
+                        "borderBottom": "2px solid #19C37D",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
                     },
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#40414F',
-                        'color': '#8E8EA0', 'border': 'none',
-                        'borderBottom': '2px solid transparent', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
-                    }
+                        "padding": "12px 24px",
+                        "backgroundColor": "#40414F",
+                        "color": "#8E8EA0",
+                        "border": "none",
+                        "borderBottom": "2px solid transparent",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
+                    },
                 )
 
-            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-            if button_id == 'main-panel-log-btn':
+            if button_id == "main-panel-log-btn":
                 # Show log tab
                 return (
-                    {'display': 'none', 'height': '100%'},
-                    {'display': 'block', 'height': '100%'},
+                    {"display": "none", "height": "100%"},
+                    {"display": "block", "height": "100%"},
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#40414F',
-                        'color': '#8E8EA0', 'border': 'none',
-                        'borderBottom': '2px solid transparent', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
+                        "padding": "12px 24px",
+                        "backgroundColor": "#40414F",
+                        "color": "#8E8EA0",
+                        "border": "none",
+                        "borderBottom": "2px solid transparent",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
                     },
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#19C37D',
-                        'color': '#ECECF1', 'border': 'none',
-                        'borderBottom': '2px solid #19C37D', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
-                    }
+                        "padding": "12px 24px",
+                        "backgroundColor": "#19C37D",
+                        "color": "#ECECF1",
+                        "border": "none",
+                        "borderBottom": "2px solid #19C37D",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
+                    },
                 )
             else:
                 # Show chat tab
                 return (
-                    {'display': 'block', 'height': '100%'},
-                    {'display': 'none', 'height': '100%'},
+                    {"display": "block", "height": "100%"},
+                    {"display": "none", "height": "100%"},
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#19C37D',
-                        'color': '#ECECF1', 'border': 'none',
-                        'borderBottom': '2px solid #19C37D', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
+                        "padding": "12px 24px",
+                        "backgroundColor": "#19C37D",
+                        "color": "#ECECF1",
+                        "border": "none",
+                        "borderBottom": "2px solid #19C37D",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
                     },
                     {
-                        'padding': '12px 24px', 'backgroundColor': '#40414F',
-                        'color': '#8E8EA0', 'border': 'none',
-                        'borderBottom': '2px solid transparent', 'cursor': 'pointer',
-                        'fontSize': '14px', 'fontWeight': '500', 'flex': '1'
-                    }
+                        "padding": "12px 24px",
+                        "backgroundColor": "#40414F",
+                        "color": "#8E8EA0",
+                        "border": "none",
+                        "borderBottom": "2px solid transparent",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "flex": "1",
+                    },
                 )
 
         # === Log debugging callbacks ===
 
         # Update log graph visualization
         @self.app.callback(
-            Output('main-panel-log-graph-graph', 'figure'),
+            Output("main-panel-log-graph-graph", "figure"),
             [
-                Input('log-data-store', 'data'),
-                Input('main-panel-log-graph-label-mode', 'value')
+                Input("log-data-store", "data"),
+                Input("main-panel-log-graph-label-mode", "value"),
             ],
-            prevent_initial_call=False
+            prevent_initial_call=False,
         )
         def update_log_graph(log_data, label_mode):
             # Default to 'name' if not specified
             if label_mode is None:
-                label_mode = 'name'
+                label_mode = "name"
 
             if log_data:
                 # Check if this is graph data (WorkGraph structure) or hierarchy (tree structure)
-                if 'graph_data' in log_data:
+                if "graph_data" in log_data:
                     # Handle WorkGraph DAG structure
-                    return self.tabbed_panel.log_graph.create_figure_from_graph(log_data['graph_data'], label_mode)
-                elif 'hierarchy' in log_data:
+                    return self.tabbed_panel.log_graph.create_figure_from_graph(
+                        log_data["graph_data"], label_mode
+                    )
+                elif "hierarchy" in log_data:
                     # Handle standard tree hierarchy
-                    return self.tabbed_panel.log_graph.create_figure(log_data['hierarchy'], label_mode)
+                    return self.tabbed_panel.log_graph.create_figure(
+                        log_data["hierarchy"], label_mode
+                    )
             return self.tabbed_panel.log_graph.create_figure([])
 
         # Update log details when graph node is clicked
         @self.app.callback(
             [
-                Output('main-panel-log-details-logs-container', 'children'),
-                Output('main-panel-log-details-group-info', 'children'),
-                Output('main-panel-log-details-pagination-controls', 'children'),
-                Output('main-panel-log-details-pagination-state', 'data')
+                Output("main-panel-log-details-logs-container", "children"),
+                Output("main-panel-log-details-group-info", "children"),
+                Output("main-panel-log-details-pagination-controls", "children"),
+                Output("main-panel-log-details-pagination-state", "data"),
             ],
-            [Input('main-panel-log-graph-graph', 'clickData')],
-            [State('log-data-store', 'data')],
-            prevent_initial_call=False
+            [Input("main-panel-log-graph-graph", "clickData")],
+            [State("log-data-store", "data")],
+            prevent_initial_call=False,
         )
         def update_log_details(click_data, log_data):
             if not click_data or not log_data:
-                logs, group_info, pagination = self.tabbed_panel.log_details.update_logs([], "", log_group_id=None)
-                return logs, group_info, pagination, {'page': 0, 'show_all': False}
+                logs, group_info, pagination = (
+                    self.tabbed_panel.log_details.update_logs([], "", log_group_id=None)
+                )
+                return logs, group_info, pagination, {"page": 0, "show_all": False}
 
             # Extract clicked node's log group ID
-            point = click_data['points'][0]
-            log_group_id = point.get('customdata', [''])[0]
+            point = click_data["points"][0]
+            log_group_id = point.get("customdata", [""])[0]
 
-            if log_group_id and log_group_id in log_data['log_groups']:
-                logs = log_data['log_groups'][log_group_id]
+            if log_group_id and log_group_id in log_data["log_groups"]:
+                logs = log_data["log_groups"][log_group_id]
                 group_info = f"Log Group: {log_group_id} ({len(logs)} entries)"
                 # Pass log_group_id to enable caching
-                rendered_logs, group_info, pagination = self.tabbed_panel.log_details.update_logs(
-                    logs, group_info, page=0, show_all=False, log_group_id=log_group_id
+                rendered_logs, group_info, pagination = (
+                    self.tabbed_panel.log_details.update_logs(
+                        logs,
+                        group_info,
+                        page=0,
+                        show_all=False,
+                        log_group_id=log_group_id,
+                    )
                 )
-                return rendered_logs, group_info, pagination, {'page': 0, 'show_all': False}
+                return (
+                    rendered_logs,
+                    group_info,
+                    pagination,
+                    {"page": 0, "show_all": False},
+                )
 
-            logs, group_info, pagination = self.tabbed_panel.log_details.update_logs([], "No logs found", log_group_id=None)
-            return logs, group_info, pagination, {'page': 0, 'show_all': False}
+            logs, group_info, pagination = self.tabbed_panel.log_details.update_logs(
+                [], "No logs found", log_group_id=None
+            )
+            return logs, group_info, pagination, {"page": 0, "show_all": False}
 
         # Toggle between Plotly and Cytoscape rendering modes
         @self.app.callback(
             [
-                Output('main-panel-log-graph-plotly-container', 'style'),
-                Output('main-panel-log-graph-cytoscape-container', 'style')
+                Output("main-panel-log-graph-plotly-container", "style"),
+                Output("main-panel-log-graph-cytoscape-container", "style"),
             ],
-            [Input('main-panel-log-graph-rendering-mode', 'value')],
-            prevent_initial_call=False
+            [Input("main-panel-log-graph-rendering-mode", "value")],
+            prevent_initial_call=False,
         )
         def toggle_graph_rendering_mode(mode):
-            if mode == 'plotly':
-                return {'display': 'block', 'height': 'calc(100% - 120px)'}, {'display': 'none', 'height': 'calc(100% - 120px)'}
+            if mode == "plotly":
+                return {"display": "block", "height": "calc(100% - 120px)"}, {
+                    "display": "none",
+                    "height": "calc(100% - 120px)",
+                }
             else:  # cytoscape
-                return {'display': 'none', 'height': 'calc(100% - 120px)'}, {'display': 'block', 'height': 'calc(100% - 120px)'}
+                return {"display": "none", "height": "calc(100% - 120px)"}, {
+                    "display": "block",
+                    "height": "calc(100% - 120px)",
+                }
 
         # Update Cytoscape graph elements
         @self.app.callback(
-            Output('main-panel-log-graph-cytoscape', 'elements'),
+            Output("main-panel-log-graph-cytoscape", "elements"),
             [
-                Input('log-data-store', 'data'),
-                Input('main-panel-log-graph-label-mode', 'value')
+                Input("log-data-store", "data"),
+                Input("main-panel-log-graph-label-mode", "value"),
             ],
-            prevent_initial_call=False
+            prevent_initial_call=False,
         )
         def update_cytoscape_graph(log_data, label_mode):
             # Default to 'name' if not specified
             if label_mode is None:
-                label_mode = 'name'
+                label_mode = "name"
 
             if log_data:
                 # Check if this is graph data (WorkGraph structure) or hierarchy (tree structure)
-                if 'graph_data' in log_data:
+                if "graph_data" in log_data:
                     # Handle WorkGraph DAG structure
                     graph_data = self.tabbed_panel.log_graph._process_dag_to_graph(
-                        log_data['graph_data']['nodes'],
-                        log_data['graph_data']['edges'],
-                        log_data['graph_data']['agent']
+                        log_data["graph_data"]["nodes"],
+                        log_data["graph_data"]["edges"],
+                        log_data["graph_data"]["agent"],
                     )
-                    return self.tabbed_panel.log_graph.convert_to_cytoscape_elements(graph_data, label_mode)
-                elif 'hierarchy' in log_data:
+                    return self.tabbed_panel.log_graph.convert_to_cytoscape_elements(
+                        graph_data, label_mode
+                    )
+                elif "hierarchy" in log_data:
                     # Handle standard tree hierarchy
-                    graph_data = self.tabbed_panel.log_graph.process_hierarchy_to_graph(log_data['hierarchy'])
-                    return self.tabbed_panel.log_graph.convert_to_cytoscape_elements(graph_data, label_mode)
+                    graph_data = self.tabbed_panel.log_graph.process_hierarchy_to_graph(
+                        log_data["hierarchy"]
+                    )
+                    return self.tabbed_panel.log_graph.convert_to_cytoscape_elements(
+                        graph_data, label_mode
+                    )
             return []
 
         # Handle Cytoscape node clicks
         @self.app.callback(
             [
-                Output('main-panel-log-details-logs-container', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-group-info', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-controls', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-state', 'data', allow_duplicate=True)
+                Output(
+                    "main-panel-log-details-logs-container",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-group-info",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-controls",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-state",
+                    "data",
+                    allow_duplicate=True,
+                ),
             ],
-            [Input('main-panel-log-graph-cytoscape', 'tapNodeData')],
-            [State('log-data-store', 'data')],
-            prevent_initial_call=True
+            [Input("main-panel-log-graph-cytoscape", "tapNodeData")],
+            [State("log-data-store", "data")],
+            prevent_initial_call=True,
         )
         def update_log_details_from_cytoscape(tap_node_data, log_data):
             if not tap_node_data or not log_data:
-                logs, group_info, pagination = self.tabbed_panel.log_details.update_logs([], "", log_group_id=None)
-                return logs, group_info, pagination, {'page': 0, 'show_all': False}
+                logs, group_info, pagination = (
+                    self.tabbed_panel.log_details.update_logs([], "", log_group_id=None)
+                )
+                return logs, group_info, pagination, {"page": 0, "show_all": False}
 
             # Extract clicked node's log group ID
-            log_group_id = tap_node_data.get('id', '')
+            log_group_id = tap_node_data.get("id", "")
 
-            if log_group_id and log_group_id in log_data.get('log_groups', {}):
-                logs = log_data['log_groups'][log_group_id]
+            if log_group_id and log_group_id in log_data.get("log_groups", {}):
+                logs = log_data["log_groups"][log_group_id]
                 group_info = f"Log Group: {log_group_id} ({len(logs)} entries)"
                 # Pass log_group_id to enable caching
-                rendered_logs, group_info, pagination = self.tabbed_panel.log_details.update_logs(
-                    logs, group_info, page=0, show_all=False, log_group_id=log_group_id
+                rendered_logs, group_info, pagination = (
+                    self.tabbed_panel.log_details.update_logs(
+                        logs,
+                        group_info,
+                        page=0,
+                        show_all=False,
+                        log_group_id=log_group_id,
+                    )
                 )
-                return rendered_logs, group_info, pagination, {'page': 0, 'show_all': False}
+                return (
+                    rendered_logs,
+                    group_info,
+                    pagination,
+                    {"page": 0, "show_all": False},
+                )
 
-            logs, group_info, pagination = self.tabbed_panel.log_details.update_logs([], "No logs found", log_group_id=None)
-            return logs, group_info, pagination, {'page': 0, 'show_all': False}
+            logs, group_info, pagination = self.tabbed_panel.log_details.update_logs(
+                [], "No logs found", log_group_id=None
+            )
+            return logs, group_info, pagination, {"page": 0, "show_all": False}
 
         # Reset log details when switching sessions
         @self.app.callback(
             [
-                Output('main-panel-log-details-logs-container', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-group-info', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-controls', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-state', 'data', allow_duplicate=True)
+                Output(
+                    "main-panel-log-details-logs-container",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-group-info",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-controls",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-state",
+                    "data",
+                    allow_duplicate=True,
+                ),
             ],
-            [Input('current-session-store', 'data')],
-            prevent_initial_call=True
+            [Input("current-session-store", "data")],
+            prevent_initial_call=True,
         )
         def reset_log_details_on_session_switch(session_id):
             # Clear log details when switching sessions
             logs, group_info, pagination = self.tabbed_panel.log_details.update_logs(
                 [], "Select a node in the graph to view logs", log_group_id=None
             )
-            return logs, group_info, pagination, {'page': 0, 'show_all': False}
+            return logs, group_info, pagination, {"page": 0, "show_all": False}
 
         # Handle "Load More" button clicks for pagination
         @self.app.callback(
             [
-                Output('main-panel-log-details-logs-container', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-controls', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-state', 'data', allow_duplicate=True)
+                Output(
+                    "main-panel-log-details-logs-container",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-controls",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-state",
+                    "data",
+                    allow_duplicate=True,
+                ),
             ],
-            [Input('main-panel-log-details-load-more-btn', 'n_clicks')],
+            [Input("main-panel-log-details-load-more-btn", "n_clicks")],
             [
-                State('main-panel-log-details-pagination-state', 'data'),
-                State('log-data-store', 'data'),
-                State('main-panel-log-details-group-info', 'children')
+                State("main-panel-log-details-pagination-state", "data"),
+                State("log-data-store", "data"),
+                State("main-panel-log-details-group-info", "children"),
             ],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def handle_load_more(n_clicks, pagination_state, log_data, group_info_text):
             if not n_clicks or not log_data or not pagination_state:
@@ -893,39 +1045,62 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
 
             # Extract log_group_id from group_info text (e.g., "Log Group: xxx (123 entries)")
             import re
-            match = re.search(r'Log Group: ([\w\-]+)', group_info_text or '')
+
+            match = re.search(r"Log Group: ([\w\-]+)", group_info_text or "")
             if not match:
                 return dash.no_update, dash.no_update, dash.no_update
 
             log_group_id = match.group(1)
-            if log_group_id not in log_data.get('log_groups', {}):
+            if log_group_id not in log_data.get("log_groups", {}):
                 return dash.no_update, dash.no_update, dash.no_update
 
-            logs = log_data['log_groups'][log_group_id]
-            current_page = pagination_state.get('page', 0)
+            logs = log_data["log_groups"][log_group_id]
+            current_page = pagination_state.get("page", 0)
             next_page = current_page + 1
 
             # Update logs in component and render next page (uses cache if available)
             group_info = f"Log Group: {log_group_id} ({len(logs)} entries)"
-            rendered_logs, _, pagination_controls = self.tabbed_panel.log_details.update_logs(
-                logs, group_info, page=next_page, show_all=False, log_group_id=log_group_id
+            rendered_logs, _, pagination_controls = (
+                self.tabbed_panel.log_details.update_logs(
+                    logs,
+                    group_info,
+                    page=next_page,
+                    show_all=False,
+                    log_group_id=log_group_id,
+                )
             )
 
-            return rendered_logs, pagination_controls, {'page': next_page, 'show_all': False}
+            return (
+                rendered_logs,
+                pagination_controls,
+                {"page": next_page, "show_all": False},
+            )
 
         # Handle "Load All" button clicks
         @self.app.callback(
             [
-                Output('main-panel-log-details-logs-container', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-controls', 'children', allow_duplicate=True),
-                Output('main-panel-log-details-pagination-state', 'data', allow_duplicate=True)
+                Output(
+                    "main-panel-log-details-logs-container",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-controls",
+                    "children",
+                    allow_duplicate=True,
+                ),
+                Output(
+                    "main-panel-log-details-pagination-state",
+                    "data",
+                    allow_duplicate=True,
+                ),
             ],
-            [Input('main-panel-log-details-load-all-btn', 'n_clicks')],
+            [Input("main-panel-log-details-load-all-btn", "n_clicks")],
             [
-                State('log-data-store', 'data'),
-                State('main-panel-log-details-group-info', 'children')
+                State("log-data-store", "data"),
+                State("main-panel-log-details-group-info", "children"),
             ],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def handle_load_all(n_clicks, log_data, group_info_text):
             if not n_clicks or not log_data:
@@ -933,23 +1108,26 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
 
             # Extract log_group_id from group_info text
             import re
-            match = re.search(r'Log Group: ([\w\-]+)', group_info_text or '')
+
+            match = re.search(r"Log Group: ([\w\-]+)", group_info_text or "")
             if not match:
                 return dash.no_update, dash.no_update, dash.no_update
 
             log_group_id = match.group(1)
-            if log_group_id not in log_data.get('log_groups', {}):
+            if log_group_id not in log_data.get("log_groups", {}):
                 return dash.no_update, dash.no_update, dash.no_update
 
-            logs = log_data['log_groups'][log_group_id]
+            logs = log_data["log_groups"][log_group_id]
 
             # Update logs in component and render all logs (uses cache if available)
             group_info = f"Log Group: {log_group_id} ({len(logs)} entries)"
-            rendered_logs, _, pagination_controls = self.tabbed_panel.log_details.update_logs(
-                logs, group_info, page=0, show_all=True, log_group_id=log_group_id
+            rendered_logs, _, pagination_controls = (
+                self.tabbed_panel.log_details.update_logs(
+                    logs, group_info, page=0, show_all=True, log_group_id=log_group_id
+                )
             )
 
-            return rendered_logs, pagination_controls, {'page': 0, 'show_all': True}
+            return rendered_logs, pagination_controls, {"page": 0, "show_all": True}
 
         # Clientside callback for expand/collapse log text
         # This handles the "Show more" / "Show less" button for long log entries
@@ -1028,13 +1206,32 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             }
             """,
             [
-                Output({'type': 'main-panel-log-details-log-content', 'index': ALL}, 'children'),
-                Output({'type': 'main-panel-log-details-expand-btn', 'index': ALL}, 'children'),
-                Output({'type': 'main-panel-log-details-log-full-text', 'index': ALL}, 'data')
+                Output(
+                    {"type": "main-panel-log-details-log-content", "index": ALL},
+                    "children",
+                ),
+                Output(
+                    {"type": "main-panel-log-details-expand-btn", "index": ALL},
+                    "children",
+                ),
+                Output(
+                    {"type": "main-panel-log-details-log-full-text", "index": ALL},
+                    "data",
+                ),
             ],
-            [Input({'type': 'main-panel-log-details-expand-btn', 'index': ALL}, 'n_clicks')],
-            [State({'type': 'main-panel-log-details-log-full-text', 'index': ALL}, 'data')],
-            prevent_initial_call=True
+            [
+                Input(
+                    {"type": "main-panel-log-details-expand-btn", "index": ALL},
+                    "n_clicks",
+                )
+            ],
+            [
+                State(
+                    {"type": "main-panel-log-details-log-full-text", "index": ALL},
+                    "data",
+                )
+            ],
+            prevent_initial_call=True,
         )
 
         # Clientside callback to fit Cytoscape graph when elements are loaded
@@ -1054,8 +1251,8 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'zoom'),
-            Input('main-panel-log-graph-cytoscape', 'elements')
+            Output("main-panel-log-graph-cytoscape", "zoom"),
+            Input("main-panel-log-graph-cytoscape", "elements"),
         )
 
         # Clientside callback for Reset View button
@@ -1101,10 +1298,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'zoom', allow_duplicate=True),
-            [Input('main-panel-log-graph-cytoscape-reset-btn', 'n_clicks')],
-            [State('main-panel-log-graph-cytoscape', 'elements')],
-            prevent_initial_call=True
+            Output("main-panel-log-graph-cytoscape", "zoom", allow_duplicate=True),
+            [Input("main-panel-log-graph-cytoscape-reset-btn", "n_clicks")],
+            [State("main-panel-log-graph-cytoscape", "elements")],
+            prevent_initial_call=True,
         )
 
         # Clientside callback for Fit to Screen button
@@ -1129,10 +1326,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'autoungrabify'),
-            [Input('main-panel-log-graph-cytoscape-fit-btn', 'n_clicks')],
-            [State('main-panel-log-graph-cytoscape', 'elements')],
-            prevent_initial_call=True
+            Output("main-panel-log-graph-cytoscape", "autoungrabify"),
+            [Input("main-panel-log-graph-cytoscape-fit-btn", "n_clicks")],
+            [State("main-panel-log-graph-cytoscape", "elements")],
+            prevent_initial_call=True,
         )
 
         # Clientside callback to auto-fit when switching to Cytoscape mode
@@ -1156,10 +1353,14 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'userPanningEnabled', allow_duplicate=True),
-            [Input('main-panel-log-graph-rendering-mode', 'value')],
-            [State('main-panel-log-graph-cytoscape', 'elements')],
-            prevent_initial_call=True
+            Output(
+                "main-panel-log-graph-cytoscape",
+                "userPanningEnabled",
+                allow_duplicate=True,
+            ),
+            [Input("main-panel-log-graph-rendering-mode", "value")],
+            [State("main-panel-log-graph-cytoscape", "elements")],
+            prevent_initial_call=True,
         )
 
         # Clientside callback for Download PNG button
@@ -1198,10 +1399,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'boxSelectionEnabled'),
-            [Input('main-panel-log-graph-cytoscape-download-png-btn', 'n_clicks')],
-            [State('main-panel-log-graph-cytoscape', 'elements')],
-            prevent_initial_call=True
+            Output("main-panel-log-graph-cytoscape", "boxSelectionEnabled"),
+            [Input("main-panel-log-graph-cytoscape-download-png-btn", "n_clicks")],
+            [State("main-panel-log-graph-cytoscape", "elements")],
+            prevent_initial_call=True,
         )
 
         # Clientside callback for Download JSON button
@@ -1236,10 +1437,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'userZoomingEnabled'),
-            [Input('main-panel-log-graph-cytoscape-download-json-btn', 'n_clicks')],
-            [State('main-panel-log-graph-cytoscape', 'elements')],
-            prevent_initial_call=True
+            Output("main-panel-log-graph-cytoscape", "userZoomingEnabled"),
+            [Input("main-panel-log-graph-cytoscape-download-json-btn", "n_clicks")],
+            [State("main-panel-log-graph-cytoscape", "elements")],
+            prevent_initial_call=True,
         )
 
         # Add CSS-based hover effects to Cytoscape control buttons
@@ -1268,9 +1469,9 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-cytoscape', 'userPanningEnabled'),
-            Input('main-panel-log-graph-rendering-mode', 'value'),
-            prevent_initial_call=True
+            Output("main-panel-log-graph-cytoscape", "userPanningEnabled"),
+            Input("main-panel-log-graph-rendering-mode", "value"),
+            prevent_initial_call=True,
         )
 
         # === Monitor Panel Draggable Functionality ===
@@ -1344,8 +1545,8 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return window.dash_clientside.no_update;
             }
             """,
-            Output('main-panel-log-graph-monitor-panel', 'data-draggable-init'),
-            Input('main-panel-log-graph-monitor-panel', 'id')
+            Output("main-panel-log-graph-monitor-panel", "data-draggable-init"),
+            Input("main-panel-log-graph-monitor-panel", "id"),
         )
 
         # === Monitor Panel Tab Switching ===
@@ -1355,67 +1556,89 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
         # Callback to populate response list in the Response Monitor
         @self.app.callback(
             [
-                Output('main-panel-log-graph-response-count', 'children'),
-                Output('main-panel-log-graph-response-list', 'children')
+                Output("main-panel-log-graph-response-count", "children"),
+                Output("main-panel-log-graph-response-list", "children"),
             ],
-            [
-                Input('messages-store', 'data'),
-                Input('current-session-store', 'data')
-            ],
-            prevent_initial_call=False
+            [Input("messages-store", "data"), Input("current-session-store", "data")],
+            prevent_initial_call=False,
         )
         def update_response_list(messages_store, session_id):
             """Update the Response Monitor list with all agent responses."""
             if not session_id or not messages_store or session_id not in messages_store:
-                return 'Total: 0', 'No responses'
+                return "Total: 0", "No responses"
 
             messages = messages_store[session_id]
 
             # Filter assistant messages only
-            agent_responses = [msg for msg in messages if msg.get('role') == 'assistant']
+            agent_responses = [
+                msg for msg in messages if msg.get("role") == "assistant"
+            ]
 
             if not agent_responses:
-                return 'Total: 0', 'No responses'
+                return "Total: 0", "No responses"
 
-            count_text = f'Total: {len(agent_responses)}'
+            count_text = f"Total: {len(agent_responses)}"
 
             # Build clickable response list items (most recent first)
             response_items = []
             for idx, msg in enumerate(reversed(agent_responses)):
-                content = msg.get('content', '')
-                timestamp = msg.get('timestamp', '')
+                content = msg.get("content", "")
+                timestamp = msg.get("timestamp", "")
                 response_num = len(agent_responses) - idx
 
                 # Extract first few characters for preview
                 if isinstance(content, str):
-                    preview = content[:20].replace('\n', ' ')
+                    preview = content[:20].replace("\n", " ")
                 elif isinstance(content, list):
-                    preview = str(content[0])[:20].replace('\n', ' ') if content else '...'
+                    preview = (
+                        str(content[0])[:20].replace("\n", " ") if content else "..."
+                    )
                 elif isinstance(content, dict):
-                    response_content = content.get('response', content)
-                    preview = str(response_content)[:20].replace('\n', ' ')
+                    response_content = content.get("response", content)
+                    preview = str(response_content)[:20].replace("\n", " ")
                 else:
-                    preview = str(content)[:20].replace('\n', ' ')
+                    preview = str(content)[:20].replace("\n", " ")
 
                 # Create clickable item
                 response_items.append(
                     html.Div(
                         children=[
-                            html.Div(f"#{response_num}", style={'fontWeight': '600', 'color': '#19C37D', 'fontSize': '8px'}),
-                            html.Div(preview + '...', style={'fontSize': '8px', 'color': '#ECECF1', 'marginTop': '2px'}),
-                            html.Div(timestamp, style={'fontSize': '7px', 'color': '#6E6E80', 'marginTop': '2px'})
+                            html.Div(
+                                f"#{response_num}",
+                                style={
+                                    "fontWeight": "600",
+                                    "color": "#19C37D",
+                                    "fontSize": "8px",
+                                },
+                            ),
+                            html.Div(
+                                preview + "...",
+                                style={
+                                    "fontSize": "8px",
+                                    "color": "#ECECF1",
+                                    "marginTop": "2px",
+                                },
+                            ),
+                            html.Div(
+                                timestamp,
+                                style={
+                                    "fontSize": "7px",
+                                    "color": "#6E6E80",
+                                    "marginTop": "2px",
+                                },
+                            ),
                         ],
-                        id={'type': 'main-panel-log-graph-response-item', 'index': idx},
+                        id={"type": "main-panel-log-graph-response-item", "index": idx},
                         n_clicks=0,
                         style={
-                            'padding': '4px',
-                            'marginBottom': '3px',
-                            'backgroundColor': 'rgba(255, 255, 255, 0.05)',
-                            'borderRadius': '2px',
-                            'cursor': 'pointer',
-                            'transition': 'background-color 0.2s',
-                            'borderLeft': '2px solid transparent'
-                        }
+                            "padding": "4px",
+                            "marginBottom": "3px",
+                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                            "borderRadius": "2px",
+                            "cursor": "pointer",
+                            "transition": "background-color 0.2s",
+                            "borderLeft": "2px solid transparent",
+                        },
                     )
                 )
 
@@ -1423,13 +1646,16 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
 
         # Callback to show response details when clicking an item
         @self.app.callback(
-            Output('main-panel-log-graph-response-details', 'children'),
+            Output("main-panel-log-graph-response-details", "children"),
             [
-                Input({'type': 'main-panel-log-graph-response-item', 'index': ALL}, 'n_clicks'),
-                Input('messages-store', 'data'),
-                Input('current-session-store', 'data')
+                Input(
+                    {"type": "main-panel-log-graph-response-item", "index": ALL},
+                    "n_clicks",
+                ),
+                Input("messages-store", "data"),
+                Input("current-session-store", "data"),
             ],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def show_response_details(n_clicks_list, messages_store, session_id):
             """Show full details of selected response."""
@@ -1437,40 +1663,43 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             if not ctx.triggered:
                 raise PreventUpdate
 
-            triggered_prop = ctx.triggered[0]['prop_id']
+            triggered_prop = ctx.triggered[0]["prop_id"]
 
             # Check if triggered by a response item click
-            if 'response-item' not in triggered_prop:
+            if "response-item" not in triggered_prop:
                 raise PreventUpdate
 
             # Parse which item was clicked
             import json
-            triggered_id_str = triggered_prop.split('.')[0]
+
+            triggered_id_str = triggered_prop.split(".")[0]
             try:
                 triggered_id = json.loads(triggered_id_str)
-                clicked_idx = triggered_id['index']
+                clicked_idx = triggered_id["index"]
             except (json.JSONDecodeError, KeyError):
                 raise PreventUpdate
 
             # Get messages
             if not session_id or not messages_store or session_id not in messages_store:
-                return 'No data'
+                return "No data"
 
             messages = messages_store[session_id]
-            agent_responses = [msg for msg in messages if msg.get('role') == 'assistant']
+            agent_responses = [
+                msg for msg in messages if msg.get("role") == "assistant"
+            ]
 
             if not agent_responses:
-                return 'No responses'
+                return "No responses"
 
             # Reverse to match list order (most recent first)
             agent_responses_reversed = list(reversed(agent_responses))
 
             if clicked_idx >= len(agent_responses_reversed):
-                return 'Invalid response'
+                return "Invalid response"
 
             selected_msg = agent_responses_reversed[clicked_idx]
-            content = selected_msg.get('content', '')
-            timestamp = selected_msg.get('timestamp', '')
+            content = selected_msg.get("content", "")
+            timestamp = selected_msg.get("timestamp", "")
             response_num = len(agent_responses) - clicked_idx
 
             # Format content for display
@@ -1478,47 +1707,50 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 display_content = content
             elif isinstance(content, list):
                 # Format list nicely
-                display_content = 'Response (list):\n'
+                display_content = "Response (list):\n"
                 for i, item in enumerate(content):
-                    display_content += f'\n[{i}]: {item}\n'
+                    display_content += f"\n[{i}]: {item}\n"
             elif isinstance(content, dict):
                 # Format dict nicely
                 import json
-                display_content = 'Response (dict):\n' + json.dumps(content, indent=2)
+
+                display_content = "Response (dict):\n" + json.dumps(content, indent=2)
             else:
                 display_content = str(content)
 
             # Build details view
-            return html.Div([
-                html.Div(
-                    f"Response #{response_num}",
-                    style={
-                        'fontSize': '10px',
-                        'fontWeight': '600',
-                        'color': '#19C37D',
-                        'marginBottom': '4px',
-                        'borderBottom': '1px solid rgba(255,255,255,0.1)',
-                        'paddingBottom': '4px'
-                    }
-                ),
-                html.Div(
-                    f"Time: {timestamp}",
-                    style={
-                        'fontSize': '8px',
-                        'color': '#8E8EA0',
-                        'marginBottom': '8px'
-                    }
-                ),
-                html.Div(
-                    display_content,
-                    style={
-                        'fontSize': '9px',
-                        'color': '#ECECF1',
-                        'whiteSpace': 'pre-wrap',
-                        'wordBreak': 'break-word'
-                    }
-                )
-            ])
+            return html.Div(
+                [
+                    html.Div(
+                        f"Response #{response_num}",
+                        style={
+                            "fontSize": "10px",
+                            "fontWeight": "600",
+                            "color": "#19C37D",
+                            "marginBottom": "4px",
+                            "borderBottom": "1px solid rgba(255,255,255,0.1)",
+                            "paddingBottom": "4px",
+                        },
+                    ),
+                    html.Div(
+                        f"Time: {timestamp}",
+                        style={
+                            "fontSize": "8px",
+                            "color": "#8E8EA0",
+                            "marginBottom": "8px",
+                        },
+                    ),
+                    html.Div(
+                        display_content,
+                        style={
+                            "fontSize": "9px",
+                            "color": "#ECECF1",
+                            "whiteSpace": "pre-wrap",
+                            "wordBreak": "break-word",
+                        },
+                    ),
+                ]
+            )
 
         # Clientside callback to highlight selected response item
         self.app.clientside_callback(
@@ -1575,9 +1807,13 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
                 return style_outputs;
             }
             """,
-            Output({'type': 'main-panel-log-graph-response-item', 'index': ALL}, 'style'),
-            Input({'type': 'main-panel-log-graph-response-item', 'index': ALL}, 'n_clicks'),
-            prevent_initial_call=True
+            Output(
+                {"type": "main-panel-log-graph-response-item", "index": ALL}, "style"
+            ),
+            Input(
+                {"type": "main-panel-log-graph-response-item", "index": ALL}, "n_clicks"
+            ),
+            prevent_initial_call=True,
         )
 
         # === Agent queue polling callbacks ===
@@ -1587,10 +1823,10 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
 
         # Callback to auto-refresh logs
         @self.app.callback(
-            Output('log-data-store', 'data', allow_duplicate=True),
-            Input('log-refresh-interval', 'n_intervals'),
-            State('current-session-store', 'data'),
-            prevent_initial_call=True
+            Output("log-data-store", "data", allow_duplicate=True),
+            Input("log-refresh-interval", "n_intervals"),
+            State("current-session-store", "data"),
+            prevent_initial_call=True,
         )
         def auto_refresh_logs(n_intervals, session_id):
             """Auto-refresh logs as agent executes."""
@@ -1600,16 +1836,18 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             agent = self.session_agents[session_id]
 
             # Access agent's log collector if available
-            if hasattr(agent, 'log_collector') and agent.log_collector:
+            if hasattr(agent, "log_collector") and agent.log_collector:
                 try:
                     graph_structure = agent.log_collector.get_graph_structure()
                     return {
-                        'graph_data': {
-                            'nodes': graph_structure['nodes'],
-                            'edges': graph_structure['edges'],
-                            'agent': graph_structure.get('agent', {})
+                        "graph_data": {
+                            "nodes": graph_structure["nodes"],
+                            "edges": graph_structure["edges"],
+                            "agent": graph_structure.get("agent", {}),
                         },
-                        'log_groups': {k: v for k, v in agent.log_collector.log_groups.items()}
+                        "log_groups": {
+                            k: v for k, v in agent.log_collector.log_groups.items()
+                        },
                     }
                 except Exception:
                     # If there's an error getting graph structure, just skip this update
@@ -1646,11 +1884,7 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             >>>         self.add_monitor_tab('settings', 'Settings', self._create_settings_content())
             >>>         super().__init__(**kwargs)
         """
-        tab = {
-            'id': tab_id,
-            'label': tab_label,
-            'content': tab_content
-        }
+        tab = {"id": tab_id, "label": tab_label, "content": tab_content}
         self.custom_monitor_tabs.append(tab)
 
     def _start_agent_for_session(self, session_id: str):
@@ -1668,7 +1902,7 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
             target=self._run_agent_in_background,
             args=(session_id,),
             daemon=True,
-            name=f"Agent-{session_id}"
+            name=f"Agent-{session_id}",
         )
         thread.start()
         self.session_threads[session_id] = thread
@@ -1676,13 +1910,16 @@ class DashInteractiveAppWithLogs(DashInteractiveApp):
     def _run_agent_in_background(self, session_id: str):
         """Create and run agent in background thread."""
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
             interactive = self.session_interactives[session_id]
 
             # Notify user that agent is initializing
-            interactive.response_queue.put("🤖 Initializing agent (this may take a few seconds)...")
+            interactive.response_queue.put(
+                "🤖 Initializing agent (this may take a few seconds)..."
+            )
 
             logger.info(f"Creating agent for session {session_id}")
             # Create agent (this takes 5-10 seconds)

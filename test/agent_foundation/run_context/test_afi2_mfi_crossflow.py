@@ -13,20 +13,19 @@ Verifies the compat-property + walk-up mechanism directly (no LLM-mocked full ``
   * the legacy / no-ctx path still uses the instance backing (byte-identical).
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: E501
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    MultiFlowAttemptState,
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
     mint_root,
+    MultiFlowAttemptState,
+    RunContext,
 )
+from attr import attrs
 
 
 @attrs

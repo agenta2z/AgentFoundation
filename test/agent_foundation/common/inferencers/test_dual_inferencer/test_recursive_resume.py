@@ -1,5 +1,3 @@
-
-
 """Automated tests for recursive resume: PTI → DualInferencer child workflows.
 
 Tests that @artifact_type(Workflow, ...) on PTI correctly discovers child
@@ -57,13 +55,13 @@ class TestArtifactTypeMetadata(unittest.TestCase):
     """Verify @artifact_type decorator sets __artifact_types__ on PTI."""
 
     def test_pti_has_artifact_types(self):
-        entries = getattr(PlanThenImplementInferencer, '__artifact_types__', None)
+        entries = getattr(PlanThenImplementInferencer, "__artifact_types__", None)
         self.assertIsNotNone(entries)
         self.assertTrue(len(entries) > 0)
 
     def test_pti_artifact_type_targets_workflow(self):
         entries = PlanThenImplementInferencer.__artifact_types__
-        types = [e['target_type'] for e in entries]
+        types = [e["target_type"] for e in entries]
         self.assertIn(Workflow, types)
 
 
@@ -111,7 +109,7 @@ class TestSetupChildWorkflows(unittest.TestCase):
         pti._current_base_workspace = self.tmpdir
         pti.enable_result_save = StepResultSaveOptions.Always
         pti.resume_with_saved_results = True
-        pti.checkpoint_mode = 'jsonfy'
+        pti.checkpoint_mode = "jsonfy"
 
         state = {"iteration": 1}
         pti._setup_child_workflows(state)
@@ -132,14 +130,14 @@ class TestSetupChildWorkflows(unittest.TestCase):
         pti._current_base_workspace = self.tmpdir
         pti.enable_result_save = StepResultSaveOptions.Always
         pti.resume_with_saved_results = True
-        pti.checkpoint_mode = 'jsonfy'
+        pti.checkpoint_mode = "jsonfy"
 
         state = {"iteration": 1}
         pti._setup_child_workflows(state)
 
         self.assertEqual(plan_dual.enable_result_save, StepResultSaveOptions.Always)
         self.assertTrue(plan_dual.resume_with_saved_results)
-        self.assertEqual(plan_dual.checkpoint_mode, 'jsonfy')
+        self.assertEqual(plan_dual.checkpoint_mode, "jsonfy")
 
     def test_child_paths_isolated_per_iteration(self):
         """Different iterations get different child directories."""
@@ -152,7 +150,7 @@ class TestSetupChildWorkflows(unittest.TestCase):
         pti._current_base_workspace = self.tmpdir
         pti.enable_result_save = StepResultSaveOptions.Always
         pti.resume_with_saved_results = True
-        pti.checkpoint_mode = 'jsonfy'
+        pti.checkpoint_mode = "jsonfy"
 
         # Iteration 1
         state1 = {"iteration": 1}

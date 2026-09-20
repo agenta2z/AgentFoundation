@@ -16,7 +16,6 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     DualInferencerResponse,
@@ -45,6 +44,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock(response=None, side_effect=None):
     inf = MagicMock()
     inf.ainfer = AsyncMock(
@@ -58,7 +58,7 @@ def _make_mock(response=None, side_effect=None):
 
 
 def _review_json(approved=True, severity="COSMETIC"):
-    return f'```json\n{json.dumps({"approved": approved, "severity": severity, "issues": [], "reasoning": "ok"})}\n```'
+    return f"```json\n{json.dumps({'approved': approved, 'severity': severity, 'issues': [], 'reasoning': 'ok'})}\n```"
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +76,12 @@ class TestCodeReviewE2E(unittest.IsolatedAsyncioTestCase):
 
         dual = DualInferencer(
             base_inferencer=_make_mock(proposal),
-            review_inferencer=_make_mock(side_effect=[
-                _review_json(approved=False, severity="MINOR"),
-                _review_json(approved=True),
-            ]),
+            review_inferencer=_make_mock(
+                side_effect=[
+                    _review_json(approved=False, severity="MINOR"),
+                    _review_json(approved=True),
+                ]
+            ),
             fixer_inferencer=_make_mock(fixed),
             consensus_config=ConsensusConfig(
                 max_iterations=3,
@@ -225,18 +227,27 @@ class TestMultiFlowResearchE2E(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             mfi = MultiFlowInferencer(
                 flow_configs=[
-                    {"input": "research auth",
-                     "initial_inferencer": flow0_init,
-                     "followup_inferencer": flow0_followup,
-                     "end_condition": end_after_first, "max_dynamic_steps": 5},
-                    {"input": "research rate-limiting",
-                     "initial_inferencer": flow1_init,
-                     "followup_inferencer": flow1_followup,
-                     "end_condition": end_after_first, "max_dynamic_steps": 5},
-                    {"input": "research privacy",
-                     "initial_inferencer": flow2_init,
-                     "followup_inferencer": flow2_followup,
-                     "end_condition": end_after_first, "max_dynamic_steps": 5},
+                    {
+                        "input": "research auth",
+                        "initial_inferencer": flow0_init,
+                        "followup_inferencer": flow0_followup,
+                        "end_condition": end_after_first,
+                        "max_dynamic_steps": 5,
+                    },
+                    {
+                        "input": "research rate-limiting",
+                        "initial_inferencer": flow1_init,
+                        "followup_inferencer": flow1_followup,
+                        "end_condition": end_after_first,
+                        "max_dynamic_steps": 5,
+                    },
+                    {
+                        "input": "research privacy",
+                        "initial_inferencer": flow2_init,
+                        "followup_inferencer": flow2_followup,
+                        "end_condition": end_after_first,
+                        "max_dynamic_steps": 5,
+                    },
                 ],
                 aggregator_inferencer=aggregator,
                 checkpoint_dir=tmpdir,
@@ -302,6 +313,7 @@ class TestHierarchicalComposition(unittest.TestCase):
         from test.agent_foundation.common.inferencers._helpers.mock_inferencer import (
             MockInferencer,
         )
+
         pti_alpha = _build_pti_with_dual_children("ALPHA")
         pti_beta = _build_pti_with_dual_children("BETA")
         followup_alpha = MockInferencer(response="alpha-followup-not-called")
@@ -352,10 +364,16 @@ class TestHierarchicalComposition(unittest.TestCase):
         agg_prompt = agg_inputs[0]
 
         # Both PTIs' implementation outputs should have propagated up
-        self.assertIn("IMPL_ALPHA", agg_prompt,
-                      "ALPHA implementation must propagate up through PTI to MFI")
-        self.assertIn("IMPL_BETA", agg_prompt,
-                      "BETA implementation must propagate up through PTI to MFI")
+        self.assertIn(
+            "IMPL_ALPHA",
+            agg_prompt,
+            "ALPHA implementation must propagate up through PTI to MFI",
+        )
+        self.assertIn(
+            "IMPL_BETA",
+            agg_prompt,
+            "BETA implementation must propagate up through PTI to MFI",
+        )
 
 
 if __name__ == "__main__":

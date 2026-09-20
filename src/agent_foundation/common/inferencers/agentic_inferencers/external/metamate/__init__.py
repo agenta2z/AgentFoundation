@@ -8,13 +8,6 @@ This package provides:
 - Clients: Production, mock, and fallback MetaMate clients
 """
 
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.metamate_cli_inferencer import (  # noqa: F401
-    MetamateCliInferencer,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer import (  # noqa: F401
-    MetamateSDKInferencer,
-)
-
 # Adapters
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.adapters import (  # noqa: F401
     DebugAssistantAdapter,
@@ -30,6 +23,12 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
     MetamateClientInterface,
     MockMetamateClient,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.code_scope_judge import (  # noqa: F401
+    CodeSearchScope,
+    CodeSemanticScope,
+    judge_code_scope,
+    resolve_scope_directive,
+)
 
 # Exceptions
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.exceptions import (  # noqa: F401
@@ -42,6 +41,12 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.e
     MetamateUnavailableError,
     MetamateValidationError,
     ResearchError,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.metamate_cli_inferencer import (  # noqa: F401
+    MetamateCliInferencer,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer import (  # noqa: F401
+    MetamateSDKInferencer,
 )
 
 # Types
@@ -66,6 +71,11 @@ __all__ = [
     # Inferencers
     "MetamateSDKInferencer",
     "MetamateCliInferencer",
+    # Scope judge (code-search scoping; on by default on MetamateSDKInferencer)
+    "judge_code_scope",
+    "resolve_scope_directive",
+    "CodeSearchScope",
+    "CodeSemanticScope",
     # Adapters
     "DeepResearchAdapter",
     "KnowledgeDiscoveryAdapter",

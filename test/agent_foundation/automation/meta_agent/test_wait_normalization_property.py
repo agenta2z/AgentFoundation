@@ -11,13 +11,9 @@ normalized duration SHALL equal the median of the observed values.
 
 import statistics
 
-from hypothesis import given, settings, strategies as st
-
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
 from agent_foundation.automation.meta_agent.normalizer import TraceNormalizer
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +21,9 @@ from agent_foundation.automation.meta_agent.normalizer import TraceNormalizer
 # ---------------------------------------------------------------------------
 
 # Positive floats for wait durations (reasonable range to avoid float issues)
-positive_duration_st = st.floats(min_value=0.01, max_value=3600.0, allow_nan=False, allow_infinity=False)
+positive_duration_st = st.floats(
+    min_value=0.01, max_value=3600.0, allow_nan=False, allow_infinity=False
+)
 
 # List of at least one positive duration
 duration_list_st = st.lists(positive_duration_st, min_size=1, max_size=50)

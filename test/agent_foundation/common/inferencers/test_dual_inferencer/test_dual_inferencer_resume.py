@@ -1,5 +1,3 @@
-
-
 """Comprehensive tests for DualInferencer checkpoint/resume from different
 workspace conditions.
 
@@ -335,9 +333,7 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(r_off.consensus_achieved, r_on.consensus_achieved)
         self.assertEqual(r_off.total_iterations, r_on.total_iterations)
-        self.assertEqual(
-            len(r_off.consensus_history), len(r_on.consensus_history)
-        )
+        self.assertEqual(len(r_off.consensus_history), len(r_on.consensus_history))
         self.assertEqual(
             r_off.consensus_history[0].consensus_reached,
             r_on.consensus_history[0].consensus_reached,
@@ -400,9 +396,7 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         """Crash during review step → resume skips propose, runs review."""
         # --- Run 1: propose succeeds, review crashes ---
         base_run1 = _make_mock_inferencer("proposal v1")
-        review_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("review crash")
-        )
+        review_run1 = _make_mock_inferencer(side_effect=RuntimeError("review crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -457,9 +451,7 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         review_run1 = _make_mock_inferencer(
             _review_json(approved=False, severity="MAJOR")
         )
-        fixer_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("fixer crash")
-        )
+        fixer_run1 = _make_mock_inferencer(side_effect=RuntimeError("fixer crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -591,9 +583,7 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
 
         # Run 1: propose with unique text, then crash at review
         base_run1 = _make_mock_inferencer(original_proposal)
-        review_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("crash")
-        )
+        review_run1 = _make_mock_inferencer(side_effect=RuntimeError("crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -743,9 +733,7 @@ class Tier5_MultiAttemptTest(unittest.IsolatedAsyncioTestCase):
 
             dual = DualInferencer(
                 base_inferencer=_make_mock_inferencer("proposal"),
-                review_inferencer=_make_mock_inferencer(
-                    side_effect=review_responses
-                ),
+                review_inferencer=_make_mock_inferencer(side_effect=review_responses),
                 fixer_inferencer=_make_mock_inferencer(_fix_response("fixed")),
                 consensus_config=ConsensusConfig(
                     max_iterations=2,

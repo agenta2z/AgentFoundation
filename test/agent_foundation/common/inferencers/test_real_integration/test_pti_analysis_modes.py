@@ -11,7 +11,6 @@ Verifies real prompt rendering produces the expected reference structure.
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -54,7 +53,9 @@ def _make_claude(tmp_workspace, **overrides):
 @pytest.mark.asyncio
 @pytest.mark.timeout(DEFAULT_TIMEOUT * 8)
 @skip_claude
-@pytest.mark.parametrize("analysis_mode", ["last_round_only", "last_with_cross_ref", "all_rounds"])
+@pytest.mark.parametrize(
+    "analysis_mode", ["last_round_only", "last_with_cross_ref", "all_rounds"]
+)
 async def test_pti_analysis_mode_variants(tmp_workspace, analysis_mode):
     """For each analysis_mode, run 2 iterations and verify the analyzer ran
     correctly and the iteration_history reflects the configured behavior.
@@ -64,9 +65,15 @@ async def test_pti_analysis_mode_variants(tmp_workspace, analysis_mode):
     error for each mode and produces valid iteration_history.
     """
     pti = PlanThenImplementInferencer(
-        planner_inferencer=_make_claude(tmp_workspace, append_system_prompt=PLANNER_PROMPT),
-        executor_inferencer=_make_claude(tmp_workspace, append_system_prompt=EXECUTOR_PROMPT),
-        analyzer_inferencer=_make_claude(tmp_workspace, append_system_prompt=ANALYZER_PROMPT_CONTINUE_ONCE),
+        planner_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=PLANNER_PROMPT
+        ),
+        executor_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=EXECUTOR_PROMPT
+        ),
+        analyzer_inferencer=_make_claude(
+            tmp_workspace, append_system_prompt=ANALYZER_PROMPT_CONTINUE_ONCE
+        ),
         enable_analysis=True,
         enable_multiple_iterations=True,
         max_meta_iterations=2,

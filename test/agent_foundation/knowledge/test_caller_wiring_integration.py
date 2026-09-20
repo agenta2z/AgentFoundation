@@ -27,21 +27,23 @@ from agent_foundation.knowledge.retrieval.formatter import (
     RetrievalResult,
 )
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.knowledge_provider import (
+    BudgetAwareKnowledgeProvider,
+)
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
-from agent_foundation.knowledge.retrieval.knowledge_provider import (
-    BudgetAwareKnowledgeProvider,
-)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
-def _piece(pid: str, info_type: str = "context", content: str = "test content") -> KnowledgePiece:
+def _piece(
+    pid: str, info_type: str = "context", content: str = "test content"
+) -> KnowledgePiece:
     return KnowledgePiece(
         piece_id=pid,
         entity_id="e1",
@@ -52,7 +54,9 @@ def _piece(pid: str, info_type: str = "context", content: str = "test content") 
 
 
 def _meta(eid: str, props: Optional[Dict[str, str]] = None) -> EntityMetadata:
-    return EntityMetadata(entity_id=eid, entity_type="user", properties=props or {"name": "Alice"})
+    return EntityMetadata(
+        entity_id=eid, entity_type="user", properties=props or {"name": "Alice"}
+    )
 
 
 def _result(
@@ -118,8 +122,9 @@ class TestKBCallDelegation:
         KnowledgeBase.__call__(kb, "test query", spaces=["space1"])
         kb.retrieve.assert_called_once()
         call_kwargs = kb.retrieve.call_args
-        assert call_kwargs.kwargs.get("spaces") == ["space1"] or \
-               (call_kwargs.args == () and "spaces" in str(call_kwargs))
+        assert call_kwargs.kwargs.get("spaces") == ["space1"] or (
+            call_kwargs.args == () and "spaces" in str(call_kwargs)
+        )
 
     def test_empty_result_returns_empty_string(self):
         """KB.__call__() with empty result should return empty string."""
@@ -130,14 +135,16 @@ class TestKBCallDelegation:
     def test_with_graph_context(self):
         """KB.__call__() should format graph context correctly."""
         result = _result(
-            graph_context=[{
-                "relation_type": "WORKS_AT",
-                "target_node_id": "company:acme",
-                "target_label": "Acme Corp",
-                "piece": None,
-                "depth": 1,
-                "score": 0.5,
-            }],
+            graph_context=[
+                {
+                    "relation_type": "WORKS_AT",
+                    "target_node_id": "company:acme",
+                    "target_label": "Acme Corp",
+                    "piece": None,
+                    "depth": 1,
+                    "score": 0.5,
+                }
+            ],
         )
         kb = _mock_kb(result)
         output = KnowledgeBase.__call__(kb, "test query")
@@ -166,8 +173,14 @@ class TestBudgetAwareKnowledgeProviderStandalone:
         """format_knowledge should produce formatted string within budget."""
         provider = BudgetAwareKnowledgeProvider()
         pieces = [
-            ScoredPiece(piece=_piece("p1", info_type="context", content="Important fact"), score=0.9),
-            ScoredPiece(piece=_piece("p2", info_type="instructions", content="Do this"), score=0.8),
+            ScoredPiece(
+                piece=_piece("p1", info_type="context", content="Important fact"),
+                score=0.9,
+            ),
+            ScoredPiece(
+                piece=_piece("p2", info_type="instructions", content="Do this"),
+                score=0.8,
+            ),
         ]
         output = provider.format_knowledge(pieces, available_tokens=8000)
         assert isinstance(output, str)
@@ -179,7 +192,12 @@ class TestBudgetAwareKnowledgeProviderStandalone:
 
         provider = BudgetAwareKnowledgeProvider()
         pieces = [
-            ScoredPiece(piece=_piece(f"p{i}", info_type="context", content=f"Fact number {i} " * 50), score=0.9 - i * 0.01)
+            ScoredPiece(
+                piece=_piece(
+                    f"p{i}", info_type="context", content=f"Fact number {i} " * 50
+                ),
+                score=0.9 - i * 0.01,
+            )
             for i in range(20)
         ]
         output = provider.format_knowledge(pieces, available_tokens=500)
@@ -195,11 +213,23 @@ class TestBudgetAwareKnowledgeProviderStandalone:
         """format_knowledge should respect CONTEXT_BUDGET priority order."""
         provider = BudgetAwareKnowledgeProvider()
         pieces = [
-            ScoredPiece(piece=_piece("s1", info_type="skills", content="Skill A"), score=0.9),
-            ScoredPiece(piece=_piece("i1", info_type="instructions", content="Instruction B"), score=0.8),
-            ScoredPiece(piece=_piece("c1", info_type="context", content="Context C"), score=0.7),
-            ScoredPiece(piece=_piece("e1", info_type="episodic", content="Episode D"), score=0.6),
-            ScoredPiece(piece=_piece("u1", info_type="user_profile", content="Profile E"), score=0.5),
+            ScoredPiece(
+                piece=_piece("s1", info_type="skills", content="Skill A"), score=0.9
+            ),
+            ScoredPiece(
+                piece=_piece("i1", info_type="instructions", content="Instruction B"),
+                score=0.8,
+            ),
+            ScoredPiece(
+                piece=_piece("c1", info_type="context", content="Context C"), score=0.7
+            ),
+            ScoredPiece(
+                piece=_piece("e1", info_type="episodic", content="Episode D"), score=0.6
+            ),
+            ScoredPiece(
+                piece=_piece("u1", info_type="user_profile", content="Profile E"),
+                score=0.5,
+            ),
         ]
         output = provider.format_knowledge(pieces, available_tokens=8000)
         # All sections should be present
@@ -217,12 +247,16 @@ class TestDeprecationWarnings:
     def test_knowledge_provider_removed(self):
         """KnowledgeProvider class should no longer exist in provider module."""
         with pytest.raises(ImportError):
-            from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider  # noqa: F401
+            from agent_foundation.knowledge.retrieval.provider import (  # noqa: F401
+                KnowledgeProvider,
+            )
 
     def test_agentic_retriever_removed(self):
         """AgenticRetriever has been removed; importing it should raise ImportError."""
         with pytest.raises(ImportError):
-            from agent_foundation.knowledge.retrieval.agentic_retriever import AgenticRetriever  # noqa: F401
+            from agent_foundation.knowledge.retrieval.agentic_retriever import (  # noqa: F401
+                AgenticRetriever,
+            )
 
     def test_budget_aware_provider_no_deprecation_warning(self):
         """BudgetAwareKnowledgeProvider should NOT emit deprecation warning."""
@@ -230,7 +264,9 @@ class TestDeprecationWarnings:
             warnings.simplefilter("always")
             BudgetAwareKnowledgeProvider()
 
-        deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        deprecation_warnings = [
+            x for x in w if issubclass(x.category, DeprecationWarning)
+        ]
         assert len(deprecation_warnings) == 0
 
 
@@ -243,25 +279,39 @@ class TestBackwardCompatibleImports:
     def test_subquery_importable_from_agentic_retriever(self):
         """SubQuery should be importable from agentic_retriever for backward compat."""
         from agent_foundation.knowledge.retrieval.agentic_retriever import SubQuery
+
         sq = SubQuery(query="test")
         assert sq.query == "test"
 
     def test_agentic_retrieval_result_importable_from_agentic_retriever(self):
         """AgenticRetrievalResult should be importable from agentic_retriever."""
-        from agent_foundation.knowledge.retrieval.agentic_retriever import AgenticRetrievalResult
+        from agent_foundation.knowledge.retrieval.agentic_retriever import (
+            AgenticRetrievalResult,
+        )
+
         result = AgenticRetrievalResult()
         assert result.pieces == []
 
     def test_subquery_same_class_from_both_modules(self):
         """SubQuery from agentic_retriever and retrieval_pipeline should be the same class."""
-        from agent_foundation.knowledge.retrieval.agentic_retriever import SubQuery as SQ1
-        from agent_foundation.knowledge.retrieval.retrieval_pipeline import SubQuery as SQ2
+        from agent_foundation.knowledge.retrieval.agentic_retriever import (
+            SubQuery as SQ1,
+        )
+        from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+            SubQuery as SQ2,
+        )
+
         assert SQ1 is SQ2
 
     def test_agentic_retrieval_result_same_class_from_both_modules(self):
         """AgenticRetrievalResult from both modules should be the same class."""
-        from agent_foundation.knowledge.retrieval.agentic_retriever import AgenticRetrievalResult as AR1
-        from agent_foundation.knowledge.retrieval.retrieval_pipeline import AgenticRetrievalResult as AR2
+        from agent_foundation.knowledge.retrieval.agentic_retriever import (
+            AgenticRetrievalResult as AR1,
+        )
+        from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+            AgenticRetrievalResult as AR2,
+        )
+
         assert AR1 is AR2
 
     def test_factory_functions_importable_from_agentic_retriever(self):
@@ -270,6 +320,7 @@ class TestBackwardCompatibleImports:
             create_domain_decomposer,
             create_llm_decomposer,
         )
+
         assert callable(create_domain_decomposer)
         assert callable(create_llm_decomposer)
 
@@ -283,20 +334,22 @@ class TestBackwardCompatibleImports:
             create_domain_decomposer as cd2,
             create_llm_decomposer as cl2,
         )
+
         assert cd1 is cd2
         assert cl1 is cl2
 
     def test_pipeline_classes_importable_from_retrieval_init(self):
         """Pipeline classes should be importable from retrieval __init__."""
         from agent_foundation.knowledge.retrieval import (
-            RetrievalPipeline,
-            QueryExpander,
-            PostProcessor,
-            FlatStringPostProcessor,
-            GroupedDictPostProcessor,
             AggregatingPostProcessor,
             BudgetAwarePostProcessor,
+            FlatStringPostProcessor,
+            GroupedDictPostProcessor,
+            PostProcessor,
+            QueryExpander,
+            RetrievalPipeline,
         )
+
         assert RetrievalPipeline is not None
         assert QueryExpander is not None
         assert PostProcessor is not None
@@ -304,12 +357,13 @@ class TestBackwardCompatibleImports:
     def test_pipeline_classes_importable_from_knowledge_init(self):
         """Pipeline classes should be importable from knowledge __init__."""
         from agent_foundation.knowledge import (
-            RetrievalPipeline,
-            QueryExpander,
-            PostProcessor,
-            FlatStringPostProcessor,
-            GroupedDictPostProcessor,
             AggregatingPostProcessor,
             BudgetAwarePostProcessor,
+            FlatStringPostProcessor,
+            GroupedDictPostProcessor,
+            PostProcessor,
+            QueryExpander,
+            RetrievalPipeline,
         )
+
         assert RetrievalPipeline is not None

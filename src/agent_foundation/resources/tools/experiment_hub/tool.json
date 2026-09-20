@@ -1,0 +1,59 @@
+{
+  "name": "experiment_hub",
+  "tool_type": "Dashboard",
+  "category": "workflow",
+  "agent_enabled": false,
+  "description": "Open the Experiment Hub — a persistent, multi-tab dashboard subtab that turns selected research proposals into runnable training experiments: Selection -> Implementation -> Review & Combo -> Experiments. Opened via the proposal-selection handoff (its 'Go To Experiment Hub' button) or the /experiment-hub slash; not LLM-invoked.",
+  "parameters": [
+    {"name": "proposals_path", "type": "path", "required": false, "description": "research-propose outputs dir (or its proposals.json) used to seed the Selection tab."},
+    {"name": "selected_proposal_ids", "type": "string", "required": false, "description": "Comma-separated proposal IDs to pre-select in the hub."},
+    {"name": "group_by", "type": "string", "default": "batch", "description": "How to group selected proposals for implementation (e.g. 'batch')."},
+    {"name": "initial_view", "type": "string", "default": "selection", "description": "Which tab to open first."},
+    {"name": "auto_implement", "type": "flag", "default": false, "description": "If set, immediately enqueue implementation of the selected proposals (the hub is otherwise the single implementation owner)."}
+  ],
+  "dashboard_config": {
+    "singleton": true,
+    "embeds": ["proposal_selection"],
+    "resume_strategy": "session_store",
+    "label": "Experiment Hub",
+    "icon": "🔬",
+    "pipeline": ["Research", "Selection", "Implement", "Experiment", "Monitor"],
+    "view_manifest": [
+      {
+        "type": "selection",
+        "label": "Selection",
+        "config": {
+          "widgets": [
+            {
+              "type": "proposal_selection",
+              "configSource": "selectionSnapshot",
+              "readOnly": false,
+              "incrementalSubmit": true,
+              "enrichments": {"statusMapSource": "runQueue"}
+            }
+          ],
+          "header": {"type": "batch_summary"}
+        }
+      },
+      {
+        "type": "implementation",
+        "label": "Implementation",
+        "config": {"renderLabel": "batch", "autoFollow": true, "showAccordions": true}
+      },
+      {
+        "type": "review_combo",
+        "label": "Review & Combo",
+        "config": {"tabField": "batchId", "submitLabel": "Submit Experiment", "submitAction": "ADD_SUBMISSION", "showComboHints": true, "detailDrawer": true}
+      },
+      {
+        "type": "experiments",
+        "label": "Experiments",
+        "config": {"groupBy": "comboKey", "showLifecycleStepper": true, "lifecycleSteps": ["Submitted", "Running", "Analyzing", "Done"]}
+      }
+    ]
+  },
+  "usage_guidance": "Opened by `proposal-selection --experiment-hub` (the widget's submit button becomes 'Go To Experiment Hub') or by the user via `/experiment-hub <proposals_path>`. Single active hub per session (singleton); resumable from session_store.",
+  "examples": [
+    "/experiment-hub <research_propose outputs dir>"
+  ]
+}

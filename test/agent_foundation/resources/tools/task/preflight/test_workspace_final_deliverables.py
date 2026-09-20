@@ -1,24 +1,19 @@
-"""Preflight test: verify the YAML's explicit workspace block enables
-`use_final_deliverables_folder=True`.
+"""Preflight test: the outer Dual's workspace uses the two-axis ``outputs/``
+contract (Part 2) — NOT the retired ``final_deliverables/`` folder.
 
 Why this matters
 ----------------
-Without this flag, the BTA at line ~977 in `breakdown_then_aggregate_inferencer.py`
-falls back to writing copied worker deliverables directly into `outputs/`,
-intermixed with intermediate streaming logs and the final consolidated
-output.md. With the flag enabled, the BTA writes them to
-`outputs/final_deliverables/` (a distinct subdirectory) which gives a clear
-"this is the user-facing deliverable" boundary.
+Part 2 retired ``use_final_deliverables_folder`` and the ``final_deliverables/``
+subfolder. ``outputs/`` IS the deliverable set now, so the outer Dual's
+workspace must:
 
-The YAML used to pass `workspace_root: "/tmp/topo_b_ws"` (a string shorthand
-that the Dual class auto-converts to `InferencerWorkspace(root=...)` with
-default flags). We replaced that with an explicit
-`workspace: {_target_: InferencerWorkspace, root: ..., use_final_deliverables_folder: true}`
-block so the flag is plumbed through.
+  * be a real ``InferencerWorkspace`` (not a surprise subclass), and
+  * expose an ``outputs_dir`` under the workspace root, and
+  * NOT carry the retired ``use_final_deliverables_folder`` attrib or the
+    ``deliverables_dir`` property.
 
-This preflight catches a silent regression where someone reverts to the
-shorthand form (which would still load OK but lose the deliverables/
-separation).
+This preflight catches a silent regression where someone re-introduces the
+retired flag/folder machinery.
 """
 
 from __future__ import annotations
@@ -30,7 +25,16 @@ import pytest
 # Resolve the YAML config — same convention as the legacy
 # `test_yaml_smoke_instantiate`. preflight/ lives one level below task/.
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
+YAML_PATH = (
+    _HERE.parents[5]
+    / "src"
+    / "agent_foundation"
+    / "resources"
+    / "tools"
+    / "task"
+    / "configs"
+    / "default.yaml"
+)
 # OpenStartup root: preflight/<this> → task/ → tools/ → resources/ → openteam/
 # → test/ → OpenStartup/.
 OPENSTARTUP_PATH = _HERE.parents[5]
@@ -38,7 +42,9 @@ OPENSTARTUP_PATH = _HERE.parents[5]
 TEMPLATES_DIR = _HERE.parents[1] / "task" / "configs" / "prompt_templates"
 if not TEMPLATES_DIR.exists():
     # Legacy smoke test points templates_dir at OpenStartup's prompt_templates.
-    TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
+    TEMPLATES_DIR = (
+        OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
+    )
 
 
 def _load_topology(monkeypatch, tmp_path):
@@ -51,7 +57,7 @@ def _load_topology(monkeypatch, tmp_path):
 
     # Side-effect import to register Hydra targets (ClaudeCodeCLI, Dual, etc.)
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import load_config, instantiate
+    from rich_python_utils.config_utils import instantiate, load_config
 
     cfg = load_config(
         str(YAML_PATH),
@@ -65,55 +71,54 @@ def _load_topology(monkeypatch, tmp_path):
 
 
 def test_yaml_loads(tmp_path, monkeypatch):
-    """Sanity: the YAML still parses + instantiates with the new workspace block."""
+    """Sanity: the YAML still parses + instantiates."""
     topology = _load_topology(monkeypatch, tmp_path)
     assert topology is not None
     # Outer Dual is the root.
     assert type(topology).__name__ == "DualInferencer"
 
 
-def test_outer_workspace_has_final_deliverables_flag_enabled(tmp_path, monkeypatch):
-    """The outer Dual's workspace MUST have use_final_deliverables_folder=True
-    after the YAML change. Catches accidental revert to the shorthand form."""
+def test_outer_workspace_uses_outputs_dir(tmp_path, monkeypatch):
+    """The outer Dual's workspace exposes an ``outputs_dir`` under its root —
+    the two-axis deliverable set (Part 2). No ``final_deliverables/`` folder."""
     topology = _load_topology(monkeypatch, tmp_path)
 
     ws = topology._workspace
     assert ws is not None, (
         "Outer Dual has no _workspace; expected an InferencerWorkspace "
-        "constructed from the explicit `workspace:` block in the YAML."
+        "constructed from the `workspace:` block in the YAML."
     )
-    assert getattr(ws, "use_final_deliverables_folder", False), (
-        "Outer Dual workspace.use_final_deliverables_folder is falsey; "
-        "the explicit `workspace:` block in the YAML may have regressed to "
-        "the `workspace_root: <str>` shorthand which doesn't carry the flag."
+    outputs_dir = ws.outputs_dir
+    assert outputs_dir is not None, "outputs_dir must resolve"
+    # Path convention: <root>/outputs — the deliverable set lives directly here.
+    assert Path(outputs_dir).name == "outputs", (
+        f"outputs_dir={outputs_dir!r} does not end with the expected 'outputs' segment."
     )
 
 
-def test_outer_workspace_deliverables_dir_resolves(tmp_path, monkeypatch):
-    """The flag must produce a non-None `deliverables_dir` path under outputs/."""
+def test_outer_workspace_has_no_retired_flag_or_property(tmp_path, monkeypatch):
+    """Regression guard: the retired ``use_final_deliverables_folder`` attrib and
+    ``deliverables_dir`` property must NOT be present on the outer workspace
+    after the Part 2 migration."""
     topology = _load_topology(monkeypatch, tmp_path)
 
     ws = topology._workspace
-    deliverables_dir = ws.deliverables_dir
-    assert deliverables_dir is not None, (
-        "deliverables_dir is None despite use_final_deliverables_folder=True; "
-        "this indicates the workspace block was not actually instantiated as "
-        "an InferencerWorkspace."
+    assert not hasattr(ws, "use_final_deliverables_folder"), (
+        "Retired attrib `use_final_deliverables_folder` reappeared on the "
+        "workspace; Part 2 removed it (outputs/ IS the deliverable set)."
     )
-    # Path convention: <root>/outputs/final_deliverables
-    assert deliverables_dir.endswith(
-        "outputs/final_deliverables"
-    ) or deliverables_dir.endswith("outputs\\final_deliverables"), (
-        f"deliverables_dir={deliverables_dir!r} does not end with the expected "
-        f"'outputs/final_deliverables' suffix."
+    assert not hasattr(ws, "deliverables_dir"), (
+        "Retired property `deliverables_dir` reappeared on the workspace; "
+        "callers must use `outputs_dir` / `output_path(...)` now."
     )
 
 
 def test_inferencer_workspace_class_is_used(tmp_path, monkeypatch):
     """Defensive: ensure the topology really uses InferencerWorkspace (not a
-    surprise subclass), so the flag semantics described in the comments hold."""
+    surprise subclass), so the outputs/ semantics described above hold."""
     topology = _load_topology(monkeypatch, tmp_path)
     from agent_foundation.common.inferencers.inferencer_workspace import (
         InferencerWorkspace,
     )
+
     assert isinstance(topology._workspace, InferencerWorkspace)

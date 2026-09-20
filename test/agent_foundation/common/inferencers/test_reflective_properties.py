@@ -6,15 +6,13 @@ Uses Hypothesis to verify correctness properties across randomized inputs.
 from unittest.mock import MagicMock
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
-from rich_python_utils.string_utils.formatting.handlebars_format import (
-    format_template as handlebars_template_format,
-)
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     InferencerResponse,
     ReflectionStyles,
+)
+from hypothesis import given, settings, strategies as st
+from rich_python_utils.string_utils.formatting.handlebars_format import (
+    format_template as handlebars_template_format,
 )
 
 
@@ -39,14 +37,17 @@ def _make_mock_inferencer(return_value="mock_result"):
 # Validates: Requirements 9.7
 # ---------------------------------------------------------------------------
 
+
 @settings(max_examples=100, deadline=None)
 @given(
-    reflection_style=st.sampled_from([
-        ReflectionStyles.NoReflection,
-        ReflectionStyles.Separate,
-        ReflectionStyles.Sequential,
-        ReflectionStyles.IntegrateAll,
-    ]),
+    reflection_style=st.sampled_from(
+        [
+            ReflectionStyles.NoReflection,
+            ReflectionStyles.Separate,
+            ReflectionStyles.Sequential,
+            ReflectionStyles.IntegrateAll,
+        ]
+    ),
     num_reflections=st.integers(min_value=1, max_value=3),
     input_text=st.text(min_size=1, max_size=50),
 )

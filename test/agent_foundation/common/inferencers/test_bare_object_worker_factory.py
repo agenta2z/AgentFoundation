@@ -6,15 +6,13 @@ for a bare ``InferencerBase`` in a field carrying ``metadata={"lazy_config_facto
 """
 
 import agent_foundation.common.configs  # noqa: F401 — registers aliases
-from omegaconf import OmegaConf
-
-from rich_python_utils.config_utils._instantiate import instantiate
-from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (  # noqa: E501
     BreakdownThenAggregateInferencer as BTA,
 )
 from agent_foundation.common.inferencers.inferencer_base import _PrototypeCloneFactory
+from omegaconf import OmegaConf
+from rich_python_utils.config_utils._instantiate import instantiate
+from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
 
 
 def _dual():
@@ -41,8 +39,8 @@ def test_factory_yields_fresh_distinct_workers():
     w1 = bta.worker_inferencers(sub_query="q", index=0)
     w2 = bta.worker_inferencers()
     assert type(w1).__name__ == "DualInferencer"
-    assert w1 is not w2                 # distinct objects
-    assert w1.id != w2.id               # distinct debuggable ids (fresh per call)
+    assert w1 is not w2  # distinct objects
+    assert w1.id != w2.id  # distinct debuggable ids (fresh per call)
     assert w1.base_inferencer is not w2.base_inferencer  # deep-independent
 
 
@@ -58,7 +56,9 @@ def test_list_path_unaffected():
 
 def test_dict_of_factories_path_unaffected():
     dct = {"_default": (lambda sub_query, index: object())}
-    assert BTA(worker_inferencers=dct, task_type_arg_name="kind").worker_inferencers is dct
+    assert (
+        BTA(worker_inferencers=dct, task_type_arg_name="kind").worker_inferencers is dct
+    )
 
 
 def test_yaml_config_path_stays_lazy_config_factory():

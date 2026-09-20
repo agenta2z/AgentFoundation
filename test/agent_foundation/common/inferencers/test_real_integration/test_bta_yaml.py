@@ -13,13 +13,9 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
-from rich_python_utils.config_utils import instantiate, load_config
-
 # Importing configs triggers alias registration (ClaudeCodeCLI, Dual, ConsensusConfig, etc.)
 import agent_foundation.common.configs  # noqa: F401
-
+import pytest
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -32,9 +28,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from rich_python_utils.config_utils import instantiate, load_config
 
 from .conftest import DEFAULT_TIMEOUT, skip_claude
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 # ---------------------------------------------------------------------------
 # Path to YAML templates
@@ -61,9 +58,7 @@ def _load_yaml_with_placeholders(yaml_name: str, replacements: dict):
         safe_value = value.replace("\\", "/")
         raw = raw.replace(f"{{{key}}}", safe_value)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
 
@@ -117,9 +112,7 @@ def test_bta_yaml_instantiation(tmp_workspace):
     )
 
     # max_breakdown from YAML
-    assert obj.max_breakdown == 2, (
-        f"max_breakdown should be 2, got {obj.max_breakdown}"
-    )
+    assert obj.max_breakdown == 2, f"max_breakdown should be 2, got {obj.max_breakdown}"
 
 
 # ===========================================================================
@@ -165,9 +158,7 @@ def test_bta_yaml_attribute_verification(tmp_workspace):
     )
 
     # max_breakdown
-    assert obj.max_breakdown == 2, (
-        f"max_breakdown should be 2, got {obj.max_breakdown}"
-    )
+    assert obj.max_breakdown == 2, f"max_breakdown should be 2, got {obj.max_breakdown}"
 
 
 # ===========================================================================
@@ -200,11 +191,15 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
     )
 
     # Planner children are ClaudeCodeCliInferencer
-    assert isinstance(obj.planner_inferencer.base_inferencer, ClaudeCodeCliInferencer), (
+    assert isinstance(
+        obj.planner_inferencer.base_inferencer, ClaudeCodeCliInferencer
+    ), (
         f"planner base_inferencer should be ClaudeCodeCliInferencer, "
         f"got {type(obj.planner_inferencer.base_inferencer).__name__}"
     )
-    assert isinstance(obj.planner_inferencer.review_inferencer, ClaudeCodeCliInferencer), (
+    assert isinstance(
+        obj.planner_inferencer.review_inferencer, ClaudeCodeCliInferencer
+    ), (
         f"planner review_inferencer should be ClaudeCodeCliInferencer, "
         f"got {type(obj.planner_inferencer.review_inferencer).__name__}"
     )
@@ -221,7 +216,9 @@ def test_pti_with_bta_executor_yaml_instantiation(tmp_workspace):
     )
 
     # Executor's breakdown inferencer is ClaudeCodeCliInferencer
-    assert isinstance(obj.executor_inferencer.breakdown_inferencer, ClaudeCodeCliInferencer), (
+    assert isinstance(
+        obj.executor_inferencer.breakdown_inferencer, ClaudeCodeCliInferencer
+    ), (
         f"executor breakdown_inferencer should be ClaudeCodeCliInferencer, "
         f"got {type(obj.executor_inferencer.breakdown_inferencer).__name__}"
     )

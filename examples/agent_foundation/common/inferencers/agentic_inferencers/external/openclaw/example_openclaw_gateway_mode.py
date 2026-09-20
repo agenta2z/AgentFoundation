@@ -94,14 +94,17 @@ async def stream_and_print(
     response = "".join(chunks)
     print()
     print()
-    print(f"  ⏱  ttft={first_chunk_time - t0:.2f}s  "
-          f"total={elapsed:.1f}s  chars={len(response)}")
+    print(
+        f"  ⏱  ttft={first_chunk_time - t0:.2f}s  "
+        f"total={elapsed:.1f}s  chars={len(response)}"
+    )
     return response
 
 
 # =============================================================================
 # Demo 1 — What should I follow up on today? (streaming, real TWG query)
 # =============================================================================
+
 
 async def demo_follow_up(thinking: str | None, timeout: int) -> None:
     """Demo 1: Streaming a real 'what should I follow up on?' query.
@@ -120,7 +123,7 @@ async def demo_follow_up(thinking: str | None, timeout: int) -> None:
         session_id="gw-demo-followup",
         thinking=thinking,
         timeout=timeout,
-        turn_separation=True,   # show multi-turn agentic loop boundaries
+        turn_separation=True,  # show multi-turn agentic loop boundaries
     )
 
     prompt = (
@@ -150,14 +153,17 @@ async def demo_follow_up(thinking: str | None, timeout: int) -> None:
     print()
     print("  " + "-" * 66)
     print(f"  ✅ Streaming complete!")
-    print(f"     ttft={first_chunk_time - t0:.2f}s  total={elapsed:.1f}s  "
-          f"chars={len(response)}")
+    print(
+        f"     ttft={first_chunk_time - t0:.2f}s  total={elapsed:.1f}s  "
+        f"chars={len(response)}"
+    )
     print(f"     session={inf.active_session_id}")
 
 
 # =============================================================================
 # Demo 2 — Multi-turn session restore (ask a follow-up in a new inferencer)
 # =============================================================================
+
 
 async def demo_session_restore(thinking: str | None, timeout: int) -> None:
     """Demo 2: Cross-run session restore — ask a follow-up in a new instance.
@@ -198,9 +204,22 @@ async def demo_session_restore(thinking: str | None, timeout: int) -> None:
 
     # Verify restore worked — Turn 2 should reference Turn 1's content
     print()
-    if any(kw in resp2.lower() for kw in
-           ["openclaw", "browser", "ai", "employee", "spike", "jira", "confluence",
-            "last week", "based on", "you mentioned", "as i mentioned"]):
+    if any(
+        kw in resp2.lower()
+        for kw in [
+            "openclaw",
+            "browser",
+            "ai",
+            "employee",
+            "spike",
+            "jira",
+            "confluence",
+            "last week",
+            "based on",
+            "you mentioned",
+            "as i mentioned",
+        ]
+    ):
         print("  ✅ Session restore CONFIRMED — Turn 2 references Turn 1 context!")
     else:
         print("  ⚠️  Turn 2 may not have restored context — check session JSONL.")
@@ -209,6 +228,7 @@ async def demo_session_restore(thinking: str | None, timeout: int) -> None:
 # =============================================================================
 # Demo 3 — Loom videos + comments query
 # =============================================================================
+
 
 async def demo_loom_videos(thinking: str | None, timeout: int) -> None:
     """Demo 3: Loom videos and audience comments via TWG.
@@ -241,6 +261,7 @@ async def demo_loom_videos(thinking: str | None, timeout: int) -> None:
 # Demo 4 — Team projects summary
 # =============================================================================
 
+
 async def demo_team_projects(thinking: str | None, timeout: int) -> None:
     """Demo 4: Summarise team's current projects and their progress.
 
@@ -271,6 +292,7 @@ async def demo_team_projects(thinking: str | None, timeout: int) -> None:
 # =============================================================================
 # Demo 5 — Auto-retry on rate limit
 # =============================================================================
+
 
 async def demo_retry(thinking: str | None, timeout: int) -> None:
     """Demo 5: Auto-retry with continuation prompt on rate limit.
@@ -308,7 +330,7 @@ async def demo_retry(thinking: str | None, timeout: int) -> None:
             print(chunk, end="", flush=True)
             chunks.append(chunk)
         print()
-        print(f"\n  ✅ Done in {time.time()-t0:.1f}s")
+        print(f"\n  ✅ Done in {time.time() - t0:.1f}s")
     except OpenClawRateLimitError as e:
         print(f"\n  ❌ Still rate-limited after 3 retries: {e}")
 
@@ -316,6 +338,7 @@ async def demo_retry(thinking: str | None, timeout: int) -> None:
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main_async(args: argparse.Namespace) -> None:
     thinking = args.thinking
@@ -341,7 +364,9 @@ async def main_async(args: argparse.Namespace) -> None:
             await demos[d]()
         except OpenClawNotFoundError as e:
             print(f"\n❌ OpenClaw not found: {e}")
-            print("   Ensure './run.sh start' is running and gateway is at ws://127.0.0.1:18789")
+            print(
+                "   Ensure './run.sh start' is running and gateway is at ws://127.0.0.1:18789"
+            )
             break
         except OpenClawError as e:
             print(f"\n⚠️  OpenClaw error in demo {d}: {type(e).__name__}: {e}")
@@ -388,6 +413,7 @@ def main() -> None:
     except Exception as e:
         print(f"\n❌ Unexpected error: {type(e).__name__}: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

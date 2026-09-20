@@ -41,7 +41,6 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
         sys.path.insert(0, _p)
 
 from omegaconf import OmegaConf
-
 from rich_python_utils.config_utils import (
     _reset_registry,
     instantiate,
@@ -54,9 +53,11 @@ from rich_python_utils.config_utils import (
 # Simple mock classes (imagine these are real inferencers)
 # ---------------------------------------------------------------------------
 
+
 @register("Translator")
 class Translator:
     """Simulates translation by prepending [lang]."""
+
     def __init__(self, lang: str = ""):
         self.lang = lang
 
@@ -70,6 +71,7 @@ class Translator:
 @register("Uppercaser")
 class Uppercaser:
     """Converts text to uppercase."""
+
     def __repr__(self):
         return "Uppercaser()"
 
@@ -80,6 +82,7 @@ class Uppercaser:
 @register("Pipeline")
 class Pipeline:
     """Chains multiple processors together."""
+
     def __init__(self, steps=None, first=None, second=None):
         # Accept either a list of steps or named first/second
         if steps:
@@ -133,13 +136,15 @@ def main():
 
     config = {
         "_target_": "Pipeline",
-        "first": "Translator",     # shorthand — expands to {_target_: Translator}
-        "second": "Uppercaser",    # shorthand — same
+        "first": "Translator",  # shorthand — expands to {_target_: Translator}
+        "second": "Uppercaser",  # shorthand — same
     }
     print(f"  Config: {config}")
 
     pipeline = instantiate(OmegaConf.create(config))
-    print(f"  Result: Pipeline with first={pipeline.steps[0]}, second={pipeline.steps[1]}")
+    print(
+        f"  Result: Pipeline with first={pipeline.steps[0]}, second={pipeline.steps[1]}"
+    )
     print(f"    -> Both were instantiated from shorthand strings!")
 
     # ── 4. Overrides ─────────────────────────────────────────
@@ -150,9 +155,7 @@ def main():
     default_obj = instantiate(base_config)
     print(f"  Default:  {default_obj}")
 
-    override_obj = instantiate(
-        OmegaConf.merge(base_config, {"lang": "Japanese"})
-    )
+    override_obj = instantiate(OmegaConf.merge(base_config, {"lang": "Japanese"}))
     print(f"  Override: {override_obj}")
 
 

@@ -8,6 +8,7 @@ Feature: knowledge-space-restructuring
 Uses hypothesis with a minimum of 100 iterations per property test.
 Integration tests use in-memory LanceDB (temp directory) for isolation.
 """
+
 import sys
 import tempfile
 from pathlib import Path
@@ -25,8 +26,6 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
@@ -34,6 +33,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
 from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
     LanceDBKnowledgePieceStore,
 )
+from hypothesis import given, settings, strategies as st
 
 # Import strategies from conftest
 _test_dir = Path(__file__).resolve().parent
@@ -49,9 +49,9 @@ _dummy_embed = lambda text: [0.1] * _EMBED_DIM
 _space_strategy = st.sampled_from(["main", "personal", "developmental"])
 
 # Strategy for generating non-empty deduplicated space lists
-_spaces_strategy = st.lists(
-    _space_strategy, min_size=1, max_size=3
-).map(lambda xs: list(dict.fromkeys(xs)))
+_spaces_strategy = st.lists(_space_strategy, min_size=1, max_size=3).map(
+    lambda xs: list(dict.fromkeys(xs))
+)
 
 
 # ── Property 3: LanceDB Storage Round-Trip for Spaces ────────────────────────
@@ -90,7 +90,9 @@ class TestLanceDBStorageRoundTrip:
             store.add(piece)
             retrieved = store.get_by_id(piece.piece_id)
 
-            assert retrieved is not None, f"Piece {piece.piece_id!r} not found after add()"
+            assert retrieved is not None, (
+                f"Piece {piece.piece_id!r} not found after add()"
+            )
             assert retrieved.spaces == piece.spaces, (
                 f"Spaces mismatch: stored {piece.spaces}, got {retrieved.spaces}"
             )

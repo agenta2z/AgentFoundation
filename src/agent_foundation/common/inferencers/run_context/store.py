@@ -126,6 +126,28 @@ class RunStateStore:
         """
         return self._nodes.get(path)
 
+    def evict_subtree(self, prefix: str) -> int:
+        """Drop every node at or under ``prefix`` — release a subtree's path claims (U1).
+
+        Before a retry RE-DERIVES a subtree (e.g. the Dual re-selects its review
+        panel), the stale ``(class_qualname, slot)`` creator claims from the prior
+        attempt must be released — otherwise a slot rebound to a DIFFERENT leaf
+        class trips the :class:`CollisionError` guard in :meth:`node`. Scoped
+        STRICTLY to ``prefix`` and its descendants (path ``== prefix`` or starting
+        ``prefix + '/'``); it NEVER clears the whole store, so sibling workers that
+        share this per-turn store are untouched. An empty/``"/"`` prefix is a
+        no-op (refuses to evict the root). Returns the number of nodes removed.
+        """
+        boundary = (prefix or "").strip().rstrip("/")
+        if not boundary:
+            return 0  # refuse to evict the whole store (empty / root prefix)
+        victims = [
+            p for p in self._nodes if p == boundary or p.startswith(boundary + "/")
+        ]
+        for p in victims:
+            del self._nodes[p]
+        return len(victims)
+
     def to_json(self) -> dict[str, Any]:
         return {"nodes": {p: n.to_json() for p, n in self._nodes.items()}}
 

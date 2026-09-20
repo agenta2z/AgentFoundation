@@ -170,7 +170,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
                                     {"type": "server_status", "status": "syncing"}
                                 )
                                 # Enrich config from file store if available
-                                reconnect_store = getattr(websocket.app.state, "session_store", None)
+                                reconnect_store = getattr(
+                                    websocket.app.state, "session_store", None
+                                )
                                 if reconnect_store:
                                     config = await asyncio.to_thread(
                                         reconnect_store.get_session_config, session_id
@@ -181,7 +183,10 @@ async def agent_websocket(websocket: WebSocket) -> None:
                                         )
                                 elif probe_resp.get("config"):
                                     await send_callback(
-                                        {"type": "config_update", "config": probe_resp["config"]}
+                                        {
+                                            "type": "config_update",
+                                            "config": probe_resp["config"],
+                                        }
                                     )
                                 bridge = new_bridge
                                 await send_callback(
@@ -211,7 +216,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
         if msg_type != "ping":
             logger.info(
                 "WS _handle_data: type=%s session=%s keys=%s",
-                msg_type, session_id, list(data.keys()),
+                msg_type,
+                session_id,
+                list(data.keys()),
             )
 
         if msg_type == "ping":
@@ -276,8 +283,12 @@ async def agent_websocket(websocket: WebSocket) -> None:
                     # Fallback to CLI args
                     fallback_config = {
                         "model": getattr(websocket.app.state, "agent_model", "") or "",
-                        "target_path": getattr(websocket.app.state, "agent_target_path", "") or "",
-                        "provider": getattr(websocket.app.state, "agent_provider", "") or "",
+                        "target_path": getattr(
+                            websocket.app.state, "agent_target_path", ""
+                        )
+                        or "",
+                        "provider": getattr(websocket.app.state, "agent_provider", "")
+                        or "",
                     }
                     if any(fallback_config.values()):
                         switch_init["config"] = fallback_config
@@ -302,11 +313,10 @@ async def agent_websocket(websocket: WebSocket) -> None:
             # Pass through all fields except "type" (added by send_message).
             logger.info(
                 "Received pending_input_response (session=%s), keys=%s",
-                session_id, list(data.keys()),
+                session_id,
+                list(data.keys()),
             )
-            forward = {
-                k: v for k, v in data.items() if k not in ("type",)
-            }
+            forward = {k: v for k, v in data.items() if k not in ("type",)}
             bridge.send_message("pending_input_response", **forward)
             logger.info(
                 "Forwarded pending_input_response to queue (session=%s)",
@@ -321,7 +331,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
             # Check if previous poll_responses is still running
             logger.info(
                 "pending_input_response: active_task=%s, done=%s (session=%s)",
-                active_task, active_task.done() if active_task else 'N/A', session_id,
+                active_task,
+                active_task.done() if active_task else "N/A",
+                session_id,
             )
             # Restart response polling. The first poll_responses() exited
             # when stream_end was sent after the initial LLM response.
@@ -329,17 +341,18 @@ async def agent_websocket(websocket: WebSocket) -> None:
             # a new poll_responses loop to pick them up and forward to the
             # frontend via WebSocket.
             if active_task is None or active_task.done():
+
                 async def resume_after_input() -> None:
                     try:
                         await bridge.poll_responses(send_callback)
                     except asyncio.CancelledError:
-                        logger.info(
-                            "Resume polling cancelled (session=%s)", session_id
-                        )
+                        logger.info("Resume polling cancelled (session=%s)", session_id)
                     except Exception as e:
                         logger.error(
                             "Error in resume polling (session=%s): %s",
-                            session_id, e, exc_info=True,
+                            session_id,
+                            e,
+                            exc_info=True,
                         )
                         await send_callback({"type": "error", "message": str(e)})
 

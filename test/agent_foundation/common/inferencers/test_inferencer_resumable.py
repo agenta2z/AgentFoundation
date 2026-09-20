@@ -13,17 +13,16 @@ import hashlib
 import os
 import time
 import unittest
-
 from typing import Any, AsyncIterator, Optional
 
 from attr import attrib, attrs
-
 from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 
 
 # ---------------------------------------------------------------------------
 # Minimal mock inferencers for testing
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class MockPlainInferencer:
@@ -32,12 +31,14 @@ class MockPlainInferencer:
     We can't instantiate InferencerBase directly (abstract), so we import
     the real mock from the existing test fixtures.
     """
+
     pass
 
 
 # Import real inferencer classes lazily to avoid heavy imports at module level
 def _get_inferencer_base():
     from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
     return InferencerBase
 
 
@@ -45,6 +46,7 @@ def _get_streaming_base():
     from agent_foundation.common.inferencers.streaming_inferencer_base import (
         StreamingInferencerBase,
     )
+
     return StreamingInferencerBase
 
 
@@ -90,8 +92,8 @@ def _make_mock_plain(**kwargs):
 # Tests: isinstance + defaults
 # ---------------------------------------------------------------------------
 
-class TestIsInstanceResumable(unittest.TestCase):
 
+class TestIsInstanceResumable(unittest.TestCase):
     def test_plain_inferencer_is_resumable(self):
         inf = _make_mock_plain()
         self.assertIsInstance(inf, Resumable)
@@ -106,17 +108,17 @@ class TestIsInstanceResumable(unittest.TestCase):
         self.assertFalse(inf.resume_with_saved_results)
 
     def test_constructor_accepts_resumable_kwargs(self):
-        inf = _make_mock_plain(enable_result_save=True, checkpoint_mode='jsonfy')
+        inf = _make_mock_plain(enable_result_save=True, checkpoint_mode="jsonfy")
         self.assertTrue(inf.enable_result_save)
-        self.assertEqual(inf.checkpoint_mode, 'jsonfy')
+        self.assertEqual(inf.checkpoint_mode, "jsonfy")
 
 
 # ---------------------------------------------------------------------------
 # Tests: _get_result_path
 # ---------------------------------------------------------------------------
 
-class TestGetResultPath(unittest.TestCase):
 
+class TestGetResultPath(unittest.TestCase):
     def test_raises_without_output_path(self):
         inf = _make_mock_plain(output_path=None)
         with self.assertRaises(NotImplementedError):
@@ -124,6 +126,7 @@ class TestGetResultPath(unittest.TestCase):
 
     def test_with_output_path(self, tmp_path=None):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_plain(output_path=tmpdir)
             result = inf._get_result_path("step_0")
@@ -131,6 +134,7 @@ class TestGetResultPath(unittest.TestCase):
 
     def test_streaming_fallback_to_cache_folder(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(cache_folder=tmpdir)
             result = inf._get_result_path("step_0")
@@ -138,6 +142,7 @@ class TestGetResultPath(unittest.TestCase):
 
     def test_streaming_prefers_output_path(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = os.path.join(tmpdir, "output")
             cache_dir = os.path.join(tmpdir, "cache")
@@ -152,11 +157,12 @@ class TestGetResultPath(unittest.TestCase):
 # Tests: _find_latest_cache
 # ---------------------------------------------------------------------------
 
-class TestFindLatestCache(unittest.TestCase):
 
+class TestFindLatestCache(unittest.TestCase):
     def _write_cache(self, cache_folder, class_name, prompt, content, delay=0):
         """Write a mock cache file matching _open_cache_file's naming convention."""
         import uuid
+
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         session_dir = os.path.join(
             cache_folder, class_name, f"mock-id_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -172,22 +178,27 @@ class TestFindLatestCache(unittest.TestCase):
 
     def test_no_cache_returns_none(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(cache_folder=tmpdir)
             self.assertIsNone(inf._find_latest_cache("test prompt"))
 
     def test_finds_matching_cache(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # Use the actual class name that _find_latest_cache will look for
             inf = _make_mock_streaming(cache_folder=tmpdir)
             class_name = inf.__class__.__name__
-            path = self._write_cache(tmpdir, class_name, "test prompt", "partial content")
+            path = self._write_cache(
+                tmpdir, class_name, "test prompt", "partial content"
+            )
             result = inf._find_latest_cache("test prompt")
             self.assertEqual(result, path)
 
     def test_filters_by_prompt_hash(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(cache_folder=tmpdir)
             class_name = inf.__class__.__name__
@@ -197,12 +208,15 @@ class TestFindLatestCache(unittest.TestCase):
 
     def test_picks_most_recent(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(cache_folder=tmpdir)
             class_name = inf.__class__.__name__
             self._write_cache(tmpdir, class_name, "test prompt", "old content")
             time.sleep(0.05)  # ensure different mtime
-            newer_path = self._write_cache(tmpdir, class_name, "test prompt", "new content")
+            newer_path = self._write_cache(
+                tmpdir, class_name, "test prompt", "new content"
+            )
             result = inf._find_latest_cache("test prompt")
             self.assertEqual(result, newer_path)
 
@@ -211,10 +225,11 @@ class TestFindLatestCache(unittest.TestCase):
 # Tests: _load_cached_or_resume
 # ---------------------------------------------------------------------------
 
-class TestLoadCachedOrResume(unittest.TestCase):
 
+class TestLoadCachedOrResume(unittest.TestCase):
     def test_disabled_by_default(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(
                 cache_folder=tmpdir,
@@ -224,6 +239,7 @@ class TestLoadCachedOrResume(unittest.TestCase):
 
     def test_no_cache_returns_none(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(
                 cache_folder=tmpdir,
@@ -233,6 +249,7 @@ class TestLoadCachedOrResume(unittest.TestCase):
 
     def test_completed_cache_returns_completed(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(
                 cache_folder=tmpdir,
@@ -244,11 +261,12 @@ class TestLoadCachedOrResume(unittest.TestCase):
             result = inf._load_cached_or_resume("test prompt")
             self.assertIsNotNone(result)
             status, text = result
-            self.assertEqual(status, 'completed')
+            self.assertEqual(status, "completed")
             self.assertEqual(text, "Hello world")
 
     def test_failed_cache_returns_partial(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(
                 cache_folder=tmpdir,
@@ -260,11 +278,12 @@ class TestLoadCachedOrResume(unittest.TestCase):
             result = inf._load_cached_or_resume("test prompt")
             self.assertIsNotNone(result)
             status, text = result
-            self.assertEqual(status, 'partial')
+            self.assertEqual(status, "partial")
             self.assertIn("Partial output", text)
 
     def test_no_marker_treated_as_partial(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(
                 cache_folder=tmpdir,
@@ -276,11 +295,12 @@ class TestLoadCachedOrResume(unittest.TestCase):
             result = inf._load_cached_or_resume("test prompt")
             self.assertIsNotNone(result)
             status, text = result
-            self.assertEqual(status, 'partial')
+            self.assertEqual(status, "partial")
             self.assertEqual(text, "Abruptly stopped content")
 
     def _write_cache(self, cache_folder, class_name, prompt, content):
         import uuid
+
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         session_dir = os.path.join(
             cache_folder, class_name, f"mock-id_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -297,12 +317,13 @@ class TestLoadCachedOrResume(unittest.TestCase):
 # Tests: _load_result contract preserved
 # ---------------------------------------------------------------------------
 
-class TestLoadResultUntouched(unittest.TestCase):
 
+class TestLoadResultUntouched(unittest.TestCase):
     def test_load_result_returns_raw(self):
         """_load_result must return raw result (not a tuple) for Workflow engine."""
-        import tempfile
         import pickle
+        import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _make_mock_streaming(cache_folder=tmpdir)
             # Manually save a pickle result
@@ -318,15 +339,16 @@ class TestLoadResultUntouched(unittest.TestCase):
 # Tests: Diamond inheritance
 # ---------------------------------------------------------------------------
 
-class TestDiamondInheritance(unittest.TestCase):
 
+class TestDiamondInheritance(unittest.TestCase):
     def test_dual_inferencer(self):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
             DualInferencer,
         )
+
         self.assertTrue(issubclass(DualInferencer, Resumable))
         mro_names = [c.__name__ for c in DualInferencer.__mro__]
-        self.assertEqual(mro_names.count('Resumable'), 1)
+        self.assertEqual(mro_names.count("Resumable"), 1)
         # Construction should work
         di = DualInferencer()
         self.assertFalse(di.enable_result_save)
@@ -335,25 +357,27 @@ class TestDiamondInheritance(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
             PlanThenImplementInferencer,
         )
+
         self.assertTrue(issubclass(PlanThenImplementInferencer, Resumable))
         mro_names = [c.__name__ for c in PlanThenImplementInferencer.__mro__]
-        self.assertEqual(mro_names.count('Resumable'), 1)
+        self.assertEqual(mro_names.count("Resumable"), 1)
 
     def test_breakdown_then_aggregate(self):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
+
         self.assertTrue(issubclass(BreakdownThenAggregateInferencer, Resumable))
         mro_names = [c.__name__ for c in BreakdownThenAggregateInferencer.__mro__]
-        self.assertEqual(mro_names.count('Resumable'), 1)
+        self.assertEqual(mro_names.count("Resumable"), 1)
 
 
 # ---------------------------------------------------------------------------
 # Tests: worker_manages_resume detection
 # ---------------------------------------------------------------------------
 
-class TestWorkerManagesResumeDetection(unittest.TestCase):
 
+class TestWorkerManagesResumeDetection(unittest.TestCase):
     def test_streaming_inferencer_detected_as_resumable(self):
         """BTA's isinstance(worker, Resumable) check now returns True for streaming."""
         inf = _make_mock_streaming()

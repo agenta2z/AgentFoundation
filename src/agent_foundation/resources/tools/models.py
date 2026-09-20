@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Dataclasses for tool definitions — ToolDefinition, ParameterDef, SubcommandDef.
@@ -86,9 +85,7 @@ class SubcommandDef:
         return cls(
             name=data["name"],
             description=data.get("description", ""),
-            parameters=[
-                ParameterDef.from_dict(p) for p in data.get("parameters", [])
-            ],
+            parameters=[ParameterDef.from_dict(p) for p in data.get("parameters", [])],
         )
 
 
@@ -98,8 +95,10 @@ class ToolDefinition:
 
     name: str
     description: str = ""
-    tool_type: str = "Action"  # "Action" | "Conversation"
-    category: str = "utility"  # "workflow" | "knowledge" | "session" | "utility" | "conversation"
+    tool_type: str = "Action"  # "Action" | "Conversation" | "Dashboard"
+    category: str = (
+        "utility"  # "workflow" | "knowledge" | "session" | "utility" | "conversation"
+    )
     aliases: list[str] = field(default_factory=list)
     # Optional LLM-facing display name. When set, the tool is rendered to the
     # LLM under this name (e.g. "enter_sop" instead of "sop") while the executor
@@ -107,7 +106,9 @@ class ToolDefinition:
     # affects agent_enabled tools (those rendered into the prompt).
     preferred_prompt_alias: str = ""
     is_bridge: bool = False
-    asynchronous: bool = False  # Fire-and-forget: tool runs in background, turn completes immediately
+    asynchronous: bool = (
+        False  # Fire-and-forget: tool runs in background, turn completes immediately
+    )
     concurrency: str = "blocking"  # "blocking" | "async_background" | "async_awaitable"
     yolo_default: dict[str, Any] | None = None  # Per-tool yolo auto-advance config
     parameters: list[ParameterDef] = field(default_factory=list)
@@ -115,7 +116,9 @@ class ToolDefinition:
     returns: str = ""
     examples: list[str] = field(default_factory=list)
     usage_guidance: str = ""  # When to use this tool (rendered in prompt)
-    agent_enabled: bool = True  # If False, tool is user-only (not rendered in LLM prompt)
+    agent_enabled: bool = (
+        True  # If False, tool is user-only (not rendered in LLM prompt)
+    )
     # Derived tool metadata — declares this tool is a specialization of
     # another tool with argument translation and a template_version override.
     # Used by tool_executor for dispatch and by prompt rendering for docs.
@@ -124,6 +127,11 @@ class ToolDefinition:
     viewable_output_path: str = ""
     viewable_output_label: str = ""
     arg_template_rules: list[dict[str, str]] | None = None
+    # Dashboard tools (tool_type == "Dashboard") declare their UI surface here:
+    #   {singleton: bool, embeds: list[str], view_manifest: list[dict], resume_strategy: str}
+    # `view_manifest` is the canonical tab structure shipped to the client in the
+    # `dashboard_open` WS payload (see agent_foundation/server/dashboard).
+    dashboard_config: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -161,6 +169,8 @@ class ToolDefinition:
             d["viewable_output_label"] = self.viewable_output_label
         if self.arg_template_rules is not None:
             d["arg_template_rules"] = self.arg_template_rules
+        if self.dashboard_config is not None:
+            d["dashboard_config"] = self.dashboard_config
         return d
 
     @classmethod
@@ -174,11 +184,12 @@ class ToolDefinition:
             preferred_prompt_alias=data.get("preferred_prompt_alias", ""),
             is_bridge=data.get("is_bridge", False),
             asynchronous=data.get("asynchronous", False),
-            concurrency=data.get("concurrency", "async_background" if data.get("asynchronous") else "blocking"),
+            concurrency=data.get(
+                "concurrency",
+                "async_background" if data.get("asynchronous") else "blocking",
+            ),
             yolo_default=data.get("yolo_default"),
-            parameters=[
-                ParameterDef.from_dict(p) for p in data.get("parameters", [])
-            ],
+            parameters=[ParameterDef.from_dict(p) for p in data.get("parameters", [])],
             subcommands=[
                 SubcommandDef.from_dict(s) for s in data.get("subcommands", [])
             ],
@@ -190,4 +201,5 @@ class ToolDefinition:
             viewable_output_path=data.get("viewable_output_path", ""),
             viewable_output_label=data.get("viewable_output_label", ""),
             arg_template_rules=data.get("arg_template_rules"),
+            dashboard_config=data.get("dashboard_config"),
         )

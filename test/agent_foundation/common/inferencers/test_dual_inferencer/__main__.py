@@ -29,15 +29,11 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.response_parsers import extract_delimited
 from rich_python_utils.common_objects.debuggable import LoggerConfig
 from rich_python_utils.io_utils.json_io import JsonLogger, SpaceExtMode
-from rich_python_utils.string_utils.formatting.template_manager import (
-    TemplateManager,
-)
+from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 from .implementation_templates import (
     IMPLEMENTATION_FOLLOWUP_TEMPLATE,

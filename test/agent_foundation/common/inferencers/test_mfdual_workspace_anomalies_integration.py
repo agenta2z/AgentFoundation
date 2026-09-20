@@ -7,7 +7,8 @@ documented in the workspace observability plan.
 Anomalies covered:
   1. LazyConfigFactory produces isolated workers (no shared instances)
   2. switch_role sets correct template_key on reviewer/fixer
-  3. No double final_deliverables nesting
+  3. (RETIRED in Part 2) double final_deliverables nesting — the
+     final_deliverables/ subfolder no longer exists, so this anomaly is moot.
   4. No empty round01 placeholder directories
   5. Worker sharing detection fires on shared instances
   6. Audit symlink cross-worker leakage detection
@@ -21,24 +22,24 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+    BreakdownThenAggregateInferencer,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
     MultiFlowDualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
-    BreakdownThenAggregateInferencer,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from attr import attrib, attrs
 
 
 # ---------------------------------------------------------------------------
 # Mock inferencer — minimal InferencerBase subclass with scripted responses
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class _MockInferencer(InferencerBase):
@@ -82,6 +83,7 @@ class _TemplatedMockInferencer(TemplatedInferencerBase):
 # Test 1: LazyConfigFactory produces isolated workers
 # ---------------------------------------------------------------------------
 
+
 class TestLazyConfigFactoryIsolation(unittest.TestCase):
     """Verify that BTA worker_inferencers produces workers with no shared
     inferencer instances between them.
@@ -124,8 +126,12 @@ class TestLazyConfigFactoryIsolation(unittest.TestCase):
         worker_1 = factory("query B", 1)
 
         # Collect all descendant inferencers for each worker
-        descendants_0 = set(id(inf) for inf in worker_0._collect_all_descendant_inferencers())
-        descendants_1 = set(id(inf) for inf in worker_1._collect_all_descendant_inferencers())
+        descendants_0 = set(
+            id(inf) for inf in worker_0._collect_all_descendant_inferencers()
+        )
+        descendants_1 = set(
+            id(inf) for inf in worker_1._collect_all_descendant_inferencers()
+        )
 
         # Worker IDs themselves should differ
         self.assertNotEqual(id(worker_0), id(worker_1))
@@ -139,8 +145,11 @@ class TestLazyConfigFactoryIsolation(unittest.TestCase):
         #
         # Verify: the initial_inferencer for flow 0 is NOT the same object
         # as the initial_inferencer for flow 1.
-        self.assertIsNot(inf_a, inf_b,
-            "Test setup error: flow inferencers must be distinct instances")
+        self.assertIsNot(
+            inf_a,
+            inf_b,
+            "Test setup error: flow inferencers must be distinct instances",
+        )
 
         # Each worker's default_initial_inferencer should reference its own
         # flow's inferencer, not the other flow's.
@@ -151,6 +160,7 @@ class TestLazyConfigFactoryIsolation(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Test 2: switch_role sets correct template_key
 # ---------------------------------------------------------------------------
+
 
 class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
     """Verify that _reassign_role_workspace calls switch_role with the
@@ -221,12 +231,16 @@ class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
             review_history = getattr(mfd.review_inferencer, "_role_history", [])
             fixer_history = getattr(mfd.fixer_inferencer, "_role_history", [])
 
-            self.assertTrue(len(review_history) > 0,
-                "switch_role should have been called on the reviewer")
+            self.assertTrue(
+                len(review_history) > 0,
+                "switch_role should have been called on the reviewer",
+            )
             self.assertEqual(review_history[-1]["to_role"], "review_inferencer")
 
-            self.assertTrue(len(fixer_history) > 0,
-                "switch_role should have been called on the fixer")
+            self.assertTrue(
+                len(fixer_history) > 0,
+                "switch_role should have been called on the fixer",
+            )
             self.assertEqual(fixer_history[-1]["to_role"], "fixer_inferencer")
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -246,10 +260,18 @@ class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
 
         mfd = MultiFlowDualInferencer(
             flow_configs=[
-                {"input": "q0", "initial_inferencer": flow0_inf,
-                 "followup_inferencer": flow0_inf, "max_dynamic_steps": 1},
-                {"input": "q1", "initial_inferencer": flow1_inf,
-                 "followup_inferencer": flow1_inf, "max_dynamic_steps": 1},
+                {
+                    "input": "q0",
+                    "initial_inferencer": flow0_inf,
+                    "followup_inferencer": flow0_inf,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "q1",
+                    "initial_inferencer": flow1_inf,
+                    "followup_inferencer": flow1_inf,
+                    "max_dynamic_steps": 1,
+                },
             ],
             visible_flows="all",
             reviewer_strategy="runner_up",
@@ -272,148 +294,56 @@ class TestSwitchRoleSetsTemplateKey(unittest.TestCase):
 
             # CRITICAL: template_key should have been mutated by
             # TemplatedInferencerBase.switch_role()
-            self.assertEqual(mfd.review_inferencer.template_key, "review",
-                "Reviewer's template_key should be 'review' after role swap")
-            self.assertEqual(mfd.fixer_inferencer.template_key, "followup",
-                "Fixer's template_key should be 'followup' after role swap")
+            self.assertEqual(
+                mfd.review_inferencer.template_key,
+                "review",
+                "Reviewer's template_key should be 'review' after role swap",
+            )
+            self.assertEqual(
+                mfd.fixer_inferencer.template_key,
+                "followup",
+                "Fixer's template_key should be 'followup' after role swap",
+            )
 
             # Verify the workspace was properly assigned (fresh child workspace)
             review_ws = getattr(mfd.review_inferencer, "_workspace", None)
             fixer_ws = getattr(mfd.fixer_inferencer, "_workspace", None)
             # The _workspace property is stored via name mangling
-            review_ws = getattr(mfd.review_inferencer, "_InferencerBase__workspace", review_ws)
-            fixer_ws = getattr(mfd.fixer_inferencer, "_InferencerBase__workspace", fixer_ws)
-            self.assertIsNotNone(review_ws,
-                "Reviewer should have a workspace after role reassignment")
-            self.assertIsNotNone(fixer_ws,
-                "Fixer should have a workspace after role reassignment")
+            review_ws = getattr(
+                mfd.review_inferencer, "_InferencerBase__workspace", review_ws
+            )
+            fixer_ws = getattr(
+                mfd.fixer_inferencer, "_InferencerBase__workspace", fixer_ws
+            )
+            self.assertIsNotNone(
+                review_ws, "Reviewer should have a workspace after role reassignment"
+            )
+            self.assertIsNotNone(
+                fixer_ws, "Fixer should have a workspace after role reassignment"
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
-# Test 3: No double final_deliverables nesting
+# Test 3: No double final_deliverables nesting — RETIRED in Part 2.
+#
+# ``TestNoDoubleFinalDeliverablesNesting`` (test_no_nested_final_deliverables,
+# test_no_nested_final_deliverables_via_bta_promote) guarded against creating
+# ``outputs/final_deliverables/final_deliverables/`` when surfacing a child whose
+# deliverables lived in ``outputs/final_deliverables/``. Part 2 retired the
+# ``final_deliverables/`` subfolder entirely — deliverables live directly in
+# ``outputs/`` and ``surface_outputs_from`` copies outputs/ → outputs/ — so the
+# double-nesting anomaly cannot occur and these tests have no subject. (Flat
+# outputs/ surfacing is covered by test_workspace_phase0.surface_outputs_from_* and
+# test_deliverable_boundary.*.)
 # ---------------------------------------------------------------------------
-
-class TestNoDoubleFinalDeliverablesNesting(unittest.TestCase):
-    """Verify that surface_outputs_from does not create
-    final_deliverables/final_deliverables/ (double nesting).
-
-    The anomaly: when a child workspace already had its deliverables in
-    outputs/final_deliverables/, surfacing them into the parent's
-    deliverables dir created final_deliverables/final_deliverables/.
-    """
-
-    def test_no_nested_final_deliverables(self):
-        tmpdir = tempfile.mkdtemp(prefix="mfdual_deliverables_")
-        try:
-            # Parent workspace with use_final_deliverables_folder=True
-            parent_ws = InferencerWorkspace(
-                root=os.path.join(tmpdir, "parent"),
-                use_final_deliverables_folder=True,
-            )
-            parent_ws.ensure_dirs()
-
-            # Child workspace with the same flag
-            child_ws = InferencerWorkspace(
-                root=os.path.join(tmpdir, "child"),
-                use_final_deliverables_folder=True,
-            )
-            child_ws.ensure_dirs()
-
-            # Write a file into child's final_deliverables
-            child_deliv_dir = child_ws.deliverables_dir
-            os.makedirs(child_deliv_dir, exist_ok=True)
-            test_file = os.path.join(child_deliv_dir, "output.md")
-            with open(test_file, "w") as f:
-                f.write("# Test output\nThis is the deliverable.")
-
-            # Surface child deliverables into parent
-            copied = parent_ws.surface_outputs_from(child_ws)
-
-            # Verify: output.md exists in parent's deliverables
-            parent_deliv_dir = parent_ws.deliverables_dir
-            self.assertTrue(
-                os.path.isfile(os.path.join(parent_deliv_dir, "output.md")),
-                "output.md should exist in parent's final_deliverables/",
-            )
-
-            # Verify: final_deliverables/final_deliverables/ does NOT exist
-            nested_path = os.path.join(parent_deliv_dir, "final_deliverables")
-            self.assertFalse(
-                os.path.isdir(nested_path),
-                f"Double nesting detected: {nested_path} should NOT exist. "
-                f"surface_outputs_from should strip the inner final_deliverables/ level.",
-            )
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    def test_no_nested_final_deliverables_via_bta_promote(self):
-        """BTA's promote_worker_deliverables uses find_conflicting_and_agreed_files,
-        which is a DIFFERENT code path from surface_outputs_from. Both must
-        prune final_deliverables/ subdirectories to prevent double nesting.
-
-        This test was MISSING — it exercises the exact code path that caused
-        the double nesting bug in production (BTA.promote_worker_deliverables
-        → find_conflicting_and_agreed_files → safe_copy_per_file).
-        """
-        from rich_python_utils.path_utils.path_listing import (
-            find_conflicting_and_agreed_files,
-            safe_copy_per_file,
-        )
-
-        tmpdir = tempfile.mkdtemp(prefix="bta_promote_")
-        try:
-            # Simulate BTA's children dir with two workers
-            children_dir = os.path.join(tmpdir, "children")
-            deliverables_dst = os.path.join(tmpdir, "outputs", "final_deliverables")
-            os.makedirs(deliverables_dst, exist_ok=True)
-
-            # Worker 0: has outputs/final_deliverables/ with content
-            # AND a nested final_deliverables/ inside (from deeper-level surfacing)
-            w0_fd = os.path.join(children_dir, "worker_0", "outputs", "final_deliverables")
-            os.makedirs(w0_fd, exist_ok=True)
-            with open(os.path.join(w0_fd, "output.md"), "w") as f:
-                f.write("Worker 0 deliverable")
-            # Simulate deeper-level surfacing creating nested final_deliverables/
-            w0_nested = os.path.join(w0_fd, "final_deliverables")
-            os.makedirs(w0_nested, exist_ok=True)
-            with open(os.path.join(w0_nested, "output.md"), "w") as f:
-                f.write("Worker 0 deliverable (nested copy)")
-            with open(os.path.join(w0_nested, ".self_promoted"), "w") as f:
-                pass
-
-            # Build roots the same way BTA does (lines 1112-1121)
-            roots = [w0_fd]
-            root_names = ["worker_0"]
-
-            diff = find_conflicting_and_agreed_files(roots, root_names)
-            copied = safe_copy_per_file(
-                diff, deliverables_dst,
-                skip_existing=True,
-                conflict_fallback="largest",
-            )
-
-            # output.md should exist at the top level
-            self.assertTrue(
-                os.path.isfile(os.path.join(deliverables_dst, "output.md")),
-                "output.md should exist in deliverables_dst",
-            )
-
-            # CRITICAL: final_deliverables/final_deliverables/ must NOT exist
-            nested = os.path.join(deliverables_dst, "final_deliverables")
-            self.assertFalse(
-                os.path.isdir(nested),
-                f"Double nesting via BTA promote path: {nested} should NOT exist. "
-                f"find_conflicting_and_agreed_files must prune final_deliverables/ subdirs.",
-            )
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # Test 4: No empty round01 placeholder
 # ---------------------------------------------------------------------------
+
 
 class TestFollowupWorkspaceAssignment(unittest.TestCase):
     """Verify that MultiFlow delegates flow_configs workspace to LWI.
@@ -442,7 +372,9 @@ class TestFollowupWorkspaceAssignment(unittest.TestCase):
                     {
                         "input": "query 1",
                         "initial_inferencer": _MockInferencer(scripted_response="q1"),
-                        "followup_inferencer": _MockInferencer(scripted_response="q1 fup"),
+                        "followup_inferencer": _MockInferencer(
+                            scripted_response="q1 fup"
+                        ),
                         "max_dynamic_steps": 2,
                     },
                 ],
@@ -472,6 +404,7 @@ class TestFollowupWorkspaceAssignment(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Test 5: Worker sharing detection fires on shared instances
 # ---------------------------------------------------------------------------
+
 
 class TestWorkerSharingDetection(unittest.TestCase):
     """Verify that BTA's _validate_worker_isolation logs a warning when
@@ -506,9 +439,7 @@ class TestWorkerSharingDetection(unittest.TestCase):
         worker_1._iter_child_inferencers = _yield_shared_1
 
         # Create a minimal BTA to call _validate_worker_isolation
-        bta = BreakdownThenAggregateInferencer.__new__(
-            BreakdownThenAggregateInferencer
-        )
+        bta = BreakdownThenAggregateInferencer.__new__(BreakdownThenAggregateInferencer)
         bta.worker_isolation_check = True
 
         log_target = (
@@ -527,13 +458,17 @@ class TestWorkerSharingDetection(unittest.TestCase):
             # Verify the warning message mentions the shared class name
             call_args = mock_logger.warning.call_args
             warning_msg = call_args[0][0] % call_args[0][1:]
-            self.assertIn("_MockInferencer", warning_msg,
-                "Warning should mention the shared inferencer class name")
+            self.assertIn(
+                "_MockInferencer",
+                warning_msg,
+                "Warning should mention the shared inferencer class name",
+            )
 
 
 # ---------------------------------------------------------------------------
 # Test 6: Audit symlink cross-worker detection
 # ---------------------------------------------------------------------------
+
 
 class TestAuditSymlinkCrossWorkerDetection(unittest.TestCase):
     """Verify that DualInferencer._record_round_audit logs an error when
@@ -596,8 +531,11 @@ class TestAuditSymlinkCrossWorkerDetection(unittest.TestCase):
                 )
                 call_args = mock_logger.error.call_args
                 msg = call_args[0][0] % call_args[0][1:]
-                self.assertIn("cross-worker leakage", msg,
-                    "Error message should mention 'cross-worker leakage'")
+                self.assertIn(
+                    "cross-worker leakage",
+                    msg,
+                    "Error message should mention 'cross-worker leakage'",
+                )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -605,6 +543,7 @@ class TestAuditSymlinkCrossWorkerDetection(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Test 7: YAML-driven instantiate() round-trip — LazyConfigFactory fires
 # ---------------------------------------------------------------------------
+
 
 class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
     """Verify that instantiate() on a config with *_factory fields produces
@@ -620,41 +559,61 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         """A BTA-like config with worker_inferencers.__default__._target_ should
         produce a LazyConfigFactory, not a functools.partial."""
         import functools
+
+        import agent_foundation.common.configs.registered_targets  # noqa: F401
         from omegaconf import OmegaConf
         from rich_python_utils.config_utils import instantiate, register_class
-        from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
-        import agent_foundation.common.configs.registered_targets  # noqa: F401
+        from rich_python_utils.config_utils._lazy_config_factory import (
+            LazyConfigFactory,
+        )
 
         # Register our mock so Hydra can resolve _target_
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
-        config = OmegaConf.create({
-            "_target_": "BTA",
-            "worker_inferencers": {
-                "__default__": {
-                    "_target_": "MultiFlowDual",
-                    "flow_configs": [
-                        {
-                            "input": "task_0",
-                            "initial_inferencer": {"_target_": "_MockInferencer", "scripted_response": "flow0"},
-                            "followup_inferencer": {"_target_": "_MockInferencer", "scripted_response": "flow0_followup"},
-                            "max_dynamic_steps": 1,
+        config = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "worker_inferencers": {
+                    "__default__": {
+                        "_target_": "MultiFlowDual",
+                        "flow_configs": [
+                            {
+                                "input": "task_0",
+                                "initial_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow0",
+                                },
+                                "followup_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow0_followup",
+                                },
+                                "max_dynamic_steps": 1,
+                            },
+                            {
+                                "input": "task_1",
+                                "initial_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow1",
+                                },
+                                "followup_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow1_followup",
+                                },
+                                "max_dynamic_steps": 1,
+                            },
+                        ],
+                        "multi_flow_aggregator_inferencer": {
+                            "_target_": "_MockInferencer",
+                            "scripted_response": "aggregated",
                         },
-                        {
-                            "input": "task_1",
-                            "initial_inferencer": {"_target_": "_MockInferencer", "scripted_response": "flow1"},
-                            "followup_inferencer": {"_target_": "_MockInferencer", "scripted_response": "flow1_followup"},
-                            "max_dynamic_steps": 1,
-                        },
-                    ],
-                    "multi_flow_aggregator_inferencer": {
-                        "_target_": "_MockInferencer",
-                        "scripted_response": "aggregated",
                     },
                 },
-            },
-            "breakdown_inferencer": {"_target_": "_MockInferencer", "scripted_response": "breakdown"},
-        })
+                "breakdown_inferencer": {
+                    "_target_": "_MockInferencer",
+                    "scripted_response": "breakdown",
+                },
+            }
+        )
 
         bta = instantiate(config)
 
@@ -662,42 +621,59 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         self.assertIsInstance(bta.worker_inferencers, dict)
         factory = bta.worker_inferencers.get("__default__")
         self.assertIsNotNone(factory, "worker_inferencers['__default__'] should exist")
-        self.assertIsInstance(factory, LazyConfigFactory,
+        self.assertIsInstance(
+            factory,
+            LazyConfigFactory,
             f"Expected LazyConfigFactory, got {type(factory).__name__}. "
-            f"This means _filter_attrs_keys didn't record the factory config.")
-        self.assertNotIsInstance(factory, functools.partial,
-            "Should NOT be a plain functools.partial (causes shared instances)")
+            f"This means _filter_attrs_keys didn't record the factory config.",
+        )
+        self.assertNotIsInstance(
+            factory,
+            functools.partial,
+            "Should NOT be a plain functools.partial (causes shared instances)",
+        )
 
     def test_lazy_factory_produces_distinct_nested_instances(self):
         """Two factory() calls must produce MFDual instances with DISTINCT
         flow_configs[i]['initial_inferencer'] instances (no shared ids)."""
-        from rich_python_utils.config_utils import instantiate, register_class
         import agent_foundation.common.configs.registered_targets  # noqa: F401
-
         from omegaconf import OmegaConf
+        from rich_python_utils.config_utils import instantiate, register_class
+
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
-        config = OmegaConf.create({
-            "_target_": "BTA",
-            "worker_inferencers": {
-                "__default__": {
-                    "_target_": "MultiFlowDual",
-                    "flow_configs": [
-                        {
-                            "input": "task_0",
-                            "initial_inferencer": {"_target_": "_MockInferencer", "scripted_response": "a"},
-                            "followup_inferencer": {"_target_": "_MockInferencer", "scripted_response": "b"},
-                            "max_dynamic_steps": 1,
+        config = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "worker_inferencers": {
+                    "__default__": {
+                        "_target_": "MultiFlowDual",
+                        "flow_configs": [
+                            {
+                                "input": "task_0",
+                                "initial_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "a",
+                                },
+                                "followup_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "b",
+                                },
+                                "max_dynamic_steps": 1,
+                            },
+                        ],
+                        "multi_flow_aggregator_inferencer": {
+                            "_target_": "_MockInferencer",
+                            "scripted_response": "agg",
                         },
-                    ],
-                    "multi_flow_aggregator_inferencer": {
-                        "_target_": "_MockInferencer",
-                        "scripted_response": "agg",
                     },
                 },
-            },
-            "breakdown_inferencer": {"_target_": "_MockInferencer", "scripted_response": "bd"},
-        })
+                "breakdown_inferencer": {
+                    "_target_": "_MockInferencer",
+                    "scripted_response": "bd",
+                },
+            }
+        )
 
         bta = instantiate(config)
         factory = bta.worker_inferencers["__default__"]
@@ -712,29 +688,39 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         # CRITICAL: nested flow inferencers must be DISTINCT
         w0_flow0_init = worker_0.flow_configs[0]["initial_inferencer"]
         w1_flow0_init = worker_1.flow_configs[0]["initial_inferencer"]
-        self.assertIsNot(w0_flow0_init, w1_flow0_init,
+        self.assertIsNot(
+            w0_flow0_init,
+            w1_flow0_init,
             "flow_configs[0]['initial_inferencer'] shared across workers! "
-            "LazyConfigFactory should produce independent instances.")
+            "LazyConfigFactory should produce independent instances.",
+        )
 
         # Also check followup
         w0_flow0_followup = worker_0.flow_configs[0]["followup_inferencer"]
         w1_flow0_followup = worker_1.flow_configs[0]["followup_inferencer"]
-        self.assertIsNot(w0_flow0_followup, w1_flow0_followup,
-            "flow_configs[0]['followup_inferencer'] shared across workers!")
+        self.assertIsNot(
+            w0_flow0_followup,
+            w1_flow0_followup,
+            "flow_configs[0]['followup_inferencer'] shared across workers!",
+        )
 
         # Also check aggregator
         w0_agg = worker_0.multi_flow_aggregator_inferencer
         w1_agg = worker_1.multi_flow_aggregator_inferencer
-        self.assertIsNot(w0_agg, w1_agg,
-            "multi_flow_aggregator_inferencer shared across workers!")
+        self.assertIsNot(
+            w0_agg, w1_agg, "multi_flow_aggregator_inferencer shared across workers!"
+        )
 
         # Full tree check using _collect_all_descendant_inferencers
         ids_0 = {id(inf) for inf in worker_0._collect_all_descendant_inferencers()}
         ids_1 = {id(inf) for inf in worker_1._collect_all_descendant_inferencers()}
         shared = ids_0 & ids_1
-        self.assertEqual(len(shared), 0,
+        self.assertEqual(
+            len(shared),
+            0,
             f"Workers share {len(shared)} inferencer instance(s) in their trees. "
-            f"LazyConfigFactory should eliminate ALL sharing.")
+            f"LazyConfigFactory should eliminate ALL sharing.",
+        )
 
     def test_nested_topology_dual_wrapping_bta(self):
         """PRODUCTION TOPOLOGY: Dual { BTA { worker_inferencers } }.
@@ -748,37 +734,48 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         top-level result. The production YAML has Dual at top level with
         BTA nested inside, so the factory replacement must recurse."""
         import functools
+
+        import agent_foundation.common.configs.registered_targets  # noqa: F401
         from omegaconf import OmegaConf
         from rich_python_utils.config_utils import instantiate, register_class
-        from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
-        import agent_foundation.common.configs.registered_targets  # noqa: F401
+        from rich_python_utils.config_utils._lazy_config_factory import (
+            LazyConfigFactory,
+        )
 
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
         # Dual wrapping BTA — matches production topology
-        config = OmegaConf.create({
-            "_target_": "Dual",
-            "base_inferencer": {
-                "_target_": "BTA",
-                "worker_inferencers": {
-                    "__default__": {
-                        "_target_": "MultiFlowDual",
-                        "flow_configs": [
-                            {
-                                "input": "t0",
-                                "initial_inferencer": {"_target_": "_MockInferencer"},
-                                "followup_inferencer": {"_target_": "_MockInferencer"},
-                                "max_dynamic_steps": 1,
+        config = OmegaConf.create(
+            {
+                "_target_": "Dual",
+                "base_inferencer": {
+                    "_target_": "BTA",
+                    "worker_inferencers": {
+                        "__default__": {
+                            "_target_": "MultiFlowDual",
+                            "flow_configs": [
+                                {
+                                    "input": "t0",
+                                    "initial_inferencer": {
+                                        "_target_": "_MockInferencer"
+                                    },
+                                    "followup_inferencer": {
+                                        "_target_": "_MockInferencer"
+                                    },
+                                    "max_dynamic_steps": 1,
+                                },
+                            ],
+                            "multi_flow_aggregator_inferencer": {
+                                "_target_": "_MockInferencer"
                             },
-                        ],
-                        "multi_flow_aggregator_inferencer": {"_target_": "_MockInferencer"},
+                        },
                     },
+                    "breakdown_inferencer": {"_target_": "_MockInferencer"},
                 },
-                "breakdown_inferencer": {"_target_": "_MockInferencer"},
-            },
-            "review_inferencer": {"_target_": "_MockInferencer"},
-            "fixer_inferencer": {"_target_": "_MockInferencer"},
-        })
+                "review_inferencer": {"_target_": "_MockInferencer"},
+                "fixer_inferencer": {"_target_": "_MockInferencer"},
+            }
+        )
 
         root = instantiate(config)
 
@@ -787,10 +784,13 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         factory = bta.worker_inferencers.get("__default__")
 
         self.assertIsNotNone(factory)
-        self.assertIsInstance(factory, LazyConfigFactory,
+        self.assertIsInstance(
+            factory,
+            LazyConfigFactory,
             f"NESTED BTA's worker_inferencers should be LazyConfigFactory, "
             f"got {type(factory).__name__}. "
-            f"_apply_lazy_factories_recursive must recurse into Dual.base_inferencer.")
+            f"_apply_lazy_factories_recursive must recurse into Dual.base_inferencer.",
+        )
         self.assertNotIsInstance(factory, functools.partial)
 
         # Verify two calls produce isolated instances
@@ -799,15 +799,19 @@ class TestYAMLDrivenLazyConfigFactory(unittest.TestCase):
         ids_0 = {id(inf) for inf in w0._collect_all_descendant_inferencers()}
         ids_1 = {id(inf) for inf in w1._collect_all_descendant_inferencers()}
         shared = ids_0 & ids_1
-        self.assertEqual(len(shared), 0,
+        self.assertEqual(
+            len(shared),
+            0,
             f"NESTED topology: workers share {len(shared)} instances. "
             f"LazyConfigFactory must produce independent trees even "
-            f"when BTA is nested inside Dual.")
+            f"when BTA is nested inside Dual.",
+        )
 
 
 # ---------------------------------------------------------------------------
 # Test 8: Root cascade variables propagate through LazyConfigFactory
 # ---------------------------------------------------------------------------
+
 
 class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
     """Verify that root-level cascade variables (_output_path, _logger, etc.)
@@ -823,175 +827,198 @@ class TestLazyConfigFactoryCascadePropagation(unittest.TestCase):
     def test_output_path_cascades_into_factory_created_workers(self):
         """_output_path at root level must reach flow inferencers inside
         a LazyConfigFactory-created MFDual worker."""
+        import agent_foundation.common.configs.registered_targets  # noqa: F401
         from omegaconf import OmegaConf
         from rich_python_utils.config_utils import instantiate, register_class
-        import agent_foundation.common.configs.registered_targets  # noqa: F401
 
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
-        config = OmegaConf.create({
-            "_target_": "BTA",
-            "_output_path": "output.md",
-            "worker_inferencers": {
-                "__default__": {
-                    "_target_": "MultiFlowDual",
-                    "flow_configs": [
-                        {
-                            "input": "task_0",
-                            "initial_inferencer": {
-                                "_target_": "_MockInferencer",
-                                "scripted_response": "flow0",
+        config = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "_output_path": "output.md",
+                "worker_inferencers": {
+                    "__default__": {
+                        "_target_": "MultiFlowDual",
+                        "flow_configs": [
+                            {
+                                "input": "task_0",
+                                "initial_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow0",
+                                },
+                                "followup_inferencer": {
+                                    "_target_": "_MockInferencer",
+                                    "scripted_response": "flow0_followup",
+                                },
+                                "max_dynamic_steps": 1,
                             },
-                            "followup_inferencer": {
-                                "_target_": "_MockInferencer",
-                                "scripted_response": "flow0_followup",
-                            },
-                            "max_dynamic_steps": 1,
+                        ],
+                        "multi_flow_aggregator_inferencer": {
+                            "_target_": "_MockInferencer",
+                            "scripted_response": "aggregated",
                         },
-                    ],
-                    "multi_flow_aggregator_inferencer": {
-                        "_target_": "_MockInferencer",
-                        "scripted_response": "aggregated",
                     },
                 },
-            },
-            "breakdown_inferencer": {
-                "_target_": "_MockInferencer",
-                "scripted_response": "breakdown",
-            },
-        })
+                "breakdown_inferencer": {
+                    "_target_": "_MockInferencer",
+                    "scripted_response": "breakdown",
+                },
+            }
+        )
 
         bta = instantiate(config)
 
         # BTA itself should have output_path (direct cascade)
-        self.assertEqual(bta.output_path, "output.md",
-            "BTA should receive _output_path from root cascade")
+        self.assertEqual(
+            bta.output_path,
+            "output.md",
+            "BTA should receive _output_path from root cascade",
+        )
 
         # Factory-created worker should ALSO have it
         factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
-        self.assertEqual(worker.output_path, "output.md",
+        self.assertEqual(
+            worker.output_path,
+            "output.md",
             "LazyConfigFactory-created MFDual should receive _output_path "
             "from root cascade. If this fails, LazyConfigFactory.__call__() "
-            "is not re-injecting parent-level injectables.")
+            "is not re-injecting parent-level injectables.",
+        )
 
         # Nested flow inferencers should have it too
         flow0_init = worker.flow_configs[0]["initial_inferencer"]
-        self.assertEqual(flow0_init.output_path, "output.md",
+        self.assertEqual(
+            flow0_init.output_path,
+            "output.md",
             "flow_configs[0]['initial_inferencer'] should receive _output_path "
             "via cascade through LazyConfigFactory. This is the exact bug "
-            "that caused hollow output directories.")
+            "that caused hollow output directories.",
+        )
 
     def test_multiple_cascade_variables_propagate(self):
         """All root cascade variables (_output_path, _debug_mode, etc.)
         must reach factory-created instances — not just one."""
+        import agent_foundation.common.configs.registered_targets  # noqa: F401
         from omegaconf import OmegaConf
         from rich_python_utils.config_utils import instantiate, register_class
-        import agent_foundation.common.configs.registered_targets  # noqa: F401
 
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
-        config = OmegaConf.create({
-            "_target_": "BTA",
-            "_output_path": "custom_output.md",
-            "_debug_mode": True,
-            "worker_inferencers": {
-                "__default__": {
-                    "_target_": "MultiFlowDual",
-                    "flow_configs": [
-                        {
-                            "input": "t0",
-                            "initial_inferencer": {"_target_": "_MockInferencer"},
-                            "followup_inferencer": {"_target_": "_MockInferencer"},
-                            "max_dynamic_steps": 1,
+        config = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "_output_path": "custom_output.md",
+                "_debug_mode": True,
+                "worker_inferencers": {
+                    "__default__": {
+                        "_target_": "MultiFlowDual",
+                        "flow_configs": [
+                            {
+                                "input": "t0",
+                                "initial_inferencer": {"_target_": "_MockInferencer"},
+                                "followup_inferencer": {"_target_": "_MockInferencer"},
+                                "max_dynamic_steps": 1,
+                            },
+                        ],
+                        "multi_flow_aggregator_inferencer": {
+                            "_target_": "_MockInferencer"
                         },
-                    ],
-                    "multi_flow_aggregator_inferencer": {"_target_": "_MockInferencer"},
+                    },
                 },
-            },
-            "breakdown_inferencer": {"_target_": "_MockInferencer"},
-        })
+                "breakdown_inferencer": {"_target_": "_MockInferencer"},
+            }
+        )
 
         bta = instantiate(config)
         factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
         self.assertEqual(worker.output_path, "custom_output.md")
-        self.assertTrue(worker.debug_mode,
-            "_debug_mode should cascade through LazyConfigFactory")
+        self.assertTrue(
+            worker.debug_mode, "_debug_mode should cascade through LazyConfigFactory"
+        )
 
     def test_factory_local_override_wins_over_root(self):
         """If the factory's own config declares _output_path, it should
         take precedence over the root-level cascade (local-wins)."""
+        import agent_foundation.common.configs.registered_targets  # noqa: F401
         from omegaconf import OmegaConf
         from rich_python_utils.config_utils import instantiate, register_class
-        import agent_foundation.common.configs.registered_targets  # noqa: F401
 
         register_class(_MockInferencer, "_MockInferencer", category="inferencer")
 
-        config = OmegaConf.create({
-            "_target_": "BTA",
-            "_output_path": "root_output.md",
-            "worker_inferencers": {
-                "__default__": {
-                    "_target_": "MultiFlowDual",
-                    "_output_path": "factory_output.md",
-                    "flow_configs": [
-                        {
-                            "input": "t0",
-                            "initial_inferencer": {"_target_": "_MockInferencer"},
-                            "followup_inferencer": {"_target_": "_MockInferencer"},
-                            "max_dynamic_steps": 1,
+        config = OmegaConf.create(
+            {
+                "_target_": "BTA",
+                "_output_path": "root_output.md",
+                "worker_inferencers": {
+                    "__default__": {
+                        "_target_": "MultiFlowDual",
+                        "_output_path": "factory_output.md",
+                        "flow_configs": [
+                            {
+                                "input": "t0",
+                                "initial_inferencer": {"_target_": "_MockInferencer"},
+                                "followup_inferencer": {"_target_": "_MockInferencer"},
+                                "max_dynamic_steps": 1,
+                            },
+                        ],
+                        "multi_flow_aggregator_inferencer": {
+                            "_target_": "_MockInferencer"
                         },
-                    ],
-                    "multi_flow_aggregator_inferencer": {"_target_": "_MockInferencer"},
+                    },
                 },
-            },
-            "breakdown_inferencer": {"_target_": "_MockInferencer"},
-        })
+                "breakdown_inferencer": {"_target_": "_MockInferencer"},
+            }
+        )
 
         bta = instantiate(config)
         factory = bta.worker_inferencers["__default__"]
         worker = factory()
 
-        self.assertEqual(worker.output_path, "factory_output.md",
+        self.assertEqual(
+            worker.output_path,
+            "factory_output.md",
             "Factory's own _output_path should win over root cascade "
-            "(local-wins / setdefault semantics)")
+            "(local-wins / setdefault semantics)",
+        )
 
 
 # ---------------------------------------------------------------------------
-# Test 9: Deliverable promotion — move semantics
+# Test 9: _finalize_output output handling (Part 2 two-axis model)
 # ---------------------------------------------------------------------------
 
-class TestDeliverablePromotion(unittest.TestCase):
-    """Verify the redesigned _finalize_output: agent-written outputs/ content
-    is MOVED to final_deliverables/, and <Response> summary is written to
-    outputs/ only when the agent didn't write output_path.
 
-    INTENTIONAL CONTRACT — these tests PIN it (do not relax to "make the summary
-    a deliverable" without an explicit design change): a framework-written
-    <Response> summary is a reference and STAYS in outputs/; only files the agent
-    PHYSICALLY WROTE are promoted to final_deliverables/. See the DESIGN NOTE in
-    InferencerBase._finalize_output. The two non-writer cases below
-    (test_agent_writes_no_output_md_deliverable_true / test_no_agent_output_
-    deliverable_true) are the guardrails that catch an accidental "promote the
-    summary too" change.
+class TestFinalizeOutputHandling(unittest.TestCase):
+    """Verify _finalize_output under the Part 2 two-axis model: ``outputs/`` IS
+    the deliverable set, so there is NO move to ``final_deliverables/`` (retired,
+    along with the ``output_is_deliverable`` flag). Everything the agent wrote to
+    ``outputs/`` stays there as-is; the framework only materializes the
+    ``<Response>``-extracted summary at ``output_path`` when the agent didn't
+    write it itself.
+
+    (The former ``TestDeliverablePromotion`` asserted the deleted Step-1 move into
+    ``final_deliverables/`` gated on ``output_is_deliverable``; those move/flag
+    assertions were removed and the surviving output-handling behavior is pinned
+    below.)
     """
 
     def _make_inferencer(self, **kwargs):
         inf = _MockInferencer(**kwargs)
         return inf
 
-    def test_agent_writes_output_md_deliverable_true(self):
-        """Agent wrote output.md → moved to final_deliverables/."""
-        tmpdir = tempfile.mkdtemp(prefix="deliv_promo_")
+    def test_agent_written_output_stays_in_outputs(self):
+        """Agent wrote output.md → it stays in outputs/ unchanged (it IS the
+        deliverable; no move to final_deliverables/)."""
+        tmpdir = tempfile.mkdtemp(prefix="deliv_stay_")
         try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+            ws = InferencerWorkspace(root=tmpdir)
             ws.ensure_dirs()
             inf = self._make_inferencer(
                 scripted_response="<Response>Summary</Response>",
-                output_is_deliverable=True,
                 output_path="output.md",
             )
             inf._workspace = ws
@@ -1003,28 +1030,28 @@ class TestDeliverablePromotion(unittest.TestCase):
 
             inf._finalize_output(inf.scripted_response)
 
-            # output.md should be in final_deliverables (moved)
-            fd_path = os.path.join(ws.deliverables_dir, "output.md")
-            self.assertTrue(os.path.isfile(fd_path),
-                "output.md should be moved to final_deliverables/")
-            self.assertEqual(open(fd_path).read(), agent_content)
-
-            # output.md should NOT be in outputs/ (moved away)
-            orig_path = os.path.join(ws.outputs_dir, "output.md")
-            self.assertFalse(os.path.isfile(orig_path),
-                "output.md should be moved OUT of outputs/")
+            # output.md stays in outputs/ with the agent's content intact —
+            # the summary must NOT overwrite a non-empty agent-written output.
+            out_path = os.path.join(ws.outputs_dir, "output.md")
+            self.assertTrue(
+                os.path.isfile(out_path),
+                "agent-written output.md must remain in outputs/",
+            )
+            self.assertEqual(open(out_path).read(), agent_content)
+            # outputs/ IS the deliverable set.
+            self.assertTrue(ws.has_deliverables)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_agent_writes_multi_file_deliverable_true(self):
-        """Agent wrote output.md + skills/ + tools/ → ALL moved to final_deliverables/."""
+    def test_agent_multi_file_output_stays_in_outputs(self):
+        """Agent wrote output.md + skills/ + tools/ → ALL stay in outputs/ (no
+        move); outputs/ contains exactly what the agent wrote."""
         tmpdir = tempfile.mkdtemp(prefix="deliv_multi_")
         try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+            ws = InferencerWorkspace(root=tmpdir)
             ws.ensure_dirs()
             inf = self._make_inferencer(
                 scripted_response="<Response>Summary</Response>",
-                output_is_deliverable=True,
                 output_path="output.md",
             )
             inf._workspace = ws
@@ -1043,30 +1070,31 @@ class TestDeliverablePromotion(unittest.TestCase):
 
             inf._finalize_output(inf.scripted_response)
 
-            # ALL should be in final_deliverables/
-            fd = ws.deliverables_dir
-            self.assertTrue(os.path.isfile(os.path.join(fd, "output.md")))
-            self.assertTrue(os.path.isfile(os.path.join(fd, "skills", "SKILL.md")))
-            self.assertTrue(os.path.isfile(os.path.join(fd, "tools", "tool.json")))
-
-            # outputs/ should be clean (only final_deliverables/ remains)
-            remaining = [e for e in os.listdir(ws.outputs_dir)
-                         if e != "final_deliverables"]
-            self.assertEqual(remaining, [],
-                f"outputs/ should be empty after move, got: {remaining}")
+            # ALL stay in outputs/ (no move, no final_deliverables/ subfolder).
+            self.assertTrue(os.path.isfile(os.path.join(ws.outputs_dir, "output.md")))
+            self.assertTrue(
+                os.path.isfile(os.path.join(ws.outputs_dir, "skills", "SKILL.md"))
+            )
+            self.assertTrue(
+                os.path.isfile(os.path.join(ws.outputs_dir, "tools", "tool.json"))
+            )
+            self.assertEqual(
+                sorted(os.listdir(ws.outputs_dir)),
+                ["output.md", "skills", "tools"],
+                "outputs/ should contain exactly the agent-written entries",
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_agent_writes_no_output_md_deliverable_true(self):
-        """Agent wrote skills/ but NOT output.md → skills/ moved,
-        framework writes <Response> summary to outputs/output.md."""
+    def test_summary_written_when_agent_wrote_no_output_md(self):
+        """Agent wrote skills/ but NOT output.md → skills/ stays in outputs/,
+        framework materializes the <Response> summary at outputs/output.md."""
         tmpdir = tempfile.mkdtemp(prefix="deliv_nomd_")
         try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+            ws = InferencerWorkspace(root=tmpdir)
             ws.ensure_dirs()
             inf = self._make_inferencer(
                 scripted_response="<Response>Summary text</Response>",
-                output_is_deliverable=True,
                 output_path="output.md",
             )
             inf._workspace = ws
@@ -1079,82 +1107,51 @@ class TestDeliverablePromotion(unittest.TestCase):
 
             inf._finalize_output(inf.scripted_response)
 
-            # skills/ moved to final_deliverables/
-            self.assertTrue(os.path.isfile(
-                os.path.join(ws.deliverables_dir, "skills", "SKILL.md")))
+            # skills/ stays in outputs/ (no move).
+            self.assertTrue(
+                os.path.isfile(os.path.join(ws.outputs_dir, "skills", "SKILL.md"))
+            )
 
-            # Framework wrote summary to outputs/output.md (NOT in deliverables)
+            # Framework materialized the <Response> summary at outputs/output.md.
             summary_path = os.path.join(ws.outputs_dir, "output.md")
-            self.assertTrue(os.path.isfile(summary_path),
-                "Framework should write <Response> summary to outputs/output.md")
+            self.assertTrue(
+                os.path.isfile(summary_path),
+                "Framework should write <Response> summary to outputs/output.md",
+            )
             self.assertIn("Summary text", open(summary_path).read())
-
-            # Summary NOT in final_deliverables
-            self.assertFalse(
-                os.path.isfile(os.path.join(ws.deliverables_dir, "output.md")),
-                "Summary should NOT be in final_deliverables/")
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_no_agent_output_deliverable_true(self):
-        """Agent wrote nothing → framework writes summary → moved to deliverables."""
+    def test_summary_written_when_agent_wrote_nothing(self):
+        """Agent wrote nothing → framework materializes the <Response> summary at
+        outputs/output.md (the no-local-access sole-output case)."""
         tmpdir = tempfile.mkdtemp(prefix="deliv_empty_")
         try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+            ws = InferencerWorkspace(root=tmpdir)
             ws.ensure_dirs()
             inf = self._make_inferencer(
                 scripted_response="<Response>API summary</Response>",
-                output_is_deliverable=True,
                 output_path="output.md",
             )
             inf._workspace = ws
 
             inf._finalize_output(inf.scripted_response)
 
-            # outputs/ was empty → framework writes summary → but nothing to move
-            # (move only happens when outputs/ HAS content before the move)
-            # So summary stays in outputs/output.md
             summary_path = os.path.join(ws.outputs_dir, "output.md")
             self.assertTrue(os.path.isfile(summary_path))
             self.assertIn("API summary", open(summary_path).read())
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_deliverable_false_no_promotion(self):
-        """output_is_deliverable=False → no move, output stays in outputs/."""
-        tmpdir = tempfile.mkdtemp(prefix="deliv_false_")
-        try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
-            ws.ensure_dirs()
-            inf = self._make_inferencer(
-                scripted_response="<Response>Result</Response>",
-                output_is_deliverable=False,
-                output_path="output.md",
-            )
-            inf._workspace = ws
-
-            with open(os.path.join(ws.outputs_dir, "output.md"), "w") as f:
-                f.write("# Agent output")
-
-            inf._finalize_output(inf.scripted_response)
-
-            # output.md stays in outputs/ (no promotion)
-            self.assertTrue(os.path.isfile(
-                os.path.join(ws.outputs_dir, "output.md")))
-            # final_deliverables/ is empty
-            self.assertFalse(ws.has_deliverables)
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    def test_no_double_nesting_after_promotion(self):
-        """Move must NOT create final_deliverables/final_deliverables/."""
+    def test_no_final_deliverables_subfolder_created(self):
+        """_finalize_output must never create an outputs/final_deliverables/
+        subfolder (retired in Part 2)."""
         tmpdir = tempfile.mkdtemp(prefix="deliv_nest_")
         try:
-            ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+            ws = InferencerWorkspace(root=tmpdir)
             ws.ensure_dirs()
             inf = self._make_inferencer(
                 scripted_response="<Response>S</Response>",
-                output_is_deliverable=True,
                 output_path="output.md",
             )
             inf._workspace = ws
@@ -1164,9 +1161,11 @@ class TestDeliverablePromotion(unittest.TestCase):
 
             inf._finalize_output(inf.scripted_response)
 
-            nested = os.path.join(ws.deliverables_dir, "final_deliverables")
-            self.assertFalse(os.path.isdir(nested),
-                "Move must skip final_deliverables/ subdir to prevent nesting")
+            nested = os.path.join(ws.outputs_dir, "final_deliverables")
+            self.assertFalse(
+                os.path.isdir(nested),
+                "outputs/final_deliverables/ must not be created (Part 2)",
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1182,7 +1181,9 @@ class TestMaxBreakdownInjection(unittest.TestCase):
             breakdown_inferencer=bd,
             aggregator_inferencer=agg,
         )
-        self.assertEqual(bta.breakdown_inferencer.template_extra_feed["max_breakdown"], 3)
+        self.assertEqual(
+            bta.breakdown_inferencer.template_extra_feed["max_breakdown"], 3
+        )
 
     def test_max_breakdown_not_injected_when_none(self):
         bd = _TemplatedMockInferencer(scripted_response="breakdown")
@@ -1204,7 +1205,9 @@ class TestMaxBreakdownInjection(unittest.TestCase):
             breakdown_inferencer=bd,
             aggregator_inferencer=agg,
         )
-        self.assertEqual(bta.breakdown_inferencer.template_extra_feed["max_breakdown"], 10)
+        self.assertEqual(
+            bta.breakdown_inferencer.template_extra_feed["max_breakdown"], 10
+        )
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class Result:
     """Result object returned by ArithmeticExecutor."""
+
     success: bool
     value: Any
     error: Optional[Exception] = None
@@ -34,7 +35,7 @@ class ArithmeticExecutor:
         action_type: str,
         action_target: Optional[str] = None,
         action_args: Optional[Dict[str, Any]] = None,
-        **kwargs
+        **kwargs,
     ) -> Result:
         action_args = action_args or {}
         value = action_args.get("value")
@@ -55,11 +56,13 @@ class ArithmeticExecutor:
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
 
-            self.history.append({
-                "action_type": action_type,
-                "value": value,
-                "result": self.accumulator,
-            })
+            self.history.append(
+                {
+                    "action_type": action_type,
+                    "value": value,
+                    "result": self.accumulator,
+                }
+            )
 
             return Result(success=True, value=self.accumulator)
 

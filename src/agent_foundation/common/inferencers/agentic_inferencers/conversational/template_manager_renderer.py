@@ -13,7 +13,6 @@ from typing import Any, Mapping, Optional
 
 import yaml
 from attr import attrib, attrs
-
 from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
     TemplateManager,
 )
@@ -127,10 +126,12 @@ class TemplateManagerPromptRenderer:
                 Path(origin_root) / root_space / ttype / f"{self.template_key}{ext}"
             )
             if template_path.is_file():
-                return _load_yaml_cascade([
-                    template_path.parent / f".{template_path.stem}.config.yaml",
-                    template_path.parent / ".config.yaml",
-                ])
+                return _load_yaml_cascade(
+                    [
+                        template_path.parent / f".{template_path.stem}.config.yaml",
+                        template_path.parent / ".config.yaml",
+                    ]
+                )
         return {}
 
     def find_sop_file(self) -> Optional[Path]:

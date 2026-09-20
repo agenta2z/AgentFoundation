@@ -58,11 +58,17 @@ _logger = logging.getLogger(__name__)
 
 
 class InferencerTemplateDefaults:
-    """Reusable bundle of template field defaults for one slot role.
+    """Reusable bundle of slot-role defaults — template fields plus, via
+    ``extra_defaults``, any other slot attribute.
 
-    Construct with any subset of the five template fields. ``apply_to``
-    merges into a YAML node: scalar fields fill iff absent; dict fields
-    merge per-key (user-supplied keys override defaults).
+    Construct with any subset of the template fields. ``apply_to`` merges into a
+    YAML node: scalar fields fill iff absent; dict fields merge per-key
+    (user-supplied keys override defaults).
+
+    ``extra_defaults`` carries non-template slot attributes (e.g.
+    ``expected_extraction``) so a class can declare them once in ``SLOT_DEFAULTS``
+    instead of every topology YAML repeating them. Same fill-iff-absent semantics,
+    so any YAML can still override.
     """
 
     def __init__(
@@ -75,22 +81,20 @@ class InferencerTemplateDefaults:
         template_version: Optional[str] = None,
         template_master_version: Optional[str] = None,
         modes: Optional[dict] = None,
+        extra_defaults: Optional[dict] = None,
     ):
         self.template_root_space = template_root_space
         self.template_key = template_key
-        self.template_variables = (
-            dict(template_variables) if template_variables else {}
-        )
+        self.template_variables = dict(template_variables) if template_variables else {}
         self.template_extra_feed = (
             dict(template_extra_feed) if template_extra_feed else {}
         )
         self.template_version = template_version
         self.template_master_version = template_master_version
         self.modes = dict(modes) if modes else {}
+        self.extra_defaults = dict(extra_defaults) if extra_defaults else {}
 
-    def apply_to(
-        self, node: dict, parent_node: Optional[dict] = None
-    ) -> None:
+    def apply_to(self, node: dict, parent_node: Optional[dict] = None) -> None:
         """Mutate ``node`` in place: fill missing fields, per-key merge dicts.
 
         ``parent_node`` is unused here but accepted for ABI compatibility
@@ -103,15 +107,9 @@ class InferencerTemplateDefaults:
             and FIELD_TEMPLATE_ROOT_SPACE not in node
         ):
             node[FIELD_TEMPLATE_ROOT_SPACE] = self.template_root_space
-        if (
-            self.template_key is not None
-            and FIELD_TEMPLATE_KEY not in node
-        ):
+        if self.template_key is not None and FIELD_TEMPLATE_KEY not in node:
             node[FIELD_TEMPLATE_KEY] = self.template_key
-        if (
-            self.template_version is not None
-            and FIELD_TEMPLATE_VERSION not in node
-        ):
+        if self.template_version is not None and FIELD_TEMPLATE_VERSION not in node:
             node[FIELD_TEMPLATE_VERSION] = self.template_version
         if (
             self.template_master_version is not None
@@ -124,6 +122,11 @@ class InferencerTemplateDefaults:
             self._merge_dict(node, FIELD_TEMPLATE_EXTRA_FEED, self.template_extra_feed)
         if self.modes:
             self._merge_dict(node, "modes", self.modes)
+        # Non-template slot attributes. Fill iff absent (never merged), so a YAML
+        # that sets the field owns it outright — matching the scalar semantics above.
+        for _field, _value in (self.extra_defaults or {}).items():
+            if _field not in node:
+                node[_field] = copy.deepcopy(_value)
 
     @staticmethod
     def _merge_dict(node: dict, field: str, defaults: dict) -> None:
@@ -202,9 +205,7 @@ class ConditionalTemplateDefaults(InferencerTemplateDefaults):
         super().__init__(**kwargs)
         self.condition = condition
 
-    def apply_to(
-        self, node: dict, parent_node: Optional[dict] = None
-    ) -> None:
+    def apply_to(self, node: dict, parent_node: Optional[dict] = None) -> None:
         if parent_node is None or not self.condition(parent_node):
             return
         super().apply_to(node, parent_node=parent_node)
@@ -263,9 +264,42 @@ def _resolve_attrib_default(target: Any, field_name: str, fallback: Any) -> Any:
 
 BREAKDOWN_TEMPLATE_DEFAULTS = InferencerTemplateDefaults(
     template_root_space=SPACE_TASK_BREAKDOWN,
+    extra_defaults={
+        # The breakdown's machine-consumed payload is the ``decomposed_subtasks``
+        # fence in its <Response>; its ``outputs/output.md`` is the human-facing
+        # narrative. Persist the fence as a structured sidecar so the node's
+        # actual product is addressable instead of only living inside a log
+        # transcript / the parent's resume checkpoint.
+        #
+        # Declared HERE rather than per-YAML: ~12 configs across AgentFoundation
+        # and OpenStartup declare a ``breakdown_inferencer`` slot, and every future
+        # BTA topology would otherwise have to remember it. Fill-iff-absent, so any
+        # YAML can still override.
+        #
+        # ``fallback_to_source``: a BTA using ``breakdown_format: numbered_list`` —
+        # or the ``"auto"`` default falling back — legitimately emits no fence.
+        # For ``kind: content`` this suppresses the missing-fence warning, so the
+        # universal default stays quiet on non-JSON breakdowns (``persist_to``
+        # simply no-ops when there is nothing to extract).
+        "expected_extraction": [
+            {
+                "label": "decomposed_subtasks",
+                "source": "response",
+                "kind": "content",
+                "fallback_to_source": True,
+                "persist_to": "decomposed_subtasks.json",
+                # Promote the persisted fence up into the parent BTA's
+                # ``checkpoints/breakdown/`` so a resume rebuilds the worker
+                # fan-out AND restores the aggregator's guidance from this one
+                # file — retiring the hand-rolled ``breakdown_result.json``.
+                "checkpoint_scope": "parent",
+            }
+        ]
+    },
 )
 """For BTA's ``breakdown_inferencer``: render against the
-``task_breakdown`` template space."""
+``task_breakdown`` template space, and persist the ``decomposed_subtasks``
+fence to ``outputs/decomposed_subtasks.json``."""
 
 
 AGGREGATION_DEFAULTS = InferencerTemplateVersionDefaults(

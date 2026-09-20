@@ -7,6 +7,7 @@ concrete examples and edge cases.
 
 Requirements: 8.1, 8.2, 9.1, 9.2, 10.1, 10.2, 11.1, 11.2, 11.3
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,33 +25,41 @@ if _rpu_src.exists() and str(_rpu_src) not in sys.path:
 
 import pytest
 from agent_foundation.knowledge.retrieval.formatter import (
-    KnowledgeFormatter, RetrievalResult,
+    KnowledgeFormatter,
+    RetrievalResult,
 )
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
-    AgenticRetrievalResult, SubQuery,
-)
 from agent_foundation.knowledge.retrieval.post_processors import (
-    AggregatingPostProcessor, BudgetAwarePostProcessor,
-    CONTEXT_BUDGET, FlatStringPostProcessor, GroupedDictPostProcessor,
+    AggregatingPostProcessor,
+    BudgetAwarePostProcessor,
+    CONTEXT_BUDGET,
+    FlatStringPostProcessor,
+    GroupedDictPostProcessor,
+)
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+    AgenticRetrievalResult,
+    SubQuery,
 )
 from agent_foundation.knowledge.retrieval.utils import count_tokens
 
 
 # ---- Helpers ----
 
+
 def _piece(pid, info_type="context", content=None):
     return KnowledgePiece(
         content=content or f"Content for {pid}",
-        piece_id=pid, info_type=info_type,
+        piece_id=pid,
+        info_type=info_type,
     )
 
 
 def _meta(eid, props=None, spaces=None):
     return EntityMetadata(
-        entity_id=eid, entity_type="user",
+        entity_id=eid,
+        entity_type="user",
         properties=props or {"name": eid},
         spaces=spaces or ["main"],
     )
@@ -67,8 +76,12 @@ def _result(pieces=None, metadata=None, global_metadata=None, graph_context=None
 
 def _edge(node_id, rel="RELATED", depth=1, score=0.5, piece=None, label=""):
     return {
-        "target_node_id": node_id, "relation_type": rel,
-        "depth": depth, "score": score, "piece": piece, "target_label": label,
+        "target_node_id": node_id,
+        "relation_type": rel,
+        "depth": depth,
+        "score": score,
+        "piece": piece,
+        "target_label": label,
     }
 
 
@@ -124,11 +137,13 @@ class TestGroupedDictPostProcessor:
         assert out["user_profile"] == "meta:1"
 
     def test_routes_pieces_by_info_type(self):
-        r = _result(pieces=[
-            (_piece("p1", info_type="context"), 0.9),
-            (_piece("p2", info_type="instructions"), 0.8),
-            (_piece("p3", info_type="context"), 0.7),
-        ])
+        r = _result(
+            pieces=[
+                (_piece("p1", info_type="context"), 0.9),
+                (_piece("p2", info_type="instructions"), 0.8),
+                (_piece("p3", info_type="context"), 0.7),
+            ]
+        )
         pp = GroupedDictPostProcessor(
             default_formatter=lambda m, p, g: f"pieces:{len(p)}",
         )
@@ -226,7 +241,9 @@ class TestAggregatingPostProcessor:
         r1 = _result(pieces=[(_piece("p1"), 0.8), (_piece("p2"), 0.6)])
         r2 = _result(pieces=[(_piece("p1"), 0.5), (_piece("p3"), 0.9)])
         sqs = [SubQuery(query="q1", weight=1.0), SubQuery(query="q2", weight=1.0)]
-        pp = AggregatingPostProcessor(aggregation_strategy="max", top_k=10, min_results=0)
+        pp = AggregatingPostProcessor(
+            aggregation_strategy="max", top_k=10, min_results=0
+        )
         out = pp.process([r1, r2], sub_queries=sqs)
         scores = {sp.piece.piece_id: sp.score for sp in out.pieces}
         assert abs(scores["p1"] - 0.8) < 1e-9
@@ -237,7 +254,9 @@ class TestAggregatingPostProcessor:
         r1 = _result(pieces=[(_piece("p1"), 0.8)])
         r2 = _result(pieces=[(_piece("p1"), 0.5)])
         sqs = [SubQuery(query="q1", weight=1.0), SubQuery(query="q2", weight=1.0)]
-        pp = AggregatingPostProcessor(aggregation_strategy="sum", top_k=10, min_results=0)
+        pp = AggregatingPostProcessor(
+            aggregation_strategy="sum", top_k=10, min_results=0
+        )
         out = pp.process([r1, r2], sub_queries=sqs)
         scores = {sp.piece.piece_id: sp.score for sp in out.pieces}
         assert abs(scores["p1"] - 1.3) < 1e-9
@@ -245,8 +264,12 @@ class TestAggregatingPostProcessor:
     def test_weighted_sum_same_as_sum(self):
         r1 = _result(pieces=[(_piece("p1"), 0.8)])
         sqs = [SubQuery(query="q1", weight=2.0)]
-        pp_sum = AggregatingPostProcessor(aggregation_strategy="sum", top_k=10, min_results=0)
-        pp_ws = AggregatingPostProcessor(aggregation_strategy="weighted_sum", top_k=10, min_results=0)
+        pp_sum = AggregatingPostProcessor(
+            aggregation_strategy="sum", top_k=10, min_results=0
+        )
+        pp_ws = AggregatingPostProcessor(
+            aggregation_strategy="weighted_sum", top_k=10, min_results=0
+        )
         out_sum = pp_sum.process([r1], sub_queries=sqs)
         out_ws = pp_ws.process([r1], sub_queries=sqs)
         assert abs(out_sum.pieces[0].score - out_ws.pieces[0].score) < 1e-9
@@ -254,7 +277,9 @@ class TestAggregatingPostProcessor:
     def test_weights_applied(self):
         r1 = _result(pieces=[(_piece("p1"), 0.5)])
         sqs = [SubQuery(query="q1", weight=2.0)]
-        pp = AggregatingPostProcessor(aggregation_strategy="max", top_k=10, min_results=0)
+        pp = AggregatingPostProcessor(
+            aggregation_strategy="max", top_k=10, min_results=0
+        )
         out = pp.process([r1], sub_queries=sqs)
         assert abs(out.pieces[0].score - 1.0) < 1e-9
 
@@ -267,7 +292,9 @@ class TestAggregatingPostProcessor:
         assert len(out.pieces) == 3
 
     def test_sorted_by_score_desc(self):
-        r = _result(pieces=[(_piece("p1"), 0.3), (_piece("p2"), 0.9), (_piece("p3"), 0.6)])
+        r = _result(
+            pieces=[(_piece("p1"), 0.3), (_piece("p2"), 0.9), (_piece("p3"), 0.6)]
+        )
         sqs = [SubQuery(query="q1")]
         pp = AggregatingPostProcessor(top_k=10, min_results=0)
         out = pp.process([r], sub_queries=sqs)
@@ -333,7 +360,9 @@ class TestBudgetAwarePostProcessor:
     def test_priority_order(self):
         pieces = []
         for it in CONTEXT_BUDGET:
-            pieces.append((_piece(f"{it}_0", info_type=it, content=f"Content for {it}"), 0.9))
+            pieces.append(
+                (_piece(f"{it}_0", info_type=it, content=f"Content for {it}"), 0.9)
+            )
         r = _result(pieces=pieces)
         pp = BudgetAwarePostProcessor(available_tokens=50000)
         out = pp.process(r)

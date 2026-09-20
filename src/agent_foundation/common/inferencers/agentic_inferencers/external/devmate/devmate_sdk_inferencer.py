@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
     _detect_fbsource_root_for,
     generate_config_with_allowed_commands,
@@ -24,6 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types 
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -151,13 +151,17 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             )
         elif self.allowed_shell_commands and self.enable_shell:
             # Sync base config first (before we mutate self.config_file_path).
-            sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
+            sync_config_to_target(
+                self.config_file_path, self.source_path, config_sync_target
+            )
             self.config_file_path = generate_config_with_allowed_commands(
                 self.config_file_path, self.allowed_shell_commands, self.source_path
             )
 
         # Sync the (possibly updated) config to the target repo if they differ.
-        sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
+        sync_config_to_target(
+            self.config_file_path, self.source_path, config_sync_target
+        )
 
     @classmethod
     def _detect_source_root(cls) -> "Optional[str]":
@@ -293,7 +297,11 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             output = getattr(action, "output", None)
 
             # Log all available fields on the action for debugging
-            action_attrs = {a: type(getattr(action, a, None)).__name__ for a in dir(action) if not a.startswith("_")}
+            action_attrs = {
+                a: type(getattr(action, a, None)).__name__
+                for a in dir(action)
+                if not a.startswith("_")
+            }
             self.log_info(
                 f"action_id={action_id}, output_type={type(output).__name__}, "
                 f"output_attrs={[a for a in dir(output) if not a.startswith('_')] if output else None}, "

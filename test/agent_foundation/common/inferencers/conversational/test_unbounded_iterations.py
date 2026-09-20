@@ -8,8 +8,6 @@ bounds as before (regression guard).
 """
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational import (
     conversational_inferencer as ci_mod,
 )
@@ -17,6 +15,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 _FINAL_ANSWER = "Here is my final answer."
@@ -52,10 +51,11 @@ class _LoopingBase(InferencerBase):
 
 
 class TestUnboundedSemantics:
-
     @pytest.mark.asyncio
     async def test_zero_runs_and_stops_on_final_answer(self):
-        ci = ConversationalInferencer(base_inferencer=_FinalAnswerBase(), max_iterations=0)
+        ci = ConversationalInferencer(
+            base_inferencer=_FinalAnswerBase(), max_iterations=0
+        )
         result = await ci.run_agentic_loop("hello")
         # Ran (NOT the old range(0,0) -> zero-iteration do-nothing) and the CI
         # stopped on its own when the model produced a final answer.
@@ -66,7 +66,9 @@ class TestUnboundedSemantics:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("cap", [0, -1, False, None])
     async def test_nonpositive_or_falsy_caps_are_unbounded_not_zero(self, cap):
-        ci = ConversationalInferencer(base_inferencer=_FinalAnswerBase(), max_iterations=cap)
+        ci = ConversationalInferencer(
+            base_inferencer=_FinalAnswerBase(), max_iterations=cap
+        )
         result = await ci.run_agentic_loop("hello")
         assert result.iterations_used == 1
         assert not result.exhausted_max_iterations
@@ -76,7 +78,9 @@ class TestUnboundedSemantics:
         # Shrink the ceiling so the test is fast; a never-stopping base loops to it.
         monkeypatch.setattr(ci_mod, "_UNBOUNDED_ITERATION_CEILING", 3)
         ci = ConversationalInferencer(
-            base_inferencer=_LoopingBase(), max_iterations=0, yolo_mode=True,
+            base_inferencer=_LoopingBase(),
+            max_iterations=0,
+            yolo_mode=True,
         )
         result = await ci.run_agentic_loop("go")
         assert result.exhausted_max_iterations
@@ -86,7 +90,9 @@ class TestUnboundedSemantics:
     async def test_positive_cap_still_bounds(self):
         # Regression: a positive cap behaves exactly as before.
         ci = ConversationalInferencer(
-            base_inferencer=_LoopingBase(), max_iterations=2, yolo_mode=True,
+            base_inferencer=_LoopingBase(),
+            max_iterations=2,
+            yolo_mode=True,
         )
         result = await ci.run_agentic_loop("go")
         assert result.exhausted_max_iterations

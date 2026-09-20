@@ -1,7 +1,6 @@
 """Unit tests for the meta agent error hierarchy."""
 
 import pytest
-
 from agent_foundation.automation.meta_agent.errors import (
     GraphSynthesisError,
     InsufficientSuccessTracesError,

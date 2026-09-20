@@ -9,54 +9,53 @@ machinery) installed at all. NOTE: this does not avoid rich_python_utils
 or attr — both are required by the contract layer itself (interactive_base
 imports rich_python_utils.common_objects.debuggable directly).
 """
+
 from __future__ import annotations
+
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 # --- Eager: lightweight contract types ---
 from agent_foundation.ui.input_modes import (
+    ChoiceOption,
+    exact_string,
     InputMode,
     InputModeConfig,
-    ChoiceOption,
-    press_to_continue,
-    exact_string,
-    single_choice,
     multiple_choices,
+    press_to_continue,
+    single_choice,
 )
-from agent_foundation.ui.widget_protocol import (
-    WidgetMessage,
-    WidgetResponse,
-    WidgetField,
-    WIDGET_TEXT_INPUT,
-    WIDGET_SINGLE_CHOICE,
-    WIDGET_MULTIPLE_CHOICE,
-    WIDGET_DROPDOWN,
-    WIDGET_TOGGLE,
-    WIDGET_TOOL_ARGUMENT_FORM,
-    WIDGET_CONFIRMATION,
-    WIDGET_MULTI_INPUT,
-    WIDGET_GROUPED,
-    WIDGET_DEFAULT,
-    WIDGET_TYPES,
-)
-from agent_foundation.ui.interactive_base import (
-    InteractiveBase,
-    InteractionFlags,
-)
-from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 from agent_foundation.ui.interactive_checkpoint import (
+    checkpoint_breakdown_review,
+    checkpoint_plan_review,
+    checkpoint_results_review,
     CheckpointResult,
     run_checkpoint,
-    checkpoint_plan_review,
-    checkpoint_breakdown_review,
-    checkpoint_results_review,
+)
+from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from agent_foundation.ui.widget_protocol import (
+    WIDGET_CONFIRMATION,
+    WIDGET_DEFAULT,
+    WIDGET_DROPDOWN,
+    WIDGET_GROUPED,
+    WIDGET_MULTI_INPUT,
+    WIDGET_MULTIPLE_CHOICE,
+    WIDGET_SINGLE_CHOICE,
+    WIDGET_TEXT_INPUT,
+    WIDGET_TOGGLE,
+    WIDGET_TOOL_ARGUMENT_FORM,
+    WIDGET_TYPES,
+    WidgetField,
+    WidgetMessage,
+    WidgetResponse,
 )
 
 # --- Lazy: heavy transports (PEP 562) ---
 _LAZY = {
-    'TerminalInteractive': 'agent_foundation.ui.terminal_interactive',
-    'QueueInteractive': 'agent_foundation.ui.queue_interactive',
-    'WebUIInteractive': 'agent_foundation.ui.web_interactive',
+    "TerminalInteractive": "agent_foundation.ui.terminal_interactive",
+    "QueueInteractive": "agent_foundation.ui.queue_interactive",
+    "WebUIInteractive": "agent_foundation.ui.web_interactive",
 }
 
 
@@ -70,22 +69,45 @@ def __getattr__(name: str):
 
 
 if TYPE_CHECKING:
-    from agent_foundation.ui.terminal_interactive import TerminalInteractive  # noqa: F401
     from agent_foundation.ui.queue_interactive import QueueInteractive  # noqa: F401
+    from agent_foundation.ui.terminal_interactive import (  # noqa: F401
+        TerminalInteractive,
+    )
     from agent_foundation.ui.web_interactive import WebUIInteractive  # noqa: F401
 
 __all__ = [
     # contract
-    'InputMode', 'InputModeConfig', 'ChoiceOption',
-    'press_to_continue', 'exact_string', 'single_choice', 'multiple_choices',
-    'WidgetMessage', 'WidgetResponse', 'WidgetField',
-    'WIDGET_TEXT_INPUT', 'WIDGET_SINGLE_CHOICE', 'WIDGET_MULTIPLE_CHOICE',
-    'WIDGET_DROPDOWN', 'WIDGET_TOGGLE', 'WIDGET_TOOL_ARGUMENT_FORM',
-    'WIDGET_CONFIRMATION', 'WIDGET_MULTI_INPUT', 'WIDGET_GROUPED',
-    'WIDGET_DEFAULT', 'WIDGET_TYPES',
-    'InteractiveBase', 'InteractionFlags', 'RichInteractiveBase',
-    'CheckpointResult', 'run_checkpoint', 'checkpoint_plan_review',
-    'checkpoint_breakdown_review', 'checkpoint_results_review',
+    "InputMode",
+    "InputModeConfig",
+    "ChoiceOption",
+    "press_to_continue",
+    "exact_string",
+    "single_choice",
+    "multiple_choices",
+    "WidgetMessage",
+    "WidgetResponse",
+    "WidgetField",
+    "WIDGET_TEXT_INPUT",
+    "WIDGET_SINGLE_CHOICE",
+    "WIDGET_MULTIPLE_CHOICE",
+    "WIDGET_DROPDOWN",
+    "WIDGET_TOGGLE",
+    "WIDGET_TOOL_ARGUMENT_FORM",
+    "WIDGET_CONFIRMATION",
+    "WIDGET_MULTI_INPUT",
+    "WIDGET_GROUPED",
+    "WIDGET_DEFAULT",
+    "WIDGET_TYPES",
+    "InteractiveBase",
+    "InteractionFlags",
+    "RichInteractiveBase",
+    "CheckpointResult",
+    "run_checkpoint",
+    "checkpoint_plan_review",
+    "checkpoint_breakdown_review",
+    "checkpoint_results_review",
     # transports (lazy)
-    'TerminalInteractive', 'QueueInteractive', 'WebUIInteractive',
+    "TerminalInteractive",
+    "QueueInteractive",
+    "WebUIInteractive",
 ]

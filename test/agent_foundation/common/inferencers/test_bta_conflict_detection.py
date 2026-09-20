@@ -8,11 +8,10 @@ import os
 import shutil
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     _canonicalize_text,
-    _sha256_of_file_canonical,
     _detect_conflicts_and_promote,
+    _sha256_of_file_canonical,
     make_conflict_aware_prompt_builder,
 )
 
@@ -76,24 +75,34 @@ class TestSha256Canonical:
 
 @pytest.fixture
 def worker_tree(tmp_path):
-    """Create a mock worker output tree for conflict detection tests."""
+    """Create a mock worker output tree for conflict detection tests.
+
+    Part 2 (two-axis model): each worker's deliverables live directly in
+    ``outputs/`` (the ``final_deliverables/`` subfolder is retired), and
+    ``_detect_conflicts_and_promote`` resolves worker roots via
+    ``candidate_subdirs=("outputs",)``.
+    """
     children = tmp_path / "children"
 
-    w0 = children / "worker_0" / "outputs" / "final_deliverables"
+    w0 = children / "worker_0" / "outputs"
     w0.mkdir(parents=True)
     (w0 / "skills" / "alpha").mkdir(parents=True)
-    (w0 / "skills" / "alpha" / "SKILL.md").write_text("# Alpha Skill v1\nShort version.\n")
+    (w0 / "skills" / "alpha" / "SKILL.md").write_text(
+        "# Alpha Skill v1\nShort version.\n"
+    )
     (w0 / "tools" / "beta").mkdir(parents=True)
     (w0 / "tools" / "beta" / "tool.json").write_text('{"name": "beta"}\n')
 
-    w1 = children / "worker_1" / "outputs" / "final_deliverables"
+    w1 = children / "worker_1" / "outputs"
     w1.mkdir(parents=True)
     (w1 / "skills" / "alpha").mkdir(parents=True)
-    (w1 / "skills" / "alpha" / "SKILL.md").write_text("# Alpha Skill v1\nShort version.\n")
+    (w1 / "skills" / "alpha" / "SKILL.md").write_text(
+        "# Alpha Skill v1\nShort version.\n"
+    )
     (w1 / "tools" / "gamma").mkdir(parents=True)
     (w1 / "tools" / "gamma" / "tool.json").write_text('{"name": "gamma"}\n')
 
-    w2 = children / "worker_2" / "outputs" / "final_deliverables"
+    w2 = children / "worker_2" / "outputs"
     w2.mkdir(parents=True)
     (w2 / "skills" / "alpha").mkdir(parents=True)
     (w2 / "skills" / "alpha" / "SKILL.md").write_text(
@@ -164,24 +173,18 @@ class TestDetectConflictsAndPromote:
         assert len(promoted) == 1
         assert conflicts == {}
 
-    def test_prefers_final_deliverables_over_outputs(self, tmp_path):
-        children = tmp_path / "children"
-        w0_fd = children / "worker_0" / "outputs" / "final_deliverables"
-        w0_fd.mkdir(parents=True)
-        (w0_fd / "good.md").write_text("from final_deliverables\n")
-        w0_out = children / "worker_0" / "outputs"
-        (w0_out / "bad.md").write_text("from outputs root\n")
-        dst = tmp_path / "dst"
-        dst.mkdir()
-        promoted, _ = _detect_conflicts_and_promote(str(dst), str(children))
-        promoted_paths = {p["path"] for p in promoted}
-        assert "good.md" in promoted_paths
-        assert "bad.md" not in promoted_paths
+    # NOTE: ``test_prefers_final_deliverables_over_outputs`` was removed in Part 2.
+    # It asserted the retired Tier-1 preference of ``outputs/final_deliverables/``
+    # over ``outputs/``. Under the two-axis model ``outputs/`` IS the deliverable
+    # set (no subfolder), so there is no such preference to test — files written
+    # directly to ``outputs/`` are the deliverables (covered by ``test_single_worker``).
 
 
 class TestMakeConflictAwarePromptBuilder:
     def test_last_writer_wins_returns_text(self):
-        builder = make_conflict_aware_prompt_builder(conflict_resolution_mode="last_writer_wins")
+        builder = make_conflict_aware_prompt_builder(
+            conflict_resolution_mode="last_writer_wins"
+        )
         result = builder(["result1", "result2"])
         assert "### Result 1" in result
         assert "result1" in result
@@ -194,7 +197,7 @@ class TestMakeConflictAwarePromptBuilder:
     def test_delegate_mode_with_real_files(self, worker_tree):
         root, children, dst = worker_tree
         w0_output = os.path.join(
-            str(children), "worker_0", "outputs", "final_deliverables", "skills", "alpha", "SKILL.md"
+            str(children), "worker_0", "outputs", "skills", "alpha", "SKILL.md"
         )
 
         # Mock BTA with aggregator_inferencer that has template_extra_feed
@@ -238,10 +241,10 @@ class TestMakeConflictAwarePromptBuilder:
         referenced by path (not inlined) to avoid ARG_MAX errors."""
         root, children, dst = worker_tree
         w0_path = os.path.join(
-            str(children), "worker_0", "outputs", "final_deliverables", "skills", "alpha", "SKILL.md"
+            str(children), "worker_0", "outputs", "skills", "alpha", "SKILL.md"
         )
         w1_path = os.path.join(
-            str(children), "worker_1", "outputs", "final_deliverables", "tools", "gamma", "tool.json"
+            str(children), "worker_1", "outputs", "tools", "gamma", "tool.json"
         )
 
         class MockLocalAggregator:
@@ -307,7 +310,7 @@ class TestMakeConflictAwarePromptBuilder:
         """Workers with paths get path refs; workers without get inlined."""
         root, children, dst = worker_tree
         w0_path = os.path.join(
-            str(children), "worker_0", "outputs", "final_deliverables", "skills", "alpha", "SKILL.md"
+            str(children), "worker_0", "outputs", "skills", "alpha", "SKILL.md"
         )
 
         class MockLocalAgg:

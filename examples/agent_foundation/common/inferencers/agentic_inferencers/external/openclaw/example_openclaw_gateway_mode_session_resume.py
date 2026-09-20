@@ -72,7 +72,7 @@ def make_inferencer(session_id: str, thinking: str | None, timeout: int):
         session_id=session_id,
         thinking=thinking,
         timeout_seconds=timeout,
-        enable_turn_separation=False,   # flat stream for demo clarity
+        enable_turn_separation=False,  # flat stream for demo clarity
         always_initialize_new_session=True,  # auto warm-up on first use
         auto_resume=True,
     )
@@ -193,10 +193,14 @@ async def run_demo(
     recall_a = secret_a.lower() in resp_a2.lower()
     wrong_b_in_a = secret_b.lower() in resp_a2.lower()
     print()
-    print(f"  {'✅' if recall_a else '❌'} Expected '{secret_a}': "
-          f"{'FOUND' if recall_a else 'NOT FOUND'} in response")
+    print(
+        f"  {'✅' if recall_a else '❌'} Expected '{secret_a}': "
+        f"{'FOUND' if recall_a else 'NOT FOUND'} in response"
+    )
     if wrong_b_in_a:
-        print(f"  ⚠️  Session B's secret '{secret_b}' appeared in Session A response — context bleed!")
+        print(
+            f"  ⚠️  Session B's secret '{secret_b}' appeared in Session A response — context bleed!"
+        )
 
     # =========================================================================
     # STEP 4: Resume Session B (fresh inferencer — simulates new process)
@@ -219,17 +223,23 @@ async def run_demo(
     recall_b = secret_b.lower() in resp_b2.lower()
     wrong_a_in_b = secret_a.lower() in resp_b2.lower()
     print()
-    print(f"  {'✅' if recall_b else '❌'} Expected '{secret_b}': "
-          f"{'FOUND' if recall_b else 'NOT FOUND'} in response")
+    print(
+        f"  {'✅' if recall_b else '❌'} Expected '{secret_b}': "
+        f"{'FOUND' if recall_b else 'NOT FOUND'} in response"
+    )
     if wrong_a_in_b:
-        print(f"  ⚠️  Session A's secret '{secret_a}' appeared in Session B response — context bleed!")
+        print(
+            f"  ⚠️  Session A's secret '{secret_a}' appeared in Session B response — context bleed!"
+        )
 
     # =========================================================================
     # STEP 5: Cross-check — ask Session A for Session B's secret (should fail)
     # =========================================================================
     print()
     print("=" * 70)
-    print(f"STEP 5: Cross-check — Session A asked for '{secret_b}' — should NOT know it")
+    print(
+        f"STEP 5: Cross-check — Session A asked for '{secret_b}' — should NOT know it"
+    )
     print("=" * 70)
     print()
 
@@ -242,10 +252,14 @@ async def run_demo(
         label=f"Cross-check Session A [{session_id_a}]",
     )
 
-    cross_isolation = secret_b.lower() not in resp_cross.lower() or "no" in resp_cross.lower()
+    cross_isolation = (
+        secret_b.lower() not in resp_cross.lower() or "no" in resp_cross.lower()
+    )
     print()
-    print(f"  {'✅' if cross_isolation else '❌'} Session A does NOT know '{secret_b}': "
-          f"{'CONFIRMED' if cross_isolation else 'FAILED — context bleed detected!'}")
+    print(
+        f"  {'✅' if cross_isolation else '❌'} Session A does NOT know '{secret_b}': "
+        f"{'CONFIRMED' if cross_isolation else 'FAILED — context bleed detected!'}"
+    )
 
     # =========================================================================
     # SUMMARY
@@ -267,7 +281,13 @@ async def run_demo(
     print(f"  Isolation cross-check: {'✅ PASSED' if cross_isolation else '❌ FAILED'}")
     print()
 
-    all_pass = recall_a and recall_b and cross_isolation and not wrong_b_in_a and not wrong_a_in_b
+    all_pass = (
+        recall_a
+        and recall_b
+        and cross_isolation
+        and not wrong_b_in_a
+        and not wrong_a_in_b
+    )
     partial = (recall_a or recall_b) and not all_pass
 
     if all_pass:
@@ -293,7 +313,7 @@ def main() -> None:
         "--session-suffix",
         default=uuid.uuid4().hex[:8],
         help="Suffix appended to session IDs to avoid collisions across runs "
-             "(default: random 8-char hex). Use a fixed value to reuse sessions.",
+        "(default: random 8-char hex). Use a fixed value to reuse sessions.",
     )
     parser.add_argument(
         "--thinking",
@@ -315,16 +335,19 @@ def main() -> None:
     print()
 
     try:
-        asyncio.run(run_demo(
-            session_suffix=args.session_suffix,
-            thinking=args.thinking,
-            timeout=args.timeout,
-        ))
+        asyncio.run(
+            run_demo(
+                session_suffix=args.session_suffix,
+                thinking=args.thinking,
+                timeout=args.timeout,
+            )
+        )
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
     except Exception as e:
         print(f"\n❌ Error: {type(e).__name__}: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

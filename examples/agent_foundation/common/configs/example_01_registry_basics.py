@@ -43,12 +43,12 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
         sys.path.insert(0, _p)
 
 from rich_python_utils.config_utils import (
+    _reset_registry,
+    list_registered,
     register,
     register_alias,
     register_class,
     resolve_target,
-    list_registered,
-    _reset_registry,
 )
 
 
@@ -56,9 +56,11 @@ from rich_python_utils.config_utils import (
 # Sample classes (stand-ins for real inferencers)
 # ---------------------------------------------------------------------------
 
+
 @register("Echo", category="inferencer")
 class EchoInferencer:
     """Simply echoes back the input."""
+
     def __init__(self, prefix=""):
         self.prefix = prefix
 
@@ -68,6 +70,7 @@ class EchoInferencer:
 
 class LoudEchoInferencer:
     """Echoes back in UPPERCASE."""
+
     def __init__(self, volume=10):
         self.volume = volume
 
@@ -77,6 +80,7 @@ class LoudEchoInferencer:
 
 class QuietEchoInferencer:
     """Echoes back in lowercase."""
+
     def infer(self, text):
         return text.lower()
 
@@ -102,7 +106,9 @@ def main():
         f"{__name__}.QuietEchoInferencer",
         category="config",  # different category for demo
     )
-    print(f"  String-only: register_alias('QuietEcho', '{__name__}.QuietEchoInferencer')")
+    print(
+        f"  String-only: register_alias('QuietEcho', '{__name__}.QuietEchoInferencer')"
+    )
 
     # ── 2. Resolve aliases to full import paths ──────────────
     separator("2. Resolve aliases -> full import paths")

@@ -7,9 +7,8 @@ import tempfile
 from abc import abstractmethod
 from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 # Default wall-clock floor (seconds) for a CLI subprocess inference call.
 # Shared across the terminal CLI inferencers (codex, claude_code, devmate,
@@ -540,11 +539,13 @@ class TerminalInferencerBase(InferencerBase):
             pre_result = self._execute_scripts(pre_scripts, script_type="pre")
 
             if not pre_result["success"] and self.fail_on_pre_script_error:
-                return self._wrap_parse_output(self.parse_output(
-                    stdout="",
-                    stderr=f"Pre-execution script failed: {pre_result.get('error', '')}",
-                    return_code=-1,
-                ))
+                return self._wrap_parse_output(
+                    self.parse_output(
+                        stdout="",
+                        stderr=f"Pre-execution script failed: {pre_result.get('error', '')}",
+                        return_code=-1,
+                    )
+                )
 
         # 2. Construct the command
         command = self.construct_command(inference_input, **kwargs)

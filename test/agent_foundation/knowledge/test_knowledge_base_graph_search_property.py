@@ -8,6 +8,7 @@ Feature: graph-semantic-retrieval
 
 **Validates: Requirements 7.4, 7.3, 7.1**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,24 +33,25 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-from hypothesis import given, settings, strategies as st, assume
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.graph_walk import (
-    SeedNode,
     graph_walk,
     merge_graph_contexts,
+    SeedNode,
 )
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
 from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
     SemanticGraphStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from hypothesis import assume, given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────
@@ -60,11 +62,20 @@ _identifier_text = st.text(
     max_size=30,
 )
 
-_node_type_strategy = st.sampled_from(["service", "person", "product", "location", "concept"])
+_node_type_strategy = st.sampled_from(
+    ["service", "person", "product", "location", "concept"]
+)
 
-_relation_type_strategy = st.sampled_from([
-    "SEARCH_HIT", "RELATED", "WORKS_AT", "SELLS", "LOCATED_IN", "KNOWS",
-])
+_relation_type_strategy = st.sampled_from(
+    [
+        "SEARCH_HIT",
+        "RELATED",
+        "WORKS_AT",
+        "SELLS",
+        "LOCATED_IN",
+        "KNOWS",
+    ]
+)
 
 
 @st.composite
@@ -73,11 +84,13 @@ def graph_node_strategy(draw):
     node_id = draw(_identifier_text)
     node_type = draw(_node_type_strategy)
     label = draw(st.text(max_size=30))
-    properties = draw(st.dictionaries(
-        st.text(min_size=1, max_size=15),
-        st.text(max_size=20),
-        max_size=3,
-    ))
+    properties = draw(
+        st.dictionaries(
+            st.text(min_size=1, max_size=15),
+            st.text(max_size=20),
+            max_size=3,
+        )
+    )
     return GraphNode(
         node_id=node_id,
         node_type=node_type,
@@ -96,7 +109,11 @@ def graph_context_entry_strategy(draw):
         "target_label": draw(st.text(max_size=20)),
         "piece": None,
         "depth": draw(st.integers(min_value=0, max_value=5)),
-        "score": draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)),
+        "score": draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        ),
     }
 
 
@@ -149,7 +166,9 @@ class TestDepthBasedScoring:
     """
 
     @given(
-        search_score=st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False),
+        search_score=st.floats(
+            min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
         num_hops=st.integers(min_value=1, max_value=3),
     )
     @settings(max_examples=100)
@@ -169,17 +188,22 @@ class TestDepthBasedScoring:
                 node_id=f"n{i}", node_type="service", label=f"Node {i}"
             )
             graph_store.add_node(neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id=prev_id, target_id=f"n{i}", edge_type="RELATED"
-            ))
+            graph_store.add_relation(
+                GraphEdge(source_id=prev_id, target_id=f"n{i}", edge_type="RELATED")
+            )
             prev_id = f"n{i}"
 
         kb = _make_knowledge_base(graph_store, graph_traversal_depth=num_hops)
 
         # Use unified graph walk with search seeds
         search_results = [(root, search_score)]
-        seeds = [SeedNode(node=node, score=score, source="search") for node, score in search_results]
-        context = graph_walk(graph_store, kb.piece_store, seeds, traversal_depth=num_hops)
+        seeds = [
+            SeedNode(node=node, score=score, source="search")
+            for node, score in search_results
+        ]
+        context = graph_walk(
+            graph_store, kb.piece_store, seeds, traversal_depth=num_hops
+        )
 
         # Verify depth-0 entry (the search hit itself)
         depth_0_entries = [e for e in context if e["depth"] == 0]
@@ -198,7 +222,9 @@ class TestDepthBasedScoring:
                 )
 
     @given(
-        search_score=st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False),
+        search_score=st.floats(
+            min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_depth_scoring_is_strictly_monotonic_decreasing(self, search_score: float):
@@ -212,10 +238,10 @@ class TestDepthBasedScoring:
         for i in range(1, 4):
             n = GraphNode(node_id=f"n{i}", node_type="service", label=f"N{i}")
             graph_store.add_node(n)
-            prev = "root" if i == 1 else f"n{i-1}"
-            graph_store.add_relation(GraphEdge(
-                source_id=prev, target_id=f"n{i}", edge_type="RELATED"
-            ))
+            prev = "root" if i == 1 else f"n{i - 1}"
+            graph_store.add_relation(
+                GraphEdge(source_id=prev, target_id=f"n{i}", edge_type="RELATED")
+            )
 
         kb = _make_knowledge_base(graph_store, graph_traversal_depth=3)
         seeds = [SeedNode(node=root, score=search_score, source="search")]
@@ -231,7 +257,7 @@ class TestDepthBasedScoring:
         for d in range(len(scores_by_depth) - 1):
             assert scores_by_depth[d] > scores_by_depth[d + 1], (
                 f"Score at depth {d} ({scores_by_depth[d]}) should be > "
-                f"score at depth {d+1} ({scores_by_depth[d+1]})"
+                f"score at depth {d + 1} ({scores_by_depth[d + 1]})"
             )
 
 
@@ -252,7 +278,9 @@ class TestGraphSearchPieceDedupViaSkip:
     @given(
         piece_id=_identifier_text,
         info_type=st.sampled_from(["context", "user_profile", "instructions"]),
-        search_score=st.floats(min_value=0.1, max_value=1.0, allow_nan=False, allow_infinity=False),
+        search_score=st.floats(
+            min_value=0.1, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_piece_already_in_layer2_is_skipped_when_flag_set(
@@ -269,15 +297,19 @@ class TestGraphSearchPieceDedupViaSkip:
         neighbor = GraphNode(node_id="neighbor", node_type="product", label="Neighbor")
         graph_store.add_node(root)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id="root",
-            target_id="neighbor",
-            edge_type="SELLS",
-            properties={"piece_id": piece_id},
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="root",
+                target_id="neighbor",
+                edge_type="SELLS",
+                properties={"piece_id": piece_id},
+            )
+        )
 
         # Mock piece_store that would return a piece for this piece_id
-        mock_piece = KnowledgePiece(content="test content", piece_id=piece_id, info_type=info_type)
+        mock_piece = KnowledgePiece(
+            content="test content", piece_id=piece_id, info_type=info_type
+        )
         piece_store = MagicMock(spec=KnowledgePieceStore)
         piece_store.get_by_id.return_value = mock_piece
         piece_store.search.return_value = []
@@ -295,7 +327,9 @@ class TestGraphSearchPieceDedupViaSkip:
 
         seeds = [SeedNode(node=root, score=search_score, source="search")]
         context = graph_walk(
-            graph_store, piece_store, seeds,
+            graph_store,
+            piece_store,
+            seeds,
             traversal_depth=1,
             already_retrieved_piece_ids=already_retrieved,
             ignore_already_retrieved=True,
@@ -310,12 +344,12 @@ class TestGraphSearchPieceDedupViaSkip:
 
     @given(
         piece_id=_identifier_text,
-        search_score=st.floats(min_value=0.1, max_value=1.0, allow_nan=False, allow_infinity=False),
+        search_score=st.floats(
+            min_value=0.1, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
-    def test_piece_not_in_layer2_is_included(
-        self, piece_id: str, search_score: float
-    ):
+    def test_piece_not_in_layer2_is_included(self, piece_id: str, search_score: float):
         """When a piece_id is NOT in already_retrieved_piece_ids, the piece
         IS attached to the graph_context entry (even when dedup flag is set)."""
         # Feature: graph-semantic-retrieval, Property 13: Graph-Search Piece Dedup via Skip
@@ -326,12 +360,14 @@ class TestGraphSearchPieceDedupViaSkip:
         neighbor = GraphNode(node_id="neighbor", node_type="product", label="Neighbor")
         graph_store.add_node(root)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id="root",
-            target_id="neighbor",
-            edge_type="SELLS",
-            properties={"piece_id": piece_id},
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="root",
+                target_id="neighbor",
+                edge_type="SELLS",
+                properties={"piece_id": piece_id},
+            )
+        )
 
         # Mock piece_store returns a piece
         mock_piece = KnowledgePiece(content="test content", piece_id=piece_id)
@@ -352,7 +388,9 @@ class TestGraphSearchPieceDedupViaSkip:
 
         seeds = [SeedNode(node=root, score=search_score, source="search")]
         context = graph_walk(
-            graph_store, piece_store, seeds,
+            graph_store,
+            piece_store,
+            seeds,
             traversal_depth=1,
             already_retrieved_piece_ids=already_retrieved,
             ignore_already_retrieved=True,
@@ -382,7 +420,9 @@ class TestGraphContextMergeDeduplicates:
 
     @given(
         search_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=8),
-        identity_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=8),
+        identity_entries=st.lists(
+            graph_context_entry_strategy(), min_size=0, max_size=8
+        ),
     )
     @settings(max_examples=100)
     def test_merged_has_unique_node_relation_pairs(
@@ -408,7 +448,9 @@ class TestGraphContextMergeDeduplicates:
 
     @given(
         search_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=8),
-        identity_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=8),
+        identity_entries=st.lists(
+            graph_context_entry_strategy(), min_size=0, max_size=8
+        ),
     )
     @settings(max_examples=100)
     def test_merged_keeps_higher_score_entry(
@@ -453,8 +495,12 @@ class TestGraphContextMergeDeduplicates:
         node_id=_identifier_text,
         rel_type_a=_relation_type_strategy,
         rel_type_b=_relation_type_strategy,
-        score_a=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
-        score_b=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+        score_a=st.floats(
+            min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
+        score_b=st.floats(
+            min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+        ),
     )
     @settings(max_examples=100)
     def test_different_relation_types_to_same_node_preserved(

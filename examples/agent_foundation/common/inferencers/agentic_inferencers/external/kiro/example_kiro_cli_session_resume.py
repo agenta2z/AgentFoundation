@@ -85,16 +85,16 @@ def send_and_print(inferencer, message: str, label: str = "") -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Kiro CLI — Session Resume Demo"
-    )
+    parser = argparse.ArgumentParser(description="Kiro CLI — Session Resume Demo")
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="auto",
         help="Model name/alias (default: auto)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         help="Working directory for Kiro CLI (default: temp dir)",
     )
     args = parser.parse_args()
@@ -176,7 +176,7 @@ def main():
         response_4 = send_and_print(
             inferencer_fresh,
             "What is the secret word? Reply with just the word if you know it, "
-            'or say "I don\'t know any secret word" if you don\'t.',
+            "or say \"I don't know any secret word\" if you don't.",
             label="New session — no prior context",
         )
 
@@ -193,8 +193,12 @@ def main():
         recall_ok = "banana" in r2_lower
         isolation_ok = "banana" not in r4_lower
 
-        print(f"  Session recall 'banana':       {'✅ PASS' if recall_ok else '❌ FAIL'}")
-        print(f"  New session isolation:          {'✅ PASS' if isolation_ok else '⚠️  UNEXPECTED'}")
+        print(
+            f"  Session recall 'banana':       {'✅ PASS' if recall_ok else '❌ FAIL'}"
+        )
+        print(
+            f"  New session isolation:          {'✅ PASS' if isolation_ok else '⚠️  UNEXPECTED'}"
+        )
         print()
 
         if recall_ok and isolation_ok:

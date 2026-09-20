@@ -11,15 +11,15 @@ retrieval layers (metadata, knowledge pieces, entity graph).
 
 Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
 """
-from typing import Any, Dict, List, Optional, Tuple
 
-from attr import attrs, attrib
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from attr import attrib, attrs
 
 
 @attrs
@@ -33,6 +33,7 @@ class RetrievalResult:
         graph_context: Graph traversal results as list of dicts with keys:
             relation_type, target_node_id, target_label, piece (optional), depth.
     """
+
     metadata: Optional[EntityMetadata] = attrib(default=None)
     global_metadata: Optional[EntityMetadata] = attrib(default=None)
     pieces: List[Tuple[KnowledgePiece, float]] = attrib(factory=list)
@@ -60,6 +61,7 @@ class KnowledgeFormatter:
         include_tags: Whether to show tags below each knowledge piece.
         include_scores: Whether to show relevance scores next to pieces.
     """
+
     section_delimiter: str = attrib(default="\n\n")
     item_delimiter: str = attrib(default="\n---\n")
     include_tags: bool = attrib(default=True)
@@ -121,9 +123,7 @@ class KnowledgeFormatter:
             lines.append(f"{key}: {value}")
         return "\n".join(lines)
 
-    def _format_pieces(
-        self, pieces: List[Tuple[KnowledgePiece, float]]
-    ) -> str:
+    def _format_pieces(self, pieces: List[Tuple[KnowledgePiece, float]]) -> str:
         """Format knowledge pieces grouped by KnowledgeType.
 
         Pieces are first sorted by (-score, piece_id) for determinism,
@@ -137,9 +137,7 @@ class KnowledgeFormatter:
             Formatted string with [Knowledge] header and grouped pieces.
         """
         # Sort pieces deterministically: by score descending, then piece_id ascending
-        sorted_pieces = sorted(
-            pieces, key=lambda p: (-p[1], p[0].piece_id)
-        )
+        sorted_pieces = sorted(pieces, key=lambda p: (-p[1], p[0].piece_id))
 
         # Group by KnowledgeType while preserving sort order
         groups: Dict[KnowledgeType, List[Tuple[KnowledgePiece, float]]] = {}

@@ -19,11 +19,9 @@ TEMPLATES_DIR = _AF_ROOT / "resources" / "prompt_templates"
 @pytest.fixture
 def template_manager():
     """Create a TemplateManager pointed at the real prompt_templates directory."""
+    from rich_python_utils.string_utils.formatting.jinja2_format import format_template
     from rich_python_utils.string_utils.formatting.template_manager import (
         TemplateManager,
-    )
-    from rich_python_utils.string_utils.formatting.jinja2_format import (
-        format_template,
     )
 
     tm = TemplateManager(
@@ -56,10 +54,10 @@ FOLLOWUP_SUFFIX = "unreachable path"
 # specific wording beyond the strengthening floor — readers may further
 # adjust phrasing as long as the floor markers remain.
 FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS = (
-    "Prior Artifacts/Files",   # explicit prior-artifact callout (the failure mode site)
-    "outside workspace",        # the trigger phrase the agent will see
-    "MUST first try",           # imperative + ordering: shell BEFORE any other recourse
-    "command-line",             # the fallback tool category
+    "Prior Artifacts/Files",  # explicit prior-artifact callout (the failure mode site)
+    "outside workspace",  # the trigger phrase the agent will see
+    "MUST first try",  # imperative + ordering: shell BEFORE any other recourse
+    "command-line",  # the fallback tool category
 )
 
 
@@ -72,7 +70,11 @@ class TestBehaviorVariableResolution:
             {"instructions.behavior.file_reading_fallback": None},
             root_space="plan",
         )
-        content = result.get("instructions", {}).get("behavior", {}).get("file_reading_fallback", "")
+        content = (
+            result.get("instructions", {})
+            .get("behavior", {})
+            .get("file_reading_fallback", "")
+        )
         assert BASE_FALLBACK_TEXT in content, (
             f"Base fallback text not found in resolved variable. Got: {content!r}"
         )
@@ -83,10 +85,12 @@ class TestBehaviorVariableResolution:
             {"instructions.behavior.file_reading_fallback_for_review": None},
             root_space="plan",
         )
-        content = result.get("instructions", {}).get("behavior", {}).get("file_reading_fallback_for_review", "")
-        assert REVIEW_SUFFIX in content, (
-            f"Review suffix not found. Got: {content!r}"
+        content = (
+            result.get("instructions", {})
+            .get("behavior", {})
+            .get("file_reading_fallback_for_review", "")
         )
+        assert REVIEW_SUFFIX in content, f"Review suffix not found. Got: {content!r}"
 
     def test_followup_fallback_variable_loads(self, template_manager):
         """instructions.behavior.file_reading_fallback_for_followup resolves."""
@@ -94,7 +98,11 @@ class TestBehaviorVariableResolution:
             {"instructions.behavior.file_reading_fallback_for_followup": None},
             root_space="plan",
         )
-        content = result.get("instructions", {}).get("behavior", {}).get("file_reading_fallback_for_followup", "")
+        content = (
+            result.get("instructions", {})
+            .get("behavior", {})
+            .get("file_reading_fallback_for_followup", "")
+        )
         assert FOLLOWUP_SUFFIX in content, (
             f"Followup suffix not found. Got: {content!r}"
         )
@@ -115,7 +123,9 @@ class TestNestedVariableExpansion:
             },
             root_space="plan",
         )
-        review_content = result["instructions"]["behavior"]["file_reading_fallback_for_review"]
+        review_content = result["instructions"]["behavior"][
+            "file_reading_fallback_for_review"
+        ]
 
         # If nested expansion works: contains the actual base text
         # If it doesn't work: contains literal "{{ file_reading_fallback }}"
@@ -138,7 +148,9 @@ class TestNestedVariableExpansion:
             },
             root_space="plan",
         )
-        followup_content = result["instructions"]["behavior"]["file_reading_fallback_for_followup"]
+        followup_content = result["instructions"]["behavior"][
+            "file_reading_fallback_for_followup"
+        ]
 
         assert "{{ file_reading_fallback }}" not in followup_content, (
             "Nested variable {{ file_reading_fallback }} was NOT expanded. "
@@ -187,7 +199,9 @@ class TestFullTemplateRendering:
             f"Review-specific suffix (verification_gap) not found in rendered template."
         )
 
-    def test_plan_followup_template_contains_fallback_instruction(self, template_manager):
+    def test_plan_followup_template_contains_fallback_instruction(
+        self, template_manager
+    ):
         """Render plan/main/followup.jinja2 and verify the file-reading
         fallback instruction (followup variant) is present."""
         vars_feed = template_manager.load_variables(
@@ -215,7 +229,9 @@ class TestFullTemplateRendering:
             f"Followup-specific suffix (unreachable path) not found."
         )
 
-    def test_plan_initial_template_contains_fallback_instruction(self, template_manager):
+    def test_plan_initial_template_contains_fallback_instruction(
+        self, template_manager
+    ):
         """Render plan/main/initial.jinja2 and verify the file-reading
         fallback instruction (base variant) is present."""
         vars_feed = template_manager.load_variables(
@@ -257,8 +273,12 @@ class TestFollowupPriorArtifactReconstructionGuard:
             },
             root_space="plan",
         )
-        content = result["instructions"]["behavior"]["file_reading_fallback_for_followup"]
-        missing = [m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in content]
+        content = result["instructions"]["behavior"][
+            "file_reading_fallback_for_followup"
+        ]
+        missing = [
+            m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in content
+        ]
         assert not missing, (
             f"Followup fallback variable is missing required guard markers {missing}. "
             f"This guard prevents reconstruction-from-summary hallucinations. "
@@ -285,13 +305,17 @@ class TestFollowupPriorArtifactReconstructionGuard:
             output_path="/tmp/test_output.md",
             **vars_feed,
         )
-        missing = [m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in rendered]
+        missing = [
+            m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in rendered
+        ]
         assert not missing, (
             f"Rendered plan followup template is missing guard markers {missing}. "
             f"First 1200 chars: {rendered[:1200]!r}"
         )
 
-    def test_implementation_followup_template_pins_reconstruction_guard(self, template_manager):
+    def test_implementation_followup_template_pins_reconstruction_guard(
+        self, template_manager
+    ):
         """Rendered implementation/main/followup.jinja2 carries the same guard."""
         vars_feed = template_manager.load_variables(
             {"instructions.behavior.file_reading_fallback_for_followup": None},
@@ -311,7 +335,9 @@ class TestFollowupPriorArtifactReconstructionGuard:
             output_path="/tmp/test_output.md",
             **vars_feed,
         )
-        missing = [m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in rendered]
+        missing = [
+            m for m in FOLLOWUP_PRIOR_ARTIFACT_FALLBACK_MARKERS if m not in rendered
+        ]
         assert not missing, (
             f"Rendered implementation followup template is missing guard markers {missing}. "
             f"First 1200 chars: {rendered[:1200]!r}"

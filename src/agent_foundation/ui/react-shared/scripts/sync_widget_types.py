@@ -10,15 +10,21 @@ Usage:
     python scripts/sync_widget_types.py --protocol-path /path/to/src
                                                    # standalone mode
 """
+
 from __future__ import annotations
-import argparse, difflib, importlib, pathlib, sys
+
+import argparse
+import difflib
+import importlib
+import pathlib
+import sys
 
 
 def _load_protocol(protocol_path: pathlib.Path | None):
     if protocol_path is not None:
         sys.path.insert(0, str(protocol_path))
-    wp = importlib.import_module('agent_foundation.ui.widget_protocol')
-    im = importlib.import_module('agent_foundation.ui.input_modes')
+    wp = importlib.import_module("agent_foundation.ui.widget_protocol")
+    im = importlib.import_module("agent_foundation.ui.input_modes")
     return wp.WIDGET_TYPES, im.InputMode
 
 
@@ -41,8 +47,11 @@ def render_widget_types(widget_types) -> str:
 
 
 def render_input_mode_types(input_mode_enum) -> str:
-    out = [BANNER, "// Mirrors agent_foundation.ui.input_modes.InputMode\n",
-           "export const InputMode = Object.freeze({\n"]
+    out = [
+        BANNER,
+        "// Mirrors agent_foundation.ui.input_modes.InputMode\n",
+        "export const InputMode = Object.freeze({\n",
+    ]
     out.extend(f"  {m.name}: {m.value!r},\n" for m in input_mode_enum)
     out.append("});\n")
     return "".join(out)
@@ -53,9 +62,16 @@ def _write_or_check(path: pathlib.Path, content: str, check: bool) -> bool:
         cur = path.read_text() if path.exists() else ""
         if cur == content:
             return True
-        sys.stderr.write("".join(difflib.unified_diff(
-            cur.splitlines(True), content.splitlines(True),
-            fromfile=str(path), tofile="generated")))
+        sys.stderr.write(
+            "".join(
+                difflib.unified_diff(
+                    cur.splitlines(True),
+                    content.splitlines(True),
+                    fromfile=str(path),
+                    tofile="generated",
+                )
+            )
+        )
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
@@ -64,10 +80,17 @@ def _write_or_check(path: pathlib.Path, content: str, check: bool) -> bool:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--check", action="store_true",
-                    help="exit non-zero if generated files are stale")
-    ap.add_argument("--protocol-path", type=pathlib.Path, default=None,
-                    help="directory containing agent_foundation package on sys.path")
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="exit non-zero if generated files are stale",
+    )
+    ap.add_argument(
+        "--protocol-path",
+        type=pathlib.Path,
+        default=None,
+        help="directory containing agent_foundation package on sys.path",
+    )
     args = ap.parse_args()
     widget_types, input_mode = _load_protocol(args.protocol_path)
     ok = True

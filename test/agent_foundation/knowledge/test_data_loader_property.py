@@ -10,6 +10,7 @@ round-trip equivalence across all three stores.
 
 **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 9.1, 9.2, 9.3, 9.4, 9.5**
 """
+
 import json
 import sys
 from pathlib import Path
@@ -28,28 +29,27 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgeType
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from hypothesis import assume, given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
 )
 
 
@@ -193,15 +193,17 @@ def pieces_entries_strategy(draw):
         entity_id = draw(st.one_of(st.none(), _safe_id))
         embedding_text = draw(st.one_of(st.none(), _safe_content))
 
-        pieces.append({
-            "piece_id": piece_id,
-            "content": content,
-            "knowledge_type": knowledge_type.value,
-            "info_type": info_type,
-            "tags": tags,
-            "entity_id": entity_id,
-            "embedding_text": embedding_text,
-        })
+        pieces.append(
+            {
+                "piece_id": piece_id,
+                "content": content,
+                "knowledge_type": knowledge_type.value,
+                "info_type": info_type,
+                "tags": tags,
+                "entity_id": entity_id,
+                "embedding_text": embedding_text,
+            }
+        )
     return pieces
 
 
@@ -225,17 +227,21 @@ def graph_entries_strategy(draw):
             continue
         node_ids.append(node_id)
         node_type = draw(_entity_type)
-        label = draw(st.text(
-            alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ",
-            max_size=30,
-        ))
+        label = draw(
+            st.text(
+                alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ",
+                max_size=30,
+            )
+        )
         properties = draw(_properties_strategy)
-        nodes.append({
-            "node_id": node_id,
-            "node_type": node_type,
-            "label": label,
-            "properties": properties,
-        })
+        nodes.append(
+            {
+                "node_id": node_id,
+                "node_type": node_type,
+                "label": label,
+                "properties": properties,
+            }
+        )
 
     # Generate edges only between existing nodes, unique by (source, target, type)
     edges = []
@@ -251,12 +257,14 @@ def graph_entries_strategy(draw):
                 continue
             used_edge_keys.add(edge_key)
             properties = draw(_properties_strategy)
-            edges.append({
-                "source_id": source_id,
-                "target_id": target_id,
-                "edge_type": edge_type,
-                "properties": properties,
-            })
+            edges.append(
+                {
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "edge_type": edge_type,
+                    "properties": properties,
+                }
+            )
 
     return {"nodes": nodes, "edges": edges}
 
@@ -350,9 +358,7 @@ class TestKnowledgeDataFileRoundTrip:
         for piece_entry in pieces_section:
             piece_id = piece_entry["piece_id"]
             loaded_piece = kb.piece_store.get_by_id(piece_id)
-            assert loaded_piece is not None, (
-                f"Piece '{piece_id}' not found after load"
-            )
+            assert loaded_piece is not None, f"Piece '{piece_id}' not found after load"
             assert loaded_piece.content == piece_entry["content"], (
                 f"Content mismatch for piece '{piece_id}'"
             )
@@ -403,19 +409,17 @@ class TestKnowledgeDataFileRoundTrip:
         # ── (c) Verify graph edges round-trip ────────────────────────────
         edges = graph_section.get("edges", [])
         assert counts["graph_edges"] == len(edges), (
-            f"Expected {len(edges)} graph edges loaded, "
-            f"got {counts['graph_edges']}"
+            f"Expected {len(edges)} graph edges loaded, got {counts['graph_edges']}"
         )
 
         for edge_data in edges:
             source_id = edge_data["source_id"]
             # Get all outgoing edges from source
-            loaded_edges = kb.graph_store.get_relations(
-                source_id, direction="outgoing"
-            )
+            loaded_edges = kb.graph_store.get_relations(source_id, direction="outgoing")
             # Find the matching edge
             matching = [
-                e for e in loaded_edges
+                e
+                for e in loaded_edges
                 if e.target_id == edge_data["target_id"]
                 and e.edge_type == edge_data["edge_type"]
             ]

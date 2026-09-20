@@ -3,10 +3,9 @@
 import asyncio
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import RunContext, RuntimeBindings
+from attr import attrs
 
 
 @attrs
@@ -28,7 +27,9 @@ def test_no_token_is_noop():
 def test_set_token_halts_fanout():
     leaf = _Leaf()
     token = {"cancelled": True}
-    root = RunContext.root(workspace=None, runtime=RuntimeBindings(cancellation_token=token))
+    root = RunContext.root(
+        workspace=None, runtime=RuntimeBindings(cancellation_token=token)
+    )
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(leaf.aparallel_infer(["a", "b", "c"], run_context=root))
 
@@ -36,7 +37,9 @@ def test_set_token_halts_fanout():
 def test_check_cancelled_supports_event_and_callable():
     leaf = _Leaf()
     # callable token
-    root = RunContext.root(workspace=None, runtime=RuntimeBindings(cancellation_token=lambda: True))
+    root = RunContext.root(
+        workspace=None, runtime=RuntimeBindings(cancellation_token=lambda: True)
+    )
     tok = __import__(
         "agent_foundation.common.inferencers.run_context", fromlist=["enter_run"]
     ).enter_run(root)

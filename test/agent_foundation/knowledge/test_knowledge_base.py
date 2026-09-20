@@ -7,6 +7,7 @@ bulk_load, merge logic, graph knowledge extraction, and retrieval.
 Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5,
               8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.2, 9.4
 """
+
 import json
 import sys
 from pathlib import Path
@@ -21,17 +22,15 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
-    GraphEdge,
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
@@ -39,17 +38,18 @@ from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter impor
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
 )
 
 
@@ -60,7 +60,9 @@ from rich_python_utils.service_utils.graph_service.memory_graph_service import (
 def stores():
     """Create adapter-backed stores using in-memory services."""
     metadata_store = KeyValueMetadataStore(kv_service=MemoryKeyValueService())
-    piece_store = RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService())
+    piece_store = RetrievalKnowledgePieceStore(
+        retrieval_service=MemoryRetrievalService()
+    )
     graph_store = GraphServiceEntityGraphStore(graph_service=MemoryGraphService())
     return metadata_store, piece_store, graph_store
 
@@ -127,12 +129,8 @@ def populated_kb(kb, stores):
     piece_store.add(global_piece)
 
     # Add graph nodes and relations using GraphNode/GraphEdge
-    user_node = GraphNode(
-        node_id="user:xinli", node_type="user", label="Xinli"
-    )
-    store_node = GraphNode(
-        node_id="store:costco", node_type="store", label="Costco"
-    )
+    user_node = GraphNode(node_id="user:xinli", node_type="user", label="Xinli")
+    store_node = GraphNode(node_id="store:costco", node_type="store", label="Costco")
     graph_store.add_node(user_node)
     graph_store.add_node(store_node)
 
@@ -276,7 +274,9 @@ class TestSetterMethods:
         assert kb._hybrid_retriever is retriever
 
     def test_set_temporal_decay(self, kb):
-        from agent_foundation.knowledge.retrieval.temporal_decay import TemporalDecayConfig
+        from agent_foundation.knowledge.retrieval.temporal_decay import (
+            TemporalDecayConfig,
+        )
 
         config = TemporalDecayConfig(half_life_days=14.0)
         kb.set_temporal_decay(config)
@@ -419,7 +419,9 @@ class TestEnhancedRetrievalPath:
     def test_hybrid_with_temporal_decay(self, kb):
         """Enhanced path applies temporal decay when configured."""
         from agent_foundation.knowledge.retrieval.hybrid_search import HybridRetriever
-        from agent_foundation.knowledge.retrieval.temporal_decay import TemporalDecayConfig
+        from agent_foundation.knowledge.retrieval.temporal_decay import (
+            TemporalDecayConfig,
+        )
 
         piece = KnowledgePiece(
             content="decayed result",

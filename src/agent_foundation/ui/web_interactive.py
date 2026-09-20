@@ -21,20 +21,14 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
-from attr import attrs, attrib
-
 from agent_foundation.ui.interactive_base import (
     InteractionFlags,
     LOG_TYPE_SYSTEM_RESPONSE,
     LOG_TYPE_USER_INPUT,
 )
-from agent_foundation.ui.rich_interactive_base import (
-    RichInteractiveBase,
-)
-from agent_foundation.ui.widget_protocol import (
-    WidgetMessage,
-    WidgetResponse,
-)
+from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from agent_foundation.ui.widget_protocol import WidgetMessage, WidgetResponse
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +167,7 @@ class WebUIInteractive(RichInteractiveBase):
                 action="timeout",
             )
 
-    async def _wait_for_widget_response(
-        self, widget_id: str
-    ) -> WidgetResponse:
+    async def _wait_for_widget_response(self, widget_id: str) -> WidgetResponse:
         deferred: list[Any] = []
         try:
             while True:
@@ -198,9 +190,7 @@ class WebUIInteractive(RichInteractiveBase):
             for item in deferred:
                 await self._input_queue.put(item)
 
-    async def send_display_widget(
-        self, widget_message: WidgetMessage
-    ) -> None:
+    async def send_display_widget(self, widget_message: WidgetMessage) -> None:
         """Send a display-only widget (no input expected)."""
         response_msg: Dict[str, Any] = {
             "type": "widget_update",

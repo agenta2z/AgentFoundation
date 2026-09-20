@@ -26,7 +26,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.e
     MetamateToolError,
     MetamateUnavailableError,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import MetamateConfig, ToolResponse
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import (
+    MetamateConfig,
+    ToolResponse,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)

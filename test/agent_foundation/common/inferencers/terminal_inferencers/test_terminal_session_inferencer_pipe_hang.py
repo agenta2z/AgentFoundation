@@ -34,11 +34,10 @@ try:
 except (ImportError, RuntimeError):
     pass  # PYTHONPATH already set externally
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionInferencerBase,
 )
+from attr import attrib, attrs
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +183,7 @@ class TestNormalProcessBehavior(unittest.TestCase):
         async def run():
             inf = MockSessionInferencer()
             collected = []
-            async for line in inf._ainfer_streaming(
-                "echo hello; sleep 1; echo world"
-            ):
+            async for line in inf._ainfer_streaming("echo hello; sleep 1; echo world"):
                 collected.append(line.strip())
             return collected, inf._last_streaming_return_code
 
@@ -231,9 +228,7 @@ class TestNormalProcessBehavior(unittest.TestCase):
         async def run():
             inf = MockSessionInferencer()
             collected = []
-            async for line in inf._ainfer_streaming(
-                "seq 1 100"
-            ):
+            async for line in inf._ainfer_streaming("seq 1 100"):
                 collected.append(line.strip())
             return collected, inf._last_streaming_return_code
 
@@ -260,7 +255,11 @@ class TestNormalProcessBehavior(unittest.TestCase):
                 "echo out; echo err >&2; sleep 0.5"
             ):
                 collected.append(line.strip())
-            return collected, inf._last_streaming_return_code, inf._last_streaming_stderr
+            return (
+                collected,
+                inf._last_streaming_return_code,
+                inf._last_streaming_stderr,
+            )
 
         collected, rc, stderr = run_with_timeout(run(), timeout=10.0)
 

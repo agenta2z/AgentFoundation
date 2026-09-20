@@ -61,27 +61,11 @@ import logging
 import uuid as uuid_mod
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.streaming_inferencer_base import (
-    StreamingInferencerBase,
-)
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TemplatedInferencerBase,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
-    SDKInferencerResponse,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.auth import (
     RovoChatAuth,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.client import (
     RovoChatClient,
-)
-from rich_python_utils.common_utils.map_helper import get__
-
-from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.exceptions import (
-    RovoChatConnectionError,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.common import (
     AUTO_CONTINUE_REPLY,
@@ -91,14 +75,28 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.c
     ENV_BASE_URL,
     ENV_CLOUD_ID,
     ENV_FALLBACK_BASE_URL,
-    MAX_CONTINUATIONS,
     extract_text_from_event,
     is_terminal_event,
+    MAX_CONTINUATIONS,
     needs_continuation,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.exceptions import (
+    RovoChatConnectionError,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.types import (
     RovoChatConfig,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
+    SDKInferencerResponse,
+)
+from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    StreamingInferencerBase,
+)
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
+)
+from attr import attrib, attrs
+from rich_python_utils.common_utils.map_helper import get__
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -216,7 +214,11 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         # configured ``agent_named_id`` / ``agent_id``. We warn loudly when
         # ``model_id`` is set so configuration mistakes don't go silent.
         self._warn_if_model_id_set()
-        auth_mode = "Basic" if (self.email and self.api_token) else ("UCT" if self.uct_token else ("ASAP" if self.asap_issuer else "none"))
+        auth_mode = (
+            "Basic"
+            if (self.email and self.api_token)
+            else ("UCT" if self.uct_token else ("ASAP" if self.asap_issuer else "none"))
+        )
         self.log_info(
             f"base_url={self.base_url}, cloud_id={self.cloud_id}, "
             f"auth={auth_mode}, agent_named_id={self.agent_named_id or '(default)'}, "
@@ -267,7 +269,9 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         import os
 
         if not self.base_url:
-            raw_url = get__(os.environ, ENV_BASE_URL, *ENV_FALLBACK_BASE_URL, default="")
+            raw_url = get__(
+                os.environ, ENV_BASE_URL, *ENV_FALLBACK_BASE_URL, default=""
+            )
             if raw_url:
                 # Strip /browse or trailing paths: "https://x.atlassian.net/browse/PROJ" -> "https://x.atlassian.net"
                 from urllib.parse import urlparse
@@ -416,7 +420,7 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 if text:
                     if accumulated_text and text.startswith(accumulated_text):
                         # Accumulated mode: text grows monotonically
-                        delta = text[len(accumulated_text):]
+                        delta = text[len(accumulated_text) :]
                     else:
                         # Incremental mode: each event is a new chunk
                         delta = text

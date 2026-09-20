@@ -7,6 +7,7 @@ Feature: knowledge-space-restructuring
 
 **Validates: Requirements 6.1, 6.2, 6.3**
 """
+
 import sys
 from pathlib import Path
 
@@ -23,16 +24,15 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import given, settings, strategies as st
-
+from agent_foundation.knowledge.ingestion.space_classifier import (
+    ClassificationResult,
+    SpaceClassifier,
+)
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from agent_foundation.knowledge.ingestion.space_classifier import (
-    SpaceClassifier,
-    ClassificationResult,
-)
+from hypothesis import given, settings, strategies as st
 
 
 # ── Strategies ───────────────────────────────────────────────────────────────
@@ -45,9 +45,7 @@ _user_entity_id = st.text(min_size=1, max_size=30).map(lambda s: f"user:{s}")
 # Entity IDs that do NOT start with "user:" (should get "main")
 _non_user_entity_id = st.one_of(
     st.none(),
-    st.text(min_size=1, max_size=30).filter(
-        lambda s: not s.startswith("user:")
-    ),
+    st.text(min_size=1, max_size=30).filter(lambda s: not s.startswith("user:")),
 )
 
 # Validation statuses that are NOT "failed" (non-developmental)
@@ -168,7 +166,9 @@ class TestSpaceClassifierDevelopmentalExclusivity:
     @given(
         content=_non_empty_text,
         entity_id=st.one_of(_user_entity_id, _non_user_entity_id),
-        info_type=st.sampled_from(["context", "instructions", "user_profile", "skills"]),
+        info_type=st.sampled_from(
+            ["context", "instructions", "user_profile", "skills"]
+        ),
         knowledge_type=st.sampled_from(list(KnowledgeType)),
     )
     @settings(max_examples=100)

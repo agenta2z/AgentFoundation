@@ -7,7 +7,6 @@ real claude workers, aggregator synthesizes.
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
@@ -22,9 +21,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
     BreakdownThenAggregateInferencer,
 )
 
-from .conftest import DEFAULT_TIMEOUT, skip_claude
 from ._helpers.mock_tools import MockToolExecutor
 from ._helpers.scripted_interactive import ScriptedInteractive
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 
 def _make_claude(tmp_workspace, **overrides):

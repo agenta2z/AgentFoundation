@@ -87,9 +87,7 @@ class TestNamespacedGraphReporter(unittest.TestCase):
 
     def test_stream_prefixes_node_id(self):
         child = NamespacedGraphReporter(self.root, "worker_0")
-        asyncio.get_event_loop().run_until_complete(
-            child.on_node_stream("w0", "hello")
-        )
+        asyncio.get_event_loop().run_until_complete(child.on_node_stream("w0", "hello"))
         sent_evt = self.ws.events_sent[0][0]
         self.assertIsInstance(sent_evt, NodeStreamEvent)
         self.assertEqual(sent_evt.node_id, "worker_0/w0")
@@ -105,7 +103,9 @@ class TestChildReporterRecursive(unittest.TestCase):
     def test_two_level_nesting(self):
         child = self.root.child_reporter("worker_0")
         grandchild = child.child_reporter("worker_2")
-        self.assertEqual(grandchild._qualify("breakdown"), "worker_0/worker_2/breakdown")
+        self.assertEqual(
+            grandchild._qualify("breakdown"), "worker_0/worker_2/breakdown"
+        )
 
     def test_three_level_nesting(self):
         a = self.root.child_reporter("a")
@@ -118,7 +118,8 @@ class TestChildReporterRecursive(unittest.TestCase):
         b = a.child_reporter("b")
         c = b.child_reporter("c")
         evt = GraphTopologyEvent(
-            nodes=[{"id": "leaf"}], edges=[],
+            nodes=[{"id": "leaf"}],
+            edges=[],
         )
         asyncio.get_event_loop().run_until_complete(c.on_graph_topology(evt))
         sent_evt = self.ws.events_sent[0][0]
@@ -178,9 +179,7 @@ class TestRateLimiting(unittest.TestCase):
                 reporter.on_node_stream(f"w{i}", "chunk", is_final=False)
             )
         # is_final should still pass
-        loop.run_until_complete(
-            reporter.on_node_stream("w0", "final", is_final=True)
-        )
+        loop.run_until_complete(reporter.on_node_stream("w0", "final", is_final=True))
         # 2 regular + 1 final = 3
         self.assertEqual(len(ws.events_sent), 3)
 
@@ -190,9 +189,7 @@ class TestRateLimiting(unittest.TestCase):
         loop = asyncio.get_event_loop()
         # Status events should always pass regardless of rate limit
         for i in range(5):
-            loop.run_until_complete(
-                reporter.on_node_status(f"w{i}", "running")
-            )
+            loop.run_until_complete(reporter.on_node_status(f"w{i}", "running"))
         self.assertEqual(len(ws.events_sent), 5)
 
 
@@ -200,25 +197,37 @@ class TestMockBtaComponents(unittest.TestCase):
     """Step 5: Mock BTA components work correctly."""
 
     def test_mock_worker_streams_and_returns(self):
-        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import MockWorker
+        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import (
+            MockWorker,
+        )
+
         worker = MockWorker(label="test", duration_s=0.1)
         chunks = []
+
         async def observer(chunk):
             chunks.append(chunk)
+
         worker.stream_observer = observer
         result = asyncio.get_event_loop().run_until_complete(worker.ainfer())
         self.assertTrue(len(chunks) > 0)
         self.assertIn("test", result)
 
     def test_mock_worker_error(self):
-        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import MockWorker
+        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import (
+            MockWorker,
+        )
+
         worker = MockWorker(should_error=True, duration_s=0.05)
         with self.assertRaises(RuntimeError):
             asyncio.get_event_loop().run_until_complete(worker.ainfer())
 
     def test_mock_breakdown_returns_json(self):
         import json
-        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import MockBreakdownInferencer
+
+        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import (
+            MockBreakdownInferencer,
+        )
+
         bd = MockBreakdownInferencer(delay_s=0.05)
         result = asyncio.get_event_loop().run_until_complete(bd.ainfer())
         parsed = json.loads(result)
@@ -226,7 +235,10 @@ class TestMockBtaComponents(unittest.TestCase):
         self.assertEqual(len(parsed["subtasks"]), 3)
 
     def test_mock_aggregator_returns_text(self):
-        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import MockAggregator
+        from agent_foundation.common.inferencers.mock_inferencers.mock_bta_components import (
+            MockAggregator,
+        )
+
         agg = MockAggregator(delay_s=0.05)
         result = asyncio.get_event_loop().run_until_complete(agg.ainfer())
         self.assertIn("Aggregated", result)

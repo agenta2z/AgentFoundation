@@ -1,5 +1,3 @@
-
-
 """Conversation response parser — extracts conversation tools from LLM output.
 
 Supports two formats:
@@ -20,15 +18,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
-    ChoiceItem,
-    ConversationTool,
     canonicalize_tool_data,
+    ChoiceItem,
     coerce_parallel_group,
+    ConversationTool,
     normalize_tool_type,
 )
-from agent_foundation.common.response_parsers.delimiter_parser import (
-    extract_delimited,
-)
+from agent_foundation.common.response_parsers.delimiter_parser import extract_delimited
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +48,9 @@ _DISPLAY_STRIP_RES = (
     _TOOLS_TO_INVOKE_RE,
     _CONV_TOOLS_RE,
     re.compile(r"<tool_call>\s*.*?\s*</tool_call>", re.DOTALL),
-    re.compile(r"<ActionTools>\s*```json\s*\n?.*?\n?\s*```\s*</ActionTools>", re.DOTALL),
+    re.compile(
+        r"<ActionTools>\s*```json\s*\n?.*?\n?\s*```\s*</ActionTools>", re.DOTALL
+    ),
     re.compile(r"<Tools>\s*```json\s*\n?.*?\n?\s*```\s*</Tools>", re.DOTALL),
 )
 
@@ -130,7 +128,8 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
     args = data.get("arguments", {})
     choices_raw = args.get("choices", [])
     choices = [
-        ChoiceItem.from_dict(c) if isinstance(c, dict)
+        ChoiceItem.from_dict(c)
+        if isinstance(c, dict)
         else ChoiceItem(label=str(c), value=str(c))
         for c in choices_raw
     ]
@@ -146,6 +145,17 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         "on_group_resolve",
         "on_yes_action",
         "hide_no_button",
+        # Dashboard handoff (generic --<dashboard> convention): the LLM emits the
+        # flag NAMED after a registered Dashboard tool (e.g. experiment_hub:true)
+        # or the explicit host_dashboard:"<id>"; a generic pre-fork pass in the
+        # inferencer normalizes these -> metadata.open_dashboard (+ submit_label).
+        # Allow-list the EMITTED names (open_dashboard/submit_label included so an
+        # already-normalized tool round-trips; dashboard_label is an override).
+        "experiment_hub",
+        "host_dashboard",
+        "open_dashboard",
+        "submit_label",
+        "dashboard_label",
         # proposal_selection args: the SOP author passes proposals_path (often
         # via Jinja substitution); the rest tune widget behaviour.
         "proposals",
@@ -160,6 +170,13 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         _val = args.get(_key)
         if _val is not None and _val != "":
             metadata[_key] = _val
+
+    # Also accept arguments.metadata sub-dict (LLMs nest metadata there)
+    args_meta = args.get("metadata")
+    if isinstance(args_meta, dict):
+        for _k, _v in args_meta.items():
+            if _v is not None and _v != "":
+                metadata[_k] = _v
 
     # Also accept top-level `metadata` block for forward-compat
     top_level_meta = data.get("metadata")
@@ -179,7 +196,10 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
         _tool_type = "confirmation"
         if "widget_type" not in metadata:
             metadata["widget_type"] = "confirmation"
-        logger.info("[parser] auto-upgraded clarification → confirmation (has view=%s)", metadata["view"])
+        logger.info(
+            "[parser] auto-upgraded clarification → confirmation (has view=%s)",
+            metadata["view"],
+        )
 
     if _tool_type != _name:
         logger.info("[parser] tool type normalized: %s → %s", _name, _tool_type)
@@ -226,7 +246,8 @@ def parse_conversation_response(response: str) -> ConversationResponse:
     result = ConversationResponse(raw_response=response)
     logger.info(
         "[parse_conversation_response] input: %d chars, starts_with=%.120s",
-        len(response), response[:120].replace('\n', '\\n'),
+        len(response),
+        response[:120].replace("\n", "\\n"),
     )
 
     # --- Path 1: Legacy <ConversationTools> tags ---
@@ -297,8 +318,8 @@ def parse_conversation_response(response: str) -> ConversationResponse:
         if '"type"' not in block or '"conversation"' not in block:
             continue  # Not a tool block — skip normal code examples
 
-        text_before = response[:fence_match.start()].strip()
-        text_after = response[fence_match.end():].strip()
+        text_before = response[: fence_match.start()].strip()
+        text_after = response[fence_match.end() :].strip()
         text_parts = [p for p in (text_before, text_after) if p]
         result.text = "\n\n".join(text_parts)
 
@@ -309,13 +330,15 @@ def parse_conversation_response(response: str) -> ConversationResponse:
         return result
 
     # --- Path 3: Raw JSON lines (no code fences, single-line) ---
-    _RAW_CONV_RE = re.compile(r'^\s*\{"type"\s*:\s*"(?:conversation|action)".*\}\s*$', re.MULTILINE)
+    _RAW_CONV_RE = re.compile(
+        r'^\s*\{"type"\s*:\s*"(?:conversation|action)".*\}\s*$', re.MULTILINE
+    )
     raw_matches = list(_RAW_CONV_RE.finditer(response))
     if raw_matches:
         text_parts = []
         last_end = 0
         for m in raw_matches:
-            before = response[last_end:m.start()].strip()
+            before = response[last_end : m.start()].strip()
             if before:
                 text_parts.append(before)
             last_end = m.end()
@@ -383,7 +406,7 @@ def _extract_json_objects(text: str) -> list[str]:
         if escape_next:
             escape_next = False
             continue
-        if ch == '\\' and in_string:
+        if ch == "\\" and in_string:
             escape_next = True
             continue
         if ch == '"':
@@ -391,14 +414,14 @@ def _extract_json_objects(text: str) -> list[str]:
             continue
         if in_string:
             continue
-        if ch == '{':
+        if ch == "{":
             if depth == 0:
                 start = i
             depth += 1
-        elif ch == '}':
+        elif ch == "}":
             depth -= 1
             if depth == 0 and start >= 0:
-                objects.append(text[start:i + 1])
+                objects.append(text[start : i + 1])
                 start = -1
 
     return objects

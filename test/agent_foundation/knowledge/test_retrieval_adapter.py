@@ -8,6 +8,7 @@ close delegation.
 
 Requirements: 12.1, 12.2, 12.3, 12.4
 """
+
 import sys
 from pathlib import Path
 
@@ -26,7 +27,6 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
@@ -243,17 +243,21 @@ class TestSearch:
     def test_search_with_entity_id_scoping(self, store):
         """Search with entity_id should only return pieces from that entity."""
         # Add global piece
-        store.add(KnowledgePiece(
-            content="Global python knowledge",
-            piece_id="global-p1",
-            entity_id=None,
-        ))
+        store.add(
+            KnowledgePiece(
+                content="Global python knowledge",
+                piece_id="global-p1",
+                entity_id=None,
+            )
+        )
         # Add entity-scoped piece
-        store.add(KnowledgePiece(
-            content="Alice python knowledge",
-            piece_id="alice-p1",
-            entity_id="user:alice",
-        ))
+        store.add(
+            KnowledgePiece(
+                content="Alice python knowledge",
+                piece_id="alice-p1",
+                entity_id="user:alice",
+            )
+        )
 
         # Search in alice's scope
         results = store.search("python", entity_id="user:alice")
@@ -270,10 +274,12 @@ class TestSearch:
     def test_search_respects_top_k(self, store):
         """Search should return at most top_k results."""
         for i in range(10):
-            store.add(KnowledgePiece(
-                content=f"Python knowledge item {i}",
-                piece_id=f"topk-{i}",
-            ))
+            store.add(
+                KnowledgePiece(
+                    content=f"Python knowledge item {i}",
+                    piece_id=f"topk-{i}",
+                )
+            )
 
         results = store.search("python", top_k=3)
         assert len(results) <= 3
@@ -370,16 +376,20 @@ class TestListAll:
 
     def test_list_all_with_entity_id_scoping(self, store):
         """list_all with entity_id should return only that entity's pieces."""
-        store.add(KnowledgePiece(
-            content="Global piece",
-            piece_id="la-global",
-            entity_id=None,
-        ))
-        store.add(KnowledgePiece(
-            content="Alice piece",
-            piece_id="la-alice",
-            entity_id="user:alice",
-        ))
+        store.add(
+            KnowledgePiece(
+                content="Global piece",
+                piece_id="la-global",
+                entity_id=None,
+            )
+        )
+        store.add(
+            KnowledgePiece(
+                content="Alice piece",
+                piece_id="la-alice",
+                entity_id="user:alice",
+            )
+        )
 
         global_pieces = store.list_all(entity_id=None)
         assert len(global_pieces) == 1
@@ -391,16 +401,20 @@ class TestListAll:
 
     def test_list_all_with_knowledge_type_filter(self, store):
         """list_all with knowledge_type should return only matching pieces."""
-        store.add(KnowledgePiece(
-            content="A fact",
-            piece_id="la-fact",
-            knowledge_type=KnowledgeType.Fact,
-        ))
-        store.add(KnowledgePiece(
-            content="An instruction",
-            piece_id="la-instr",
-            knowledge_type=KnowledgeType.Instruction,
-        ))
+        store.add(
+            KnowledgePiece(
+                content="A fact",
+                piece_id="la-fact",
+                knowledge_type=KnowledgeType.Fact,
+            )
+        )
+        store.add(
+            KnowledgePiece(
+                content="An instruction",
+                piece_id="la-instr",
+                knowledge_type=KnowledgeType.Instruction,
+            )
+        )
 
         facts = store.list_all(knowledge_type=KnowledgeType.Fact)
         assert len(facts) == 1

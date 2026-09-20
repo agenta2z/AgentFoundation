@@ -1,3 +1,5 @@
-Produce careful, in-depth, comprehensive, structured, machine-followable and human-readable documentation at {{ target_path }}/.ai-employee/docs/codebase/ in reStructuredText format. Include concrete file/module references to actual code throughout the documentation.
+Produce careful, in-depth, comprehensive, structured, machine-followable and human-readable documentation at {{ target_path }}/.ai-employee/docs/codebase/ in reStructuredText format. Include concrete file/module references to actual code throughout the documentation. Symlink this documentation path to {{ workspace_outputs }}/docs/codebase
 
-After writing the documentation, build a navigable HTML site from the reStructuredText sources using Sphinx (or equivalent) so the documentation is browsable locally.
+After writing the documentation, build a navigable HTML site from the reStructuredText sources using Sphinx (or equivalent) so the documentation is browsable locally. Resolve/identify the entry HTML file path from the HTML documentation build (e.g., _build/html/index.html).
+
+Write a json file under {{ workspace_outputs }}/doc_pointers.json, record the entry HTML file path and the documentation path. The json file should be in the following simple format: `{"docs_path": "{{ target_path }}/.ai-employee/docs/codebase", "index_path": "<your resolved index HTML file above >"}`

@@ -19,10 +19,9 @@ Example:
 
 from typing import Any, Dict, Optional
 
-from attr import attrs, attrib
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import active_run_context
+from attr import attrib, attrs
 from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 
@@ -58,6 +57,7 @@ class TemplatedInferencer:
         >>> # Or use raw prompt directly
         >>> result = templated.infer_raw("What is 2+2?")
     """
+
     base_inferencer: InferencerBase = attrib()
     template_manager: TemplateManager = attrib()
 
@@ -68,7 +68,7 @@ class TemplatedInferencer:
         inference_config: Any = None,
         active_template_type: Optional[str] = None,
         active_template_root_space: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """
         Call with template key instead of raw prompt.
@@ -143,7 +143,7 @@ class TemplatedInferencer:
         inference_config: Any = None,
         active_template_type: Optional[str] = None,
         active_template_root_space: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """
         Alias for __call__ for explicit method invocation.
@@ -165,5 +165,5 @@ class TemplatedInferencer:
             inference_config=inference_config,
             active_template_type=active_template_type,
             active_template_root_space=active_template_root_space,
-            **kwargs
+            **kwargs,
         )

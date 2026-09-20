@@ -16,21 +16,20 @@ import os
 import time
 import unittest
 import uuid
-
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
-
-from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     FallbackInferMode,
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
+from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 
 
 # ---------------------------------------------------------------------------
 # Mock streaming inferencer with controllable behavior
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class ControllableStreamingInferencer(StreamingInferencerBase):
@@ -40,6 +39,7 @@ class ControllableStreamingInferencer(StreamingInferencerBase):
         crash_on_first_call: If True, _ainfer_streaming crashes on first invocation.
         response_chunks: Chunks to yield on successful calls.
     """
+
     crash_on_first_call: bool = attrib(default=False)
     response_chunks: list = attrib(factory=lambda: ["Hello ", "world!"])
     _call_count: int = attrib(default=0, init=False, repr=False)
@@ -61,7 +61,9 @@ class ControllableStreamingInferencer(StreamingInferencerBase):
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
         self._ainfer_calls.append(inference_input)
         content_parts = []
-        async for chunk in self.ainfer_streaming(inference_input, inference_config, **kwargs):
+        async for chunk in self.ainfer_streaming(
+            inference_input, inference_config, **kwargs
+        ):
             content_parts.append(chunk)
         return "".join(content_parts)
 
@@ -73,9 +75,7 @@ def _write_cache_file(cache_folder, class_name, prompt, content):
     """Write a mock cache file matching _open_cache_file's naming convention."""
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    session_dir = os.path.join(
-        cache_folder, class_name, f"mock-id_{timestamp}"
-    )
+    session_dir = os.path.join(cache_folder, class_name, f"mock-id_{timestamp}")
     os.makedirs(session_dir, exist_ok=True)
     unique_id = uuid.uuid4().hex[:8]
     path = os.path.join(session_dir, f"stream_{unique_id}_{prompt_hash}.txt")
@@ -88,6 +88,7 @@ def _write_cache_file(cache_folder, class_name, prompt, content):
 # End-to-end: Completed cache → skip execution
 # ---------------------------------------------------------------------------
 
+
 class TestE2ECompletedCacheSkip(unittest.TestCase):
     """When a previous run completed successfully (success marker in cache),
     a new inferencer instance should return the cached result without
@@ -95,6 +96,7 @@ class TestE2ECompletedCacheSkip(unittest.TestCase):
 
     def test_async_skip_on_completed_cache(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write a completed cache file
             prompt = "What is 2+2?"
@@ -110,7 +112,8 @@ class TestE2ECompletedCacheSkip(unittest.TestCase):
             inf = ControllableStreamingInferencer(
                 cache_folder=tmpdir,
                 resume_with_saved_results=True,
-                min_retry_wait=0, max_retry_wait=0,
+                min_retry_wait=0,
+                max_retry_wait=0,
             )
 
             # This should return the cached result without streaming
@@ -123,12 +126,17 @@ class TestE2ECompletedCacheSkip(unittest.TestCase):
 # End-to-end: Partial cache → resume via recovery
 # ---------------------------------------------------------------------------
 
+
 class TestE2EPartialCacheResume(unittest.TestCase):
-    """When a previous run failed (failure marker in cache), a new inferencer
-    should read the partial and trigger recovery (augmented prompt)."""
+    """When a previous run failed (failure marker in cache), a new inferencer reads
+    the partial and re-runs. Under the DEFAULT ``fallback_infer_mode=RETRY``, the
+    crash partial is un-judged (the crash preceded any guardrail) and may be garbage,
+    so recovery is a PLAIN re-run of the original input — the partial is DROPPED, not
+    fed back. Crash-continue is an explicit ``fallback_infer_mode=UPDATE`` opt-in."""
 
     def test_async_resume_from_partial_cache(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             prompt = "Tell me a story"
             partial = "Once upon a time"
@@ -143,27 +151,66 @@ class TestE2EPartialCacheResume(unittest.TestCase):
                 cache_folder=tmpdir,
                 resume_with_saved_results=True,
                 response_chunks=["...the end."],  # recovery call returns this
-                min_retry_wait=0, max_retry_wait=0,
+                min_retry_wait=0,
+                max_retry_wait=0,
             )
 
             result = asyncio.run(inf.ainfer(prompt))
 
-            # Should have called _ainfer with an augmented recovery prompt
+            # Default RETRY → _render_recovery_prompt returns None → the resume hook
+            # falls through to a PLAIN re-run: _ainfer gets the ORIGINAL prompt and
+            # the un-judged partial is dropped (NOT inlined as a reference).
             self.assertTrue(len(inf._ainfer_calls) > 0)
-            # The recovery prompt should contain the partial output
+            rerun_prompt = inf._ainfer_calls[0]
+            self.assertIn("Tell me a story", rerun_prompt)
+            self.assertNotIn("Once upon a time", rerun_prompt)  # partial dropped
+            self.assertEqual(result, "...the end.")
+
+    def test_async_resume_update_mode_continues_partial(self):
+        """Explicit opt-in: ``fallback_infer_mode=UPDATE`` renders ``recovery/update.jinja2``
+        with the partial inlined, so recovery CONTINUES the crash partial instead of
+        dropping it — the deliberate crash-continue path."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt = "Tell me a story"
+            partial = "Once upon a time"
+            _write_cache_file(
+                tmpdir,
+                "ControllableStreamingInferencer",
+                prompt,
+                f"{partial}\n--- STREAM FAILED: connection dropped ---\n",
+            )
+
+            inf = ControllableStreamingInferencer(
+                cache_folder=tmpdir,
+                resume_with_saved_results=True,
+                fallback_infer_mode=FallbackInferMode.UPDATE,
+                response_chunks=["...the end."],
+                min_retry_wait=0,
+                max_retry_wait=0,
+            )
+
+            result = asyncio.run(inf.ainfer(prompt))
+
+            self.assertTrue(len(inf._ainfer_calls) > 0)
             recovery_prompt = inf._ainfer_calls[0]
+            # UPDATE inlines the partial into the continuation prompt.
             self.assertIn("Once upon a time", recovery_prompt)
+            self.assertEqual(result, "...the end.")
 
 
 # ---------------------------------------------------------------------------
 # Resume disabled by default
 # ---------------------------------------------------------------------------
 
+
 class TestResumeDisabledByDefault(unittest.TestCase):
     """With resume_with_saved_results=False (default), cache files are ignored."""
 
     def test_cache_ignored_when_disabled(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             prompt = "What is 2+2?"
             _write_cache_file(
@@ -177,7 +224,8 @@ class TestResumeDisabledByDefault(unittest.TestCase):
                 cache_folder=tmpdir,
                 resume_with_saved_results=False,  # default
                 response_chunks=["Fresh ", "response"],
-                min_retry_wait=0, max_retry_wait=0,
+                min_retry_wait=0,
+                max_retry_wait=0,
             )
 
             result = asyncio.run(inf.ainfer(prompt))
@@ -190,26 +238,33 @@ class TestResumeDisabledByDefault(unittest.TestCase):
 # Multiple prompts, same cache folder
 # ---------------------------------------------------------------------------
 
+
 class TestMultiplePromptsSameFolder(unittest.TestCase):
     """Different prompts produce different cache files; resume finds the right one."""
 
     def test_correct_cache_per_prompt(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             class_name = "ControllableStreamingInferencer"
             _write_cache_file(
-                tmpdir, class_name, "prompt A",
+                tmpdir,
+                class_name,
+                "prompt A",
                 "Result A\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
             )
             _write_cache_file(
-                tmpdir, class_name, "prompt B",
+                tmpdir,
+                class_name,
+                "prompt B",
                 "Result B\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
             )
 
             inf = ControllableStreamingInferencer(
                 cache_folder=tmpdir,
                 resume_with_saved_results=True,
-                min_retry_wait=0, max_retry_wait=0,
+                min_retry_wait=0,
+                max_retry_wait=0,
             )
 
             result_a = asyncio.run(inf.ainfer("prompt A"))
@@ -226,6 +281,7 @@ class TestMultiplePromptsSameFolder(unittest.TestCase):
 # Resume hook fires after preprocessing
 # ---------------------------------------------------------------------------
 
+
 class TestResumeAfterPreprocessing(unittest.TestCase):
     """The resume check uses the POST-processed prompt for hash matching.
     If input_preprocessor transforms the prompt, the hash must match
@@ -233,6 +289,7 @@ class TestResumeAfterPreprocessing(unittest.TestCase):
 
     def test_preprocessed_prompt_hash_matches(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # The preprocessor lowercases the input
             def lower_preprocessor(inp):
@@ -251,7 +308,8 @@ class TestResumeAfterPreprocessing(unittest.TestCase):
                 cache_folder=tmpdir,
                 resume_with_saved_results=True,
                 input_preprocessor=lower_preprocessor,
-                min_retry_wait=0, max_retry_wait=0,
+                min_retry_wait=0,
+                max_retry_wait=0,
             )
 
             # Pass UPPERCASE — preprocessor lowercases it, hash matches cache
@@ -263,6 +321,7 @@ class TestResumeAfterPreprocessing(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # worker_manages_resume detection
 # ---------------------------------------------------------------------------
+
 
 class TestWorkerManagesResumeInWorkflowContext(unittest.TestCase):
     """When a streaming inferencer is used as a worker in BTA,

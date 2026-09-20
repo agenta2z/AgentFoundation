@@ -7,6 +7,7 @@ callable interface, and bulk loading.
 # Feature: agent-knowledge-base
 # Properties 11, 15, 18, 19
 """
+
 import json
 import sys
 from pathlib import Path
@@ -21,17 +22,14 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
-    GraphEdge,
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
@@ -39,17 +37,19 @@ from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter impor
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from hypothesis import assume, given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
 )
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
 )
 
 
@@ -103,8 +103,10 @@ def _safe_piece_strategy(draw, entity_id=None, piece_id=None):
     pid = piece_id if piece_id is not None else draw(_safe_id)
     knowledge_type = draw(_knowledge_type_strategy)
     tags = draw(st.lists(_normalized_tag, max_size=4))
-    eid = entity_id if entity_id is not None else draw(
-        st.one_of(st.none(), _entity_id_strategy)
+    eid = (
+        entity_id
+        if entity_id is not None
+        else draw(st.one_of(st.none(), _entity_id_strategy))
     )
 
     return KnowledgePiece(
@@ -120,7 +122,9 @@ def _make_kb(active_entity_id=None):
     """Create a KnowledgeBase with adapter-backed in-memory stores."""
     return KnowledgeBase(
         metadata_store=KeyValueMetadataStore(kv_service=MemoryKeyValueService()),
-        piece_store=RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService()),
+        piece_store=RetrievalKnowledgePieceStore(
+            retrieval_service=MemoryRetrievalService()
+        ),
         graph_store=GraphServiceEntityGraphStore(graph_service=MemoryGraphService()),
         active_entity_id=active_entity_id,
     )
@@ -166,9 +170,7 @@ class TestGlobalAndEntityPieceMerge:
         n_global = data.draw(st.integers(min_value=1, max_value=3))
         global_pieces = []
         for i in range(n_global):
-            piece = data.draw(
-                _safe_piece_strategy(entity_id=None, piece_id=f"glb{i}")
-            )
+            piece = data.draw(_safe_piece_strategy(entity_id=None, piece_id=f"glb{i}"))
             global_pieces.append(piece)
 
         # Build a query from content words of all pieces to ensure matches
@@ -221,22 +223,24 @@ class TestGlobalAndEntityPieceMerge:
 
 
 # Strategy for generating strings that match sensitive patterns
-_sensitive_prefix = st.sampled_from([
-    "api_key=",
-    "api-key=",
-    "apikey=",
-    "secret=",
-    "secret:",
-    "password=",
-    "password:",
-    "token=",
-    "token:",
-    "credential=",
-    "credential:",
-    "API_KEY =",
-    "Secret =",
-    "Password:",
-])
+_sensitive_prefix = st.sampled_from(
+    [
+        "api_key=",
+        "api-key=",
+        "apikey=",
+        "secret=",
+        "secret:",
+        "password=",
+        "password:",
+        "token=",
+        "token:",
+        "credential=",
+        "credential:",
+        "API_KEY =",
+        "Secret =",
+        "Password:",
+    ]
+)
 
 _sensitive_bearer = st.text(
     alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~+/",
@@ -253,20 +257,26 @@ def _sensitive_content_strategy(draw):
         return draw(_sensitive_bearer)
     else:
         prefix = draw(_sensitive_prefix)
-        value = draw(st.text(
-            alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-            min_size=3,
-            max_size=20,
-        ))
+        value = draw(
+            st.text(
+                alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+                min_size=3,
+                max_size=20,
+            )
+        )
         # Optionally add surrounding text
-        before = draw(st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "Zs")),
-            max_size=20,
-        ))
-        after = draw(st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "Zs")),
-            max_size=20,
-        ))
+        before = draw(
+            st.text(
+                alphabet=st.characters(whitelist_categories=("L", "N", "Zs")),
+                max_size=20,
+            )
+        )
+        after = draw(
+            st.text(
+                alphabet=st.characters(whitelist_categories=("L", "N", "Zs")),
+                max_size=20,
+            )
+        )
         return f"{before} {prefix}{value} {after}".strip()
 
 
@@ -347,9 +357,7 @@ class TestCallableReturnsFormattedString:
         result = kb(query)
 
         # Must return a string
-        assert isinstance(result, str), (
-            f"Expected str, got {type(result).__name__}"
-        )
+        assert isinstance(result, str), f"Expected str, got {type(result).__name__}"
 
         # If pieces match, the result should be non-empty and contain
         # content from at least one piece
@@ -358,8 +366,7 @@ class TestCallableReturnsFormattedString:
             assert result != "", "Expected non-empty string when pieces match"
             # At least one piece's content should appear in the formatted output
             found_any = any(
-                piece.content in result
-                for piece, _ in retrieve_result.pieces
+                piece.content in result for piece, _ in retrieve_result.pieces
             )
             assert found_any, (
                 f"Formatted output does not contain any matching piece content. "
@@ -387,13 +394,15 @@ def _bulk_load_items_strategy(draw):
         tags = draw(st.lists(_normalized_tag, max_size=3))
         entity_id = draw(st.one_of(st.none(), _entity_id_strategy))
 
-        items.append({
-            "content": content,
-            "piece_id": f"bulk{i}",
-            "knowledge_type": knowledge_type.value,
-            "tags": tags,
-            "entity_id": entity_id,
-        })
+        items.append(
+            {
+                "content": content,
+                "piece_id": f"bulk{i}",
+                "knowledge_type": knowledge_type.value,
+                "tags": tags,
+                "entity_id": entity_id,
+            }
+        )
     return items
 
 
@@ -426,9 +435,7 @@ class TestBulkLoadAddsAllValidItems:
         count = kb.bulk_load(json_path)
 
         # Should have loaded all items
-        assert count == len(items), (
-            f"Expected {len(items)} items loaded, got {count}"
-        )
+        assert count == len(items), f"Expected {len(items)} items loaded, got {count}"
 
         # Each item should be retrievable by its piece_id
         for item_dict in items:

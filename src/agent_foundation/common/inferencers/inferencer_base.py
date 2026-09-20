@@ -4,6 +4,8 @@ import enum
 import logging
 import os
 import sys
+import traceback
+import uuid
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from functools import partial
@@ -13,11 +15,13 @@ from typing import (
     AsyncIterator,
     Callable,
     ClassVar,
+    Dict,
     Iterable,
     Iterator,
     List,
     Optional,
     Sequence,
+    Set,
     Type,
     Union,
 )
@@ -39,6 +43,7 @@ from rich_python_utils.common_utils import dict_, iter__, resolve_environ
 from rich_python_utils.common_utils.function_helper import (
     execute_with_retry,
     FallbackMode,
+    OutputValidationExhaustedError,
 )
 from rich_python_utils.path_utils import AllowedPath, PathAccess
 
@@ -55,6 +60,81 @@ _current_fallback_state: ContextVar[dict | None] = ContextVar(
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
 
 _logger = logging.getLogger(__name__)
+
+
+# v5 Phase 1 — Correlation instrumentation. Env-gated so production stays
+# byte-identical. When RESEARCH_PROPOSE__VERBOSE_CORRELATION=1, every
+# InferenceInput / InferenceResponse parts file emitted from a single
+# (a)infer call gets the same `call_<8hex>` filename segment, so input
+# ↔ response pair lookup becomes filename-only (no JSONL line-ordering
+# reasoning required, which breaks under guardrail-retry interleave).
+# RoleSwitch, WorkspaceReassign, GuardrailRetry, and ToolUsePhase
+# structured events are also emitted under the same gate (sites below).
+_VERBOSE_CORRELATION_ENV = "RESEARCH_PROPOSE__VERBOSE_CORRELATION"
+
+
+def _is_verbose_correlation() -> bool:
+    return os.environ.get(_VERBOSE_CORRELATION_ENV) == "1"
+
+
+def _call_correlation_kwargs(call_id: str) -> dict:
+    """Build the ``parts_file_namer`` kwarg dict for ``log_info`` /
+    ``log_debug`` so the minted ``call_id`` becomes the filename name-hint
+    segment in every parts file emitted under this call (see
+    ``rich_python_utils.io_utils.json_io.write_json`` line ~1854 where the
+    ``name_hint`` is concatenated into ``<TS>_<name_hint>_<file_stem>_<uid>``).
+
+    Empty dict when env var is unset → log calls render exactly as today.
+    """
+    if not _is_verbose_correlation():
+        return {}
+    return {"parts_file_namer": lambda _obj, _cid=call_id: f"call_{_cid}"}
+
+
+def _is_bookkeeping_sidecar(name: str) -> bool:
+    """True for loose ``outputs/`` entries that are framework BOOKKEEPING, not
+    deliverables — used by loose-sidecar promotion (Fix 2) so a child's internal
+    bookkeeping is never lifted into the parent's ``outputs/``.
+
+    Denylist (provenance-anchored to the framework's own write sites): dotfiles,
+    the Dual ``round_log.jsonl``, and any ``*_manifest.json``. The canonical
+    output name and ``final_deliverables/`` are context-dependent and skipped at
+    the call site, not here.
+    """
+    if name.startswith("."):
+        return True
+    if name == "round_log.jsonl":
+        return True
+    if name.endswith("_manifest.json"):
+        return True
+    return False
+
+
+class MissingDependencyError(ImportError):
+    """A required runtime hard-dependency (module/binary) is unavailable (U2d).
+
+    Subclasses ``ImportError`` so callers may also catch it structurally. Listed
+    in the ``non_retryable_exceptions`` tuples below so a missing dependency
+    FAILS FAST instead of retrying — a missing module never reappears on retry,
+    and (pre-U1/U4) that pointless retry is what triggered the observed
+    ``CollisionError`` cascade. Raise it at dep-resolution sites (e.g. the
+    metamate client resolver) instead of a generic ``RuntimeError``.
+    """
+
+
+class HopelessOutputError(Exception):
+    """Raised by ``_run_output_guardrail`` when N consecutive identical empty
+    or banner-shaped outputs trip the fail-fast threshold
+    (``guardrail_empty_fail_fast_n``).
+
+    Distinct from generic retry-exhausted exceptions: this is a TERMINAL
+    diagnostic that says "further retries will not produce anything different".
+    MultiFlow quorum (v4 Phase 3.1) catches this in ``_make_worker_fn`` so the
+    failing flow is marked terminal-error without burning the rest of the
+    retry budget, and survivors continue.
+    """
+
+    pass
 
 
 class ModelTier(str, enum.Enum):
@@ -216,12 +296,60 @@ class InferencerBase(Debuggable, Resumable, ABC):
     Disabled by default (``None``). Overridable verdict parser:
     ``_parse_guardrail_verdict``."""
 
+    guardrail_empty_fail_fast_n: int = attrib(default=2)
+    """v4 Phase 3.2 — fail-fast threshold for identical empty / very-short
+    outputs.
+
+    When the guardrail rejects N consecutive outputs whose normalized
+    fingerprint matches (typically banner-only emissions like Devmate's
+    "Starting Devmate server and session..."), give up immediately
+    instead of consuming the full ``max_retry`` budget × idle-timeout
+    (which is ~25 min per stuck flow on the observed runs).
+
+    Default = 2 (ON, conservative). Set to 0 to disable.
+
+    Detection is conservative: an empty-or-banner-shaped output is one
+    whose collapsed-whitespace length is <= 200 characters. Two identical
+    fingerprints in a row = deterministic failure pattern; further retries
+    have produced ~25 minutes of wasted wall-clock per flow in production.
+
+    The trigger is per-inferencer-instance, tracked on the private attr
+    ``_guardrail_recent_empty_fingerprints`` (list of last N hashes).
+    Reset on the next non-empty / non-rejected output."""
+
+    _guardrail_recent_empty_fingerprints: list = attrib(
+        factory=list, init=False, repr=False
+    )
+    """Sliding window of the last N rejected-output fingerprints. Bounded
+    at ``guardrail_empty_fail_fast_n`` entries; reset to [] whenever a
+    rejected output's fingerprint differs OR the output isn't empty-shaped
+    (legitimate retry pattern). See ``_check_guardrail_fail_fast``."""
+
     # State graph support — optional list of StateGraphTracker instances
     state_graphs: list = attrib(default=None)
 
     # Whether this inferencer has local file system access (e.g., can write files).
     # False for cloud API inferencers (RovoChat), True for local agents (RovoDevCli).
     has_local_access: bool = attrib(default=False)
+
+    # region prompt-variable expansion (per-inferencer variable roots)
+    # Master switch (hard gate): False -> no derived manager is built and
+    # rendering is byte-identical to a stock TemplateManager (the per-key
+    # overrides below are not even consulted). YAML-toggleable on _target_.
+    enable_inferencer_variable_expansion: bool = attrib(default=True, kw_only=True)
+
+    # Per-key opt-out, e.g. {"notes.large_file_writing": False} renders that one
+    # key base-only while this inferencer's other extensions still apply. A
+    # True/absent value expands. Consulted only when the master switch is ON.
+    inferencer_variable_overrides: Dict[str, bool] = attrib(factory=dict, kw_only=True)
+
+    # Memoized per-inferencer derived TemplateManager, built lazily at first
+    # render (after every __attrs_post_init__ has added its template roots).
+    # Never a constructor argument; never in repr.
+    _extension_manager_cache: Optional[Any] = attrib(
+        default=None, init=False, repr=False, kw_only=True
+    )
+    # endregion
 
     # Default output path — when relative and a workspace is set (via _workspace
     # on flow inferencers), resolves to workspace.outputs_dir/<output_path>.
@@ -248,15 +376,74 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # the orchestrator/executor to plumb the top task root explicitly.
     additional_allowed_paths: List[AllowedPath] = attrib(factory=list)
 
-    output_is_deliverable: bool = attrib(default=False)
-    """When True, output file is copied into final_deliverables/ after
-    finalization. Extends BTA/PTI's publishes_response_as_deliverable
-    concept to any inferencer."""
-
     output_manifest_index: bool = attrib(default=False)
-    """When True, emit output_manifest.json listing contributing files
-    (LLM prompts, streaming cache, session logs). Auto-enables when
-    output_is_deliverable is True."""
+    """When True, emit output_manifest.json (to ``artifacts/``) listing
+    contributing files (LLM prompts, streaming cache, session logs).
+    Part 2: independent of promotion (the deliverable flags are retired)."""
+
+    surfaceable_exceptions: tuple = attrib(default=())
+    """Part 4 (U4-B): per-inferencer allowlist of exception TYPES that must ALWAYS
+    propagate (surface) out of a fan-out containment seam — never be swallowed into a
+    quorum sentinel/dropped panelist. The containment-axis sibling of
+    ``non_retryable_exceptions``. Consulted at each containment seam AFTER the
+    non-overridable never-contain floor (CancelledError/KeyboardInterrupt/SystemExit/
+    MemoryError + any non-Exception BaseException). Default empty → ``isinstance(e, ())``
+    is always False, so containment behaviour is unchanged unless a tool opts in."""
+
+    expected_extraction: "Optional[list]" = attrib(default=None)
+    """Unified fenced-content registry (supersedes the old ``expected_contents_to_extract``):
+    the fences THIS inferencer emits, GENERICALLY extracted + validated in its own output —
+    emitter-side self-validation, ZERO domain knowledge. Each entry is a dict:
+
+      ``{"label": "<fence>",              # the ```json <label>``` block, e.g. "proposal_index"
+         "source": "output"|"response",   # channel THIS inferencer emits it on: the deliverable
+                                           #   file (output.md) vs the stdout <Response>. Default "output".
+         "kind": "content"|"control",     # content = part of the deliverable (proposal_index);
+                                           #   control = a workflow signal a parent orchestrator consumes
+                                           #   cross-node (winner_pick/ranking/iteration_judgment).
+                                           #   Default "content".
+         "fallback_to_source": bool,       # content only: if the fence can't be extracted, the whole
+                                           #   source text stands in as the content — so a missing fence is
+                                           #   NOT flagged by _run_expected_extraction, and _finalize_output
+                                           #   writes the raw response for the no-file case. Always False for
+                                           #   control (a cross-node consumer can't fall back to raw text).
+         "persist_to": "<filename>",       # optional: also WRITE the extracted dict as JSON to this
+                                           #   node's own ``outputs/<filename>``. Bare filename only —
+                                           #   absolute paths and ``..`` are rejected. Best-effort: a
+                                           #   failed write is logged and never gates.
+         "checkpoint_scope": "parent"}``   # optional (requires ``persist_to``): after the child writes
+                                           #   ``outputs/<persist_to>``, its PARENT promotes that file up
+                                           #   into ``checkpoints/<child>/<persist_to>`` so it survives
+                                           #   resume as durable state (a child cannot write to the parent
+                                           #   directly — RunContext is parent->child). Pulled by
+                                           #   ``_promote_child_checkpoints`` at child completion. Only
+                                           #   "parent" is defined today; absent = no promotion.
+
+    Extraction/validation is unified in the base (``_run_expected_extraction``): a missing /
+    malformed fence is logged as an ``extraction_issue`` (observability ONLY — never gates).
+    Generation is the prompt's job; this registry declares + checks expectations, and — when
+    ``persist_to`` is set — EMITS the extracted block as a structured sidecar. The contract is
+    "declare + check + (optionally) emit"; it still never gates. Opt-in; default ``None`` = no-op.
+    IMPORTANT: control-fence CONSUMPTION (winner-selection, stop) stays with the orchestrator
+    parsers (``flow_parsers.parse_*_tag`` — they carry per-fence value logic + legacy XML
+    fallbacks); this registry is emitter-side self-validation, NOT the consumer.
+
+    Child classes may register a per-label PARSER (``dict`` → domain object) via the
+    ``BLOCK_PARSERS`` ClassVar; ``block_parsed()`` applies it. A parser cannot live in JSON/YAML
+    config, which is why the block itself is declared in config while its parser is declared in
+    code. Register the TRANSFORM only — never a replacement for a child's own tolerant text→dict
+    extraction (e.g. BTA's ``_parse_json_subtasks`` also accepts an unlabeled fence, a bare
+    ``{...\"subtasks\"...}`` scan, and a backtick-repair retry that ``_extract_json_block`` does not)."""
+
+    BLOCK_PARSERS: ClassVar[dict] = {}
+    """Per-label parsers for registered blocks: ``{label: callable(dict) -> Any}``, or
+    ``{label: "<method_name>"}`` to bind an instance method (the usual case, since a domain
+    transform typically reads instance config).
+
+    Class-level (mirrors the ``SLOT_DEFAULTS`` pattern) because a callable cannot be expressed in
+    JSON/YAML config — which is why a block is DECLARED in config while its meaning is declared in
+    code. Subclasses override; ``block_parsed()`` looks the label up here. Empty default =
+    ``block_parsed`` returns the raw dict."""
 
     # === Workspace (opt-in) ===
     # Construction-time workspace. Synced to ``_workspace`` (property) in
@@ -312,23 +499,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # or derive a subprocess cwd via the effective_cwd property below.
     target_path: Optional[str] = attrib(default=None)
 
-    # === Deliverable Boundary Semantics (v1.7) ===
-    # Whether this inferencer is a Deliverable Boundary. When True, the
-    # inferencer guarantees that its outputs/final_deliverables/ is the
-    # canonical artifact set visible to its immediate parent boundary.
-    #
-    # Subclass defaults (set on each subclass, NOT here):
-    #   - BreakdownThenAggregateInferencer  → True
-    #   - PlanThenImplementInferencer       → True
-    #   - DualInferencer                    → False (pass-through)
-    #   - LinearWorkflowInferencer          → False (pass-through)
-    #   - All API/CLI leaves                → False (default)
-    #
-    # The boundary mechanism only ACTIVATES when use_final_deliverables_folder
-    # is True on the workspace. With the default workspace (no flag), the
-    # Legacy boundary attr — kept for backward compatibility but no longer
-    # used by the unified _finalize_output symlink architecture.
-    is_deliverable_boundary: bool = attrib(default=False)
+    # === Deliverable model (Part 2: two-axis) ===
+    # ``final_deliverables/`` and the deliverable flags (output_is_deliverable,
+    # is_deliverable_boundary, use_final_deliverables_folder,
+    # publishes_response_as_deliverable) are RETIRED. ``outputs/`` IS the
+    # deliverable set; an orchestrator promotes its SELECTED canonical child's
+    # ``outputs/`` up to its own ``outputs/`` via ``promote_child`` (see
+    # ``_symlink_child_output``). PTI's multi-child aggregation selects children
+    # by role (see ``deliverable_boundary.py``). ``artifacts/`` never promotes.
 
     # === Template-based prompt rendering (opt-in) ===
     # Template fields (template_manager, template_key, template_root_space,
@@ -399,6 +577,45 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     @_workspace.setter
     def _workspace(self, value):
+        # v5 Phase 1.3 — WorkspaceReassign audit. Emitted ONLY when the root
+        # actually changes AND verbose correlation is enabled. The caller
+        # frame is captured via `traceback.extract_stack(limit=3)[-2]`
+        # (cheap; avoids `inspect.stack()` which fills FrameInfo.code_context).
+        # Lets us prove every workspace transition originated from a known
+        # site (switch_role / _reassign_role_workspace / publish_to_ctx) and
+        # not from a stray mutation. Off → behaviour unchanged.
+        if _is_verbose_correlation():
+            _old_backing = getattr(self, "_InferencerBase__workspace", None)
+            _old_root = (
+                getattr(_old_backing, "root", None)
+                if _old_backing is not None
+                else None
+            )
+            _new_root = getattr(value, "root", None) if value is not None else None
+            if _old_root != _new_root:
+                try:
+                    _frame = traceback.extract_stack(limit=3)[-2]
+                    _caller = {
+                        "file": _frame.filename,
+                        "line": _frame.lineno,
+                        "func": _frame.name,
+                    }
+                except Exception:
+                    _caller = {}
+                try:
+                    self.log_info(
+                        {
+                            "instance_id": getattr(self, "id", None),
+                            "class": type(self).__name__,
+                            "old_workspace": _old_root,
+                            "new_workspace": _new_root,
+                            "caller": _caller,
+                        },
+                        "WorkspaceReassign",
+                    )
+                except Exception:
+                    # NEVER let an audit log abort the actual reassignment
+                    pass
         object.__setattr__(self, "_InferencerBase__workspace", value)
         if value is not None:
             self._configure_for_workspace(value)
@@ -426,6 +643,28 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if override is not None:
                 return override
         return getattr(child_inf, "_workspace", None)
+
+    def _bind_rebuilt_child_ws(self, child_inf, slot: str, child_ws) -> None:
+        """Durably bind a rebuilt, NON-SHARED WorkGraph child's workspace.
+
+        Publishes the workspace into the child's run-context (tier-1, ephemeral —
+        serves fresh-path ctx readers) AND sets the durable instance backing
+        (tier-2) so the binding survives a resume, where the active run-context is
+        not guaranteed to be the dispatched child ctx across the child's recovery
+        gate (see ``_workspace`` getter tiers). Safe ONLY for non-shared nodes —
+        per-subtask workers and the single aggregator — each dispatched exactly
+        once and never serving concurrent branches, so the durable set is
+        race-free and does NOT violate the shared-instance workspace write-purity
+        invariant that keeps reviewer/fixer reuse concurrency-safe. Byte-identical
+        to the prior legacy (no-ctx) path; the only change is that the durable set
+        is no longer gated behind the absence of a run-context.
+        """
+        if child_ws is None:
+            return
+        child_ws.ensure_dirs()
+        self._publish_workspace_to_ctx(self._rc_child(slot), child_ws)
+        if isinstance(child_inf, InferencerBase):
+            child_inf._workspace = child_ws
 
     # Subclasses may override this tuple to declare instance attributes that
     # are derived from ``_workspace`` and must be invalidated (removed from
@@ -541,75 +780,143 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 return parent
             current = parent
 
+    @staticmethod
+    def _module_dir_for_class(klass: type) -> Optional[Path]:
+        """Resolve the on-disk directory of ``klass``'s module.
+
+        Tries ``importlib.resources`` first (works under buck2 link-tree
+        packaging), then falls back to the class's source-file directory
+        (direct-Python runs). Returns None when neither resolves.
+        """
+        parent_pkg = (getattr(klass, "__module__", "") or "").rpartition(".")[0]
+        if parent_pkg:
+            try:
+                from importlib import resources
+
+                candidate = Path(str(resources.files(parent_pkg)))
+                if candidate.is_dir():
+                    return candidate.resolve()
+            except (TypeError, OSError, ModuleNotFoundError):
+                pass
+        try:
+            import inspect
+
+            return Path(inspect.getfile(klass)).resolve().parent
+        except (TypeError, OSError):
+            return None
+
+    @classmethod
+    def _discover_inferencer_variable_roots(cls) -> List[Path]:
+        """This inferencer's own ``prompt_templates`` roots, MRO-derived first.
+
+        Walks ``cls.__mro__`` most-derived first; yields each class's
+        ``<module dir>/prompt_templates`` when that folder holds a
+        ``_variables/`` subtree. Dedups by resolved path. Returns [] when no
+        class in the MRO ships variable extensions (the common case) so the
+        caller keeps the shared manager unchanged.
+        """
+        roots: List[Path] = []
+        seen: Set[Path] = set()
+        for klass in cls.__mro__:
+            module_dir = cls._module_dir_for_class(klass)
+            if module_dir is None:
+                continue
+            candidate = (module_dir / "prompt_templates").resolve()
+            if candidate in seen:
+                continue
+            if candidate.is_dir() and (candidate / "_variables").is_dir():
+                seen.add(candidate)
+                roots.append(candidate)
+        return roots
+
+    def _inferencer_variable_skip_keys(self) -> Set[str]:
+        """Override keys explicitly disabled (mapped to ``False``).
+
+        Such keys render base-only (extension roots skipped for that key).
+        Meaningful only when ``enable_inferencer_variable_expansion`` is on.
+        """
+        return {k for k, v in self.inferencer_variable_overrides.items() if v is False}
+
+    @staticmethod
+    def _discover_inferencer_variable_keys(roots: List[Path]) -> Set[str]:
+        """Dotted variable keys shipped under ``<root>/_variables/``.
+
+        ``_variables/notes/large_file_writing.jinja2`` ->
+        ``notes.large_file_writing``. Best-effort; used only to warn about
+        typo'd override keys, never to gate resolution.
+        """
+        keys: Set[str] = set()
+        for root in roots:
+            vroot = root / "_variables"
+            if not vroot.is_dir():
+                continue
+            for path in vroot.rglob("*"):
+                if not path.is_file() or path.name.startswith("."):
+                    continue
+                rel = path.relative_to(vroot).with_suffix("")
+                keys.add(".".join(rel.parts))
+        return keys
+
+    def _warn_unknown_override_keys(
+        self, roots: List[Path], skip_keys: Set[str]
+    ) -> None:
+        """Warn once if a disabled override key isn't shipped under the roots.
+
+        A typo'd key in ``inferencer_variable_overrides`` would otherwise
+        silently do nothing -- the exact silent failure this framework fights.
+        """
+        unknown = skip_keys - self._discover_inferencer_variable_keys(roots)
+        if unknown:
+            _logger.warning(
+                "inferencer_variable_overrides for %s names key(s) %s not "
+                "found under its extension roots; they have no effect",
+                type(self).__name__,
+                sorted(unknown),
+            )
+
     # Attrs whose values are semantically relevant when switching roles.
     # Subclasses extend this tuple in their own class body.
-    _ROLE_RELEVANT_ATTRS: tuple = ("output_is_deliverable", "is_deliverable_boundary")
+    _ROLE_RELEVANT_ATTRS: tuple = ()
 
     def switch_role(
         self,
         new_role: str,
         *,
         workspace=None,
-        output_is_deliverable=None,
-        is_deliverable_boundary=None,
         reset_session=True,
     ):
         """Transition this inferencer to a new semantic role.
 
-        Centralises the workspace-swap + session-reset + flag-update pattern
-        that orchestrators (MFDual, PTI, ...) previously performed inline.
-        The base layer handles workspace assignment, deliverable flags, and
-        session reset; TemplatedInferencerBase extends with template attrs.
+        Centralises the workspace-swap + session-reset pattern that orchestrators
+        (MFDual, PTI, ...) previously performed inline. The base layer handles
+        workspace assignment and session reset; TemplatedInferencerBase extends
+        with template attrs.
+
+        Part 2 (two-axis model): the deliverable flags (output_is_deliverable /
+        is_deliverable_boundary) are RETIRED — role transitions carry only
+        workspace + session state; promotion is role-based via ``promote_child``.
 
         Args:
             new_role: human-readable role name (e.g. 'fixer_inferencer').
             workspace: if not None, assigned via the _workspace property
                 setter (triggers _configure_for_workspace cascade).
-            output_is_deliverable: if not None, overrides the flag.
-            is_deliverable_boundary: if not None, overrides the flag.
             reset_session: if True, calls self.reset_session() (when available).
         """
         import time
 
-        # M7 NOTE (write-purity boundary — empirically established): the deliverable
-        # flags (output_is_deliverable / is_deliverable_boundary) and workspace set
-        # here STAY instance-backed under a context. This is the plan's D6 / §2.12
-        # option-(a) rule: these are read POST-dispatch on the instance (e.g.
-        # MFDual's alias-dispatched fixer is asserted via ``fixer.output_is_deliverable``
-        # after the run; the workspace getter is intentionally instance-pure). Routing
-        # them to ctx.node breaks those post-call readers (verified by
-        # test_alias_dispatched_fixer_inherits_output_is_deliverable). The role
-        # TEMPLATE fields ARE virtualized (TemplatedInferencerBase.switch_role +
-        # RoleState), and session reset is ctx-aware (active_session_id) — but the
-        # deliverable flags remain instance state by design.
         # 1. Workspace assignment FIRST — triggers cascade
         if workspace is not None:
             self._workspace = workspace
-        # 2. Override deliverable flags
-        for attr, val in {
-            "output_is_deliverable": output_is_deliverable,
-            "is_deliverable_boundary": is_deliverable_boundary,
-        }.items():
-            if val is not None:
-                setattr(self, attr, val)
-        # 3. Session reset
+        # 2. Session reset
         if reset_session and hasattr(self, "reset_session"):
             self.reset_session()
-        # 4. Audit trail (_role_history, lazy-init)
+        # 3. Audit trail (_role_history, lazy-init)
         history = getattr(self, "_role_history", None)
         if history is None:
             history = []
             object.__setattr__(self, "_role_history", history)
         changes = {
             **({"workspace": str(workspace.root)} if workspace else {}),
-            **{
-                k: v
-                for k, v in {
-                    "output_is_deliverable": output_is_deliverable,
-                    "is_deliverable_boundary": is_deliverable_boundary,
-                }.items()
-                if v is not None
-            },
         }
         # Merge template-layer changes stashed by TemplatedInferencerBase.switch_role
         pending = getattr(self, "_pending_role_changes", None)
@@ -838,6 +1145,21 @@ class InferencerBase(Debuggable, Resumable, ABC):
             self.logger = new_loggers
 
     def __attrs_post_init__(self):
+        # Leaf-only guardrail: the lightweight output-guardrail judge drives leaf
+        # RETRY/UPDATE recovery (StreamingInferencerBase). An orchestrator uses the
+        # base _ainfer_recovery, which re-raises the guardrail's
+        # OutputValidationExhaustedError on the first rejection instead of
+        # recovering — so a judge cannot function there. Reject the misconfiguration
+        # up front. (_is_orchestrator() is a class-level check, valid at construction;
+        # note super()-last subclasses have already run their own setup — still fine,
+        # the raise aborts construction.)
+        if self.output_guardrail_inferencer is not None and self._is_orchestrator():
+            raise ValueError(
+                f"output_guardrail_inferencer is only supported on leaf inferencers, "
+                f"not on orchestrators ({type(self).__name__}). Attach the guardrail "
+                f"to the leaf inferencer(s) whose output should be judged."
+            )
+
         if self.logger is None:
             self.logger = "auto"
 
@@ -1119,6 +1441,48 @@ class InferencerBase(Debuggable, Resumable, ABC):
         for child in self._iter_child_inferencers():
             yield from child._collect_all_descendant_inferencers(_seen=_seen)
 
+    def _is_orchestrator(self) -> bool:
+        """True iff this node owns child inferencers (a flow/orchestrator).
+
+        Detected via the standard override idiom: a genuine orchestrator overrides
+        AT LEAST ONE child-iteration primitive. EITHER (not both) suffices — PTI
+        overrides only ``_iter_child_slots`` while BTA/MFI override
+        ``_iter_child_inferencers`` — so an AND here would wrongly exclude PTI from
+        recovery-suppression. This matches the sibling is-orchestrator check used by
+        the recovery-chain builder (see ``_ainfer_recovery`` wiring). Used by
+        ``_ainfer_recovery`` (U4-A) to re-raise instead of blindly re-running the
+        whole subtree. (A leaf overrides neither → False; streaming leaves override
+        ``_ainfer_recovery`` itself so this is not consulted for them.)
+        """
+        return (
+            type(self)._iter_child_inferencers
+            is not InferencerBase._iter_child_inferencers
+            or type(self)._iter_child_slots is not InferencerBase._iter_child_slots
+        )
+
+    async def preflight(self) -> None:
+        """Additive readiness check (U2b). Default no-op.
+
+        Overrides raise (or the resolver they call raises) when a required runtime
+        hard-dependency is missing; :meth:`preflight_all` aggregates the failures
+        into ONE actionable startup error before any inference work begins.
+        """
+        return None
+
+    async def preflight_all(self) -> list[str]:
+        """Walk self + all descendants, run each :meth:`preflight`, aggregate failures.
+
+        Reuses the cycle-safe :meth:`_collect_all_descendant_inferencers` walker so
+        a missing dependency deep in the topology surfaces up front (U2b).
+        """
+        problems: list[str] = []
+        for inf in self._collect_all_descendant_inferencers():
+            try:
+                await inf.preflight()
+            except Exception as exc:  # noqa: BLE001 — aggregate, don't abort the walk
+                problems.append(f"{type(inf).__qualname__}: {exc}")
+        return problems
+
     def _iter_child_slots(self) -> Iterator[tuple]:
         """§9.3/N-Major1: slot-aware child iteration — yield ``(slot, child)`` so
         lifecycle ops (``pre_retry``/``reset_session``/``aconnect``) can bind
@@ -1192,16 +1556,64 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 )
 
     async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
-        """Subclass override hook for own-state cleanup before next retry.
+        """Own-state cleanup before the next retry — default = U3c archive-and-clean.
 
-        Default is a no-op. Subclasses with transient per-attempt state
-        (sessions, cached connections, in-memory buffers) override to reset.
+        On a retry-after-failure (NOT an intended resume) this archives the node's
+        stale deliverable STATE (``outputs/`` + ``checkpoints/`` + the
+        ``.*_completed`` markers in ``artifacts/``) into ``root/.attempts/<n>/`` so
+        the retry starts on a clean workspace — otherwise a leftover
+        ``outputs/output.md`` can make a re-run no-op on its own prior output.
+        ``logs/`` is kept LIVE (its append handle is open). Best-effort — never
+        blocks the retry. Subclasses (e.g. StreamingInferencerBase) may override
+        for their own recovery and skip this.
 
-        Note: only fires on the ASYNC retry path. Sync inferencers in this
-        codebase are rare; sync `pre_retry` propagation is not currently
-        wired (sync `_internal_retry_callback` stays as-is).
+        Note: only fires on the ASYNC retry path (max_retry >= 2). Sync
+        `pre_retry` propagation is not currently wired.
         """
-        pass
+        self._archive_workspace_for_retry(attempt)
+
+    def _archive_workspace_for_retry(self, attempt: int) -> None:
+        """Move stale deliverable STATE into ``root/.attempts/<attempt>/`` (U3c).
+
+        Archived: ``outputs/`` + ``checkpoints/`` + the ``.*_completed`` completion
+        markers in ``artifacts/`` (they gate re-runs). ``logs/`` is left live (open
+        append handle). Skipped on an intended resume (``resume_with_saved_results``)
+        or when there is no workspace on disk. Swallows all errors so it never
+        blocks a retry.
+        """
+        try:
+            if getattr(self, "resume_with_saved_results", False):
+                return
+            ws = self._workspace
+            if ws is None or not getattr(ws, "root", "") or not os.path.isdir(ws.root):
+                return
+            import shutil
+
+            attempt_dir = os.path.join(ws.root, ".attempts", str(attempt))
+            moved = False
+            for state_dir in (ws.outputs_dir, ws.checkpoints_dir):
+                if os.path.isdir(state_dir):
+                    os.makedirs(attempt_dir, exist_ok=True)
+                    shutil.move(
+                        state_dir,
+                        os.path.join(attempt_dir, os.path.basename(state_dir)),
+                    )
+                    moved = True
+            art = ws.artifacts_dir
+            if os.path.isdir(art):
+                for entry in os.listdir(art):
+                    if entry.startswith(".") and entry.endswith("_completed"):
+                        marker_dst = os.path.join(attempt_dir, "artifacts")
+                        os.makedirs(marker_dst, exist_ok=True)
+                        shutil.move(
+                            os.path.join(art, entry),
+                            os.path.join(marker_dst, entry),
+                        )
+                        moved = True
+            if moved:
+                ws.ensure_dirs()  # recreate the emptied outputs/ + checkpoints/
+        except Exception:  # noqa: BLE001 — archival must never block a retry
+            _logger.debug("U3c archive-and-clean skipped", exc_info=True)
 
     @abstractmethod
     def _infer(
@@ -1397,68 +1809,31 @@ class InferencerBase(Debuggable, Resumable, ABC):
         return inference_input
 
     def _finalize_output(self, response: Any) -> Any:
-        """Finalize outputs after inference: promote deliverables, write summary.
+        """Finalize outputs after inference: write the <Response> summary, emit manifest.
 
-        Principle: everything the agent wrote to ``outputs/`` IS the
-        deliverable.  The framework only writes ``output_path`` (the
-        ``<Response>``-extracted summary) when the agent didn't.
+        Part 2 (two-axis model): ``outputs/`` IS the deliverable set — there is no
+        move to ``final_deliverables/`` (retired). Everything the agent wrote to
+        ``outputs/`` is the deliverable as-is; the framework only materializes the
+        ``<Response>``-extracted summary at ``output_path`` when the agent didn't
+        write it itself (the no-local-access sole-output case). Orchestrators promote
+        a selected child's ``outputs/`` up via ``promote_child`` /
+        ``_symlink_child_output``.
 
         Sequence:
-        1. If ``output_is_deliverable``: MOVE all agent-written content
-           from ``outputs/`` to ``outputs/final_deliverables/``.
-        2. Check ``output_path``: if the agent already wrote it (now in
-           ``final_deliverables/``), done.  If not, extract ``<Response>``
-           and write to ``outputs/output_path`` as a summary reference
-           (this summary stays in ``outputs/``, not in deliverables).
-        3. Emit manifest if applicable.
-
-        DESIGN NOTE — INTENTIONAL, do NOT "fix" by promoting the summary:
-        A deliverable is a substantive artifact the agent PHYSICALLY WROTE.  The
-        Step-2 ``<Response>`` summary is a *reference/narration* the framework
-        writes only when the agent didn't produce ``output_path`` itself — so it
-        deliberately stays in ``outputs/`` and is NEVER moved into
-        ``final_deliverables/``.  Consequence: a slot marked
-        ``output_is_deliverable`` surfaces a deliverable only when its inferencer
-        actually writes a file (local-access leaves do; pure-text / API leaves do
-        not — by design, and moot for shipped configs where every deliverable
-        slot is a local-access ClaudeCodeCLI).  Reordering so the summary is
-        materialized BEFORE the move would wrongly promote narration to a
-        deliverable.  This contract is pinned by ``TestDeliverablePromotion`` in
-        test_mfdual_workspace_anomalies_integration.py — change those tests first
-        if you ever intend to revisit this as a deliberate design change.
+        1. If the agent already wrote a non-empty ``output_path``, keep it; otherwise
+           extract ``<Response>`` and write it to ``output_path`` as a reference summary.
+        2. Emit ``output_manifest.json`` (to ``artifacts/``) when ``output_manifest_index``.
         """
-        import shutil as _shutil
-
-        ws = self._workspace
         resolved = self.resolve_output_path()
+        _orig_response = (
+            response  # capture before Step 1 may reassign response to the file body
+        )
 
-        # -- Step 1: Move agent-written outputs to final_deliverables/ --
-        agent_wrote_output_path = False
-        if ws is not None and self.output_is_deliverable:
-            fd = getattr(ws, "deliverables_dir", None)
-            if fd is not None:
-                outputs_dir = ws.outputs_dir
-                if os.path.isdir(outputs_dir):
-                    fd_basename = os.path.basename(fd)
-                    entries = [e for e in os.listdir(outputs_dir) if e != fd_basename]
-                    if entries:
-                        os.makedirs(fd, exist_ok=True)
-                        for entry in entries:
-                            src = os.path.join(outputs_dir, entry)
-                            dst = os.path.join(fd, entry)
-                            if not os.path.exists(dst):
-                                _shutil.move(src, dst)
-                        # output_path was moved with everything else
-                        if resolved:
-                            moved_path = os.path.join(fd, os.path.basename(resolved))
-                            if os.path.isfile(moved_path):
-                                agent_wrote_output_path = True
-
-        # -- Step 2: Write <Response> summary if agent didn't write output_path --
-        # INTENTIONAL: this summary is a REFERENCE — it stays in outputs/ and is
-        # NOT promoted to final_deliverables/ (only agent-written files are
-        # deliverables). See the DESIGN NOTE above + TestDeliverablePromotion.
-        if resolved and os.path.isabs(resolved) and not agent_wrote_output_path:
+        # -- Step 1: Write <Response> summary if the agent didn't write output_path --
+        # Part 2 (two-axis): outputs/ IS the deliverable set — no move to
+        # final_deliverables/ (retired). Keep a non-empty agent-written output_path
+        # as-is; otherwise materialize the <Response> as a reference summary.
+        if resolved and os.path.isabs(resolved):
             if os.path.isfile(resolved) and os.path.getsize(resolved) > 0:
                 pass
             else:
@@ -1477,17 +1852,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     f.write(cleaned)
                 response = cleaned
 
-        # -- Step 3: Emit manifest --
-        manifest_source = resolved
-        if ws is not None and self.output_is_deliverable:
-            fd = getattr(ws, "deliverables_dir", None)
-            if fd and resolved:
-                candidate = os.path.join(fd, os.path.basename(resolved))
-                if os.path.isfile(candidate):
-                    manifest_source = candidate
-        if manifest_source and os.path.isfile(manifest_source):
-            if self.output_manifest_index or self.output_is_deliverable:
-                self._emit_output_manifest(manifest_source)
+        # -- Step 2: Emit manifest (to artifacts/) --
+        if resolved and os.path.isfile(resolved) and self.output_manifest_index:
+            self._emit_output_manifest(resolved)
+
+        # -- Step 3: Generic declared-content format check (Fix 3 / G4 observability) --
+        if self.expected_extraction:
+            self._run_expected_extraction(_orig_response)
 
         return response
 
@@ -1546,9 +1917,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
         When ``child_output_name`` is ``None``, assumes the child uses
         the same filename as the orchestrator (``self.output_path``).
 
-        For deliverables: symlinks each entry in the child's
-        ``final_deliverables/`` into the orchestrator's own
-        ``final_deliverables/``.
+        For sidecars: promotes each non-bookkeeping entry in the child's
+        ``outputs/`` into the orchestrator's own ``outputs/`` (skip-if-exists).
         """
         ws = self._workspace
         if ws is None or child_workspace is None:
@@ -1579,16 +1949,310 @@ class InferencerBase(Debuggable, Resumable, ABC):
             own_output = ws.output_path(own_name)
             self._symlink_or_copy(src, own_output)
 
-        # Symlink deliverable entries
-        child_fd = getattr(child_workspace, "deliverables_dir", None)
-        own_fd = getattr(ws, "deliverables_dir", None)
-        if child_fd and own_fd and os.path.isdir(child_fd) and os.listdir(child_fd):
-            os.makedirs(own_fd, exist_ok=True)
-            for entry in os.listdir(child_fd):
+        # Part 2: the final_deliverables/ symlink loop is RETIRED — deliverables now
+        # live directly in outputs/ (deliverables_dir collapses to outputs_dir), so
+        # the child's whole outputs/ is promoted by the denylisted block below (which
+        # correctly skips bookkeeping; the old FD loop did not).
+
+        # Fix 2 / Part 2: promote the child's outputs/ deliverables up to the parent's
+        # outputs/ — minus the bookkeeping denylist and the canonical output (already
+        # promoted above). Generic, format-agnostic, skip-if-exists. (proposals.json
+        # itself is derived at the task level by the executor, Fix 3 — not here.)
+        child_out = getattr(child_workspace, "outputs_dir", None)
+        own_out = getattr(ws, "outputs_dir", None)
+        if child_out and own_out and os.path.isdir(child_out):
+            for entry in os.listdir(child_out):
+                if _is_bookkeeping_sidecar(entry):
+                    continue
+                if entry in (own_name, child_name):
+                    continue
                 self._symlink_or_copy(
-                    os.path.join(child_fd, entry),
-                    os.path.join(own_fd, entry),
+                    os.path.join(child_out, entry),
+                    os.path.join(own_out, entry),
                 )
+
+    def promote_child(
+        self,
+        child_workspace,
+        *,
+        role: str = "canonical",
+        child_output_name: "Optional[str]" = None,
+    ) -> None:
+        """Role-based promotion of a selected child's ``outputs/`` up to this
+        node's ``outputs/`` (Part 2 two-axis model).
+
+        The orchestrator selects the canonical child by role (Dual → winner,
+        BTA → aggregator, MFDual → fixer, LWI → last step) and calls this to
+        surface that child's deliverables as its own. Workers are consumed
+        inputs and are NOT promoted; ``artifacts/`` never promotes.
+
+        This is the role-named entry point over the ``_symlink_child_output``
+        mechanism, which promotes the canonical output plus the child's loose
+        ``outputs/`` sidecars (minus the bookkeeping denylist), skip-if-exists.
+        """
+        self._symlink_child_output(child_workspace, child_output_name)
+
+    def _promote_child_checkpoints(self, child: "InferencerBase") -> None:
+        """Publish a child's ``checkpoint_scope="parent"`` extractions up into
+        this parent's ``checkpoints/<child>/``.
+
+        The ``checkpoints/``-dir counterpart of :meth:`_symlink_child_output`. A
+        child cannot push state to its parent (``RunContext`` is strictly
+        parent->child), so the parent PULLS: for each of the child's
+        ``expected_extraction`` entries marked ``checkpoint_scope: "parent"``,
+        copy the file the extraction register already wrote to the child's
+        ``outputs/<persist_to>`` into this parent's
+        ``checkpoints/<child>/<persist_to>``. The ``<child>`` segment is the
+        child workspace's own directory name, so the promoted file lands beside
+        that node's other checkpoints (e.g. its ``__graph_expansion__`` record).
+
+        Atomic tmp->rename so a resumer never observes a half-written file;
+        best-effort (a failed copy is logged, never gates), mirroring
+        :meth:`_persist_extracted_block`. Call this right after the child
+        completes and BEFORE any downstream node can fail, so the promoted state
+        is durable for resume. Parent-driven, so inherently concurrency-safe.
+        """
+        import shutil
+
+        ws = self._workspace
+        child_ws = getattr(child, "_workspace", None)
+        if ws is None or child_ws is None:
+            return
+        child_name = os.path.basename(os.path.normpath(child_ws.root))
+        if not child_name:
+            return
+        for _spec in getattr(child, "expected_extraction", None) or ():
+            if not isinstance(_spec, dict):
+                continue
+            if _spec.get("checkpoint_scope") != "parent":
+                continue
+            dest = _spec.get("persist_to")
+            if (
+                not dest
+                or os.path.isabs(dest)
+                or ".." in dest.replace("\\", "/").split("/")
+            ):
+                continue
+            src = child_ws.output_path(dest)
+            if not os.path.isfile(src):
+                continue
+            target = ws.checkpoint_path(os.path.join(child_name, dest))
+            try:
+                os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                tmp = f"{target}.tmp"
+                shutil.copyfile(src, tmp)
+                os.replace(tmp, target)
+                _logger.info(
+                    "promoted child checkpoint (checkpoint_scope=parent) %s -> %s",
+                    src,
+                    target,
+                )
+            except OSError as e:
+                _logger.warning(
+                    "failed to promote child checkpoint %s -> %s: %s",
+                    src,
+                    target,
+                    e,
+                )
+
+    def _run_expected_extraction(self, response: Any = None) -> None:
+        """Self-validation for the unified ``expected_extraction`` registry (opt-in).
+
+        For each declared fence, extract it from ITS channel — the deliverable file
+        (``source="output"``) or this inferencer's stdout response (``source="response"``)
+        — and log an ``extraction_issue`` when it is missing / not ``json.loads``-able.
+        Observability ONLY (never raises/gates), generic-FORMAT only (ZERO domain
+        knowledge): content fences are repaired in-loop by the reviewer/fixer and
+        validated by the tool at finalization; control fences fall back to defaults in
+        their cross-node consumer (``flow_parsers.parse_*_tag``). This is emitter-side
+        self-validation — it does NOT consume/route control fences. Mirrors the
+        overridable ``_guardrail_*`` hook pattern.
+        """
+        from agent_foundation.common.inferencers.flow_parsers import _extract_json_block
+
+        _file_text = None  # deliverable file, read at most once (lazy)
+        _file_read = False
+        for _spec in self.expected_extraction or ():
+            if not isinstance(_spec, dict):
+                continue
+            _label = _spec.get("label")
+            if not _label:
+                continue
+            _source = _spec.get("source") or "output"
+            _kind = _spec.get("kind") or "content"
+            # ``fallback_to_source`` (content only; forced off for control): when the
+            # fence can't be extracted but the source text IS present, the whole source
+            # counts as the content — so a missing fence is not an issue here and is not
+            # flagged. Control fences always flag (a parent orchestrator consumes them
+            # cross-node and cannot fall back to raw text).
+            _fallback = _kind != "control" and bool(_spec.get("fallback_to_source"))
+            if _source == "response":
+                _text = self._extraction_response_text(response)
+            else:
+                if not _file_read:
+                    _file_text = self._extraction_output_text()
+                    _file_read = True
+                _text = _file_text
+            if _text is None:
+                # No artifact on this channel to check (e.g. no file written, or no
+                # response captured). A missing expected deliverable is surfaced
+                # separately by _guardrail_output_text; don't double-warn here.
+                continue
+            # ``_extract_json_block`` returns the parsed dict, or None when the fence
+            # is missing OR not valid JSON — exactly the generic-format signal we want.
+            # ``_fallback`` suppresses the warning: the present source text stands in as
+            # the content when the specific fence is absent.
+            _parsed = _extract_json_block(_text, _label)
+            if _parsed is None:
+                if not _fallback:
+                    _logger.warning(
+                        "extraction_issue: declared %s fence ```json %s``` is missing or not "
+                        "valid JSON in this inferencer's %s — reviewer/fixer repair content "
+                        "in-loop (tool validates at finalization); control fences fall back "
+                        "to defaults in their consumer.",
+                        _kind,
+                        _label,
+                        _source,
+                    )
+                # Nothing extracted -> nothing to emit; ``persist_to`` no-ops.
+                continue
+            # Emit the structured block as a sidecar when the registry asks for it.
+            # Never gates: a bad destination or a failed write only logs.
+            _dest = _spec.get("persist_to")
+            if _dest:
+                self._persist_extracted_block(_label, _parsed, _dest)
+
+    # ------------------------------------------------------------------
+    # Registered-block accessors (stateless: text in -> object out)
+    # ------------------------------------------------------------------
+    #
+    # Deliberately NOT cached on the instance. Leaf inferencers are shared and
+    # re-roled at runtime (a non-winning proposer flow becomes a reviewer, the
+    # winner becomes the fixer), so a ``self._last_block[label]`` would go stale
+    # across roles/rounds and silently serve another node's data. Taking the text
+    # as an argument also solves emitter-vs-consumer: a control fence is consumed
+    # by a PARENT holding the child's returned string, not by the emitter itself.
+
+    def block_text(self, text: Any, label: str) -> "Optional[str]":
+        """Raw body of the ```json <label>``` fence in ``text``, or None."""
+        import re as _re
+
+        from agent_foundation.common.inferencers.flow_parsers import (
+            _JSON_FENCE_TEMPLATE,
+        )
+
+        if not text or not label:
+            return None
+        m = _re.search(_JSON_FENCE_TEMPLATE.format(label=_re.escape(label)), str(text))
+        return m.group(1) if m else None
+
+    def block_dict(self, text: Any, label: str) -> "Optional[dict]":
+        """Parsed dict for the ```json <label>``` fence in ``text``, or None."""
+        from agent_foundation.common.inferencers.flow_parsers import _extract_json_block
+
+        if not text or not label:
+            return None
+        return _extract_json_block(str(text), label)
+
+    def block_parsed(self, text: Any, label: str) -> Any:
+        """``block_dict`` run through the label's registered ``BLOCK_PARSERS`` entry.
+
+        Returns the raw dict when no parser is registered, and None when the fence
+        is absent/invalid. The parser is a pure transform (dict -> domain object)
+        supplied by the subclass; it must not depend on instance mutation.
+        """
+        parsed = self.block_dict(text, label)
+        if parsed is None:
+            return None
+        parser = (type(self).BLOCK_PARSERS or {}).get(label)
+        if isinstance(parser, str):
+            # Registered by method name — the common case, since a domain
+            # transform usually reads instance config (e.g. worker_query_fields).
+            parser = getattr(self, parser, None)
+        return parser(parsed) if callable(parser) else parsed
+
+    def _persist_extracted_block(self, label: str, parsed: dict, dest: str) -> None:
+        """Write an extracted block to this node's own ``outputs/<dest>`` (best-effort).
+
+        Confined to the node's own outputs dir: bare filenames only, so a registry
+        entry can never write outside its workspace. Atomic tmp->rename so a reader
+        never observes a half-written file. Never raises — persistence is emission,
+        not a gate.
+        """
+        import json as _json
+
+        if (
+            not dest
+            or os.path.isabs(dest)
+            or ".." in dest.replace("\\", "/").split("/")
+        ):
+            _logger.warning(
+                "expected_extraction[%s]: ignoring unsafe persist_to=%r "
+                "(bare filename required)",
+                label,
+                dest,
+            )
+            return
+        ws = getattr(self, "_workspace", None)
+        if ws is None or not hasattr(ws, "output_path"):
+            return
+        try:
+            target = ws.output_path(dest)
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+            tmp = f"{target}.tmp"
+            # utf-8 + ensure_ascii=False: LLM-generated content carries Unicode
+            # (arrows, em-dashes) that would raise under a cp1252 default.
+            with open(tmp, "w", encoding="utf-8") as _f:
+                _json.dump(parsed, _f, indent=2, ensure_ascii=False)
+            os.replace(tmp, target)
+            _logger.info(
+                "expected_extraction[%s]: persisted block to %s", label, target
+            )
+        except (OSError, TypeError, ValueError) as e:
+            _logger.warning(
+                "expected_extraction[%s]: failed to persist block to %r: %s",
+                label,
+                dest,
+                e,
+            )
+
+    def _extraction_output_text(self) -> "Optional[str]":
+        """Deliverable-file content for ``expected_extraction`` (source='output'), or
+        ``None`` when no non-empty ``output_path`` file exists."""
+        try:
+            resolved = self.resolve_output_path()
+        except Exception:
+            return None
+        if resolved and os.path.isabs(resolved) and os.path.isfile(resolved):
+            try:
+                with open(resolved, "r", encoding="utf-8") as _f:
+                    return _f.read()
+            except OSError:
+                return None
+        return None
+
+    def _extraction_response_text(self, response: Any) -> "Optional[str]":
+        """This inferencer's stdout response text for ``expected_extraction``
+        (source='response'): the raw response envelope (with any ``<Response>`` + fences),
+        or ``None`` when unavailable. Prefers ``raw_output`` (the full stdout that carries
+        the fences) over the parsed ``output``; robust to dict / wrapped-response shapes."""
+        if response is None:
+            return None
+        for _getter in (
+            lambda r: r.get("raw_output") if isinstance(r, dict) else None,
+            lambda r: r.get("output") if isinstance(r, dict) else None,
+            lambda r: getattr(r, "raw_output", None),
+        ):
+            try:
+                _v = _getter(response)
+            except Exception:
+                _v = None
+            if isinstance(_v, str) and _v:
+                return _v
+        try:
+            return str(response) or None
+        except Exception:
+            return None
 
     def _emit_output_manifest(self, output_path: str) -> None:
         """Walk workspace logs/session and emit output_manifest.json."""
@@ -1649,7 +2313,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
             "stats": {"total": len(contributors)},
         }
 
-        manifest_path = os.path.splitext(output_path)[0] + "_manifest.json"
+        # Part 2 (Axis A): the manifest is framework BOOKKEEPING → artifacts/ (not
+        # outputs/, the deliverable set). Write-only; no prod reader assumes outputs/.
+        _manifest_name = (
+            os.path.splitext(os.path.basename(output_path))[0] + "_manifest.json"
+        )
+        _manifest_dir = getattr(ws, "artifacts_dir", None) or os.path.dirname(
+            output_path
+        )
+        os.makedirs(_manifest_dir, exist_ok=True)
+        manifest_path = os.path.join(_manifest_dir, _manifest_name)
         with open(manifest_path, "w", encoding="utf-8") as f:
             f.write(_json.dumps(manifest, indent=2))
 
@@ -1772,6 +2445,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
         else:
             inference_input = self._render_prompt(inference_input)
 
+        # v5 Fix #1 — capture the POST-render prompt as a closure-local so
+        # Fix #4 (recovery) can re-issue the rendered prompt and the
+        # guardrail can source it via the _fallback_state ContextVar (see
+        # plan v4: zero new instance-mutated state). For non-templated
+        # leaves _render_prompt is a pass-through, so rendered_input is
+        # byte-identical to the (preprocessed) inference_input.
+        rendered_input = inference_input
+
         # Phase 1: render_only mode — used by orchestrators that need the
         # rendered prompt for logging/cache-keying without invoking the LLM.
         # See Q14 / ConsensusIterationRecord.review_input use case.
@@ -1854,23 +2535,79 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_info(inference_input, "InferenceInput", is_artifact=True)
-        self.log_info(inference_args, "InferenceArgs", is_artifact=True)
+        # v5 Phase 1.1 — mint a per-call correlation ID and weave it into
+        # every InferenceInput / InferenceArgs / InferenceResponse parts
+        # file emitted from THIS invocation. The id flows through the
+        # existing parts_file_namer kwarg (see _call_correlation_kwargs
+        # docstring). Off → behaviour unchanged.
+        call_id = uuid.uuid4().hex[:8]
+        _corr = _call_correlation_kwargs(call_id)
+
+        self.log_info(inference_input, "InferenceInput", is_artifact=True, **_corr)
+        self.log_info(inference_args, "InferenceArgs", is_artifact=True, **_corr)
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None
 
         # -- Build _fallback_state and fallback chain --
+        # v5 Fix #1/#2 — `rendered_input` (post-render prompt) and
+        # `call_id`/`guardrail_reject_attempt` ride the same per-call
+        # ContextVar dict that already carries `partial_output` /
+        # `cache_path`. The guardrail (`_render_guardrail_prompt`) reads
+        # `rendered_input` from the ContextVar; the persist-on-reject
+        # path (Fix #2) bumps the counter and uses `call_id` to name the
+        # InferenceResponse parts file. Per-call, concurrency-safe by
+        # construction — no new instance-mutated state added.
         _fallback_state = {
             "last_exception": None,
             "partial_output": None,
             "cache_path": None,
+            "call_id": call_id,
+            "guardrail_reject_attempt": 0,
+            "guardrail_reason": None,
+            "rendered_input": rendered_input,
         }
+        # v5 Phase 1.4 — retry counter shared between _recovery_wrapper and
+        # GuardrailRetry marker so post-scan can tag any subsequent
+        # InferenceInput as retry_of=<parent call_id>.
+        _retry_counter = {"n": 0}
 
         # Recovery wrapper — reads from closure-captured _fallback_state
         def _recovery_wrapper(inp, **kw):
+            # v5 Phase 1.4 — interleave marker. Emitted BEFORE the inner
+            # _infer_recovery call so the next InferenceInput (which mints
+            # its OWN call_id) can be labeled as a retry of THIS parent.
+            if _is_verbose_correlation():
+                _retry_counter["n"] += 1
+                _exc = _fallback_state.get("last_exception")
+                # NOTE: the "guardrail_reject" (last_exception is None) branch is
+                # unreachable on the recovery path — _on_transition always sets
+                # _fallback_state["last_exception"] to the non-None
+                # OutputValidationExhaustedError (even a non-string/False verdict
+                # yields one; async_utils.py:331-333) BEFORE this wrapper runs.
+                self.log_info(
+                    {
+                        "parent_call_id": call_id,
+                        "retry_index": _retry_counter["n"],
+                        "trigger": (
+                            type(_exc).__name__
+                            if _exc is not None
+                            else "guardrail_reject"
+                        ),
+                    },
+                    "GuardrailRetry",
+                )
+            # v5 Fix #4 — internal recovery re-runs the RENDERED prompt
+            # (captured above), not the raw pre-render seed. For LWI
+            # followup steps the raw seed is empty/stub (real content is
+            # injected via extra_feed during render); raw-seed recovery
+            # would feed the agent "" -> empty output -> guaranteed
+            # false-RESTART loop. External fallback inferencers receive
+            # retry_args[0] (still original_input per `_on_transition`
+            # below) so they keep re-rendering with their OWN template —
+            # internal-only fix.
             return self._infer_recovery(
-                inp,
+                rendered_input or inp,
                 last_exception=_fallback_state["last_exception"],
                 last_partial_output=_fallback_state["partial_output"],
                 inference_config=inference_config,
@@ -1958,6 +2695,21 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     if self.output_guardrail_inferencer is not None
                     else None
                 ),
+                # v5 Fix #5 — terminal short-circuit for the empty-loop
+                # fail-fast. Mirrors the async sibling's tuple. Fix #2's
+                # persist-on-reject runs BEFORE the raise so the
+                # offending response is captured.
+                non_retryable_exceptions=(
+                    # U2d: a missing hard-dependency is deterministic — never
+                    # retry it (and, pre-U1/U4, don't let it cascade).
+                    MissingDependencyError,
+                    HopelessOutputError,
+                    # Guardrail-exhaustion is terminal for ENCLOSING layers: the
+                    # leaf already retried the RESTART up to its own max_retry, so
+                    # an outer wrapper must re-raise — NOT re-run the whole subtree
+                    # (that multiplied one bad leaf into a whole-propose re-run).
+                    OutputValidationExhaustedError,
+                ),
             )
         except TimeoutError:
             self.log_info(
@@ -1968,7 +2720,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
         finally:
             _current_fallback_state.reset(token)
 
-        self.log_debug(inference_response, "InferenceResponse", is_artifact=True)
+        # v5 Phase 1.1 — pair the InferenceResponse parts file with this
+        # call's InferenceInput via the shared call_id name-hint.
+        self.log_debug(
+            inference_response,
+            "InferenceResponse",
+            is_artifact=True,
+            **_corr,
+        )
 
         # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
@@ -1981,7 +2740,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
             self.log_debug(
-                processed_response, "PostProcessedResponse", is_artifact=True
+                processed_response,
+                "PostProcessedResponse",
+                is_artifact=True,
+                **_corr,
             )
             return processed_response
 
@@ -2073,6 +2835,25 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if ws is not None and not os.path.isabs(path):
             return ws.output_path(path)
         return path
+
+    def _proposer_task_instructions(self) -> str:
+        """The task contract an AUTHOR beneath this node actually rendered.
+
+        Node-level protocol backing the reviewer/fixer ``<OriginalTaskInstructions>``
+        reference block. Those blocks describe the node's INPUT (what it was asked to
+        do) — semantically distinct from the reviewed artifact, which is the node's
+        OUTPUT. ``task_instructions`` is a predefined variable re-resolved per leaf,
+        so a consumer that renders it itself binds any actor-scoped placeholder (e.g.
+        ``{{ output_path }}``) to ITSELF. Instead each node reports what its author
+        really rendered, and the orchestrator relays that verbatim.
+
+        Base default: ``""`` (no templated author beneath this node) — consumers then
+        omit the block. Templated leaves return their own snapshot; orchestrators
+        delegate to the child on their INPUT side (proposer/worker), never to an
+        aggregator, which renders the OUTPUT-side "merge the upstream outcomes"
+        variant rather than the contract the node was given.
+        """
+        return ""
 
     def _infer_iterator(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
@@ -2254,7 +3035,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
             reporter = self._resolve_graph_reporter()
             if reporter is None:
                 return
-            await reporter.on_node_status(node_id, status, output_path=output_path or "")
+            await reporter.on_node_status(
+                node_id, status, output_path=output_path or ""
+            )
         except Exception:
             import logging
 
@@ -2621,11 +3404,86 @@ class InferencerBase(Debuggable, Resumable, ABC):
             inference_config: Optional inference configuration.
             **kwargs: Additional keyword arguments passed through to _ainfer.
         """
+        # U4-A: an orchestrator's subtree already ran (and failed) once; blindly
+        # re-invoking _ainfer re-runs the whole graph against a dirty workspace.
+        # Re-raise so the failure surfaces (contained by the parent's quorum,
+        # U4-B) instead of silently re-running the subtree. NOTE: a guardrail
+        # rejection passes a NON-None OutputValidationExhaustedError (verdict in
+        # args[1]), so this guard fires and re-raises it — leaf RETRY/UPDATE
+        # recovery is leaf-only (enforced in __attrs_post_init__).
+        if self._is_orchestrator() and last_exception is not None:
+            raise last_exception
         return await self._ainfer(inference_input, inference_config, **kwargs)
 
     # ------------------------------------------------------------------
     # Output guardrail (LLM-based quality judge)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _empty_shaped_fingerprint(response) -> Optional[str]:
+        """Return a fingerprint string if ``response`` looks empty/banner-shaped,
+        else None.
+
+        "Empty-shaped" = whitespace-collapsed length <= 200 chars. This is the
+        Devmate-ACL-denied / Claude-startup-banner failure signature: the same
+        ~40 byte banner repeats verbatim across retries. Anything substantial
+        (real LLM work) blows past 200 chars and returns None — no fail-fast.
+        """
+        try:
+            text = response if isinstance(response, str) else str(response or "")
+            # Collapse whitespace runs so "Starting Devmate server and session...\n"
+            # vs "Starting Devmate server and session... " fingerprint identically.
+            collapsed = " ".join(text.split())
+            if len(collapsed) > 200:
+                return None
+            return collapsed
+        except Exception:
+            return None
+
+    def _check_guardrail_fail_fast(self, response) -> bool:
+        """Return True iff the inferencer should ABORT retries immediately.
+
+        Updates the sliding-window fingerprint tracker as a side effect:
+          - Substantive output (None fingerprint) → reset window, no fail-fast.
+          - Repeat of same fingerprint → window grows; trip when reaching N.
+          - Different fingerprint → reset window to just this one (legitimate
+            retry where output is changing).
+
+        Knob: ``guardrail_empty_fail_fast_n`` (default 2 = trip on second
+        identical empty in a row; 0 disables).
+        """
+        n = self.guardrail_empty_fail_fast_n
+        if n <= 0:
+            return False
+        fingerprint = self._empty_shaped_fingerprint(response)
+        if fingerprint is None:
+            # Substantive output — clear the window. (Whether the judge later
+            # rejects it for a non-empty reason is independent: that's a
+            # legitimate retry, not a hopeless loop.)
+            if self._guardrail_recent_empty_fingerprints:
+                self._guardrail_recent_empty_fingerprints = []
+            return False
+        # Empty-shaped output.
+        window = self._guardrail_recent_empty_fingerprints
+        if window and window[-1] == fingerprint:
+            window.append(fingerprint)
+        else:
+            self._guardrail_recent_empty_fingerprints = [fingerprint]
+            window = self._guardrail_recent_empty_fingerprints
+        if len(window) >= n:
+            _logger.warning(
+                "[%s] HOPELESS-OUTPUT FAIL-FAST: %d consecutive identical "
+                "empty-shaped outputs (~%d chars each, fingerprint=%r). "
+                "Aborting retries early; raising a terminal error so callers "
+                "(e.g. MFDual quorum) can route around this leaf. Set "
+                "guardrail_empty_fail_fast_n=0 to disable.",
+                type(self).__name__,
+                len(window),
+                len(fingerprint),
+                fingerprint[:80],
+            )
+            return True
+        return False
 
     async def _run_output_guardrail(self, response) -> bool:
         """Run the guardrail judge inferencer on the response.
@@ -2638,9 +3496,24 @@ class InferencerBase(Debuggable, Resumable, ABC):
         ``recovery/judge`` template with the main inferencer's input + output.
         Subclasses override ``_parse_guardrail_verdict`` to customize the
         verdict contract.
+
+        v4 Phase 3.2 — when the judge would reject AND the output is the N-th
+        consecutive identical empty/banner-shaped emission, raise a terminal
+        ``HopelessOutputError`` so the retry chain stops burning ~25 min per
+        stuck flow.
         """
         judge = self.output_guardrail_inferencer
         if judge is None:
+            return True
+        # Defense-in-depth for the mutable public slot: a guardrail assigned to an
+        # orchestrator post-construction (bypassing the __attrs_post_init__ guard)
+        # would re-raise terminally on rejection. Skip it (accept) with a warning.
+        if self._is_orchestrator():
+            _logger.warning(
+                "[%s] output_guardrail attached to an orchestrator; skipping "
+                "(leaf-only). Attach it to the leaf inferencer instead.",
+                type(self).__name__,
+            )
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
@@ -2648,12 +3521,85 @@ class InferencerBase(Debuggable, Resumable, ABC):
             verdict_raw = await judge.ainfer(prompt, run_context=guardrail_ctx)
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
+                # v4 Phase 3.3 — diagnostic audit for the judge over-rejection
+                # investigation (E4-aux). Logs the size of the output passed
+                # to the judge plus a head+tail snippet of the judge's verdict
+                # text. If the judge sees a full 34 KB output but verdicts
+                # "narration-only" (the pattern observed in the
+                # understand_codebase run), the judge prompt itself is buggy
+                # and needs revision; if the judge sees < 100 B, the
+                # content-extraction in ``_render_guardrail_prompt`` is the
+                # bug. Pure diagnostic — no behavior change.
+                try:
+                    _resp_len = len(response) if response else 0
+                except TypeError:
+                    _resp_len = -1
+                try:
+                    _verdict_repr = repr(verdict_raw)
+                    if len(_verdict_repr) > 600:
+                        _verdict_repr = (
+                            _verdict_repr[:300]
+                            + " …[truncated]… "
+                            + _verdict_repr[-200:]
+                        )
+                except Exception:
+                    _verdict_repr = "<unreprable>"
                 _logger.info(
-                    "[%s] Output guardrail rejected: handler=%s",
+                    "[%s] Output guardrail rejected: handler=%s "
+                    "(judge_input_chars=%d, verdict=%s)",
                     type(self).__name__,
                     verdict,
+                    _resp_len,
+                    _verdict_repr,
                 )
+                # v5 Fix #2 — persist the rejected InferenceResponse BEFORE
+                # the fail-fast raise (and before the helper turns the
+                # verdict into a ValueError that the helper later raises
+                # on retry exhaustion). Without this, the proposer's good
+                # response that triggered a false-RESTART (or any retried
+                # rejection) is silently dropped. Counter rides on the
+                # per-call ``_fallback_state`` ContextVar; verbose-
+                # correlation supplies a unique parts_file_namer so
+                # multiple rejections from the SAME call don't overwrite.
+                _fs = _current_fallback_state.get(None)
+                _cid = _fs.get("call_id") if _fs else None
+                if _fs is not None:
+                    _fs["guardrail_reject_attempt"] = (
+                        _fs.get("guardrail_reject_attempt", 0) + 1
+                    )
+                    # Q2: carry the judge's concrete <reason> (verdict text after the
+                    # UPDATE:/RETRY: prefix) to recovery/update.jinja2 for a guided fix.
+                    _fs["guardrail_reason"] = self._extract_guardrail_reason(
+                        verdict_raw
+                    )
+                _k = _fs.get("guardrail_reject_attempt", 0) if _fs else 0
+                if _cid and _is_verbose_correlation():
+                    # Default-arg capture pinning current values; avoids
+                    # late-binding bugs if the lambda outlives this frame.
+                    self.log_debug(
+                        response,
+                        "InferenceResponse",
+                        is_artifact=True,
+                        parts_file_namer=(
+                            lambda _obj, _c=_cid, _kk=_k: f"call_{_c}_reject{_kk}"
+                        ),
+                    )
+                else:
+                    self.log_debug(response, "InferenceResponse", is_artifact=True)
+                if self._check_guardrail_fail_fast(response):
+                    raise HopelessOutputError(
+                        f"{type(self).__name__}: {self.guardrail_empty_fail_fast_n} "
+                        f"consecutive identical empty/banner-shaped outputs. "
+                        f"See WARNING above for fingerprint."
+                    )
+            else:
+                # Accepted — clear the empty-shape tracker so a later genuine
+                # failure can start fresh.
+                if self._guardrail_recent_empty_fingerprints:
+                    self._guardrail_recent_empty_fingerprints = []
             return verdict
+        except HopelessOutputError:
+            raise
         except Exception as exc:
             _logger.warning(
                 "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
@@ -2663,9 +3609,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return True
 
     def _run_output_guardrail_sync(self, response):
-        """Sync equivalent of ``_run_output_guardrail``."""
+        """Sync equivalent of ``_run_output_guardrail`` (v4 Phase 3.2 hopeless
+        fail-fast mirrored from the async variant)."""
         judge = self.output_guardrail_inferencer
         if judge is None:
+            return True
+        if self._is_orchestrator():
+            _logger.warning(
+                "[%s] output_guardrail attached to an orchestrator; skipping "
+                "(leaf-only). Attach it to the leaf inferencer instead.",
+                type(self).__name__,
+            )
             return True
         try:
             prompt = self._render_guardrail_prompt(response)
@@ -2673,12 +3627,73 @@ class InferencerBase(Debuggable, Resumable, ABC):
             verdict_raw = judge.infer(prompt, run_context=guardrail_ctx)
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
+                # v4 Phase 3.3 — diagnostic audit for the judge over-rejection
+                # investigation (E4-aux). Logs the size of the output passed
+                # to the judge plus a head+tail snippet of the judge's verdict
+                # text. If the judge sees a full 34 KB output but verdicts
+                # "narration-only" (the pattern observed in the
+                # understand_codebase run), the judge prompt itself is buggy
+                # and needs revision; if the judge sees < 100 B, the
+                # content-extraction in ``_render_guardrail_prompt`` is the
+                # bug. Pure diagnostic — no behavior change.
+                try:
+                    _resp_len = len(response) if response else 0
+                except TypeError:
+                    _resp_len = -1
+                try:
+                    _verdict_repr = repr(verdict_raw)
+                    if len(_verdict_repr) > 600:
+                        _verdict_repr = (
+                            _verdict_repr[:300]
+                            + " …[truncated]… "
+                            + _verdict_repr[-200:]
+                        )
+                except Exception:
+                    _verdict_repr = "<unreprable>"
                 _logger.info(
-                    "[%s] Output guardrail rejected: handler=%s",
+                    "[%s] Output guardrail rejected: handler=%s "
+                    "(judge_input_chars=%d, verdict=%s)",
                     type(self).__name__,
                     verdict,
+                    _resp_len,
+                    _verdict_repr,
                 )
+                # v5 Fix #2 — sync mirror of the async persist-on-reject
+                # block above. See async sibling for full rationale.
+                _fs = _current_fallback_state.get(None)
+                _cid = _fs.get("call_id") if _fs else None
+                if _fs is not None:
+                    _fs["guardrail_reject_attempt"] = (
+                        _fs.get("guardrail_reject_attempt", 0) + 1
+                    )
+                    # Q2: carry the judge's concrete <reason> (verdict text after the
+                    # UPDATE:/RETRY: prefix) to recovery/update.jinja2 for a guided fix.
+                    _fs["guardrail_reason"] = self._extract_guardrail_reason(
+                        verdict_raw
+                    )
+                _k = _fs.get("guardrail_reject_attempt", 0) if _fs else 0
+                if _cid and _is_verbose_correlation():
+                    self.log_debug(
+                        response,
+                        "InferenceResponse",
+                        is_artifact=True,
+                        parts_file_namer=(
+                            lambda _obj, _c=_cid, _kk=_k: f"call_{_c}_reject{_kk}"
+                        ),
+                    )
+                else:
+                    self.log_debug(response, "InferenceResponse", is_artifact=True)
+                if self._check_guardrail_fail_fast(response):
+                    raise HopelessOutputError(
+                        f"{type(self).__name__}: {self.guardrail_empty_fail_fast_n} "
+                        f"consecutive identical empty/banner-shaped outputs."
+                    )
+            else:
+                if self._guardrail_recent_empty_fingerprints:
+                    self._guardrail_recent_empty_fingerprints = []
             return verdict
+        except HopelessOutputError:
+            raise
         except Exception as exc:
             _logger.warning(
                 "[%s] Output guardrail judge failed: %s — accepting output (fail-open).",
@@ -2736,23 +3751,205 @@ class InferencerBase(Debuggable, Resumable, ABC):
         templates live at ``recovery/<name>.jinja2`` (no type subdir), so render
         with ``active_template_type=""``. Falls back to the standalone recovery
         TemplateManager when this inferencer has no ``template_manager``.
+
+        v5 Fix #1 — source the agent's input from the per-call
+        ``_fallback_state`` ContextVar (key ``rendered_input``: the
+        POST-render prompt captured at the single render seam in both
+        ``__(a)infer_single_impl``). Falls back to the legacy
+        ``_last_inference_input`` instance attribute when no fallback
+        state is active (direct callers / legacy paths). The final
+        text is routed through the overridable ``_guardrail_input_text``
+        shaper hook (default: identity — full rendered prompt).
         """
-        output_text = str(response.get("output", "") if isinstance(response, dict) else response)
-        input_text = str(getattr(self, "_last_inference_input", "") or "")
+        output_text = self._guardrail_output_text(response)
+        _fs = _current_fallback_state.get(None)
+        _source = (
+            ((_fs or {}).get("rendered_input"))
+            or getattr(self, "_last_inference_input", "")
+            or ""
+        )
+        input_text = self._guardrail_input_text(str(_source))
         tm = getattr(self, "template_manager", None)
         if tm is not None:
+            # recovery/judge.jinja2 uses agent_prompt/agent_response.
             return tm(
                 "recovery/judge",
                 active_template_type="",
-                prompt=input_text,
-                partial_output=output_text,
+                agent_prompt=input_text,
+                agent_response=output_text,
             )
         from agent_foundation.common.inferencers.recovery import render_recovery_prompt
+
         return render_recovery_prompt(
             "recovery/judge",
             prompt=input_text,
             partial_output=output_text,
         )
+
+    def _guardrail_input_text(self, rendered: str) -> str:
+        """Shape the input passed to the guardrail judge's ``{{ prompt }}`` slot.
+
+        Default: return the FULL rendered prompt unchanged.
+
+        Why the full prompt: the rendered prompt contains BOTH the
+        ``<UserRequest>`` block (typically the body of the user-facing
+        ask) AND the ``output_path`` instruction (typically the
+        ``## Output Requirements`` section, e.g. line ~439 in the actual
+        ``plan/main/initial.jinja2`` output) that the judge needs to see,
+        including any wrapper/format the input requires (see the current
+        ``recovery/judge.jinja2``). A missing/empty *expected* deliverable is
+        surfaced to the judge by ``_guardrail_output_text`` itself (Fix 3), not
+        by the judge's own file reasoning. Eagerly
+        extracting only the ``<UserRequest>`` block in the base would
+        strip the path and reintroduce the false-RESTART that triggered
+        this fix.
+
+        Subclasses MAY override to trim noise — e.g., extract just the
+        ``<UserRequest>`` block — but MUST ensure the result still
+        carries any agent-supposed-to-write-here paths so the judge can
+        verify deliverables.
+
+        Mirrors the overridable ``_parse_guardrail_verdict`` pattern.
+        Opt-in per inferencer; no template coupling in the base.
+        """
+        return rendered
+
+    def _guardrail_output_text(self, response) -> str:
+        """Shape the OUTPUT the guardrail judge evaluates (its ``partial_output`` slot).
+
+        Default: when this inferencer produced a written ``output_path`` deliverable,
+        judge the FILE's content — NOT the captured stdout transcript. The deliverable
+        IS the file; the transcript is fragile narration that terminal/CLI leaves can
+        truncate under load, and a truncated transcript reads as "narration only" →
+        false RESTART even though a complete deliverable exists on disk (the exact bug
+        this fixes: a 40 KB output.md rejected because the judged transcript was a
+        141-byte mid-tool snippet).
+
+        Timing (why the file is present here): the guardrail runs as the retry loop's
+        ``output_validator`` AFTER ``self._infer`` has run the agent to completion (file
+        fully written) and BEFORE ``_finalize_output`` moves anything — so
+        ``resolve_output_path()`` resolves to the complete ``outputs/<output_path>``.
+
+        The WHOLE file is fed (no head+tail truncation): the machine-consumed fences
+        (e.g. a 28-84 KB ``proposal_index``) sit at the file's end, and slicing them
+        mid-JSON made the judge false-reject a correct deliverable as "malformed". A
+        deliverable is bounded by the agent's own output, so the judge model handles the
+        length.
+
+        Fallback: if no output_path is configured, return the response transcript.
+        If a local agent's file is missing/empty, return the transcript prefixed with
+        a NEUTRAL statement of that fact (no "expected"/"not written" verdict) — the
+        framework cannot know whether the input asked for a file, so it states only
+        what it knows and leaves the file-vs-response determination to the judge
+        (``recovery/judge.jinja2`` already instructs it to make exactly that call).
+        Subclasses may override (mirrors ``_guardrail_input_text`` /
+        ``_parse_guardrail_verdict``).
+        """
+        try:
+            resolved = self.resolve_output_path()
+        except Exception:
+            resolved = None
+        if resolved and os.path.isabs(resolved) and os.path.isfile(resolved):
+            try:
+                if os.path.getsize(resolved) > 0:
+                    with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    # Feed the WHOLE deliverable to the judge — no head+tail truncation.
+                    # The machine-consumed fences (e.g. a 28-84 KB ``proposal_index``) sit
+                    # at the file's END, and slicing them mid-JSON made the judge
+                    # false-reject a CORRECT deliverable as "malformed" (the 0709
+                    # aggregator's 4x loop). A deliverable is bounded by the agent's own
+                    # output (typically well within the judge model's context), so let the
+                    # judge model handle the length rather than pre-truncating here.
+                    return f"# Agent-written deliverable ({resolved}):\n{content}"
+            except OSError:
+                pass
+        transcript = str(
+            response.get("output", "") if isinstance(response, dict) else response
+        )
+        # Channel labeling — a FACT, deliberately NOT an intent verdict. The
+        # framework knows whether a file exists at ``output_path``; it does NOT know
+        # whether the input asked for one: ``output_path`` is blanket-cascaded to
+        # every leaf (so its presence carries no contract signal) and
+        # ``has_local_access`` is a capability, not a contract. An earlier version
+        # asserted "EXPECTED DELIVERABLE ... WAS NOT WRITTEN" here, which (a) claimed
+        # knowledge the framework does not have and (b) duplicated — and biased —
+        # the determination ``recovery/judge.jinja2`` already makes from the input.
+        # So: state the fact, disclaim the inference, let the judge decide.
+        #
+        # Still gated on has_local_access purely for RELEVANCE (a capability the
+        # framework does know): a no-local agent could not have written a file at
+        # all — its deliverable is legitimately inline in <Response> and is
+        # materialized to output_path later by _finalize_output — so remarking on
+        # the file's absence would be pure noise.
+        if (
+            resolved
+            and os.path.isabs(resolved)
+            and self.has_local_access
+            and (not os.path.isfile(resolved) or os.path.getsize(resolved) == 0)
+        ):
+            return (
+                f"# No file exists at {resolved}. (An output path is assigned to every\n"
+                f"# agent; this does NOT imply the task required writing one — determine\n"
+                f"# that from the input.)\n"
+                f"# The agent's response transcript follows:\n{transcript}"
+            )
+        return transcript
+
+    # Verdict keywords the guardrail understands, longest-safe for prefix matching.
+    _GUARDRAIL_VERDICT_KEYWORDS = (
+        "PASS",
+        "UPDATE",
+        "RETRY",
+        "RESTART",
+        "FAIL",
+        "CONTINUE",
+    )
+    # Leading markdown/quote decoration a judge may wrap the verdict in.
+    _GUARDRAIL_VERDICT_DECORATION = "`\"'*#>- \t\r\n"
+
+    def _guardrail_verdict_segment(self, judge_response) -> str:
+        """Isolate the verdict-bearing segment from a (possibly multi-line) judge reply.
+
+        The recovery judge is a full agentic inferencer (``main_inferencer``): it reasons
+        first and states its verdict LAST. Reading the HEAD of the reply (a naive
+        ``startswith``) therefore misfires whenever the reasoning preamble merely opens
+        with a verdict keyword — e.g. a real judge reply that began "RETRY/UPDATE/PASS
+        decision requires …" but concluded ``PASS`` on its final line was misread as
+        ``RETRY``, discarding a valid deliverable and forcing a wasteful restart.
+
+        Resolution, tail-first:
+          1. the text after the LAST ``Verdict:`` label — what ``recovery/judge.jinja2``
+             asks the judge to emit on its final line — when that yields a known verdict
+             (the historical ``Vertdict`` misspelling is tolerated defensively);
+          2. otherwise the last non-empty line (a bare/legacy verdict-first reply, or a
+             reasoning-first reply whose final line is the verdict, lands here).
+
+        Leading markdown/quote decoration is stripped so the returned segment begins at
+        the verdict keyword, ready for both keyword matching (``_parse_guardrail_verdict``)
+        and reason extraction (``_extract_guardrail_reason``). Regex-free on purpose —
+        ``re`` is not imported at this module's scope and these helpers are deliberately so.
+        """
+        text = str(judge_response).strip()
+        if not text:
+            return ""
+        decoration = self._GUARDRAIL_VERDICT_DECORATION
+        lowered = text.lower()
+        # (1) Prefer the explicit label the judge is asked to emit on its final line.
+        marker_end = -1
+        for marker in ("verdict:", "vertdict:"):
+            found = lowered.rfind(marker)
+            if found >= 0:
+                marker_end = max(marker_end, found + len(marker))
+        if marker_end >= 0:
+            labeled = text[marker_end:].strip().lstrip(decoration)
+            if labeled.upper().startswith(self._GUARDRAIL_VERDICT_KEYWORDS):
+                return labeled
+        # (2) Otherwise take the last non-empty line (verdict-first / bare / label-less).
+        for line in reversed(text.splitlines()):
+            if line.strip():
+                return line.strip().lstrip(decoration)
+        return ""
 
     def _parse_guardrail_verdict(self, judge_response):
         """Parse the guardrail judge response into a verdict.
@@ -2760,29 +3957,66 @@ class InferencerBase(Debuggable, Resumable, ABC):
         Returns:
             ``True`` to accept the output.
             ``False`` to reject (plain retry with the same func).
-            A handler name string (``"restart"``, ``"retry_with_reference"``,
-            ``"continue"``) to reject and route to a specific recovery handler.
+            A handler name string (``"retry"``, ``"update"``) to reject and
+            route to a specific recovery strategy.
 
-        Default contract: the judge outputs one of:
+        Default contract (Option C taxonomy): the judge reasons first and states its
+        verdict LAST (see ``recovery/judge.jinja2``), one of:
           - ``"PASS"`` → accept
-          - ``"RESTART: <reason>"`` → reject, retry from scratch
-          - ``"RETRY_WITH_REFERENCE: <reason>"`` → reject, retry with failed output as reference
-          - ``"CONTINUE: <reason>"`` → reject, continue from where it stopped
-          - ``"FAIL: <reason>"`` → reject, default recovery (retry_with_reference)
+          - ``"RETRY: <reason>"`` → reject; re-run from scratch, carrying the prior
+            attempt only as a negative-example reference (empty / off-topic / narration-only)
+          - ``"UPDATE: <reason>"`` → reject; edit/complete the prior output in place,
+            preserving the good work (real-but-incomplete / truncated)
+
+        The verdict is read from the TAIL of the reply via ``_guardrail_verdict_segment``
+        (not the head), so a reasoning preamble that happens to open with a keyword no
+        longer misroutes. Legacy verdicts are still mapped so a custom or stale judge
+        never silently accepts a bad output: ``RESTART``/``FAIL``/``RETRY_WITH_REFERENCE``
+        → ``"retry"``; ``CONTINUE`` → ``"update"``.
 
         Subclasses can override for a custom verdict format.
         """
-        text = str(judge_response).strip()
-        upper = text.upper()
+        segment = self._guardrail_verdict_segment(judge_response)
+        upper = segment.upper()
         if upper.startswith("PASS"):
             return True
-        if upper.startswith("RESTART"):
-            return "restart"
+        if upper.startswith("UPDATE"):
+            return "update"
+        if upper.startswith("RETRY"):  # RETRY and legacy RETRY_WITH_REFERENCE
+            return "retry"
+        # Legacy verdicts (backward-compat): route sanely, never silent-accept.
+        if upper.startswith("RESTART") or upper.startswith("FAIL"):
+            return "retry"
         if upper.startswith("CONTINUE"):
-            return "continue"
-        if upper.startswith("RETRY_WITH_REFERENCE") or upper.startswith("FAIL"):
-            return "retry_with_reference"
+            return "update"
+        # Nothing matched — this is the historical silent-accept fall-through. Keep
+        # accepting (back-compat) but log it, since an unrecognized verdict is a
+        # guardrail blind spot worth surfacing. Log the tail we tried to parse.
+        _logger.warning(
+            "[%s] Unrecognized guardrail verdict (tail=%r) — accepting output (PASS).",
+            type(self).__name__,
+            (segment or str(judge_response).strip())[:200],
+        )
         return True
+
+    def _extract_guardrail_reason(self, verdict_raw) -> Optional[str]:
+        """Extract the judge's concrete <reason> from a rejection verdict, for a guided
+        UPDATE fix (rendered into ``recovery/update.jinja2``'s ``{{ reason }}`` slot).
+
+        Reads the same tail segment as ``_parse_guardrail_verdict`` (via
+        ``_guardrail_verdict_segment``) so the reason is drawn from the actual verdict
+        line even when the judge reasons first. Strips the leading verdict keyword
+        (``UPDATE``/``RETRY``) and any separator so only the human-readable reason
+        remains; returns ``None`` for a bare verdict with no trailing reason. Regex-free
+        on purpose (``re`` is not imported in this module). Subclasses may override to
+        match a custom verdict format (mirrors ``_parse_guardrail_verdict``).
+        """
+        segment = self._guardrail_verdict_segment(verdict_raw)
+        for prefix in ("UPDATE", "RETRY"):
+            if segment.upper().startswith(prefix):
+                segment = segment[len(prefix) :].lstrip(" \t:-—").strip()
+                break
+        return segment or None
 
     async def _ainfer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
@@ -2850,6 +4084,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
         else:
             inference_input = self._render_prompt(inference_input)
+
+        # v5 Fix #1 — capture POST-render prompt as closure-local; see
+        # sync sibling above for rationale. Published via _fallback_state
+        # below; consumed by `_render_guardrail_prompt` (Fix #1) and by
+        # `_recovery_wrapper` (Fix #4).
+        rendered_input = inference_input
 
         # Phase 1: render_only short-circuit — see _infer_single.
         if _render_only:
@@ -2946,24 +4186,64 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             on_retry_callback = _internal_retry_callback
 
-        self.log_info(inference_input, "InferenceInput", is_artifact=True)
-        self.log_info(inference_args, "InferenceArgs", is_artifact=True)
+        # v5 Phase 1.1 — async path: mint per-call correlation ID + weave
+        # into all InferenceInput / InferenceArgs / InferenceResponse parts
+        # files emitted from THIS invocation. Off → behaviour unchanged.
+        call_id = uuid.uuid4().hex[:8]
+        _corr = _call_correlation_kwargs(call_id)
+
+        self.log_info(inference_input, "InferenceInput", is_artifact=True, **_corr)
+        self.log_info(inference_args, "InferenceArgs", is_artifact=True, **_corr)
 
         # Convert 0 → None for timeout parameters (0 = disabled)
         effective_total_timeout = total_timeout or None
         effective_attempt_timeout = attempt_timeout or None
 
         # -- Build _fallback_state and fallback chain --
+        # v5 Fix #1/#2 — see sync sibling: `rendered_input` (post-render
+        # prompt) + `call_id` + `guardrail_reject_attempt` ride the
+        # per-call ContextVar; no new instance-mutated state.
         _fallback_state = {
             "last_exception": None,
             "partial_output": None,
             "cache_path": None,
+            "call_id": call_id,
+            "guardrail_reject_attempt": 0,
+            "guardrail_reason": None,
+            "rendered_input": rendered_input,
         }
+        # v5 Phase 1.4 — shared retry counter for the GuardrailRetry marker.
+        _retry_counter = {"n": 0}
 
         # Recovery wrapper — reads from closure-captured _fallback_state
         async def _recovery_wrapper(inp, **kw):
+            # v5 Phase 1.4 — interleave marker before recovery retry.
+            if _is_verbose_correlation():
+                _retry_counter["n"] += 1
+                _exc = _fallback_state.get("last_exception")
+                # NOTE: the "guardrail_reject" (last_exception is None) branch is
+                # unreachable on the recovery path — _on_transition always sets
+                # _fallback_state["last_exception"] to the non-None
+                # OutputValidationExhaustedError (even a non-string/False verdict
+                # yields one; async_utils.py:331-333) BEFORE this wrapper runs.
+                self.log_info(
+                    {
+                        "parent_call_id": call_id,
+                        "retry_index": _retry_counter["n"],
+                        "trigger": (
+                            type(_exc).__name__
+                            if _exc is not None
+                            else "guardrail_reject"
+                        ),
+                    },
+                    "GuardrailRetry",
+                )
+            # v5 Fix #4 — internal recovery re-runs the RENDERED prompt;
+            # see sync sibling for rationale. External fallback wrappers
+            # below still receive retry_args[0] (= original_input per
+            # `_on_transition`), so they re-render via their own template.
             return await self._ainfer_recovery(
-                inp,
+                rendered_input or inp,
                 last_exception=_fallback_state["last_exception"],
                 last_partial_output=_fallback_state["partial_output"],
                 inference_config=inference_config,
@@ -3043,8 +4323,25 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 default_return_or_raise=self.default_return_or_raise,
                 on_retry_callback=on_retry_callback,
                 non_retryable_exceptions=(
+                    # U2d: a missing hard-dependency is deterministic — never retry.
+                    MissingDependencyError,
                     asyncio.LimitOverrunError,
                     asyncio.IncompleteReadError,
+                    # v5 Fix #5 — make the empty-loop fail-fast actually
+                    # terminal. Without this entry the retry helper
+                    # catches `HopelessOutputError` as generic retryable
+                    # and merely changes which exception ends the loop
+                    # after `max_retry` exhausts — i.e. the fail-fast
+                    # docstring lied. Fix #2's persist runs BEFORE the
+                    # raise so the offending response is still captured.
+                    HopelessOutputError,
+                    # Guardrail-exhaustion is terminal for ENCLOSING layers: the
+                    # leaf already retried the RESTART up to its own max_retry, so
+                    # an outer wrapper (LWI flow / MFDual / BTA / Dual) must
+                    # re-raise it — NOT re-run its whole subtree. Without this,
+                    # one leaf's spent guardrail multiplied into a full
+                    # propose/MultiFlow-fan-out re-run at every nesting level.
+                    OutputValidationExhaustedError,
                 ),
                 total_timeout=effective_total_timeout,
                 attempt_timeout=effective_attempt_timeout,
@@ -3068,7 +4365,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
         finally:
             _current_fallback_state.reset(token)
 
-        self.log_debug(inference_response, "InferenceResponse", is_artifact=True)
+        # v5 Phase 1.1 — pair the InferenceResponse parts file with this
+        # call's InferenceInput via the shared call_id name-hint.
+        self.log_debug(
+            inference_response,
+            "InferenceResponse",
+            is_artifact=True,
+            **_corr,
+        )
 
         # Output finalization (promote deliverables, write summary)
         inference_response = self._finalize_output(inference_response)
@@ -3081,7 +4385,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
             post_input = self._normalize_for_post_processor(inference_response)
             processed_response = self.response_post_processor(post_input)
             self.log_debug(
-                processed_response, "PostProcessedResponse", is_artifact=True
+                processed_response,
+                "PostProcessedResponse",
+                is_artifact=True,
+                **_corr,
             )
             return processed_response
 

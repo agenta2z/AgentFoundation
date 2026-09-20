@@ -16,6 +16,7 @@ All test data uses clearly fictional entities (e.g., "Alice Mockwell", "MockMart
 
 Requirements: 3.2, 3.3, 4.1, 4.2, 4.5
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
@@ -34,27 +35,46 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-from attr import attrs, attrib
-
 from agent_foundation.agents.agent_response import AgentResponse
-from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
+from agent_foundation.agents.agent_state import AgentStateItem, AgentTaskStatusFlags
 from agent_foundation.agents.prompt_based_agents.prompt_based_agent import (
-    PromptBasedAgent,
     FeedConflictResolution,
+    PromptBasedAgent,
 )
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
-from agent_foundation.knowledge.retrieval.post_processors import GroupedDictPostProcessor
-from agent_foundation.knowledge.retrieval.provider import _default_formatter
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece, KnowledgeType
-from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import KeyValueMetadataStore
-from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import GraphServiceEntityGraphStore
-from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import MemoryKeyValueService
-from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import MemoryRetrievalService
-from rich_python_utils.service_utils.graph_service.memory_graph_service import MemoryGraphService
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
+)
+from agent_foundation.knowledge.retrieval.post_processors import (
+    GroupedDictPostProcessor,
+)
+from agent_foundation.knowledge.retrieval.provider import _default_formatter
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
+    KeyValueMetadataStore,
+)
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
+    RetrievalKnowledgePieceStore,
+)
+from attr import attrib, attrs
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
+)
+from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
+    MemoryKeyValueService,
+)
+from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
+    MemoryRetrievalService,
+)
 from rich_python_utils.string_utils.formatting.handlebars_format import (
     format_template as handlebars_format,
 )
@@ -96,9 +116,10 @@ class _TestablePromptBasedAgent(PromptBasedAgent):
     as a test class.
     """
 
-    def _parse_raw_response(self, raw_response) -> Tuple[
-        Union[str, AgentResponse],
-        Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
+    def _parse_raw_response(
+        self, raw_response
+    ) -> Tuple[
+        Union[str, AgentResponse], Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
     ]:
         return (
             AgentResponse(instant_response="done", next_actions=[]),
@@ -112,7 +133,9 @@ class _TestablePromptBasedAgent(PromptBasedAgent):
 def _build_mock_kb() -> KnowledgeBase:
     """Build a KnowledgeBase with fictional inline data. No external files."""
     metadata_store = KeyValueMetadataStore(kv_service=MemoryKeyValueService())
-    piece_store = RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService())
+    piece_store = RetrievalKnowledgePieceStore(
+        retrieval_service=MemoryRetrievalService()
+    )
     graph_store = GraphServiceEntityGraphStore(graph_service=MemoryGraphService())
 
     kb = KnowledgeBase(
@@ -123,60 +146,82 @@ def _build_mock_kb() -> KnowledgeBase:
     )
 
     # Metadata — fictional user
-    metadata_store.save_metadata(EntityMetadata(
-        entity_id="user:mock_alice",
-        entity_type="user",
-        properties={
-            "FirstName": "Alice",
-            "LastName": "Mockwell",
-            "Location": "Faketown, FS, Testland",
-            "ZipCode": "00000",
-        },
-    ))
+    metadata_store.save_metadata(
+        EntityMetadata(
+            entity_id="user:mock_alice",
+            entity_type="user",
+            properties={
+                "FirstName": "Alice",
+                "LastName": "Mockwell",
+                "Location": "Faketown, FS, Testland",
+                "ZipCode": "00000",
+            },
+        )
+    )
 
     # Pieces — fictional memberships (entity-scoped, info_type=user_profile)
-    piece_store.add(KnowledgePiece(
-        piece_id="mockmart-membership",
-        content="User is a MockMart member with free delivery on qualifying orders.",
-        knowledge_type=KnowledgeType.Fact,
-        info_type="user_profile",
-        tags=["grocery", "mockmart", "membership"],
-        entity_id="user:mock_alice",
-        embedding_text="MockMart grocery store membership account delivery",
-    ))
-    piece_store.add(KnowledgePiece(
-        piece_id="freshco-membership",
-        content="User is a FreshCo premium member.",
-        knowledge_type=KnowledgeType.Fact,
-        info_type="user_profile",
-        tags=["grocery", "freshco", "membership"],
-        entity_id="user:mock_alice",
-        embedding_text="FreshCo grocery store premium membership",
-    ))
+    piece_store.add(
+        KnowledgePiece(
+            piece_id="mockmart-membership",
+            content="User is a MockMart member with free delivery on qualifying orders.",
+            knowledge_type=KnowledgeType.Fact,
+            info_type="user_profile",
+            tags=["grocery", "mockmart", "membership"],
+            entity_id="user:mock_alice",
+            embedding_text="MockMart grocery store membership account delivery",
+        )
+    )
+    piece_store.add(
+        KnowledgePiece(
+            piece_id="freshco-membership",
+            content="User is a FreshCo premium member.",
+            knowledge_type=KnowledgeType.Fact,
+            info_type="user_profile",
+            tags=["grocery", "freshco", "membership"],
+            entity_id="user:mock_alice",
+            embedding_text="FreshCo grocery store premium membership",
+        )
+    )
 
     # Piece — fictional procedure (global, info_type=instructions)
-    piece_store.add(KnowledgePiece(
-        piece_id="mock-shopping-procedure",
-        content="Mock Shopping Procedure: 1) Log in. 2) Find store. 3) Add items to cart and checkout.",
-        knowledge_type=KnowledgeType.Procedure,
-        info_type="instructions",
-        tags=["grocery", "procedure", "workflow"],
-        entity_id=None,
-        embedding_text="grocery shopping steps procedure workflow login store cart checkout",
-    ))
+    piece_store.add(
+        KnowledgePiece(
+            piece_id="mock-shopping-procedure",
+            content="Mock Shopping Procedure: 1) Log in. 2) Find store. 3) Add items to cart and checkout.",
+            knowledge_type=KnowledgeType.Procedure,
+            info_type="instructions",
+            tags=["grocery", "procedure", "workflow"],
+            entity_id=None,
+            embedding_text="grocery shopping steps procedure workflow login store cart checkout",
+        )
+    )
 
     # Graph — fictional relationships
-    graph_store.add_node(GraphNode(node_id="user:mock_alice", node_type="user", label="Alice Mockwell"))
-    graph_store.add_node(GraphNode(node_id="store:mockmart", node_type="store", label="MockMart"))
-    graph_store.add_node(GraphNode(node_id="store:freshco", node_type="store", label="FreshCo"))
-    graph_store.add_relation(GraphEdge(
-        source_id="user:mock_alice", target_id="store:mockmart",
-        edge_type="SHOPS_AT", properties={"piece_id": "mockmart-membership"},
-    ))
-    graph_store.add_relation(GraphEdge(
-        source_id="user:mock_alice", target_id="store:freshco",
-        edge_type="SHOPS_AT", properties={"piece_id": "freshco-membership"},
-    ))
+    graph_store.add_node(
+        GraphNode(node_id="user:mock_alice", node_type="user", label="Alice Mockwell")
+    )
+    graph_store.add_node(
+        GraphNode(node_id="store:mockmart", node_type="store", label="MockMart")
+    )
+    graph_store.add_node(
+        GraphNode(node_id="store:freshco", node_type="store", label="FreshCo")
+    )
+    graph_store.add_relation(
+        GraphEdge(
+            source_id="user:mock_alice",
+            target_id="store:mockmart",
+            edge_type="SHOPS_AT",
+            properties={"piece_id": "mockmart-membership"},
+        )
+    )
+    graph_store.add_relation(
+        GraphEdge(
+            source_id="user:mock_alice",
+            target_id="store:freshco",
+            edge_type="SHOPS_AT",
+            properties={"piece_id": "freshco-membership"},
+        )
+    )
 
     return kb
 
@@ -242,13 +287,17 @@ def _call_agent(agent, user_input: str):
 class TestConstructReasonerInputWithKnowledge:
     """Unit test: call _construct_reasoner_input directly with real provider output."""
 
-    def test_construct_reasoner_input_contains_knowledge(self, mock_knowledge_provider, mock_reasoner):
+    def test_construct_reasoner_input_contains_knowledge(
+        self, mock_knowledge_provider, mock_reasoner
+    ):
         """Direct _construct_reasoner_input call merges knowledge into template.
 
         Validates the inner integration: knowledge dict is merged into feed
         and the template renders with user_profile and instructions.
         """
-        agent = _make_agent(reasoner=mock_reasoner, knowledge_provider=mock_knowledge_provider)
+        agent = _make_agent(
+            reasoner=mock_reasoner, knowledge_provider=mock_knowledge_provider
+        )
 
         # Call the provider directly to get the knowledge dict
         query = "MockMart grocery store membership"
@@ -272,7 +321,9 @@ class TestConstructReasonerInputWithKnowledge:
 class TestE2EAgentCall:
     """E2E test: full __call__ flow — knowledge appears in captured reasoner_input."""
 
-    def test_e2e_agent_call_passes_knowledge_to_reasoner(self, mock_knowledge_provider, mock_reasoner):
+    def test_e2e_agent_call_passes_knowledge_to_reasoner(
+        self, mock_knowledge_provider, mock_reasoner
+    ):
         """Full __call__ flow: knowledge appears in captured reasoner_input.
 
         Validates the complete chain:
@@ -304,7 +355,10 @@ class TestE2EAgentCall:
 
         def tracking_provider(query):
             captured_queries.append(query)
-            return {"user_profile": "Mock Profile Data", "instructions": "Mock Instructions"}
+            return {
+                "user_profile": "Mock Profile Data",
+                "instructions": "Mock Instructions",
+            }
 
         agent = _make_agent(
             reasoner=mock_reasoner,

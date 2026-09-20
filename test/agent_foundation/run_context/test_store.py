@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from agent_foundation.common.inferencers.run_context import (
     CollisionError,
     MultiFlowState,

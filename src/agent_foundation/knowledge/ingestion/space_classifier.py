@@ -19,8 +19,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
 
 logger = logging.getLogger(__name__)
@@ -200,7 +200,9 @@ class SpaceClassifier:
             "entity_id": piece.entity_id,
             "info_type": piece.info_type,
             "validation_status": piece.validation_status,
-            "knowledge_type": piece.knowledge_type.value if piece.knowledge_type else None,
+            "knowledge_type": piece.knowledge_type.value
+            if piece.knowledge_type
+            else None,
             "domain": piece.domain,
             "tags": piece.tags,
             "space": piece.space,

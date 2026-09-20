@@ -13,13 +13,13 @@ import shutil
 import tempfile
 import unittest
 
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.cross_flow_rendezvous import (
     CrossFlowRendezvous,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
 
 class _AsyncSlowInferencer(InferencerBase):
@@ -49,7 +49,11 @@ class _CapturingInferencer(InferencerBase):
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         self.received_prompts.append(str(inference_input))
-        r = self._responses[self._idx] if self._idx < len(self._responses) else f"ov_{self._idx}"
+        r = (
+            self._responses[self._idx]
+            if self._idx < len(self._responses)
+            else f"ov_{self._idx}"
+        )
         self._idx += 1
         return r
 
@@ -178,8 +182,11 @@ class TestCrossFlowSyncBarrierIntegration(unittest.TestCase):
         # flow_0's round01 followup prompt must carry flow_1's initial output.
         self.assertTrue(f0_fu.received_prompts, "flow_0 followup never ran")
         f0_round01 = f0_fu.received_prompts[0]
-        self.assertIn("f1_init", f0_round01,
-                      f"barrier ON: flow_0 round01 should see slow peer's initial; got {f0_round01!r}")
+        self.assertIn(
+            "f1_init",
+            f0_round01,
+            f"barrier ON: flow_0 round01 should see slow peer's initial; got {f0_round01!r}",
+        )
         self.assertNotIn("(no output yet)", f0_round01)
 
     def test_barrier_off_fast_flow_races_ahead(self):
@@ -190,8 +197,11 @@ class TestCrossFlowSyncBarrierIntegration(unittest.TestCase):
         f0_round01 = f0_fu.received_prompts[0]
         # flow_1 (sleeping 0.3s) hasn't published its initial when fast flow_0 builds
         # round01 → peer1 renders empty/None, NOT 'f1_init'.
-        self.assertNotIn("f1_init", f0_round01,
-                         f"barrier OFF: expected the race (no peer output); got {f0_round01!r}")
+        self.assertNotIn(
+            "f1_init",
+            f0_round01,
+            f"barrier OFF: expected the race (no peer output); got {f0_round01!r}",
+        )
 
 
 class TestCrossFlowSyncEarlyStop(unittest.TestCase):
@@ -244,8 +254,10 @@ class TestCrossFlowSyncEarlyStop(unittest.TestCase):
         # flow_1 ran BOTH followup rounds → it was released at gen1 (by flow_0's leave)
         # and at gen2 (solo).
         self.assertEqual(
-            len(f1_fu.received_prompts), 2,
-            f"flow_1 should run round01 + round02; got {f1_fu.received_prompts}")
+            len(f1_fu.received_prompts),
+            2,
+            f"flow_1 should run round01 + round02; got {f1_fu.received_prompts}",
+        )
         # flow_0 stopped after initial → its followup never ran.
         self.assertEqual(f0_fu.received_prompts, [])
         # The departed peer's output is still visible (published by its response_builder

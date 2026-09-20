@@ -1,5 +1,3 @@
-
-
 """Widget message protocol for interactive UI elements.
 
 Defines the data structures for sending widget requests to the frontend

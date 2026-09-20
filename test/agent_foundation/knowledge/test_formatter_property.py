@@ -5,6 +5,7 @@ Property-based tests for KnowledgeFormatter.
 # Feature: agent-knowledge-base, Property 17: Formatter output structure
 # **Validates: Requirements 10.1, 10.2, 10.3, 10.5**
 """
+
 import sys
 from pathlib import Path
 
@@ -17,11 +18,8 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-import random
 import copy
-
-from hypothesis import given, settings, assume
-from hypothesis import strategies as st
+import random
 
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
@@ -32,12 +30,13 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from hypothesis import assume, given, settings, strategies as st
 
 # Import strategies from conftest
 _test_dir = Path(__file__).resolve().parent
 if str(_test_dir) not in sys.path:
     sys.path.insert(0, str(_test_dir))
-from conftest import knowledge_piece_strategy, entity_metadata_strategy
+from conftest import entity_metadata_strategy, knowledge_piece_strategy
 
 
 # ── Strategies ───────────────────────────────────────────────────────────────
@@ -64,16 +63,20 @@ def graph_context_entry_strategy(draw):
     """Generate a graph context dict matching the expected format."""
     relation_type = draw(_identifier_text)
     # target_node_id uses type:name format
-    node_type = draw(st.text(
-        alphabet=st.characters(whitelist_categories=("L", "N")),
-        min_size=1,
-        max_size=15,
-    ))
-    node_name = draw(st.text(
-        alphabet=st.characters(whitelist_categories=("L", "N")),
-        min_size=1,
-        max_size=15,
-    ))
+    node_type = draw(
+        st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")),
+            min_size=1,
+            max_size=15,
+        )
+    )
+    node_name = draw(
+        st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")),
+            min_size=1,
+            max_size=15,
+        )
+    )
     target_node_id = f"{node_type}:{node_name}"
     target_label = draw(st.text(max_size=30))
     # Optionally include a linked piece
@@ -96,7 +99,9 @@ def retrieval_result_strategy(draw):
     include_metadata = draw(st.booleans())
     include_global_metadata = draw(st.booleans())
     metadata = draw(entity_metadata_strategy()) if include_metadata else None
-    global_metadata = draw(entity_metadata_strategy()) if include_global_metadata else None
+    global_metadata = (
+        draw(entity_metadata_strategy()) if include_global_metadata else None
+    )
     pieces = draw(st.lists(scored_piece_strategy(), max_size=8))
     graph_context = draw(st.lists(graph_context_entry_strategy(), max_size=5))
 
@@ -223,7 +228,9 @@ class TestFormatterOutputDeterminism:
             "Shuffled piece order produced different output"
         )
 
-    @given(graph_context=st.lists(graph_context_entry_strategy(), min_size=2, max_size=8))
+    @given(
+        graph_context=st.lists(graph_context_entry_strategy(), min_size=2, max_size=8)
+    )
     @settings(max_examples=200)
     def test_graph_context_permutation_produces_same_output(self, graph_context):
         """Formatting graph_context in any permutation produces the same output string.

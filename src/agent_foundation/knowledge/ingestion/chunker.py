@@ -200,9 +200,7 @@ class MarkdownChunker:
             """Build header context string from stack."""
             if not header_stack:
                 return ""
-            return " > ".join(
-                f"{'#' * level} {text}" for level, text in header_stack
-            )
+            return " > ".join(f"{'#' * level} {text}" for level, text in header_stack)
 
         def flush_chunk(chunk_start: int, chunk_end: int) -> None:
             """Save current chunk if non-empty."""
@@ -245,7 +243,10 @@ class MarkdownChunker:
             separator_len = 2 if current_chunk_parts else 0
 
             # If adding this section would exceed max, flush first
-            if current_len + separator_len + section_len > self.config.max_chars and current_len > 0:
+            if (
+                current_len + separator_len + section_len > self.config.max_chars
+                and current_len > 0
+            ):
                 flush_chunk(current_start, current_end)
                 current_start = start_line
                 separator_len = 0
@@ -322,7 +323,10 @@ class MarkdownChunker:
             separator_len = 2 if current_parts else 0
 
             # If adding would exceed max, flush first
-            if current_len + separator_len + para_len > self.config.max_chars and current_len > 0:
+            if (
+                current_len + separator_len + para_len > self.config.max_chars
+                and current_len > 0
+            ):
                 chunk_lines = sum(p.count("\n") + 1 for p in current_parts)
                 chunks.append(
                     (

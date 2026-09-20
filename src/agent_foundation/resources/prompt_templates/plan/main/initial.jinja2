@@ -13,9 +13,10 @@ You are tasked with creating artifacts (e.g., plan, document, design, etc.) base
 
 {% if task_instructions %}
 ## Your Task
-{{ task_instructions }}
 
+{{ task_instructions }}
 {% endif %}
+
 ## Quality & Size Guidelines
 
 - **You MUST perform a relevant, detailed and evidence-based analysis** before producing the final artifact:
@@ -30,20 +31,18 @@ However,
 
 ## Output Requirements
 
-- Write your **complete artifact** following any user-requested format to: `{{ output_path }}`
+- Write your **complete artifact** to: `{{ output_path }}`, following the output-related requirements (e.g., on content, structure or format or other aspects) in UserRequest and the task instructions.
 - The artifact should be human readable and structured with details, that another human or agent could follow or act on later.
 
 ## Response Format
 
 In addition to above output, YOU MUST generate a **concise summary** (NOT the full artifact) wrapped in `<Response>` tags:
 
-**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used, which may cause downstream failures.
 
 <ResponseSchema>
 [Your concise natural language summary of what you have investigated and produced. Do NOT repeat the full artifact here — it is already in the file above.]
-{% if task_response_format %}
 {{ task_response_format }}
-{% endif %}
 </ResponseSchema>
 
 (Use literal `<Response>` and `</Response>` in your actual reply — `<ResponseSchema>` is just the example container.)

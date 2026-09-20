@@ -35,19 +35,14 @@ def _mock_inferencer():
 
 
 class TestAcceptableAndBlockingSeverities(unittest.TestCase):
-
     def test_default_cosmetic_threshold(self):
         config = ConsensusConfig()
         self.assertEqual(config.acceptable_severities(), ("NONE", "COSMETIC"))
-        self.assertEqual(
-            config.blocking_severities(), ("MINOR", "MAJOR", "CRITICAL")
-        )
+        self.assertEqual(config.blocking_severities(), ("MINOR", "MAJOR", "CRITICAL"))
 
     def test_minor_threshold(self):
         config = ConsensusConfig(consensus_threshold="MINOR")
-        self.assertEqual(
-            config.acceptable_severities(), ("NONE", "COSMETIC", "MINOR")
-        )
+        self.assertEqual(config.acceptable_severities(), ("NONE", "COSMETIC", "MINOR"))
         self.assertEqual(config.blocking_severities(), ("MAJOR", "CRITICAL"))
 
     def test_major_threshold(self):
@@ -95,9 +90,7 @@ class TestApproveHint(unittest.TestCase):
 
     def test_minor_uses_blocking_list(self):
         config = ConsensusConfig(consensus_threshold="MINOR")
-        self.assertEqual(
-            config.approve_hint(), "true if no MAJOR/CRITICAL issues"
-        )
+        self.assertEqual(config.approve_hint(), "true if no MAJOR/CRITICAL issues")
 
     def test_major_uses_blocking_list(self):
         config = ConsensusConfig(consensus_threshold="MAJOR")
@@ -112,9 +105,7 @@ class TestApproveHint(unittest.TestCase):
 
     def test_none_threshold_tie_uses_acceptable(self):
         config = ConsensusConfig(consensus_threshold="NONE")
-        self.assertEqual(
-            config.approve_hint(), "true if only observing NONE issues"
-        )
+        self.assertEqual(config.approve_hint(), "true if only observing NONE issues")
 
     def test_custom_levels_blocking_shorter(self):
         config = ConsensusConfig(
@@ -125,7 +116,6 @@ class TestApproveHint(unittest.TestCase):
 
 
 class TestApprovalGuidance(unittest.TestCase):
-
     def test_cosmetic_threshold(self):
         guidance = ConsensusConfig().approval_guidance()
         self.assertIn("at most COSMETIC severity", guidance)
@@ -134,17 +124,13 @@ class TestApprovalGuidance(unittest.TestCase):
         self.assertIn("must NOT approve", guidance)
 
     def test_minor_threshold(self):
-        guidance = ConsensusConfig(
-            consensus_threshold="MINOR"
-        ).approval_guidance()
+        guidance = ConsensusConfig(consensus_threshold="MINOR").approval_guidance()
         self.assertIn("at most MINOR severity", guidance)
         self.assertIn("NONE or COSMETIC or MINOR", guidance)
         self.assertIn("MAJOR, CRITICAL", guidance)
 
     def test_critical_threshold_no_restrictions(self):
-        guidance = ConsensusConfig(
-            consensus_threshold="CRITICAL"
-        ).approval_guidance()
+        guidance = ConsensusConfig(consensus_threshold="CRITICAL").approval_guidance()
         self.assertIn("no severity restrictions", guidance)
 
 
@@ -154,16 +140,13 @@ class TestApprovalGuidance(unittest.TestCase):
 
 
 class TestReviewFeedContainsThresholdStrings(unittest.TestCase):
-
     def test_default_threshold(self):
         dual = DualInferencer(
             base_inferencer=_mock_inferencer(),
             review_inferencer=_mock_inferencer(),
             consensus_config=ConsensusConfig(consensus_threshold="COSMETIC"),
         )
-        feed = dual._build_review_feed(
-            "input", "proposal", None, inference_config={}
-        )
+        feed = dual._build_review_feed("input", "proposal", None, inference_config={})
         self.assertEqual(feed["consensus_threshold"], "COSMETIC")
         self.assertIn("NONE/COSMETIC", feed["approve_hint"])
         self.assertIn("at most COSMETIC", feed["approval_guidance"])
@@ -195,16 +178,13 @@ class TestReviewFeedContainsThresholdStrings(unittest.TestCase):
 
 
 class TestFollowupFeedContainsThresholdStrings(unittest.TestCase):
-
     def test_followup_feed_has_threshold_keys(self):
         dual = DualInferencer(
             base_inferencer=_mock_inferencer(),
             review_inferencer=_mock_inferencer(),
             consensus_config=ConsensusConfig(consensus_threshold="COSMETIC"),
         )
-        feed = dual._build_followup_feed(
-            "input", "proposal", {"issues": []}, {}
-        )
+        feed = dual._build_followup_feed("input", "proposal", {"issues": []}, {})
         self.assertEqual(feed["consensus_threshold"], "COSMETIC")
         self.assertIn("approve_hint", feed)
         self.assertIn("approval_guidance", feed)
@@ -267,9 +247,7 @@ def _render_review_template(root_space: str, feed: dict) -> str:
 
 def _minimal_review_feed(root_space: str, **overrides) -> dict:
     """Build the minimum feed dict needed to render a review template."""
-    config = overrides.pop(
-        "_config", ConsensusConfig(consensus_threshold="COSMETIC")
-    )
+    config = overrides.pop("_config", ConsensusConfig(consensus_threshold="COSMETIC"))
     base = {
         "main_response": "The implementation report placeholder.",
         "prior_output_path": "",
@@ -340,9 +318,7 @@ class TestReviewTemplateRendersThresholdGuidance(unittest.TestCase):
 
     def test_implementation_review_minor_threshold(self):
         config = ConsensusConfig(consensus_threshold="MINOR")
-        rendered = self._assert_rendered_contains_threshold(
-            "implementation", config
-        )
+        rendered = self._assert_rendered_contains_threshold("implementation", config)
         self.assertIn("MAJOR/CRITICAL", rendered)
         self.assertIn("at most MINOR", rendered)
 
@@ -416,12 +392,19 @@ class TestLegacyRenderPathThresholdInjection(unittest.TestCase):
 def _make_approved_review_json():
     """Return a review JSON string that approves immediately."""
     import json
-    return "```json\n" + json.dumps({
-        "approve": True,
-        "overall_severity": "NONE",
-        "issues": [],
-        "reasoning": "Looks good.",
-    }) + "\n```"
+
+    return (
+        "```json\n"
+        + json.dumps(
+            {
+                "approve": True,
+                "overall_severity": "NONE",
+                "issues": [],
+                "reasoning": "Looks good.",
+            }
+        )
+        + "\n```"
+    )
 
 
 def _make_mock_inferencer_for_e2e(response):
@@ -444,6 +427,7 @@ class TestEndToEndReviewPathNoNameError(unittest.TestCase):
 
     def _run(self, coro):
         import asyncio
+
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(coro)

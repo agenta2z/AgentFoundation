@@ -55,6 +55,7 @@ def _prepare_env():
 
 # -- Demo 1: Async single call (ainfer) --------------------------------------
 
+
 async def demo_async_single(query: str, target_path: str) -> None:
     """Async context manager + ainfer: full response at once."""
     print("=" * 70)
@@ -69,7 +70,9 @@ async def demo_async_single(query: str, target_path: str) -> None:
 
     start = time.time()
 
-    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(
+        target_path=target_path, allowed_tools=[]
+    ) as inf:
         result = await inf.ainfer(query)
 
     elapsed = time.time() - start
@@ -84,6 +87,7 @@ async def demo_async_single(query: str, target_path: str) -> None:
 
 
 # -- Demo 2: Async streaming (ainfer_streaming) -------------------------------
+
 
 async def demo_async_streaming(query: str, target_path: str) -> None:
     """Async streaming: prints text chunk-by-chunk as Claude generates."""
@@ -105,7 +109,9 @@ async def demo_async_streaming(query: str, target_path: str) -> None:
     print("Response (streaming):")
     print("-" * 60)
 
-    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(
+        target_path=target_path, allowed_tools=[]
+    ) as inf:
         async for chunk in inf.ainfer_streaming(query):
             if first_chunk_time is None:
                 first_chunk_time = time.time()
@@ -127,6 +133,7 @@ async def demo_async_streaming(query: str, target_path: str) -> None:
 
 # -- Demo 3: SDKInferencerResponse -------------------------------------------
 
+
 async def demo_sdk_response(query: str, target_path: str) -> None:
     """SDKInferencerResponse: structured result with metadata."""
     print("=" * 70)
@@ -141,13 +148,17 @@ async def demo_sdk_response(query: str, target_path: str) -> None:
 
     start = time.time()
 
-    async with ClaudeCodeSdkInferencer(target_path=target_path, allowed_tools=[]) as inf:
+    async with ClaudeCodeSdkInferencer(
+        target_path=target_path, allowed_tools=[]
+    ) as inf:
         response = await inf.ainfer(query, return_sdk_response=True)
 
     elapsed = time.time() - start
 
     print(f"Type:       {type(response).__name__}")
-    print(f"Content:    {response.content[:200]}{'...' if len(response.content) > 200 else ''}")
+    print(
+        f"Content:    {response.content[:200]}{'...' if len(response.content) > 200 else ''}"
+    )
     print(f"Session ID: {response.session_id}")
     print(f"Tool uses:  {response.tool_uses}")
     print(f"str():      {str(response)[:80]}...")
@@ -155,11 +166,14 @@ async def demo_sdk_response(query: str, target_path: str) -> None:
     print()
     print("NOTE: SDKInferencerResponse.content returns the full text.")
     print("      str(response) also returns the text (for DualInferencer compat).")
-    print("      session_id + tool_uses provide metadata not available in plain ainfer().")
+    print(
+        "      session_id + tool_uses provide metadata not available in plain ainfer()."
+    )
     print()
 
 
 # -- Demo 4: Sync bridge (_infer) --------------------------------------------
+
 
 def demo_sync_single(query: str, target_path: str) -> None:
     """Sync _infer bridge: for non-async code (pays reconnect cost per call)."""
@@ -194,22 +208,26 @@ def demo_sync_single(query: str, target_path: str) -> None:
 
 # -- Main ---------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Claude Code SDK Inferencer -- Streaming & Modes Demo"
     )
     parser.add_argument(
-        "-q", "--query",
+        "-q",
+        "--query",
         default="Explain what a Python decorator is in 2 bullet points.",
         help="Query to send to Claude",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default=os.path.expanduser("~"),
         help="Working directory for Claude Code agent (default: home dir)",
     )
     parser.add_argument(
-        "-e", "--examples",
+        "-e",
+        "--examples",
         type=int,
         default=4,
         choices=[1, 2, 3, 4],

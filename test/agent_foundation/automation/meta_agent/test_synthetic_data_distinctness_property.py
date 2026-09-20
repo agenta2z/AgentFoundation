@@ -11,11 +11,8 @@ SHALL all be pairwise distinct (no two sets are equal).
 
 from typing import Any, Dict, List
 
+from agent_foundation.automation.meta_agent.synthetic_data import SyntheticDataProvider
 from hypothesis import given, settings, strategies as st
-
-from agent_foundation.automation.meta_agent.synthetic_data import (
-    SyntheticDataProvider,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +70,7 @@ class TestSyntheticDataDistinctnessProperty:
         provider = SyntheticDataProvider(parameter_schema=schema)
         result = provider.generate(n)
 
-        assert len(result) == n, (
-            f"Expected {n} data sets, got {len(result)}"
-        )
+        assert len(result) == n, f"Expected {n} data sets, got {len(result)}"
 
         keys = [_dict_key(item) for item in result]
         assert len(set(keys)) == n, (
@@ -90,6 +85,7 @@ class TestSyntheticDataDistinctnessProperty:
         For any N >= 2, a custom generator that returns distinct data
         passes through correctly.
         """
+
         def distinct_gen(count: int) -> List[Dict[str, Any]]:
             return [{"id": i, "value": f"item_{i}"} for i in range(count)]
 
@@ -98,15 +94,11 @@ class TestSyntheticDataDistinctnessProperty:
 
         assert len(result) == n
         keys = [_dict_key(item) for item in result]
-        assert len(set(keys)) == n, (
-            f"Custom generator should produce {n} distinct sets"
-        )
+        assert len(set(keys)) == n, f"Custom generator should produce {n} distinct sets"
 
     @given(schema=parameter_schema_st, n=count_st)
     @settings(max_examples=100)
-    def test_pairwise_no_two_equal(
-        self, schema: Dict[str, str], n: int
-    ):
+    def test_pairwise_no_two_equal(self, schema: Dict[str, str], n: int):
         """
         Explicit pairwise check: for any i != j, result[i] != result[j].
         """

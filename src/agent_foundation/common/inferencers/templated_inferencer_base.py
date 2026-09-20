@@ -72,12 +72,11 @@ import functools
 import os
 from typing import Any, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
     TEMPLATE_EXTRA_FEED_ATTR,
 )
+from attr import attrib, attrs
 
 
 def _deep_merge_into(target: dict, source: dict) -> None:
@@ -201,6 +200,15 @@ class TemplatedInferencerBase(InferencerBase):
     # YAML topology when specific runs need different behavior.
     modes: dict = attrib(factory=lambda: {"deep_mode": True, "elegant_mode": True})
 
+    # Snapshot of the ``task_instructions`` THIS leaf actually rendered, recorded at
+    # its own render by ``_capture_rendered_task_instructions``. Orchestrators relay
+    # the *proposer's* snapshot into reviewer/fixer reference blocks verbatim, so
+    # ``<OriginalTaskInstructions>`` shows what the author was really told instead of
+    # a per-leaf re-render bound to the consumer's own context (see
+    # ``DualInferencer._representative_proposer``). ``init=False``: runtime state,
+    # never a constructor arg, never serialized.
+    _last_rendered_task_instructions: str = attrib(default="", init=False)
+
     # ------------------------------------------------------------------
     # Template feed construction
     # ------------------------------------------------------------------
@@ -256,13 +264,16 @@ class TemplatedInferencerBase(InferencerBase):
         for mode_name, enabled in (self.modes or {}).items():
             feed[f"enable_{mode_name}"] = bool(enabled)
             if enabled:
-                effective_specs.setdefault(
-                    f"instructions.modes.{mode_name}", None
-                )
+                effective_specs.setdefault(f"instructions.modes.{mode_name}", None)
 
-        if effective_specs and self.template_manager and hasattr(self.template_manager, "load_variables"):
+        rendering_manager = self._rendering_manager()
+        if (
+            effective_specs
+            and rendering_manager
+            and hasattr(rendering_manager, "load_variables")
+        ):
             try:
-                resolved = self.template_manager.load_variables(
+                resolved = rendering_manager.load_variables(
                     variable_specs=effective_specs,
                     root_space=self.template_root_space or "",
                     default_version=self.template_version or "",
@@ -270,6 +281,7 @@ class TemplatedInferencerBase(InferencerBase):
                 )
             except FileNotFoundError as e:
                 import logging
+
                 logging.getLogger(__name__).debug(
                     "Variable not found, degrading gracefully: %s", e
                 )
@@ -330,6 +342,33 @@ class TemplatedInferencerBase(InferencerBase):
         """
         return self.template_manager is not None
 
+    def _rendering_manager(self) -> Optional[Any]:
+        """Render-time ``TemplateManager`` with this inferencer's variable
+        extensions applied.
+
+        Derived LAZILY on first render (never in ``__attrs_post_init__``) and
+        memoized: only after every post-init has finished adding template roots
+        (e.g. ``StreamingInferencerBase`` appends its recovery root there) does
+        the fork snapshot the fully-built manager. Returns the shared
+        ``template_manager`` unchanged -- byte-identical rendering -- when the
+        master switch is off, when no ``prompt_templates/_variables`` root is
+        discovered for this class, or when no manager is configured.
+        """
+        if self._extension_manager_cache is not None:
+            return self._extension_manager_cache
+        tm = self.template_manager
+        roots = (
+            type(self)._discover_inferencer_variable_roots()
+            if tm is not None and self.enable_inferencer_variable_expansion
+            else []
+        )
+        if roots:
+            skip_keys = self._inferencer_variable_skip_keys()
+            self._warn_unknown_override_keys(roots, skip_keys)
+            tm = tm.with_variable_extensions(roots, disabled_keys=skip_keys)
+        self._extension_manager_cache = tm
+        return self._extension_manager_cache
+
     def _render_prompt(
         self,
         inference_input: Any,
@@ -383,20 +422,93 @@ class TemplatedInferencerBase(InferencerBase):
                 f"inherit from InferencerBase, not TemplatedInferencerBase."
             )
         feed = self._build_template_feed(inference_input, extra_feed=extra_feed)
-        return self.template_manager(
+        self._capture_rendered_task_instructions(feed, eff_root, eff_master)
+        return self._rendering_manager()(
             eff_key,
             active_template_root_space=eff_root,
             master_version=eff_master,
             **feed,
         )
 
+    def _capture_rendered_task_instructions(
+        self, feed: dict, eff_root: Optional[str], eff_master: Optional[str]
+    ) -> None:
+        """Record the fully-resolved ``task_instructions`` THIS leaf just rendered.
+
+        ``task_instructions`` is a predefined variable RE-RESOLVED per leaf, and some
+        variants embed actor-scoped placeholders (e.g. ``{{ output_path }}``,
+        ``{% if separate_proposal_files %}``). A downstream consumer that re-renders
+        it binds those to ITSELF — which is how a reviewer's
+        ``<OriginalTaskInstructions>`` came to quote the reviewer's own output path,
+        an instruction no author ever received. Recording the value here lets the
+        orchestrator relay the *author's* text verbatim instead (see
+        ``DualInferencer._representative_proposer``).
+
+        Must run at the leaf's OWN render: ``output_path``/``workspace_outputs``
+        resolve through the ACTIVE run-context's workspace, and only during this
+        render is that this leaf's workspace. Best-effort — on any failure the
+        snapshot stays "" and the consumer simply omits the reference block.
+        """
+        from agent_foundation.common.inferencers.template_constants import (
+            VAR_TASK_INSTRUCTIONS,
+        )
+
+        tm = self._rendering_manager()
+        if tm is None:
+            return
+        try:
+            raw = feed.get(VAR_TASK_INSTRUCTIONS)
+            if not raw and hasattr(tm, "load_variables"):
+                # Not pre-placed in the feed — this leaf lets ``__call__``
+                # auto-discover the variable. Reproduce that selection with the
+                # public loader, most-specific first: an explicitly declared variant,
+                # then the master_version (which names the sub-directory holding the
+                # variant, and doubles as the version selector), then the generic
+                # default. Mirrors how the tool config itself pins a variant
+                # (``template_variables.task_instructions: research_propose``).
+                _declared = (self.template_variables or {}).get(VAR_TASK_INSTRUCTIONS)
+                for _selector in (_declared, eff_master, None):
+                    _loaded = tm.load_variables(
+                        variable_specs={VAR_TASK_INSTRUCTIONS: _selector},
+                        root_space=eff_root or "",
+                        default_version=self.template_version or "",
+                        master_version=eff_master,
+                    )
+                    raw = (_loaded or {}).get(VAR_TASK_INSTRUCTIONS)
+                    if raw:
+                        break
+            if not isinstance(raw, str) or not raw.strip():
+                return
+            rendered = raw
+            if ("{{" in raw or "{%" in raw) and hasattr(tm, "_resolve_templated_feed"):
+                # The same seam ``TemplateManager.__call__`` uses, so the snapshot
+                # matches what this render actually emitted.
+                rendered = tm._resolve_templated_feed(
+                    {**feed, VAR_TASK_INSTRUCTIONS: raw},
+                    root_space=eff_root or "",
+                ).get(VAR_TASK_INSTRUCTIONS)
+            # Brace-free invariant: an unresolved placeholder would be re-rendered
+            # against the CONSUMER's feed downstream — exactly the leak this prevents.
+            if not rendered or "{{" in rendered or "{%" in rendered:
+                return
+            self._last_rendered_task_instructions = rendered
+        except Exception as exc:  # best-effort snapshot; never break the render
+            self.log_debug(
+                f"task_instructions snapshot skipped: {type(exc).__name__}: {exc}",
+                "TaskInstructionsSnapshot",
+            )
+
+    def _proposer_task_instructions(self) -> str:
+        """A templated leaf IS an author: report the contract it rendered itself."""
+        return self._last_rendered_task_instructions or ""
+
     def _effective_role(self):
         """M7: (template_key, template_root_space, template_master_version) —
         from the active context's RoleState when set, else the instance fields.
         Byte-identical without a context (returns the instance values)."""
         from agent_foundation.common.inferencers.run_context import (
-            RoleState,
             active_run_context,
+            RoleState,
         )
 
         key = self.template_key
@@ -435,7 +547,8 @@ class TemplatedInferencerBase(InferencerBase):
         # Propagate template_extra_feed (the original behavior).
         if self.template_extra_feed:
             self._propagate_dict_attr_to_children(
-                self.template_extra_feed, TEMPLATE_EXTRA_FEED_ATTR,
+                self.template_extra_feed,
+                TEMPLATE_EXTRA_FEED_ATTR,
             )
         # Propagate modes — same merge semantics so a parent topology can
         # set `modes: {deep_mode: true}` once and have it cascade to every
@@ -449,6 +562,7 @@ class TemplatedInferencerBase(InferencerBase):
         Children without this attribute are skipped (they can't receive it).
         Partials get merged kwargs.
         """
+
         def _on_instance(child, field_name, key):
             existing = getattr(child, attr_name, None)
             if existing is None:
@@ -458,9 +572,7 @@ class TemplatedInferencerBase(InferencerBase):
         def _on_partial(p, field_name, key):
             existing = p.keywords.get(attr_name, {})
             merged = {**existing, **source}
-            return functools.partial(
-                p.func, **{**p.keywords, attr_name: merged}
-            )
+            return functools.partial(p.func, **{**p.keywords, attr_name: merged})
 
         self._for_each_child_inferencer(_on_instance, _on_partial)
 
@@ -469,15 +581,28 @@ class TemplatedInferencerBase(InferencerBase):
     # ------------------------------------------------------------------
 
     _ROLE_RELEVANT_ATTRS = InferencerBase._ROLE_RELEVANT_ATTRS + (
-        "template_key", "template_root_space", "template_extra_feed",
-        "template_variables", "template_version", "template_master_version",
+        "template_key",
+        "template_root_space",
+        "template_extra_feed",
+        "template_variables",
+        "template_version",
+        "template_master_version",
         "modes",
     )
 
-    def switch_role(self, new_role, *, template_key=None, template_root_space=None,
-                    template_extra_feed=None, template_variables=None,
-                    template_version=None, template_master_version=None,
-                    modes=None, **base_kwargs):
+    def switch_role(
+        self,
+        new_role,
+        *,
+        template_key=None,
+        template_root_space=None,
+        template_extra_feed=None,
+        template_variables=None,
+        template_version=None,
+        template_master_version=None,
+        modes=None,
+        **base_kwargs,
+    ):
         """Template-aware role switch: apply template attrs BEFORE the base
         layer's workspace + session reset, so the new template state is in
         place when the inferencer next renders.
@@ -488,16 +613,19 @@ class TemplatedInferencerBase(InferencerBase):
         All remaining ``**base_kwargs`` are forwarded to
         ``InferencerBase.switch_role()`` (workspace, deliverable flags, etc.).
         """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+        from agent_foundation.common.inferencers.run_context import active_run_context
 
         _ctx_active = active_run_context() is not None
         changes = {}
-        for attr, val in {"template_key": template_key, "template_root_space": template_root_space,
-                          "template_extra_feed": template_extra_feed, "template_variables": template_variables,
-                          "template_version": template_version, "template_master_version": template_master_version,
-                          "modes": modes}.items():
+        for attr, val in {
+            "template_key": template_key,
+            "template_root_space": template_root_space,
+            "template_extra_feed": template_extra_feed,
+            "template_variables": template_variables,
+            "template_version": template_version,
+            "template_master_version": template_master_version,
+            "modes": modes,
+        }.items():
             if val is not None:
                 # M7 read-flip: under a context, run-state (role) goes to the
                 # context node (recorded below) and NOT onto ``self`` — the
@@ -516,8 +644,8 @@ class TemplatedInferencerBase(InferencerBase):
     def _record_role_state(self, new_role, changes):
         """M7: mirror a role switch into ``ctx.node.call`` as a ``RoleState``."""
         from agent_foundation.common.inferencers.run_context import (
-            RoleState,
             active_run_context,
+            RoleState,
         )
 
         ctx = active_run_context()

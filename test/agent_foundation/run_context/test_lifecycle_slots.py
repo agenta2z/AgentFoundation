@@ -2,10 +2,14 @@
 
 import asyncio
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.run_context import RunContext, active_run_context, enter_run, exit_run
+from agent_foundation.common.inferencers.run_context import (
+    active_run_context,
+    enter_run,
+    exit_run,
+    RunContext,
+)
+from attr import attrib, attrs
 
 
 @attrs
@@ -37,9 +41,13 @@ def test_default_iter_child_slots_positional():
     @attrs
     class P(InferencerBase):
         c: _Child = attrib(factory=_Child)
-        def _infer(self, x, inference_config=None, **kw): return x
+
+        def _infer(self, x, inference_config=None, **kw):
+            return x
+
         def _iter_child_inferencers(self):
             yield self.c
+
     slots = list(P()._iter_child_slots())
     assert slots[0][0] == "child_0"
 

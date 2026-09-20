@@ -39,6 +39,7 @@ from .mock_inferencer import MockInferencer, SequentialMockInferencer
 # Mock factories (convenience wrappers)
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_inferencer(
     response: Union[str, Callable, List, None] = "mock response",
 ) -> MockInferencer:
@@ -54,6 +55,7 @@ def _make_sequential_mock(responses: List) -> SequentialMockInferencer:
 # ---------------------------------------------------------------------------
 # Flow inferencer factories — provide sensible test defaults
 # ---------------------------------------------------------------------------
+
 
 def _make_lwi(
     step_configs: Optional[List[WorkflowStepConfig]] = None,
@@ -72,7 +74,9 @@ def _make_lwi(
 
 def _make_dual(
     base_response: Union[str, Callable, List] = "base proposal",
-    review_response: Union[str, Callable, List] = "## Review\nSeverity: COSMETIC\nApproved: true",
+    review_response: Union[
+        str, Callable, List
+    ] = "## Review\nSeverity: COSMETIC\nApproved: true",
     fixer_response: Union[str, Callable, List, None] = None,
     consensus_config: Optional[ConsensusConfig] = None,
     base_inferencer: Optional[InferencerBase] = None,
@@ -200,7 +204,9 @@ def _make_bta(
     if aggregator_inferencer is None:
         aggregator_inferencer = _make_mock_inferencer(aggregator_response)
     if worker_inferencers is None:
-        worker_inferencers = _make_bta_worker_inferencer(worker_responses=worker_responses)
+        worker_inferencers = _make_bta_worker_inferencer(
+            worker_responses=worker_responses
+        )
 
     return BreakdownThenAggregateInferencer(
         breakdown_inferencer=breakdown_inferencer,

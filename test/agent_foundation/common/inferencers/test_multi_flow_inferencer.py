@@ -14,12 +14,11 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 
 # ---------------------------------------------------------------------------
@@ -197,17 +196,29 @@ class TestHeterogeneousFlows(unittest.TestCase):
         result = mfi.infer("go")
 
         # Each initial inferencer should have been called exactly once
-        self.assertEqual(inf_a_init._call_count[0], 1,
-                         "Flow A initial inferencer should be called once")
-        self.assertEqual(inf_b_init._call_count[0], 1,
-                         "Flow B initial inferencer should be called once")
+        self.assertEqual(
+            inf_a_init._call_count[0],
+            1,
+            "Flow A initial inferencer should be called once",
+        )
+        self.assertEqual(
+            inf_b_init._call_count[0],
+            1,
+            "Flow B initial inferencer should be called once",
+        )
 
         # Each followup inferencer should have been called exactly once
         # (2 steps total per flow: 1 initial + 1 followup)
-        self.assertEqual(inf_a_followup._call_count[0], 1,
-                         "Flow A followup inferencer should be called once")
-        self.assertEqual(inf_b_followup._call_count[0], 1,
-                         "Flow B followup inferencer should be called once")
+        self.assertEqual(
+            inf_a_followup._call_count[0],
+            1,
+            "Flow A followup inferencer should be called once",
+        )
+        self.assertEqual(
+            inf_b_followup._call_count[0],
+            1,
+            "Flow B followup inferencer should be called once",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -280,13 +291,15 @@ class TestMaxConcurrency(unittest.TestCase):
         flows = []
         for i in range(3):
             init = _make_sequential_inferencer([f"flow{i}_out"])
-            flows.append({
-                "input": f"task_{i}",
-                "initial_inferencer": init,
-                "followup_inferencer": init,
-                "end_condition": lambda s, r: True,
-                "max_dynamic_steps": 1,
-            })
+            flows.append(
+                {
+                    "input": f"task_{i}",
+                    "initial_inferencer": init,
+                    "followup_inferencer": init,
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                }
+            )
 
         mfi = MultiFlowInferencer(
             flow_configs=flows,
@@ -307,13 +320,15 @@ class TestMaxConcurrency(unittest.TestCase):
         flows = []
         for i in range(4):
             init = _make_sequential_inferencer([f"flow{i}_out"])
-            flows.append({
-                "input": f"task_{i}",
-                "initial_inferencer": init,
-                "followup_inferencer": init,
-                "end_condition": lambda s, r: True,
-                "max_dynamic_steps": 1,
-            })
+            flows.append(
+                {
+                    "input": f"task_{i}",
+                    "initial_inferencer": init,
+                    "followup_inferencer": init,
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                }
+            )
 
         mfi = MultiFlowInferencer(
             flow_configs=flows,
@@ -414,12 +429,18 @@ class TestInheritanceAndShape(unittest.TestCase):
 
     def test_predefined_sub_queries_derived_from_flow_configs(self):
         flows = [
-            {"input": "alpha",
-             "initial_inferencer": _make_sequential_inferencer(["x"]),
-             "max_dynamic_steps": 1, "end_condition": lambda s, r: True},
-            {"input": "beta",
-             "initial_inferencer": _make_sequential_inferencer(["y"]),
-             "max_dynamic_steps": 1, "end_condition": lambda s, r: True},
+            {
+                "input": "alpha",
+                "initial_inferencer": _make_sequential_inferencer(["x"]),
+                "max_dynamic_steps": 1,
+                "end_condition": lambda s, r: True,
+            },
+            {
+                "input": "beta",
+                "initial_inferencer": _make_sequential_inferencer(["y"]),
+                "max_dynamic_steps": 1,
+                "end_condition": lambda s, r: True,
+            },
         ]
         mfi = MultiFlowInferencer(
             flow_configs=flows,
@@ -437,17 +458,22 @@ class TestInheritanceAndShape(unittest.TestCase):
     def test_flow_config_missing_input_raises(self):
         with self.assertRaises(ValueError):
             MultiFlowInferencer(
-                flow_configs=[{"initial_inferencer": _make_sequential_inferencer(["x"])}],
+                flow_configs=[
+                    {"initial_inferencer": _make_sequential_inferencer(["x"])}
+                ],
             )
 
     def test_passing_predefined_sub_queries_directly_raises(self):
         with self.assertRaises(ValueError):
             MultiFlowInferencer(
-                flow_configs=[{
-                    "input": "q",
-                    "initial_inferencer": _make_sequential_inferencer(["x"]),
-                    "max_dynamic_steps": 1, "end_condition": lambda s, r: True,
-                }],
+                flow_configs=[
+                    {
+                        "input": "q",
+                        "initial_inferencer": _make_sequential_inferencer(["x"]),
+                        "max_dynamic_steps": 1,
+                        "end_condition": lambda s, r: True,
+                    }
+                ],
                 predefined_sub_queries=["override"],
             )
 
@@ -455,11 +481,14 @@ class TestInheritanceAndShape(unittest.TestCase):
         dummy = _make_sequential_inferencer(["bd"])
         with self.assertRaises(ValueError):
             MultiFlowInferencer(
-                flow_configs=[{
-                    "input": "q",
-                    "initial_inferencer": _make_sequential_inferencer(["x"]),
-                    "max_dynamic_steps": 1, "end_condition": lambda s, r: True,
-                }],
+                flow_configs=[
+                    {
+                        "input": "q",
+                        "initial_inferencer": _make_sequential_inferencer(["x"]),
+                        "max_dynamic_steps": 1,
+                        "end_condition": lambda s, r: True,
+                    }
+                ],
                 breakdown_inferencer=dummy,
             )
 
@@ -544,13 +573,16 @@ class TestCrossFlowVisibility(unittest.TestCase):
     def test_visible_self_no_other_plans_in_followup_prompt(self):
         tmpl = "your_prev={{ your_prev }} | visible_count={{ visible_plans|length }}"
         mfi, (_, f0_fu, _, f1_fu) = self._build_two_flow_mfi(
-            visible_flows="self", followup_template=tmpl,
+            visible_flows="self",
+            followup_template=tmpl,
         )
         mfi.infer("master")
         # Followup prompts should report 0 visible peers
         for fu in (f0_fu, f1_fu):
-            self.assertTrue(any("visible_count=0" in p for p in fu.received_prompts),
-                            f"expected visible_count=0 in {fu.received_prompts}")
+            self.assertTrue(
+                any("visible_count=0" in p for p in fu.received_prompts),
+                f"expected visible_count=0 in {fu.received_prompts}",
+            )
 
     def test_visible_all_includes_other_plans_in_followup_prompt(self):
         tmpl = (
@@ -561,7 +593,8 @@ class TestCrossFlowVisibility(unittest.TestCase):
             "{% endfor %}"
         )
         mfi, (_, f0_fu, _, f1_fu) = self._build_two_flow_mfi(
-            visible_flows="all", followup_template=tmpl,
+            visible_flows="all",
+            followup_template=tmpl,
         )
         mfi.infer("master")
         # Flow 0's followup prompt should include flow 1's latest output
@@ -579,13 +612,14 @@ class TestCrossFlowVisibility(unittest.TestCase):
     def test_visible_explicit_indices(self):
         tmpl = "{% for idx in visible_plans %}peer{{ idx }};{% endfor %}"
         mfi, (_, f0_fu, _, f1_fu) = self._build_two_flow_mfi(
-            visible_flows=[1], followup_template=tmpl,
+            visible_flows=[1],
+            followup_template=tmpl,
         )
         # Override per-flow: flow 1 sees nothing, flow 0 sees flow 1
         mfi.flow_configs[1]["visible_flows"] = []
         mfi = MultiFlowInferencer(
             flow_configs=mfi.flow_configs,
-            visible_flows="self",   # default class-level
+            visible_flows="self",  # default class-level
             disable_aggregator=True,
             checkpoint_dir=self.tmpdir,
         )
@@ -600,7 +634,7 @@ class TestCrossFlowVisibility(unittest.TestCase):
                 "initial_inferencer": _PromptCapturingInferencer(["p0"]),
                 "followup_inferencer": _PromptCapturingInferencer(["p0_fu"]),
                 "followup_prompt": tmpl,
-                "visible_flows": "all",     # override per-flow
+                "visible_flows": "all",  # override per-flow
                 "end_condition": lambda s, r: s.get("dynamic_step_count", 0) >= 2,
                 "max_dynamic_steps": 5,
             },
@@ -621,7 +655,7 @@ class TestCrossFlowVisibility(unittest.TestCase):
             checkpoint_dir=self.tmpdir,
         )
         self.assertEqual(mfi._resolve_flow_visibility(0), [0, 1])  # override → all
-        self.assertEqual(mfi._resolve_flow_visibility(1), [1])     # default → self
+        self.assertEqual(mfi._resolve_flow_visibility(1), [1])  # default → self
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +680,7 @@ class TestTemplateMachinery(unittest.TestCase):
                 def _infer(self, x, inference_config=None, **kw):
                     captured.append(str(x))
                     return "step1_result"
+
             return _Cap()
 
         mfi = MultiFlowInferencer(
@@ -691,7 +726,7 @@ class TestTemplateMachinery(unittest.TestCase):
                     "input": "task",
                     "initial_inferencer": _make_sequential_inferencer(["init"]),
                     "followup_inferencer": _Cap(),
-                    "dynamic_input_builder": my_builder,   # takes precedence
+                    "dynamic_input_builder": my_builder,  # takes precedence
                     "followup_prompt": _TEST_FOLLOWUP_PROMPT,
                     "end_condition": lambda s, r: s.get("dynamic_step_count", 0) >= 2,
                     "max_dynamic_steps": 5,
@@ -821,16 +856,20 @@ class TestAggregatorIntegration(unittest.TestCase):
 
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0",
-                 "initial_inferencer": _make_sequential_inferencer(["p0"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True,
-                 "max_dynamic_steps": 1},
-                {"input": "t1",
-                 "initial_inferencer": _make_sequential_inferencer(["p1"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True,
-                 "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": _make_sequential_inferencer(["p0"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": _make_sequential_inferencer(["p1"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             aggregator_inferencer=_Agg(),
             response_parser=parse_finalplan,
@@ -867,9 +906,11 @@ class TestAggregatorIntegration(unittest.TestCase):
                 {
                     "input": "t0",
                     "initial_inferencer": _make_sequential_inferencer(
-                        [flow_outputs_with_judgment[0]]),
+                        [flow_outputs_with_judgment[0]]
+                    ),
                     "followup_inferencer": _make_sequential_inferencer(
-                        [flow_outputs_with_judgment[1]]),
+                        [flow_outputs_with_judgment[1]]
+                    ),
                     "followup_prompt": "v={{ your_prev }}",
                     "end_condition": lambda s, r: s.get("dynamic_step_count", 0) >= 2,
                     "max_dynamic_steps": 5,
@@ -885,7 +926,7 @@ class TestAggregatorIntegration(unittest.TestCase):
         # is parsed at the start of step 1 (when prev_result = step 0 output).
         # So we expect at least one entry in _all_judgments.
         self.assertEqual(len(mfi._all_judgments), 1)
-        self.assertEqual(mfi._all_judgments[0][0], 0)   # flow index
+        self.assertEqual(mfi._all_judgments[0][0], 0)  # flow index
         self.assertEqual(mfi._all_judgments[0][2], "flow_0")
         # And the aggregator prompt should mention the judgment summary.
         self.assertIn("flow_0", agg.last_input)
@@ -954,16 +995,20 @@ class TestBackwardCompat(unittest.TestCase):
         """Construct with only flow_configs + disable_aggregator. No
         visible_flows, no templates, no parsers."""
         flows = [
-            {"input": "a",
-             "initial_inferencer": _make_sequential_inferencer(["A"]),
-             "followup_inferencer": _make_sequential_inferencer([]),
-             "end_condition": lambda s, r: True,
-             "max_dynamic_steps": 1},
-            {"input": "b",
-             "initial_inferencer": _make_sequential_inferencer(["B"]),
-             "followup_inferencer": _make_sequential_inferencer([]),
-             "end_condition": lambda s, r: True,
-             "max_dynamic_steps": 1},
+            {
+                "input": "a",
+                "initial_inferencer": _make_sequential_inferencer(["A"]),
+                "followup_inferencer": _make_sequential_inferencer([]),
+                "end_condition": lambda s, r: True,
+                "max_dynamic_steps": 1,
+            },
+            {
+                "input": "b",
+                "initial_inferencer": _make_sequential_inferencer(["B"]),
+                "followup_inferencer": _make_sequential_inferencer([]),
+                "end_condition": lambda s, r: True,
+                "max_dynamic_steps": 1,
+            },
         ]
         mfi = MultiFlowInferencer(
             flow_configs=flows,
@@ -1011,28 +1056,32 @@ class TestRound7DispatchState(unittest.TestCase):
             def _infer(self, x, inference_config=None, **kw):
                 return self._output
 
-        return MultiFlowInferencer(
-            flow_configs=[
-                {
-                    "input": "t0",
-                    "initial_inferencer": flow0_init,
-                    "followup_inferencer": _make_sequential_inferencer([]),
-                    "end_condition": lambda s, r: True,
-                    "max_dynamic_steps": 1,
-                },
-                {
-                    "input": "t1",
-                    "initial_inferencer": flow1_init,
-                    "followup_inferencer": _make_sequential_inferencer([]),
-                    "end_condition": lambda s, r: True,
-                    "max_dynamic_steps": 1,
-                },
-            ],
-            aggregator_inferencer=_AggCap(agg_output),
-            aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
-            checkpoint_dir=self.tmpdir,
-            **mfi_kwargs,
-        ), flow0_init, flow1_init
+        return (
+            MultiFlowInferencer(
+                flow_configs=[
+                    {
+                        "input": "t0",
+                        "initial_inferencer": flow0_init,
+                        "followup_inferencer": _make_sequential_inferencer([]),
+                        "end_condition": lambda s, r: True,
+                        "max_dynamic_steps": 1,
+                    },
+                    {
+                        "input": "t1",
+                        "initial_inferencer": flow1_init,
+                        "followup_inferencer": _make_sequential_inferencer([]),
+                        "end_condition": lambda s, r: True,
+                        "max_dynamic_steps": 1,
+                    },
+                ],
+                aggregator_inferencer=_AggCap(agg_output),
+                aggregator_prompt=_TEST_AGGREGATOR_PROMPT,
+                checkpoint_dir=self.tmpdir,
+                **mfi_kwargs,
+            ),
+            flow0_init,
+            flow1_init,
+        )
 
     @staticmethod
     def _parse_winner_tag(s):
@@ -1110,12 +1159,20 @@ class TestRound7DispatchState(unittest.TestCase):
         flow1_init = _make_sequential_inferencer(["plan_1"])
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": flow0_init,
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": flow1_init,
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": flow0_init,
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": flow1_init,
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             disable_aggregator=True,
             checkpoint_dir=self.tmpdir,
@@ -1156,6 +1213,7 @@ class _TerminalResponseAgg(InferencerBase):
         from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
             TerminalInferencerResponse,
         )
+
         return TerminalInferencerResponse(output=self.output_text)
 
 
@@ -1165,6 +1223,7 @@ class TestPostMortemFixes(unittest.TestCase):
     @staticmethod
     def _parse_winner_tag(s):
         import re
+
         m = re.search(r"<Winner>\s*flow_(\d+)\s*</Winner>", str(s))
         return int(m.group(1)) if m else None
 
@@ -1186,12 +1245,20 @@ class TestPostMortemFixes(unittest.TestCase):
         shared_inf = _make_sequential_inferencer(["shared"])
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0", "initial_inferencer": f0_init,
-                 "followup_inferencer": shared_inf,
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1", "initial_inferencer": f1_init,
-                 "followup_inferencer": shared_inf,
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": f0_init,
+                    "followup_inferencer": shared_inf,
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": f1_init,
+                    "followup_inferencer": shared_inf,
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             aggregator_inferencer=agg,
             checkpoint_dir=self.tmpdir,
@@ -1212,14 +1279,20 @@ class TestPostMortemFixes(unittest.TestCase):
         """Sanity: aggregator output with valid Winner tag → winner_idx set."""
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0",
-                 "initial_inferencer": _make_sequential_inferencer(["p0"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1",
-                 "initial_inferencer": _make_sequential_inferencer(["p1"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": _make_sequential_inferencer(["p0"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": _make_sequential_inferencer(["p1"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             aggregator_inferencer=_FixedOutputAgg(
                 output="<FinalPlan>x</FinalPlan>\n<Winner>flow_0</Winner>"
@@ -1239,14 +1312,20 @@ class TestPostMortemFixes(unittest.TestCase):
         which dropped the response object in favor of the last worker's text)."""
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0",
-                 "initial_inferencer": _make_sequential_inferencer(["p0"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1",
-                 "initial_inferencer": _make_sequential_inferencer(["p1"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": _make_sequential_inferencer(["p0"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": _make_sequential_inferencer(["p1"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             aggregator_inferencer=_TerminalResponseAgg(
                 output_text="<FinalPlan>x</FinalPlan>\n<Winner>flow_0</Winner>"
@@ -1255,22 +1334,31 @@ class TestPostMortemFixes(unittest.TestCase):
             checkpoint_dir=self.tmpdir,
         )
         mfi.infer("master")
-        self.assertEqual(mfi.get_winner_flow_idx(), 0,
-                         f"winner_idx should be 0, got {mfi.get_winner_flow_idx()}")
+        self.assertEqual(
+            mfi.get_winner_flow_idx(),
+            0,
+            f"winner_idx should be 0, got {mfi.get_winner_flow_idx()}",
+        )
 
     def test_dispatch_state_resets_on_new_top_level_call(self):
         """Reset is once per top-level ainfer call. A second call's
         malformed output does NOT carry over winner from the first call."""
         mfi = MultiFlowInferencer(
             flow_configs=[
-                {"input": "t0",
-                 "initial_inferencer": _make_sequential_inferencer(["p0"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
-                {"input": "t1",
-                 "initial_inferencer": _make_sequential_inferencer(["p1"]),
-                 "followup_inferencer": _make_sequential_inferencer([]),
-                 "end_condition": lambda s, r: True, "max_dynamic_steps": 1},
+                {
+                    "input": "t0",
+                    "initial_inferencer": _make_sequential_inferencer(["p0"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
+                {
+                    "input": "t1",
+                    "initial_inferencer": _make_sequential_inferencer(["p1"]),
+                    "followup_inferencer": _make_sequential_inferencer([]),
+                    "end_condition": lambda s, r: True,
+                    "max_dynamic_steps": 1,
+                },
             ],
             aggregator_inferencer=_FixedOutputAgg(
                 output="<FinalPlan>x</FinalPlan>\n<Winner>flow_0</Winner>"

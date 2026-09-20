@@ -32,10 +32,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.hand
     HandlerResult,
     InferencerEffect,
 )
-from agent_foundation.common.ui.input_modes import (
-    InputMode,
-    InputModeConfig,
-)
+from agent_foundation.common.ui.input_modes import InputMode, InputModeConfig
 
 
 class ToolArgumentFormHandler(ConversationToolHandler):

@@ -62,28 +62,31 @@ _EXPECTED_DEVMATE_NAME: dict[str, str] = {
 # Subset of Devmate's ``ModelName`` enum values that we expect ``ClaudeModels``
 # to resolve to. The full enum has ~130 entries (Llama, GPT, Gemini, etc.) —
 # we only enumerate the Claude-family Plugboard values here.
-_DEVMATE_CLAUDE_NAMES: frozenset[str] = frozenset({
-    "claude3-haiku",
-    "claude3.5-haiku",
-    "claude-haiku-4.5",
-    "claude3.5-sonnet",
-    "claude3.7-sonnet",
-    "claude4-sonnet",
-    "claude-sonnet-4.5",
-    "claude-sonnet-4.6",
-    "claude-sonnet-4.6-1m",
-    "claude-opus-4.5",
-    "claude-opus-4.6",
-    "claude-opus-4.7",
-    "claude-opus-4.6-1m",
-    "claude-opus-4.7-1m",
-    "gcp-claude-4-opus",  # CLAUDE_4_OPUS_PLUGBOARD
-})
+_DEVMATE_CLAUDE_NAMES: frozenset[str] = frozenset(
+    {
+        "claude3-haiku",
+        "claude3.5-haiku",
+        "claude-haiku-4.5",
+        "claude3.5-sonnet",
+        "claude3.7-sonnet",
+        "claude4-sonnet",
+        "claude-sonnet-4.5",
+        "claude-sonnet-4.6",
+        "claude-sonnet-4.6-1m",
+        "claude-opus-4.5",
+        "claude-opus-4.6",
+        "claude-opus-4.7",
+        "claude-opus-4.6-1m",
+        "claude-opus-4.7-1m",
+        "gcp-claude-4-opus",  # CLAUDE_4_OPUS_PLUGBOARD
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Translation correctness
 # ---------------------------------------------------------------------------
+
 
 class ResolveModelTagClaudeModelsTest(unittest.TestCase):
     """Every ``ClaudeModels`` value resolves to a Devmate-valid name."""
@@ -107,7 +110,8 @@ class ResolveModelTagClaudeModelsTest(unittest.TestCase):
                 expected = _EXPECTED_DEVMATE_NAME[name]
                 actual = resolve_model_tag(raw)
                 self.assertEqual(
-                    actual, expected,
+                    actual,
+                    expected,
                     f"{name}: resolve_model_tag({raw!r}) returned {actual!r}, "
                     f"expected {expected!r}",
                 )
@@ -138,6 +142,7 @@ class ResolveModelTagClaudeModelsTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Precedence rule + integration with inferencer __attrs_post_init__
 # ---------------------------------------------------------------------------
+
 
 class DevmateCliInferencerModelIdTest(unittest.TestCase):
     """``model_id`` translation is applied in ``DevmateCliInferencer``."""
@@ -204,6 +209,7 @@ class DevmateSDKInferencerModelIdTest(unittest.TestCase):
 # Symmetric behavior between CLI and SDK
 # ---------------------------------------------------------------------------
 
+
 class CliAndSdkProduceSameModelNameTest(unittest.TestCase):
     """For every ``ClaudeModels`` value, CLI and SDK resolve to the same name."""
 
@@ -213,7 +219,8 @@ class CliAndSdkProduceSameModelNameTest(unittest.TestCase):
                 cli = DevmateCliInferencer(model_id=value)
                 sdk = DevmateSDKInferencer(model_id=value)
                 self.assertEqual(
-                    cli.model_name, sdk.model_name,
+                    cli.model_name,
+                    sdk.model_name,
                     f"CLI/SDK divergence for {name}: "
                     f"CLI={cli.model_name!r} SDK={sdk.model_name!r}",
                 )

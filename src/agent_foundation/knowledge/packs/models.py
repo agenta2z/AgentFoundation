@@ -10,12 +10,12 @@ The models follow the project's @attrs pattern for core data classes and
 """
 
 import uuid
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
-from attr import attrs, attrib
+from attr import attrib, attrs
 
 
 class PackStatus(StrEnum):

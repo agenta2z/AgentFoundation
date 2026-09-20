@@ -14,6 +14,7 @@ Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8,
               5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5,
               8.1, 8.2, 8.3, 9.1, 9.2
 """
+
 import json
 import logging
 import os
@@ -21,26 +22,26 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from attr import attrs, attrib
-
-from rich_python_utils.service_utils.data_operation_record import (
-    DataOperationRecord,
-    generate_operation_id,
-)
-from agent_foundation.knowledge.retrieval.models.kb_metadata import (
-    KnowledgeBaseMetadata,
-)
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
+)
+from agent_foundation.knowledge.retrieval.graph_walk import (
+    find_identity_seeds,
+    find_search_seeds,
+    graph_walk,
+    merge_graph_contexts,
 )
 from agent_foundation.knowledge.retrieval.hybrid_search import (
     HybridRetriever,
     HybridSearchConfig,
 )
 from agent_foundation.knowledge.retrieval.mmr_reranking import (
-    MMRConfig,
     apply_mmr_reranking,
+    MMRConfig,
+)
+from agent_foundation.knowledge.retrieval.models.kb_metadata import (
+    KnowledgeBaseMetadata,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
@@ -48,16 +49,15 @@ from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphSt
 from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from agent_foundation.knowledge.retrieval.temporal_decay import (
-    TemporalDecayConfig,
     apply_temporal_decay,
-)
-from agent_foundation.knowledge.retrieval.graph_walk import (
-    find_search_seeds,
-    find_identity_seeds,
-    graph_walk,
-    merge_graph_contexts,
+    TemporalDecayConfig,
 )
 from agent_foundation.knowledge.retrieval.utils import parse_entity_type
+from attr import attrib, attrs
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,9 @@ class KnowledgeBase:
     include_pieces: bool = attrib(default=True)
     include_graph: bool = attrib(default=True)
     graph_traversal_depth: int = attrib(default=1)
-    graph_retrieval_ignore_pieces_already_retrieved: Union[bool, Tuple[str, ...], List[str]] = attrib(default=False)
+    graph_retrieval_ignore_pieces_already_retrieved: Union[
+        bool, Tuple[str, ...], List[str]
+    ] = attrib(default=False)
 
     # Security
     sensitive_patterns: List[str] = attrib(
@@ -111,8 +113,6 @@ class KnowledgeBase:
 
     # Store path for KB-level metadata persistence
     store_path: Optional[str] = attrib(default=None)
-
-
 
     def __attrs_post_init__(self):
         if self.formatter is None:
@@ -178,9 +178,14 @@ class KnowledgeBase:
 
         Requirements: 8.1, 8.2, 8.3
         """
+        from agent_foundation.knowledge.retrieval.post_processors import (
+            FlatStringPostProcessor,
+        )
+
         # Deferred imports to avoid circular dependency
-        from agent_foundation.knowledge.retrieval.retrieval_pipeline import RetrievalPipeline
-        from agent_foundation.knowledge.retrieval.post_processors import FlatStringPostProcessor
+        from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+            RetrievalPipeline,
+        )
 
         pipeline = RetrievalPipeline(
             kb=self,
@@ -190,7 +195,6 @@ class KnowledgeBase:
         # Remove spaces from kwargs to avoid passing it twice to pipeline.execute
         kwargs.pop("spaces", None)
         return pipeline.execute(query, spaces=spaces, **kwargs)
-
 
     # ── Layer Methods ────────────────────────────────────────────────────
 
@@ -301,7 +305,8 @@ class KnowledgeBase:
                 if secondary_domains:
                     all_domains.update(secondary_domains)
                 filtered = [
-                    sp for sp in scored
+                    sp
+                    for sp in scored
                     if getattr(sp.piece, "domain", "general") in all_domains
                 ]
                 # Fall back to unfiltered if domain filter yields too few
@@ -330,7 +335,9 @@ class KnowledgeBase:
                 )
                 # Apply space post-filter to global pieces before merging
                 if spaces:
-                    global_scored = [sp for sp in global_scored if set(sp.piece.spaces) & set(spaces)]
+                    global_scored = [
+                        sp for sp in global_scored if set(sp.piece.spaces) & set(spaces)
+                    ]
                 global_pieces = [(sp.piece, sp.score) for sp in global_scored]
                 pieces = self._merge_scored_pieces(pieces, global_pieces, top_k)
 
@@ -396,9 +403,7 @@ class KnowledgeBase:
         if not self.include_graph:
             return []
 
-        search_seeds = find_search_seeds(
-            self.graph_store, query, top_k, spaces
-        )
+        search_seeds = find_search_seeds(self.graph_store, query, top_k, spaces)
         if not search_seeds:
             return []
 
@@ -439,9 +444,7 @@ class KnowledgeBase:
         if not self.include_graph:
             return []
 
-        identity_seeds = find_identity_seeds(
-            self.graph_store, entity_id, spaces
-        )
+        identity_seeds = find_identity_seeds(self.graph_store, entity_id, spaces)
         if not identity_seeds:
             return []
 
@@ -454,7 +457,6 @@ class KnowledgeBase:
             spaces,
             self.graph_retrieval_ignore_pieces_already_retrieved,
         )
-
 
     # ── Retrieval ────────────────────────────────────────────────────────
 
@@ -512,8 +514,15 @@ class KnowledgeBase:
         # L2: Knowledge pieces (skip for empty/whitespace queries)
         if query and query.strip() and self.include_pieces:
             result.pieces = self.retrieve_pieces(
-                query, entity_id, top_k, include_global,
-                domain, secondary_domains, tags, min_results, spaces,
+                query,
+                entity_id,
+                top_k,
+                include_global,
+                domain,
+                secondary_domains,
+                tags,
+                min_results,
+                spaces,
             )
 
         # Build dedup set from L2 pieces for graph walk
@@ -581,8 +590,7 @@ class KnowledgeBase:
         )
         if domain:
             pieces = [
-                (p, s) for p, s in pieces
-                if getattr(p, "domain", "general") == domain
+                (p, s) for p, s in pieces if getattr(p, "domain", "general") == domain
             ]
         if len(pieces) >= min_results:
             return pieces[:top_k]
@@ -595,7 +603,8 @@ class KnowledgeBase:
                 query, entity_id=entity_id, tags=tags, top_k=top_k, spaces=spaces
             )
             pieces = [
-                (p, s) for p, s in pieces
+                (p, s)
+                for p, s in pieces
                 if getattr(p, "domain", "general") in all_domains
             ]
             if len(pieces) >= min_results:
@@ -703,16 +712,8 @@ class KnowledgeBase:
         for piece, score in a + b:
             if piece.piece_id not in merged or score > merged[piece.piece_id][1]:
                 merged[piece.piece_id] = (piece, score)
-        sorted_pieces = sorted(
-            merged.values(), key=lambda x: (-x[1], x[0].piece_id)
-        )
+        sorted_pieces = sorted(merged.values(), key=lambda x: (-x[1], x[0].piece_id))
         return sorted_pieces[:top_k]
-
-
-
-
-
-
 
     # ── CRUD operations ──────────────────────────────────────────────────
 
@@ -740,14 +741,18 @@ class KnowledgeBase:
         self._validate_content(piece.content)
         now = datetime.now(timezone.utc).isoformat()
         op_id = operation_id or generate_operation_id("KnowledgeBase", "add_piece")
-        piece.history.append(DataOperationRecord(
-            operation="add",
-            timestamp=now,
-            operation_id=op_id,
-            source="KnowledgeBase.add_piece",
-        ))
+        piece.history.append(
+            DataOperationRecord(
+                operation="add",
+                timestamp=now,
+                operation_id=op_id,
+                source="KnowledgeBase.add_piece",
+            )
+        )
         result = self.piece_store.add(piece)
-        self._log_kb_operation(op_id, f"Added piece {piece.piece_id}", "KnowledgeBase.add_piece", 1)
+        self._log_kb_operation(
+            op_id, f"Added piece {piece.piece_id}", "KnowledgeBase.add_piece", 1
+        )
         return result
 
     def update_piece(
@@ -794,19 +799,30 @@ class KnowledgeBase:
             if old_val != new_val:
                 fields_changed[field_name] = {"before": old_val, "after": new_val}
 
-        piece.history.append(DataOperationRecord(
-            operation="update",
-            timestamp=now,
-            operation_id=op_id,
-            source="KnowledgeBase.update_piece",
-            content_before=existing.content if existing.content != piece.content else None,
-            content_after=piece.content if existing.content != piece.content else None,
-            fields_changed=fields_changed or None,
-        ))
+        piece.history.append(
+            DataOperationRecord(
+                operation="update",
+                timestamp=now,
+                operation_id=op_id,
+                source="KnowledgeBase.update_piece",
+                content_before=existing.content
+                if existing.content != piece.content
+                else None,
+                content_after=piece.content
+                if existing.content != piece.content
+                else None,
+                fields_changed=fields_changed or None,
+            )
+        )
         piece.updated_at = now
         result = self.piece_store.update(piece)
         if result:
-            self._log_kb_operation(op_id, f"Updated piece {piece.piece_id}", "KnowledgeBase.update_piece", 1)
+            self._log_kb_operation(
+                op_id,
+                f"Updated piece {piece.piece_id}",
+                "KnowledgeBase.update_piece",
+                1,
+            )
         return result
 
     def remove_piece(
@@ -832,8 +848,15 @@ class KnowledgeBase:
         if hard:
             result = self.piece_store.remove(piece_id)
             if result:
-                op_id = operation_id or generate_operation_id("KnowledgeBase", "hard_delete")
-                self._log_kb_operation(op_id, f"Hard-deleted piece {piece_id}", "KnowledgeBase.remove_piece", 1)
+                op_id = operation_id or generate_operation_id(
+                    "KnowledgeBase", "hard_delete"
+                )
+                self._log_kb_operation(
+                    op_id,
+                    f"Hard-deleted piece {piece_id}",
+                    "KnowledgeBase.remove_piece",
+                    1,
+                )
             return result
 
         # Soft delete
@@ -846,17 +869,21 @@ class KnowledgeBase:
         now = datetime.now(timezone.utc).isoformat()
         op_id = operation_id or generate_operation_id("KnowledgeBase", "delete_piece")
         piece.is_active = False
-        piece.history.append(DataOperationRecord(
-            operation="delete",
-            timestamp=now,
-            operation_id=op_id,
-            source="KnowledgeBase.remove_piece",
-            details={"delete_mode": "soft"},
-        ))
+        piece.history.append(
+            DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                source="KnowledgeBase.remove_piece",
+                details={"delete_mode": "soft"},
+            )
+        )
         piece.updated_at = now
         result = self.piece_store.update(piece)
         if result:
-            self._log_kb_operation(op_id, f"Soft-deleted piece {piece_id}", "KnowledgeBase.remove_piece", 1)
+            self._log_kb_operation(
+                op_id, f"Soft-deleted piece {piece_id}", "KnowledgeBase.remove_piece", 1
+            )
         return result
 
     # ── Bulk loading ─────────────────────────────────────────────────────
@@ -983,10 +1010,7 @@ class KnowledgeBase:
         """Return KB operation entries after the given timestamp."""
         if self._kb_metadata is None:
             return []
-        return [
-            op for op in self._kb_metadata.operations
-            if op.timestamp > timestamp
-        ]
+        return [op for op in self._kb_metadata.operations if op.timestamp > timestamp]
 
     def get_operation_by_id(self, operation_id: str):
         """Look up a KB operation entry by its operation_id."""
@@ -1023,16 +1047,17 @@ class KnowledgeBase:
         }
 
         # ── Pieces rollback ──────────────────────────────────────────
-        namespaces = list(self.piece_store.retrieval_service.namespaces()) if hasattr(self.piece_store, 'retrieval_service') else []
+        namespaces = (
+            list(self.piece_store.retrieval_service.namespaces())
+            if hasattr(self.piece_store, "retrieval_service")
+            else []
+        )
         namespaces.append(None)  # default namespace
 
         for ns in namespaces:
             pieces = self.piece_store.list_all(entity_id=ns)
             for piece in pieces:
-                records_after = [
-                    r for r in piece.history
-                    if r.timestamp > timestamp
-                ]
+                records_after = [r for r in piece.history if r.timestamp > timestamp]
                 if not records_after:
                     continue
 
@@ -1043,7 +1068,10 @@ class KnowledgeBase:
                     if record.operation_id:
                         result["operation_ids"].add(record.operation_id)
 
-                    if record.operation == "update" and record.content_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.content_before is not None
+                    ):
                         piece.content = record.content_before
                         piece.content_hash = piece._compute_content_hash()
                         changed = True
@@ -1060,22 +1088,21 @@ class KnowledgeBase:
                         changed = True
 
                 if changed:
-                    piece.history = [r for r in piece.history if r.timestamp <= timestamp]
+                    piece.history = [
+                        r for r in piece.history if r.timestamp <= timestamp
+                    ]
                     piece.updated_at = datetime.now(timezone.utc).isoformat()
                     self.piece_store.update(piece)
                     result["pieces"] += 1
 
         # ── Metadata rollback ────────────────────────────────────────
-        if hasattr(self.metadata_store, 'kv_service'):
+        if hasattr(self.metadata_store, "kv_service"):
             all_entity_ids = self.metadata_store.list_entities(include_inactive=True)
             for eid in all_entity_ids:
                 meta = self.metadata_store.get_metadata(eid, include_inactive=True)
                 if meta is None:
                     continue
-                records_after = [
-                    r for r in meta.history
-                    if r.timestamp > timestamp
-                ]
+                records_after = [r for r in meta.history if r.timestamp > timestamp]
                 if not records_after:
                     continue
 
@@ -1086,7 +1113,10 @@ class KnowledgeBase:
                     if record.operation_id:
                         result["operation_ids"].add(record.operation_id)
 
-                    if record.operation == "update" and record.properties_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.properties_before is not None
+                    ):
                         meta.properties = dict(record.properties_before)
                         changed = True
                     elif record.operation == "delete":
@@ -1095,7 +1125,9 @@ class KnowledgeBase:
                     elif record.operation == "add":
                         # Hard-remove metadata added after target
                         entity_type = parse_entity_type(eid)
-                        self.metadata_store.kv_service.delete(eid, namespace=entity_type)
+                        self.metadata_store.kv_service.delete(
+                            eid, namespace=entity_type
+                        )
                         result["metadata"] += 1
                         changed = False
                         break
@@ -1109,21 +1141,20 @@ class KnowledgeBase:
                     # Write directly to KV service to bypass adapter history tracking
                     entity_type = parse_entity_type(eid)
                     self.metadata_store.kv_service.put(
-                        eid, meta.to_dict(), namespace=entity_type,
+                        eid,
+                        meta.to_dict(),
+                        namespace=entity_type,
                     )
                     result["metadata"] += 1
 
         # ── Graph rollback (nodes then edges) ────────────────────────
-        if hasattr(self.graph_store, 'graph_service'):
+        if hasattr(self.graph_store, "graph_service"):
             gs = self.graph_store.graph_service
 
             # Phase 1: Rollback graph nodes
             all_nodes = gs.list_nodes()
             for node in all_nodes:
-                records_after = [
-                    r for r in node.history
-                    if r.timestamp > timestamp
-                ]
+                records_after = [r for r in node.history if r.timestamp > timestamp]
                 if not records_after:
                     continue
 
@@ -1134,7 +1165,10 @@ class KnowledgeBase:
                     if record.operation_id:
                         result["operation_ids"].add(record.operation_id)
 
-                    if record.operation == "update" and record.properties_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.properties_before is not None
+                    ):
                         node.properties = dict(record.properties_before)
                         changed = True
                     elif record.operation == "delete":
@@ -1166,10 +1200,7 @@ class KnowledgeBase:
                         continue
                     processed_edges.add(edge_key)
 
-                    records_after = [
-                        r for r in edge.history
-                        if r.timestamp > timestamp
-                    ]
+                    records_after = [r for r in edge.history if r.timestamp > timestamp]
                     if not records_after:
                         continue
 
@@ -1180,14 +1211,19 @@ class KnowledgeBase:
                         if record.operation_id:
                             result["operation_ids"].add(record.operation_id)
 
-                        if record.operation == "update" and record.properties_before is not None:
+                        if (
+                            record.operation == "update"
+                            and record.properties_before is not None
+                        ):
                             edge.properties = dict(record.properties_before)
                             changed = True
                         elif record.operation == "delete":
                             edge.is_active = True
                             changed = True
                         elif record.operation == "add":
-                            gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                            gs.remove_edge(
+                                edge.source_id, edge.target_id, edge.edge_type
+                            )
                             result["graph_edges"] += 1
                             changed = False
                             break
@@ -1196,12 +1232,19 @@ class KnowledgeBase:
                             changed = True
 
                     if changed:
-                        edge.history = [r for r in edge.history if r.timestamp <= timestamp]
+                        edge.history = [
+                            r for r in edge.history if r.timestamp <= timestamp
+                        ]
                         gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
                         gs.add_edge(edge)
                         result["graph_edges"] += 1
 
-        total = result["pieces"] + result["metadata"] + result["graph_nodes"] + result["graph_edges"]
+        total = (
+            result["pieces"]
+            + result["metadata"]
+            + result["graph_nodes"]
+            + result["graph_edges"]
+        )
         result["operation_ids"] = list(result["operation_ids"])
         self._log_kb_operation(
             op_id,
@@ -1228,16 +1271,17 @@ class KnowledgeBase:
         result = {"pieces": 0, "metadata": 0, "graph_nodes": 0, "graph_edges": 0}
 
         # ── Pieces ────────────────────────────────────────────────────
-        namespaces = list(self.piece_store.retrieval_service.namespaces()) if hasattr(self.piece_store, 'retrieval_service') else []
+        namespaces = (
+            list(self.piece_store.retrieval_service.namespaces())
+            if hasattr(self.piece_store, "retrieval_service")
+            else []
+        )
         namespaces.append(None)
 
         for ns in namespaces:
             pieces = self.piece_store.list_all(entity_id=ns)
             for piece in pieces:
-                matching = [
-                    r for r in piece.history
-                    if r.operation_id == operation_id
-                ]
+                matching = [r for r in piece.history if r.operation_id == operation_id]
                 if not matching:
                     continue
 
@@ -1245,7 +1289,10 @@ class KnowledgeBase:
 
                 changed = False
                 for record in matching:
-                    if record.operation == "update" and record.content_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.content_before is not None
+                    ):
                         piece.content = record.content_before
                         piece.content_hash = piece._compute_content_hash()
                         changed = True
@@ -1263,24 +1310,20 @@ class KnowledgeBase:
 
                 if changed:
                     piece.history = [
-                        r for r in piece.history
-                        if r.operation_id != operation_id
+                        r for r in piece.history if r.operation_id != operation_id
                     ]
                     piece.updated_at = datetime.now(timezone.utc).isoformat()
                     self.piece_store.update(piece)
                     result["pieces"] += 1
 
         # ── Metadata ──────────────────────────────────────────────────
-        if hasattr(self.metadata_store, 'kv_service'):
+        if hasattr(self.metadata_store, "kv_service"):
             all_entity_ids = self.metadata_store.list_entities(include_inactive=True)
             for eid in all_entity_ids:
                 meta = self.metadata_store.get_metadata(eid, include_inactive=True)
                 if meta is None:
                     continue
-                matching = [
-                    r for r in meta.history
-                    if r.operation_id == operation_id
-                ]
+                matching = [r for r in meta.history if r.operation_id == operation_id]
                 if not matching:
                     continue
 
@@ -1288,7 +1331,10 @@ class KnowledgeBase:
 
                 changed = False
                 for record in matching:
-                    if record.operation == "update" and record.properties_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.properties_before is not None
+                    ):
                         meta.properties = dict(record.properties_before)
                         changed = True
                     elif record.operation == "delete":
@@ -1296,7 +1342,9 @@ class KnowledgeBase:
                         changed = True
                     elif record.operation == "add":
                         entity_type = parse_entity_type(eid)
-                        self.metadata_store.kv_service.delete(eid, namespace=entity_type)
+                        self.metadata_store.kv_service.delete(
+                            eid, namespace=entity_type
+                        )
                         result["metadata"] += 1
                         changed = False
                         break
@@ -1306,27 +1354,25 @@ class KnowledgeBase:
 
                 if changed:
                     meta.history = [
-                        r for r in meta.history
-                        if r.operation_id != operation_id
+                        r for r in meta.history if r.operation_id != operation_id
                     ]
                     meta.updated_at = datetime.now(timezone.utc).isoformat()
                     entity_type = parse_entity_type(eid)
                     self.metadata_store.kv_service.put(
-                        eid, meta.to_dict(), namespace=entity_type,
+                        eid,
+                        meta.to_dict(),
+                        namespace=entity_type,
                     )
                     result["metadata"] += 1
 
         # ── Graph (nodes then edges) ─────────────────────────────────
-        if hasattr(self.graph_store, 'graph_service'):
+        if hasattr(self.graph_store, "graph_service"):
             gs = self.graph_store.graph_service
 
             # Phase 1: nodes
             all_nodes = gs.list_nodes()
             for node in all_nodes:
-                matching = [
-                    r for r in node.history
-                    if r.operation_id == operation_id
-                ]
+                matching = [r for r in node.history if r.operation_id == operation_id]
                 if not matching:
                     continue
 
@@ -1334,7 +1380,10 @@ class KnowledgeBase:
 
                 changed = False
                 for record in matching:
-                    if record.operation == "update" and record.properties_before is not None:
+                    if (
+                        record.operation == "update"
+                        and record.properties_before is not None
+                    ):
                         node.properties = dict(record.properties_before)
                         changed = True
                     elif record.operation == "delete":
@@ -1351,8 +1400,7 @@ class KnowledgeBase:
 
                 if changed:
                     node.history = [
-                        r for r in node.history
-                        if r.operation_id != operation_id
+                        r for r in node.history if r.operation_id != operation_id
                     ]
                     gs.add_node(node)
                     result["graph_nodes"] += 1
@@ -1369,8 +1417,7 @@ class KnowledgeBase:
                     processed_edges.add(edge_key)
 
                     matching = [
-                        r for r in edge.history
-                        if r.operation_id == operation_id
+                        r for r in edge.history if r.operation_id == operation_id
                     ]
                     if not matching:
                         continue
@@ -1379,14 +1426,19 @@ class KnowledgeBase:
 
                     changed = False
                     for record in matching:
-                        if record.operation == "update" and record.properties_before is not None:
+                        if (
+                            record.operation == "update"
+                            and record.properties_before is not None
+                        ):
                             edge.properties = dict(record.properties_before)
                             changed = True
                         elif record.operation == "delete":
                             edge.is_active = True
                             changed = True
                         elif record.operation == "add":
-                            gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+                            gs.remove_edge(
+                                edge.source_id, edge.target_id, edge.edge_type
+                            )
                             result["graph_edges"] += 1
                             changed = False
                             break
@@ -1396,14 +1448,18 @@ class KnowledgeBase:
 
                     if changed:
                         edge.history = [
-                            r for r in edge.history
-                            if r.operation_id != operation_id
+                            r for r in edge.history if r.operation_id != operation_id
                         ]
                         gs.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
                         gs.add_edge(edge)
                         result["graph_edges"] += 1
 
-        total = result["pieces"] + result["metadata"] + result["graph_nodes"] + result["graph_edges"]
+        total = (
+            result["pieces"]
+            + result["metadata"]
+            + result["graph_nodes"]
+            + result["graph_edges"]
+        )
         self._log_kb_operation(
             rb_op_id,
             f"Rolled back operation {operation_id}",

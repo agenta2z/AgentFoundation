@@ -11,6 +11,7 @@ Design: a single-parser registry is sufficient for v1 (one producer at a time).
 The getter returns ``None`` when nothing is registered, so callers degrade
 gracefully (no enrichment) rather than crashing.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable

@@ -1,7 +1,12 @@
 from copy import copy
-from typing import Callable, Mapping, Union, Any, Iterable, Tuple, List, Dict
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple, Union
 
-from rich_python_utils.common_utils import iter_, explode_map, add_key_prefix_suffix, get_relevant_named_args
+from rich_python_utils.common_utils import (
+    add_key_prefix_suffix,
+    explode_map,
+    get_relevant_named_args,
+    iter_,
+)
 
 SCORE_TYPE = Union[float, int, bool]
 TAG_TYPE = Union[int, bool, str]
@@ -13,13 +18,13 @@ SCORE_AGGREGATOR_TYPE = Callable[[Iterable[SCORE_TYPE]], SCORE_TYPE]
 
 
 def score_datapoint(
-        data_point: Any,
-        preprocessors: Iterable[SCORING_TARGET_EXTRACTOR_TYPE],
-        scorers: Mapping[str, SCORER_TYPE],
-        explode: Mapping[str, List[str]] = None,
-        associate_scoring_results_with_datapoint: Union[bool, str] = False,
-        add_preprocessing_results_to_datapoint: Union[bool, Callable] = False,
-        add_scoring_results_to_datapoint: Union[bool, Callable] = False
+    data_point: Any,
+    preprocessors: Iterable[SCORING_TARGET_EXTRACTOR_TYPE],
+    scorers: Mapping[str, SCORER_TYPE],
+    explode: Mapping[str, List[str]] = None,
+    associate_scoring_results_with_datapoint: Union[bool, str] = False,
+    add_preprocessing_results_to_datapoint: Union[bool, Callable] = False,
+    add_scoring_results_to_datapoint: Union[bool, Callable] = False,
 ) -> Mapping:
     """
     Computes a metric (or metrics) for a given data point, and optionally returns associated tags.
@@ -56,7 +61,7 @@ def score_datapoint(
         {'accuracy_scorer': [{'accuracy_scorer.accuracy': True}, {'accuracy_scorer.accuracy': False}, {'accuracy_scorer.accuracy': False}]}
     """
     if associate_scoring_results_with_datapoint is True:
-        associate_scoring_results_with_datapoint = '_data'
+        associate_scoring_results_with_datapoint = "_data"
     scoring_targets = {}
 
     for preprocessor in preprocessors:
@@ -92,32 +97,56 @@ def score_datapoint(
                 scoring_results_no_datapoint = []
                 for score_target_item in score_target:
                     if isinstance(score_target_item, Mapping):
-                        scoring_results_item = add_key_prefix_suffix(scorer(**get_relevant_named_args(scorer, **score_target_item)), prefix=scorer_target_name, sep='.')
+                        scoring_results_item = add_key_prefix_suffix(
+                            scorer(
+                                **get_relevant_named_args(scorer, **score_target_item)
+                            ),
+                            prefix=scorer_target_name,
+                            sep=".",
+                        )
                     elif isinstance(score_target_item, Tuple):
-                        scoring_results_item = add_key_prefix_suffix(scorer(*score_target_item), prefix=scorer_target_name, sep='.')
+                        scoring_results_item = add_key_prefix_suffix(
+                            scorer(*score_target_item),
+                            prefix=scorer_target_name,
+                            sep=".",
+                        )
                     else:
-                        raise ValueError(f"Unsupported scoring target '{score_target_item}'")
+                        raise ValueError(
+                            f"Unsupported scoring target '{score_target_item}'"
+                        )
                     scoring_result = {**scoring_results_item, **score_target_item}
 
                     if associate_scoring_results_with_datapoint:
                         scoring_results_no_datapoint.append(copy(scoring_result))
-                        scoring_result[associate_scoring_results_with_datapoint] = data_point
+                        scoring_result[associate_scoring_results_with_datapoint] = (
+                            data_point
+                        )
                     scoring_results.append(scoring_result)
             else:
                 if isinstance(score_target, Mapping):
-                    scoring_results = add_key_prefix_suffix(scorer(**get_relevant_named_args(scorer, **score_target)), prefix=scorer_target_name, sep='.')
+                    scoring_results = add_key_prefix_suffix(
+                        scorer(**get_relevant_named_args(scorer, **score_target)),
+                        prefix=scorer_target_name,
+                        sep=".",
+                    )
                 elif isinstance(score_target, Tuple):
-                    scoring_results = add_key_prefix_suffix(scorer(*score_target), prefix=scorer_target_name, sep='.')
+                    scoring_results = add_key_prefix_suffix(
+                        scorer(*score_target), prefix=scorer_target_name, sep="."
+                    )
                 else:
                     raise ValueError(f"Unsupported scoring target '{score_target}'")
                 scoring_results = {**scoring_results, **score_target}
                 if associate_scoring_results_with_datapoint:
                     scoring_results_no_datapoint = copy(scoring_results)
-                    scoring_results[associate_scoring_results_with_datapoint] = data_point
+                    scoring_results[associate_scoring_results_with_datapoint] = (
+                        data_point
+                    )
 
             all_scoring_results[scorer_target_name] = scoring_results
             if associate_scoring_results_with_datapoint:
-                all_scoring_results_no_datapoint[scorer_target_name] = scoring_results_no_datapoint
+                all_scoring_results_no_datapoint[scorer_target_name] = (
+                    scoring_results_no_datapoint
+                )
 
     if add_scoring_results_to_datapoint is True:
         data_point.update(all_scoring_results_no_datapoint)
@@ -128,18 +157,14 @@ def score_datapoint(
 
 
 def score_precision_and_recall_by_hits(
-        prediction: Union[
-            Any, List[Any], List[List[Any]],
-            Mapping[str, Union[Any, List[Any]]]
-        ],
-        reference: Union[
-            Any, List[Any],
-            Mapping[str, Any]
-        ],
-        comparer: Callable[[Any, Any], float] = None,
-        k=1,
-        undergrab_threshold: float = 1.0,
-        overgrab_threshold: float = 0.0
+    prediction: Union[
+        Any, List[Any], List[List[Any]], Mapping[str, Union[Any, List[Any]]]
+    ],
+    reference: Union[Any, List[Any], Mapping[str, Any]],
+    comparer: Callable[[Any, Any], float] = None,
+    k=1,
+    undergrab_threshold: float = 1.0,
+    overgrab_threshold: float = 0.0,
 ) -> Dict[str, float]:
     """
     Calculates precision and recall metrics for predictions against references.
@@ -213,8 +238,8 @@ def score_precision_and_recall_by_hits(
         # If `reference` is None or empty, then we are unable to compute the hits and metrics.
         # In this case return `None` for both precision and recall.
         return {
-            'precision': None,
-            'recall': None,
+            "precision": None,
+            "recall": None,
         }
 
     prediction_labels = reference_labels = None
@@ -238,19 +263,17 @@ def score_precision_and_recall_by_hits(
         prediction_labels = prediction
 
     if not prediction:
-        precision_at_k = {f'precision@{_k}': 0 for _k in range(1, k + 1)}
+        precision_at_k = {f"precision@{_k}": 0 for _k in range(1, k + 1)}
 
-        recall_at_k = {f'recall@{_k}': 0 for _k in range(1, k + 1)}
+        recall_at_k = {f"recall@{_k}": 0 for _k in range(1, k + 1)}
 
         return {
-            'precision': 0,
-            'recall': 0,
+            "precision": 0,
+            "recall": 0,
             **precision_at_k,
             **recall_at_k,
-            'overgrab': [],
-            'undergrab': (
-                    reference_labels or list(range(len_reference))
-            )
+            "overgrab": [],
+            "undergrab": (reference_labels or list(range(len_reference))),
         }
 
     # endregion
@@ -278,48 +301,69 @@ def score_precision_and_recall_by_hits(
                 for j, ref in enumerate(reference):
                     compare_score = comparer(pred_item, ref)
                     if not (0 <= compare_score <= 1):
-                        raise ValueError(f"Comparer score must be between 0 and 1; got {compare_score}")
+                        raise ValueError(
+                            f"Comparer score must be between 0 and 1; got {compare_score}"
+                        )
                     hits_prediction[i] = max(compare_score, hits_prediction[i])
                     hits_reference[j] = max(compare_score, hits_reference[j])
                     recall_matrix[i][j] = compare_score
                     if i == 0:
                         recall_at_k_matrix[0][j] = compare_score
                     else:
-                        recall_at_k_matrix[i][j] = max(compare_score, recall_at_k_matrix[i - 1][j])
+                        recall_at_k_matrix[i][j] = max(
+                            compare_score, recall_at_k_matrix[i - 1][j]
+                        )
     # endregion
 
     # region aggregate metrics
     precision = sum(hits_prediction) / len_prediction if prediction else 0
-    overgrab = [prediction_labels[i] for i in range(len_prediction) if not hits_prediction[i]]
+    overgrab = [
+        prediction_labels[i] for i in range(len_prediction) if not hits_prediction[i]
+    ]
     recall = sum(hits_reference) / len_reference if reference else 0
-    undergrab = [reference_labels[i] for i in range(len_reference) if not hits_reference[i]]
+    undergrab = [
+        reference_labels[i] for i in range(len_reference) if not hits_reference[i]
+    ]
 
     precision_at_k = {
-        f'precision@{_k}': sum(hits_prediction[:_k]) / _k if _k < len_prediction else precision
+        f"precision@{_k}": sum(hits_prediction[:_k]) / _k
+        if _k < len_prediction
+        else precision
         for _k in range(1, k + 1)
     }
 
     recall_at_k = {
-        f'recall@{_k}': sum(recall_at_k_matrix[_k - 1]) / len_reference if _k < len_prediction else recall
+        f"recall@{_k}": sum(recall_at_k_matrix[_k - 1]) / len_reference
+        if _k < len_prediction
+        else recall
         for _k in range(1, k + 1)
     }
 
     undergrab_at_k = {
-        f'undergrab@{_k}': (
+        f"undergrab@{_k}": (
             [
-                reference_labels[i] for i in range(len_reference)
+                reference_labels[i]
+                for i in range(len_reference)
                 if recall_at_k_matrix[_k - 1][i] < undergrab_threshold
-            ] if _k < len_prediction else undergrab
+            ]
+            if _k < len_prediction
+            else undergrab
         )
         for _k in range(1, k + 1)
     }
 
     overgrab_at_k = {
-        f'overgrab@{_k}': (
+        f"overgrab@{_k}": (
             [
-                prediction_labels[i] for i in range(min(_k, len_prediction))
-                if all(recall_matrix[i][j] <= overgrab_threshold for j in range(len_reference))
-            ] if _k < len_prediction else overgrab
+                prediction_labels[i]
+                for i in range(min(_k, len_prediction))
+                if all(
+                    recall_matrix[i][j] <= overgrab_threshold
+                    for j in range(len_reference)
+                )
+            ]
+            if _k < len_prediction
+            else overgrab
         )
         for _k in range(1, k + 1)
     }
@@ -327,12 +371,12 @@ def score_precision_and_recall_by_hits(
     # endregion
 
     return {
-        'precision': precision,
-        'recall': recall,
+        "precision": precision,
+        "recall": recall,
         **precision_at_k,
         **recall_at_k,
-        'overgrab': overgrab,
-        'undergrab': undergrab,
+        "overgrab": overgrab,
+        "undergrab": undergrab,
         **overgrab_at_k,
-        **undergrab_at_k
+        **undergrab_at_k,
     }

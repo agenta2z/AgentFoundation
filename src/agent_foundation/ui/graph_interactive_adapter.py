@@ -50,7 +50,7 @@ class NodeStreamInteractive:
 
     async def stream_token_batches(
         self,
-        token_stream: Any,              # AsyncIterator[tuple[str, dict]]
+        token_stream: Any,  # AsyncIterator[tuple[str, dict]]
         session_id: str = "",
         batch_interval_ms: float = 50.0,
         task_id: Any = None,
@@ -69,12 +69,18 @@ class NodeStreamInteractive:
                         task_id=self._task_id,
                     )
                 except Exception as exc:
-                    _logger.warning("[NodeStreamInteractive] send_graph_event failed: %s", exc)
+                    _logger.warning(
+                        "[NodeStreamInteractive] send_graph_event failed: %s", exc
+                    )
                 yield chunk, metadata
 
         result = await self._ws.stream_token_batches(
-            _tagged_stream(), session_id, batch_interval_ms,
-            task_id, send_stream_end, turn_number,
+            _tagged_stream(),
+            session_id,
+            batch_interval_ms,
+            task_id,
+            send_stream_end,
+            turn_number,
         )
         try:
             await self._ws.send_graph_event(
@@ -82,7 +88,9 @@ class NodeStreamInteractive:
                 task_id=self._task_id,
             )
         except Exception as exc:
-            _logger.warning("[NodeStreamInteractive] final node_stream event failed: %s", exc)
+            _logger.warning(
+                "[NodeStreamInteractive] final node_stream event failed: %s", exc
+            )
         return result
 
     def __getattr__(self, name: str) -> Any:
@@ -100,7 +108,9 @@ class WebSocketGraphReporter:
     failures from aborting the BTA computation.
     """
 
-    def __init__(self, ws_interactive: Any, task_id: str, max_msg_per_sec: int = 30) -> None:
+    def __init__(
+        self, ws_interactive: Any, task_id: str, max_msg_per_sec: int = 30
+    ) -> None:
         self._ws = ws_interactive
         self._task_id = task_id
         self._max_msg_per_sec = max_msg_per_sec
@@ -120,9 +130,13 @@ class WebSocketGraphReporter:
         try:
             await self._ws.send_graph_event(event, task_id=self._task_id)
         except Exception as exc:
-            _logger.warning("[WebSocketGraphReporter] on_graph_topology failed: %s", exc)
+            _logger.warning(
+                "[WebSocketGraphReporter] on_graph_topology failed: %s", exc
+            )
 
-    async def on_node_status(self, node_id: str, status: str, error: str = "", output_path: str = "") -> None:
+    async def on_node_status(
+        self, node_id: str, status: str, error: str = "", output_path: str = ""
+    ) -> None:
         """Send a node lifecycle status change to the frontend.
 
         output_path: absolute path to the node's primary output file (e.g. facet.md).
@@ -132,9 +146,12 @@ class WebSocketGraphReporter:
         Aggregator → children/aggregator/outputs/role_document.md
         """
         from agent_foundation.common.inferencers.graph_events import NodeStatusEvent
+
         try:
             await self._ws.send_graph_event(
-                NodeStatusEvent(node_id=node_id, status=status, error=error, output_path=output_path),
+                NodeStatusEvent(
+                    node_id=node_id, status=status, error=error, output_path=output_path
+                ),
                 task_id=self._task_id,
             )
         except Exception as exc:
@@ -143,15 +160,20 @@ class WebSocketGraphReporter:
     async def on_graph_reconcile(self, node_statuses: dict) -> None:
         """Send final node statuses after graph completes — frontend reconciles gaps."""
         from agent_foundation.common.inferencers.graph_events import GraphReconcileEvent
+
         try:
             await self._ws.send_graph_event(
                 GraphReconcileEvent(node_statuses=node_statuses),
                 task_id=self._task_id,
             )
         except Exception as exc:
-            _logger.warning("[WebSocketGraphReporter] on_graph_reconcile failed: %s", exc)
+            _logger.warning(
+                "[WebSocketGraphReporter] on_graph_reconcile failed: %s", exc
+            )
 
-    async def on_node_stream(self, node_id: str, content: str, is_final: bool = True) -> None:
+    async def on_node_stream(
+        self, node_id: str, content: str, is_final: bool = True
+    ) -> None:
         """Emit content for a node (its output text) as a node_stream event.
 
         is_final events always pass (never throttled). Regular stream chunks
@@ -162,6 +184,7 @@ class WebSocketGraphReporter:
         if not is_final and not self._check_rate():
             return
         from agent_foundation.common.inferencers.graph_events import NodeStreamEvent
+
         try:
             await self._ws.send_graph_event(
                 NodeStreamEvent(node_id=node_id, content=content, is_final=is_final),
@@ -208,7 +231,8 @@ class WebSocketGraphReporter:
                     )
                 except Exception as exc:
                     _logger.warning(
-                        "[WebSocketGraphReporter] node_stream_observer flush failed: %s", exc
+                        "[WebSocketGraphReporter] node_stream_observer flush failed: %s",
+                        exc,
                     )
 
         return _observer
@@ -241,7 +265,11 @@ class NamespacedGraphReporter:
     with composed prefixes (e.g., ``worker_0/worker_2/worker_1``).
     """
 
-    def __init__(self, parent: "WebSocketGraphReporter | NamespacedGraphReporter", parent_node_id: str) -> None:
+    def __init__(
+        self,
+        parent: "WebSocketGraphReporter | NamespacedGraphReporter",
+        parent_node_id: str,
+    ) -> None:
         self._parent = parent
         self._parent_node_id = parent_node_id
 
@@ -250,27 +278,43 @@ class NamespacedGraphReporter:
 
     async def on_graph_topology(self, event: Any) -> None:
         from dataclasses import replace as _replace
+
         nodes = [{**n, "id": self._qualify(n["id"])} for n in event.nodes]
-        edges = [{"source": self._qualify(e["source"]),
-                  "target": self._qualify(e["target"])} for e in event.edges]
-        new_evt = _replace(event, nodes=nodes, edges=edges,
-                           parent_node_id=self._parent_node_id)
+        edges = [
+            {"source": self._qualify(e["source"]), "target": self._qualify(e["target"])}
+            for e in event.edges
+        ]
+        new_evt = _replace(
+            event, nodes=nodes, edges=edges, parent_node_id=self._parent_node_id
+        )
         await self._parent.on_graph_topology(new_evt)
 
-    async def on_node_status(self, node_id: str, status: str, error: str = "", output_path: str = "") -> None:
-        await self._parent.on_node_status(self._qualify(node_id), status, error=error, output_path=output_path)
+    async def on_node_status(
+        self, node_id: str, status: str, error: str = "", output_path: str = ""
+    ) -> None:
+        await self._parent.on_node_status(
+            self._qualify(node_id), status, error=error, output_path=output_path
+        )
 
-    async def on_node_stream(self, node_id: str, content: str, is_final: bool = True) -> None:
-        await self._parent.on_node_stream(self._qualify(node_id), content, is_final=is_final)
+    async def on_node_stream(
+        self, node_id: str, content: str, is_final: bool = True
+    ) -> None:
+        await self._parent.on_node_stream(
+            self._qualify(node_id), content, is_final=is_final
+        )
 
     def node_stream_observer(self, node_id: str, flush_interval_ms: float = 200.0):
-        return self._parent.node_stream_observer(self._qualify(node_id), flush_interval_ms=flush_interval_ms)
+        return self._parent.node_stream_observer(
+            self._qualify(node_id), flush_interval_ms=flush_interval_ms
+        )
 
     def node_interactive(self, node_id: str) -> "NodeStreamInteractive":
         return self._parent.node_interactive(self._qualify(node_id))
 
     async def on_graph_reconcile(self, node_statuses: dict) -> None:
-        qualified = {self._qualify(nid): status for nid, status in node_statuses.items()}
+        qualified = {
+            self._qualify(nid): status for nid, status in node_statuses.items()
+        }
         await self._parent.on_graph_reconcile(qualified)
 
     def child_reporter(self, parent_node_id: str) -> "NamespacedGraphReporter":

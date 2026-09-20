@@ -9,6 +9,7 @@ Tests cover:
 - LLM-backed decomposer factory with error handling
 - SubQuery and AgenticRetrievalResult defaults
 """
+
 import json
 import sys
 from pathlib import Path
@@ -25,11 +26,11 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 from agent_foundation.knowledge.retrieval.agentic_retriever import (
-    AgenticRetriever,
     AgenticRetrievalResult,
-    SubQuery,
+    AgenticRetriever,
     create_domain_decomposer,
     create_llm_decomposer,
+    SubQuery,
 )
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
@@ -105,10 +106,12 @@ class TestAgenticRetriever:
         p2 = _make_piece("p2")
 
         # First call returns p1, second returns p2, third (fallback) not needed
-        kb = _make_kb_mock_per_call([
-            [(p1, 0.9)],
-            [(p2, 0.8)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 0.9)],
+                [(p2, 0.8)],
+            ]
+        )
 
         def decomposer(query):
             return [
@@ -116,9 +119,7 @@ class TestAgenticRetriever:
                 SubQuery(query="sub2", domain="d2"),
             ]
 
-        retriever = AgenticRetriever(
-            kb=kb, query_decomposer=decomposer, min_results=1
-        )
+        retriever = AgenticRetriever(kb=kb, query_decomposer=decomposer, min_results=1)
         result = retriever.retrieve("complex query")
 
         assert len(result.pieces) == 2
@@ -130,10 +131,12 @@ class TestAgenticRetriever:
         p1 = _make_piece("p1")
 
         # Same piece returned by two sub-queries with different scores
-        kb = _make_kb_mock_per_call([
-            [(p1, 0.9)],
-            [(p1, 0.7)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 0.9)],
+                [(p1, 0.7)],
+            ]
+        )
 
         def decomposer(query):
             return [SubQuery(query="a"), SubQuery(query="b")]
@@ -153,10 +156,12 @@ class TestAgenticRetriever:
         """Sum aggregation adds all weighted scores per piece."""
         p1 = _make_piece("p1")
 
-        kb = _make_kb_mock_per_call([
-            [(p1, 0.9)],
-            [(p1, 0.7)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 0.9)],
+                [(p1, 0.7)],
+            ]
+        )
 
         def decomposer(query):
             return [SubQuery(query="a"), SubQuery(query="b")]
@@ -176,10 +181,12 @@ class TestAgenticRetriever:
         """Weighted sum uses sub-query weights to scale scores."""
         p1 = _make_piece("p1")
 
-        kb = _make_kb_mock_per_call([
-            [(p1, 1.0)],
-            [(p1, 1.0)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 1.0)],
+                [(p1, 1.0)],
+            ]
+        )
 
         def decomposer(query):
             return [
@@ -206,10 +213,12 @@ class TestAgenticRetriever:
         p3 = _make_piece("p3")
 
         # Sub-query returns 1 piece, fallback returns 3
-        kb = _make_kb_mock_per_call([
-            [(p1, 0.9)],
-            [(p1, 0.8), (p2, 0.7), (p3, 0.6)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 0.9)],
+                [(p1, 0.8), (p2, 0.7), (p3, 0.6)],
+            ]
+        )
 
         retriever = AgenticRetriever(kb=kb, min_results=3)
         result = retriever.retrieve("test")
@@ -256,10 +265,12 @@ class TestAgenticRetriever:
         p1 = _make_piece("p1")
 
         # Sub-query returns p1 with score 0.5, fallback returns p1 with score 0.9
-        kb = _make_kb_mock_per_call([
-            [(p1, 0.5)],
-            [(p1, 0.9)],
-        ])
+        kb = _make_kb_mock_per_call(
+            [
+                [(p1, 0.5)],
+                [(p1, 0.9)],
+            ]
+        )
 
         retriever = AgenticRetriever(kb=kb, min_results=5)
         result = retriever.retrieve("test")
@@ -304,10 +315,12 @@ class TestCreateDomainDecomposer:
 
 class TestCreateLlmDecomposer:
     def test_parses_llm_json_response(self):
-        response = json.dumps([
-            {"query": "sub1", "domain": "ml", "weight": 1.0},
-            {"query": "sub2", "domain": "infra", "weight": 0.8},
-        ])
+        response = json.dumps(
+            [
+                {"query": "sub1", "domain": "ml", "weight": 1.0},
+                {"query": "sub2", "domain": "infra", "weight": 0.8},
+            ]
+        )
 
         def llm_fn(prompt):
             return response
@@ -342,9 +355,16 @@ class TestCreateLlmDecomposer:
         assert sub_queries[0].query == "test query"
 
     def test_tags_parsed_from_llm_response(self):
-        response = json.dumps([
-            {"query": "sub1", "domain": "ml", "tags": ["gpu", "cuda"], "weight": 1.0},
-        ])
+        response = json.dumps(
+            [
+                {
+                    "query": "sub1",
+                    "domain": "ml",
+                    "tags": ["gpu", "cuda"],
+                    "weight": 1.0,
+                },
+            ]
+        )
 
         def llm_fn(prompt):
             return response

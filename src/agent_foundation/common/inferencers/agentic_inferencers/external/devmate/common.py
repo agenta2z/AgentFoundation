@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Common utilities for Devmate inferencers.
@@ -14,9 +13,9 @@ This module provides:
 - ``DevmateConfig``: Enum of known Devmate config files for inferencers.
 """
 
+import hashlib
 import logging
 import os
-import hashlib
 import re
 import shutil
 from enum import Enum

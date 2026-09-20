@@ -82,6 +82,7 @@ from rich_python_utils.config_utils import (
 # Same mock classes as Example 02 (re-registered here for standalone use)
 # ---------------------------------------------------------------------------
 
+
 @register("Translator")
 class Translator:
     def __init__(self, lang=""):
@@ -189,7 +190,9 @@ second: Uppercaser
 
         cfg = load_config(str(yaml_path))
         pipeline = instantiate(cfg)
-        print(f"  Both 'Translator' and 'Uppercaser' were auto-expanded to real objects.")
+        print(
+            f"  Both 'Translator' and 'Uppercaser' were auto-expanded to real objects."
+        )
         print(f"  Pipeline steps: {pipeline.steps}")
 
         # ── 4. Override at load time ─────────────────────────

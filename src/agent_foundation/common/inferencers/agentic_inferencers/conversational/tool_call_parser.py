@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Parse LLM responses for <tool_call> blocks interspersed with text.

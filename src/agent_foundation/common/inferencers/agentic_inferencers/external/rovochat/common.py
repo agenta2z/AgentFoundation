@@ -380,7 +380,12 @@ def is_terminal_event(event: StreamEvent) -> bool:
 
     # Also check for status fields within the data
     status = event.data.get("status", "")
-    if isinstance(status, str) and status.upper() in ("COMPLETED", "ERROR", "DONE", "FAILED"):
+    if isinstance(status, str) and status.upper() in (
+        "COMPLETED",
+        "ERROR",
+        "DONE",
+        "FAILED",
+    ):
         return True
 
     return False

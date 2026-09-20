@@ -8,8 +8,8 @@ is injected into the agent prompt.
 import logging
 from typing import Callable, Dict
 
-from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
 from agent_foundation.knowledge.prompt_templates import render_prompt
+from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
 from agent_foundation.knowledge.retrieval.utils import count_tokens
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,8 @@ class KnowledgeConsolidator:
         # duplication — user_profile is rendered separately in <UserProfile>
         # by the HBS templates)
         content_values = [
-            v for k, v in formatted_groups.items()
+            v
+            for k, v in formatted_groups.items()
             if k != "user_profile" and v and v.strip()
         ]
         all_knowledge = "\n\n".join(content_values)

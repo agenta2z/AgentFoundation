@@ -8,9 +8,18 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Union,
+)
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     InferencerExecutionError,
     MaxIterationsExhaustedError,
@@ -29,6 +38,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_inference
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -45,10 +55,7 @@ _PORT_FILE_RACE_BACKOFF_SECONDS: float = 2.5
 
 
 def _looks_like_port_file_race(error_text: str) -> bool:
-    return (
-        "ENOENT" in error_text
-        and "port" in error_text.lower()
-    )
+    return "ENOENT" in error_text and "port" in error_text.lower()
 
 
 def _looks_like_max_iterations(error_text: str) -> bool:
@@ -245,7 +252,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     # (``devmate_standalone/devai/devmate_terminal:devmate_terminal``,
     # also published as ``dmt``) and set ``cli_mode="print"`` to use its
     # headless non-interactive mode.
-    cli_binary: str = attrib(default="devmate")
+    cli_binary: str = attrib(default="dm")
     # CLI invocation style. Controls how ``construct_command`` shapes
     # the argv:
     #   ``"run"``  — canonical devmate: ``devmate run <config>
@@ -260,10 +267,10 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     #                drops into the TUI which panics in non-interactive
     #                contexts.
     cli_mode: str = attrib(
-        default="run",
-        validator=lambda _self, _attr, v: v in ("run", "print")
+        default="dm",
+        validator=lambda _self, _attr, v: v in ("run", "print", "dm")
         or (_ for _ in ()).throw(
-            ValueError(f"cli_mode must be 'run' or 'print', got {v!r}")
+            ValueError(f"cli_mode must be 'run', 'print', or 'dm', got {v!r}")
         ),
     )
     # Whether the configured ``cli_binary`` honors ``--no-create-commit``.
@@ -321,7 +328,9 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # only enforces ``timeout`` when set). Floor at the shared default,
         # scaling with ``idle_timeout_seconds``. (Async/streaming uses idle timeouts.)
         if self.timeout is None:
-            self.timeout = max(self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
+            self.timeout = max(
+                self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+            )
 
         # If both shell controls are set, generate an extended config that
         # restricts execute_command to the allowed commands. If only
@@ -350,6 +359,26 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # True so pre_exec_scripts are joined with ``&&`` into the SAME
         # shell that already starts in effective_cwd. A pre-exec ``cd``
         # would be a no-op.
+
+        # Fix 4: redirect dm-core's conversation store to a per-user writable dir.
+        # dm-core persists conversations to ``os.tmpdir()/devmate/conversations``
+        # (FileBasedDevmateStorage) with no dedicated redirect env — only ``TMPDIR``
+        # (the os.tmpdir base) is honored. Under concurrent orchestrated runs the
+        # shared ``/tmp/devmate/conversations`` became unwritable (EACCES x41K) ->
+        # session-save failed -> no ``dm --resume`` footer -> every retry
+        # re-investigated from scratch. Pointing TMPDIR at a per-uid dir (stable across
+        # a leaf's retries so resume works; isolated per user so concurrent runs don't
+        # collide) sidesteps the shared-dir permission/collision entirely. The dm
+        # launcher (``/usr/local/bin/dm`` -> ``devmate_env.sh``) does not reset TMPDIR.
+        # Elements are chained with ``&&`` by ``_build_full_command`` (TSIB:426), so
+        # this must NOT abort the chain if mkdir fails — the trailing ``|| true``
+        # guarantees ``dm`` still runs (TMPDIR is already exported by then).
+        _tmpdir_prep = (
+            'export TMPDIR="/tmp/devmate-$(id -u)" '
+            '&& mkdir -p "$TMPDIR/devmate/conversations" 2>/dev/null || true'
+        )
+        if _tmpdir_prep not in (self.pre_exec_scripts or []):
+            self.pre_exec_scripts = list(self.pre_exec_scripts or []) + [_tmpdir_prep]
 
     # ------------------------------------------------------------------
     # Root-in-Sapling fallback (Issue 1 fix). Devmate's server REQUIRES its CWD
@@ -393,7 +422,9 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 logger.info(
                     "[%s] target %r is not a Sapling/EdenSCM repo; rooting the devmate "
                     "server in %r and analyzing the target via absolute paths.",
-                    type(self).__name__, self.effective_cwd, root,
+                    type(self).__name__,
+                    self.effective_cwd,
+                    root,
                 )
                 self._devmate_reroot_logged = True
             elif mode == "no_repo":
@@ -401,7 +432,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                     "[%s] target %r is not a Sapling/EdenSCM repo and no ~/fbsource or "
                     "~/www repo was found; devmate cannot start here and will produce no "
                     "output. Use an fbsource/www target or set devmate_repo_root.",
-                    type(self).__name__, self.effective_cwd,
+                    type(self).__name__,
+                    self.effective_cwd,
                 )
                 self._devmate_reroot_logged = True
         return super()._resolve_subprocess_cwd(cwd if mode == "native" else root)
@@ -478,6 +510,123 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             return f"{self.session_arg_name} '{session_id}'"
         return ""
 
+    # --- dm / devmate-core (supported harness) -------------------------------
+    # dm (devmate-core) is the supported agent harness (same one that powers
+    # VS Code Devmate). It replaces the deprecated Devmate Platform path
+    # (`devmate run` / --orchestrator-type devmate-platform), which
+    # authenticates against the RETIRED `TIER:devmate_agent` ACL (migrated to
+    # `TIER:agentic_coding_platform` in D108827214 and now allowlist-gated by
+    # D107276072). dm needs no execution ACL. Select via cli_binary="dm" +
+    # cli_mode="dm".
+    _DM_MODEL_MAP = {
+        "claude-opus-4.7-1m": "claude-opus-4.7-long",
+        "claude-opus-4.7": "claude-opus-4.7-long",
+        "claude-opus-4.6-1m": "claude-opus-4.6-long",
+        "claude-opus-4.6": "claude-opus-4.6",
+        "claude-opus-4.8": "claude-opus-4.8",
+        "claude-sonnet-4.6-1m": "claude-sonnet-4.6-long",
+        "claude-sonnet-4.6": "claude-sonnet-4.6-long",
+        "claude-sonnet-4.5": "claude-sonnet-4.6-long",
+        "claude-haiku-4.5": "claude-haiku-4.5",
+        "opus": "claude-opus-4.7-long",
+        "sonnet": "claude-sonnet-4.6-long",
+        "haiku": "claude-haiku-4.5",
+    }
+    _DM_KNOWN_MODELS = frozenset(
+        {
+            "avocado-code-internal-0529",
+            "claude-opus-4.8",
+            "claude-opus-4.7-long",
+            "claude-opus-4.6",
+            "claude-opus-4.6-long",
+            "claude-sonnet-4.6-long",
+            "claude-haiku-4.5",
+            "gpt-5-5",
+            "gemini-3-1-pro",
+            "opus",
+            "sonnet",
+            "haiku",
+            "gpt",
+            "codex",
+            "gemini",
+            "avocado",
+        }
+    )
+    _DM_DEFAULT_MODEL = "claude-opus-4.7-long"
+
+    def _resolve_dm_model(self, model):
+        # Map an AgentFoundation/Anthropic model tag onto a dm model id.
+        # dm uses "-long" for 1M-context (not the Devmate Platform "-1m").
+        if model in self._DM_KNOWN_MODELS:
+            return model
+        if model in self._DM_MODEL_MAP:
+            return self._DM_MODEL_MAP[model]
+        if isinstance(model, str) and model.endswith("-1m"):
+            cand = model[:-3] + "-long"
+            if cand in self._DM_KNOWN_MODELS:
+                return cand
+        return self._DM_DEFAULT_MODEL
+
+    def _construct_dm_command(self, escaped_prompt, model, session_id, is_resume):
+        # Build a supported `dm -p` (devmate-core) command. No execution ACL,
+        # no devmate-server, no orchestrator-type. dm reads the repo from CWD
+        # (set by _resolve_subprocess_cwd). A path-style config_name is passed
+        # as a dm --agent config; the plain "freeform" name uses dm defaults
+        # (rich tool set, no patchgen 8192 truncation).
+        dm_model = self._resolve_dm_model(model)
+        parts = [
+            self.cli_binary,
+            "-p",
+            "--agent-harness",
+            "native",
+            "--auto-run-mode",
+            "autoRunAll",
+            "-m",
+            dm_model,
+        ]
+        if is_resume and session_id:
+            parts += ["--resume", str(session_id)]
+        if self.config_name and ("/" in self.config_name or os.sep in self.config_name):
+            parts += ["--agent", self.config_name]
+        if self.extra_cli_args:
+            parts.extend(self.extra_cli_args)
+        parts.append('"' + escaped_prompt + '"')
+        return " ".join(parts)
+
+    def _clean_dm_output(self, raw):
+        # Extract the final assistant message from `dm -p` plain output. dm
+        # prints a banner, a prompt echo, an optional "Failed to save session"
+        # notice, the final message (first line prefixed by a bullet, then
+        # 2-space-indented continuation lines), then a Logs/Resume footer.
+        if not raw:
+            return ""
+        import re
+
+        raw = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw)
+        lines = raw.splitlines()
+        start = None
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith("\u25cf"):
+                start = i
+        if start is None:
+            return raw.strip()
+        out = [lines[start].lstrip()[1:].lstrip()]
+        for ln in lines[start + 1 :]:
+            stripped = ln.strip()
+            if (
+                stripped.startswith("Logs available")
+                or stripped.startswith("Resume with")
+                or stripped.startswith("dm --resume")
+            ):
+                break
+            if ln.startswith("  "):
+                out.append(ln[2:])
+            elif stripped == "":
+                out.append("")
+            else:
+                break
+        return "\n".join(out).strip()
+
     def construct_command(self, inference_input: Any, **kwargs) -> str:
         """
         Construct the DevMate CLI command as a shell command string.
@@ -544,6 +693,11 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # selects between the canonical ``devmate run`` shape and the
         # standalone ``dmt print`` shape (the standalone's ``run`` subcommand
         # drops into the TUI and panics in non-interactive contexts).
+        if self.cli_mode == "dm":
+            return self._construct_dm_command(
+                escaped_prompt, model, session_id, is_resume
+            )
+
         if self.cli_mode == "print":
             # Standalone DMT print mode:
             #   dmt print "<PROMPT>" -c <config> [--resume-session-id <ID>]
@@ -718,7 +872,18 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         if "output" not in result:
             session_id = self._extract_session_id(result["raw_output"])
             trajectory_url = self._extract_trajectory_url(result["raw_output"])
-            cleaned_output = self._clean_devmate_output(result["raw_output"])
+            if self.cli_mode == "dm":
+                cleaned_output = self._clean_dm_output(result["raw_output"])
+                # dm prints "Resume with: dm --resume <session_id>" in its footer.
+                _dm_blob = (
+                    (result.get("stderr", "") or "") + "\n" + result["raw_output"]
+                )
+                _dm_blob = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", _dm_blob)
+                _dm_sid = re.search(r"dm --resume\s+(\S+)", _dm_blob)
+                if _dm_sid:
+                    session_id = _dm_sid.group(1)
+            else:
+                cleaned_output = self._clean_devmate_output(result["raw_output"])
 
             result["output"] = cleaned_output
             if session_id:
@@ -765,7 +930,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             if err_blob.strip():
                 logger.warning(
                     "[%s] devmate produced EMPTY output; failure detail: %s",
-                    type(self).__name__, err_blob.strip()[:500],
+                    type(self).__name__,
+                    err_blob.strip()[:500],
                 )
 
         return result
@@ -832,12 +998,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         # 1. UUID v4 (or any 8-4-4-4-12 hex grouping) anywhere after a
         #    ``Session ID:`` marker — survives OSC8 escape codes.
-        uuid_pattern = (
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-        )
-        m = re.search(
-            r"Session ID:.*?(" + uuid_pattern + r")", output, flags=re.DOTALL
-        )
+        uuid_pattern = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        m = re.search(r"Session ID:.*?(" + uuid_pattern + r")", output, flags=re.DOTALL)
         if m:
             return m.group(1)
 
@@ -1003,7 +1165,12 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["resume"] = is_resume and session_id is not None
 
     def infer(
-        self, inference_input: Any, inference_config: Any = None, *, run_context=None, **kwargs
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs,
     ) -> Any:
         """Sync inference with session-mode policy + active-session propagation.
 
@@ -1084,9 +1251,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         """
         self._apply_session_policy(kwargs)
 
-        result = await self._ainfer_single(
-            inference_input, inference_config, **kwargs
-        )
+        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
 
         # ``_ainfer`` may return either a plain dict (legacy path) or a
         # ``TerminalInferencerResponse`` (current path). Accept both so the
@@ -1213,8 +1378,12 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             content_started = False
             pending_empty_lines = []
 
-            # Open cache file if configured
-            cache_file = self._open_cache_file(prompt) if self.cache_folder else None
+            # Open cache file if configured. v5 Fix #3 — gate on resolved
+            # cache folder so ctx-dispatched leaves also write cache.
+            _cache_folder = self._effective_cache_folder()
+            cache_file = (
+                self._open_cache_file(prompt, _cache_folder) if _cache_folder else None
+            )
             success = False
             error = None
 
@@ -1270,6 +1439,25 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # Empty lines pass through (will be filtered later if needed)
         if not stripped:
             return False
+
+        # dm (devmate-core) banner / footer / prompt-echo / box-drawing
+        # art lines are noise in streaming mode -- filter them out.
+        if self.cli_mode == "dm":
+            clean = re.sub(r"\\x1b\\[[0-9;]*[A-Za-z]", "", stripped)
+            dm_patterns = [
+                r"^Running non-interactively",
+                r"Powered by dm-core",
+                r"^Error: Failed to save session",
+                r"^Logs available",
+                r"^Resume with",
+                r"^dm --resume",
+                r"^\u276f",
+            ]
+            for pattern in dm_patterns:
+                if re.search(pattern, clean, re.IGNORECASE):
+                    return True
+            if sum(1 for c in clean if ord(c) > 0x2000) >= 3:
+                return True
 
         # Patterns for session info lines to filter
         session_patterns = [
@@ -1382,8 +1570,11 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             content_started = False
             pending_empty_lines = []
 
-            # Open cache file if configured
-            cache_file = self._open_cache_file(prompt) if self.cache_folder else None
+            # Open cache file if configured. v5 Fix #3 — gate on resolved value.
+            _cache_folder = self._effective_cache_folder()
+            cache_file = (
+                self._open_cache_file(prompt, _cache_folder) if _cache_folder else None
+            )
             cache_success = False
             cache_error = None
 

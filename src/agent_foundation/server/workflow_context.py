@@ -1,6 +1,6 @@
-
 # pyre-strict
 """Workflow context — session-level workflow state for prompt injection."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_foundation.common.workflow_constants import _WORKFLOW_DESC_PHASE_RE  # noqa: E402
+from agent_foundation.common.workflow_constants import (  # noqa: E402
+    _WORKFLOW_DESC_PHASE_RE,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -146,9 +148,7 @@ class WorkflowContext:
         if self.state_tracker is not None:
             self.state_tracker.complete(phase, **outputs)
 
-    def fail_phase(
-        self, phase: str, error: str = "", task_id: str = ""
-    ) -> None:
+    def fail_phase(self, phase: str, error: str = "", task_id: str = "") -> None:
         """Fail a phase — updates legacy fields and state_tracker."""
         self.phase_status = "error"
         self.completed_phases.append(
@@ -338,7 +338,9 @@ class WorkflowContext:
             for rec in self.completed_phases:
                 rec_name = pn.get(rec.phase, rec.phase)
                 status_label = "completed" if rec.status == "completed" else rec.status
-                lines.append(f"  - Phase {rec.phase} — {rec_name} ({status_label}): {rec.summary}")
+                lines.append(
+                    f"  - Phase {rec.phase} — {rec_name} ({status_label}): {rec.summary}"
+                )
             # Show accumulated phase outputs as key-value pairs
             if self.phase_outputs:
                 for key, value in self.phase_outputs.items():
@@ -399,9 +401,7 @@ class WorkflowContext:
             for e in running:
                 label = e.get("hypothesis_id") or e.get("task_id", "")
                 lines.append(f"  Running: {label} — {e.get('title', '')}")
-            next_q = next(
-                (e for e in self.task_queue if e["status"] == "queued"), None
-            )
+            next_q = next((e for e in self.task_queue if e["status"] == "queued"), None)
             if next_q:
                 label = next_q.get("hypothesis_id") or next_q.get("task_id", "")
                 lines.append(f"  Next: {label} — {next_q.get('title', '')}")

@@ -20,9 +20,9 @@ Equivalent to:
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import resolve_path  # noqa: F401 - Must be first import for path setup
-
 from agent_foundation.automation.schema.action_graph import ActionGraph
 from arithmetic_executor import ArithmeticExecutor
 from arithmetic_registry import create_arithmetic_registry
@@ -34,7 +34,7 @@ def get_last_value(result):
         return 0
     last_id = list(result.context.results.keys())[-1]
     r = result.context.results[last_id].value
-    return r.value if hasattr(r, 'value') else 0
+    return r.value if hasattr(r, "value") else 0
 
 
 # ============================================================
@@ -68,8 +68,14 @@ def build_multi_branch_graph():
             condition=lambda r, **kw: get_last_value(r) >= 90,
             if_true=lambda g: g.add(value=100),  # Grade A
             elseif=[
-                (lambda r, **kw: get_last_value(r) >= 80, lambda g: g.add(value=80)),  # Grade B
-                (lambda r, **kw: get_last_value(r) >= 70, lambda g: g.add(value=70)),  # Grade C
+                (
+                    lambda r, **kw: get_last_value(r) >= 80,
+                    lambda g: g.add(value=80),
+                ),  # Grade B
+                (
+                    lambda r, **kw: get_last_value(r) >= 70,
+                    lambda g: g.add(value=70),
+                ),  # Grade C
             ],
             if_false=lambda g: g.add(value=60),  # Grade D (else)
         )
@@ -98,11 +104,11 @@ def build_context_manager_style():
         with branch.if_true():
             graph.add(value=100)  # Grade A
         with branch.elseif(lambda r, **kw: get_last_value(r) >= 80):
-            graph.add(value=80)   # Grade B
+            graph.add(value=80)  # Grade B
         with branch.elseif(lambda r, **kw: get_last_value(r) >= 70):
-            graph.add(value=70)   # Grade C
+            graph.add(value=70)  # Grade C
         with branch.if_false():
-            graph.add(value=60)   # Grade D
+            graph.add(value=60)  # Grade D
 
     return graph
 
@@ -129,11 +135,11 @@ def build_convenience_style():
         with branch.if_gte(90):
             graph.add(value=100)  # Grade A
         with branch.elseif_gte(80):
-            graph.add(value=80)   # Grade B
+            graph.add(value=80)  # Grade B
         with branch.elseif_gte(70):
-            graph.add(value=70)   # Grade C
+            graph.add(value=70)  # Grade C
         with branch.else_():
-            graph.add(value=60)   # Grade D
+            graph.add(value=60)  # Grade D
 
     return graph
 
@@ -165,14 +171,16 @@ if __name__ == "__main__":
             status = "OK" if actual == expected else "FAIL"
             if status == "FAIL":
                 all_pass = False
-            print(f"  Score {score:3} -> Grade {grade}: {score} + bonus = {actual:6.1f} (expected {expected}) [{status}]")
+            print(
+                f"  Score {score:3} -> Grade {grade}: {score} + bonus = {actual:6.1f} (expected {expected}) [{status}]"
+            )
             results.append((score, actual))
         return results, all_pass
 
     # Style 1: Lambda callback style
-    print("="*60)
+    print("=" * 60)
     print("Style 1: Lambda Callback with elseif=[]")
-    print("="*60)
+    print("=" * 60)
     print("  graph.branch(")
     print("      condition=lambda r: score >= 90,")
     print("      if_true=lambda g: g.add(100),")
@@ -187,9 +195,9 @@ if __name__ == "__main__":
 
     # Style 2: Context manager style
     print()
-    print("="*60)
+    print("=" * 60)
     print("Style 2: Context Manager with branch.elseif()")
-    print("="*60)
+    print("=" * 60)
     print("  with graph.condition(lambda r: score >= 90) as branch:")
     print("      with branch.if_true():")
     print("          graph.add(value=100)")
@@ -204,9 +212,9 @@ if __name__ == "__main__":
 
     # Style 3: Convenience comparison methods
     print()
-    print("="*60)
+    print("=" * 60)
     print("Style 3: Convenience Methods (if_gte, elseif_gte, else_)")
-    print("="*60)
+    print("=" * 60)
     print("  with graph.condition(value_extractor=get_last_value) as branch:")
     print("      with branch.if_gte(90):")
     print("          graph.add(value=100)")
@@ -221,13 +229,13 @@ if __name__ == "__main__":
 
     # Verify all styles produce identical results
     print()
-    print("="*60)
+    print("=" * 60)
     print("Verification: All styles produce identical results")
-    print("="*60)
+    print("=" * 60)
     all_match = r1 == r2 == r3
     print(f"  Style 1 results: {[r[1] for r in r1]}")
     print(f"  Style 2 results: {[r[1] for r in r2]}")
     print(f"  Style 3 results: {[r[1] for r in r3]}")
     print(f"  Results match: {all_match}")
     print(f"  All tests passed: {p1 and p2 and p3}")
-    print("="*60)
+    print("=" * 60)

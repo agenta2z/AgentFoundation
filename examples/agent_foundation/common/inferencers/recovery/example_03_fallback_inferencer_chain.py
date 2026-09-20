@@ -59,7 +59,9 @@ import sys
 
 # --- Path setup ---
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_agent_root = os.path.normpath(os.path.join(_script_dir, "..", "..", "..", "..", "..", ".."))
+_agent_root = os.path.normpath(
+    os.path.join(_script_dir, "..", "..", "..", "..", "..", "..")
+)
 for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
     _p = os.path.normpath(os.path.join(_agent_root, _sub))
     if os.path.isdir(_p) and _p not in sys.path:
@@ -67,17 +69,17 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
 
 from typing import Any, AsyncIterator, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 from rich_python_utils.common_utils.function_helper import FallbackMode
 
 
 # ---------------------------------------------------------------------------
 # Mock inferencers representing different backends
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class MockBackend(StreamingInferencerBase):
@@ -89,6 +91,7 @@ class MockBackend(StreamingInferencerBase):
         recovery_crashes: If True, _ainfer_recovery also crashes.
         response: The response to return on success.
     """
+
     name: str = attrib(default="Mock")
     should_crash: bool = attrib(default=False)
     recovery_crashes: bool = attrib(default=False)
@@ -99,20 +102,32 @@ class MockBackend(StreamingInferencerBase):
 
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
         if self.should_crash:
-            print(f"  [{self.name:8s}] _ainfer -- CRASH! (APIError: Service unavailable)")
+            print(
+                f"  [{self.name:8s}] _ainfer -- CRASH! (APIError: Service unavailable)"
+            )
             raise RuntimeError(f"{self.name}: Service unavailable")
-        print(f"  [{self.name:8s}] _ainfer -- SUCCESS: \"{self.response}\"")
+        print(f'  [{self.name:8s}] _ainfer -- SUCCESS: "{self.response}"')
         return self.response
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         return self.response
 
-    async def _ainfer_recovery(self, inference_input, last_exception, last_partial_output,
-                                inference_config=None, **kwargs):
+    async def _ainfer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         if self.recovery_crashes:
-            print(f"  [{self.name:8s}] _ainfer_recovery -- CRASH! (APIError: Still down)")
+            print(
+                f"  [{self.name:8s}] _ainfer_recovery -- CRASH! (APIError: Still down)"
+            )
             raise RuntimeError(f"{self.name}: Recovery also failed")
-        print(f"  [{self.name:8s}] _ainfer_recovery -- SUCCESS: \"{self.response} (recovered)\"")
+        print(
+            f'  [{self.name:8s}] _ainfer_recovery -- SUCCESS: "{self.response} (recovered)"'
+        )
         return f"{self.response} (recovered)"
 
     async def adisconnect(self):
@@ -123,6 +138,7 @@ class MockBackend(StreamingInferencerBase):
 # Demo scenarios
 # ---------------------------------------------------------------------------
 
+
 def separator(title: str):
     print(f"\n{'=' * 3} {title} {'=' * 3}")
 
@@ -132,7 +148,9 @@ async def main():
     print("=" * 60)
     print()
     print("Architecture:")
-    print("  Primary._ainfer() -> Primary._ainfer_recovery() -> FallbackInferencer[0].ainfer() -> ...")
+    print(
+        "  Primary._ainfer() -> Primary._ainfer_recovery() -> FallbackInferencer[0].ainfer() -> ..."
+    )
     print()
 
     # ── Scenario 1: Self-recovery succeeds ──────────────────────────────
@@ -144,13 +162,14 @@ async def main():
 
     primary = MockBackend(
         name="FastAPI",
-        should_crash=True,          # Primary always crashes
-        recovery_crashes=False,     # But self-recovery works
+        should_crash=True,  # Primary always crashes
+        recovery_crashes=False,  # But self-recovery works
         response="Recovered via self-healing",
         fallback_inferencer=cli_fallback,
         fallback_mode=FallbackMode.ON_FIRST_FAILURE,
         max_retry=2,
-        min_retry_wait=0, max_retry_wait=0,
+        min_retry_wait=0,
+        max_retry_wait=0,
     )
 
     result = await primary.ainfer("Summarize this document")
@@ -166,13 +185,14 @@ async def main():
 
     primary = MockBackend(
         name="FastAPI",
-        should_crash=True,          # Primary crashes
-        recovery_crashes=True,      # Self-recovery also crashes
+        should_crash=True,  # Primary crashes
+        recovery_crashes=True,  # Self-recovery also crashes
         response="FastAPI response",
         fallback_inferencer=cli_fallback,
         fallback_mode=FallbackMode.ON_FIRST_FAILURE,
         max_retry=1,
-        min_retry_wait=0, max_retry_wait=0,
+        min_retry_wait=0,
+        max_retry_wait=0,
     )
 
     result = await primary.ainfer("Summarize this document")
@@ -191,7 +211,8 @@ async def main():
         response="CLI response",
         max_retry=1,
         fallback_mode=FallbackMode.NEVER,
-        min_retry_wait=0, max_retry_wait=0,
+        min_retry_wait=0,
+        max_retry_wait=0,
     )
 
     primary = MockBackend(
@@ -202,7 +223,8 @@ async def main():
         fallback_inferencer=[cli_fallback, cloud_fallback],  # list = ordered chain
         fallback_mode=FallbackMode.ON_FIRST_FAILURE,
         max_retry=1,
-        min_retry_wait=0, max_retry_wait=0,
+        min_retry_wait=0,
+        max_retry_wait=0,
     )
 
     result = await primary.ainfer("Summarize this document")
@@ -211,7 +233,9 @@ async def main():
 
     # Summary
     separator("Summary")
-    print("  The fallback chain is: primary -> self-recovery -> external[0] -> external[1] -> ...")
+    print(
+        "  The fallback chain is: primary -> self-recovery -> external[0] -> external[1] -> ..."
+    )
     print()
     print("  FallbackMode controls WHEN to switch:")
     print("    ON_FIRST_FAILURE: switch immediately on any failure")
@@ -226,5 +250,6 @@ async def main():
 
 if __name__ == "__main__":
     import warnings
+
     warnings.filterwarnings("ignore")
     asyncio.run(main())

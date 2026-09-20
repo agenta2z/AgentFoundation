@@ -66,7 +66,9 @@ def test_sync_single_call(query: str) -> bool:
         print(f"\n✓ Got response in {elapsed:.2f}s:")
         print(f"  Response type: {type(response)}")
         print(f"  Success: {response.success}")
-        print(f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}...")
+        print(
+            f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}..."
+        )
         print(f"  Return code: {response.return_code}")
         output = getattr(response, "output", "")
         print(f"  Output length: {len(output)} chars")
@@ -175,7 +177,9 @@ async def test_async_single_call(query: str) -> bool:
         print(f"\n✓ Got response in {elapsed:.2f}s:")
         print(f"  Response type: {type(response)}")
         print(f"  Success: {response.success}")
-        print(f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}...")
+        print(
+            f"  Session ID: {getattr(response, 'session_id', 'N/A') or 'N/A'[:16]}..."
+        )
         output = getattr(response, "output", "")
         print(f"  Output length: {len(output)} chars")
         print("-" * 40)
@@ -471,7 +475,9 @@ async def test_session_continuation() -> bool:
         print(f"✓ Response 1 in {elapsed1:.2f}s")
         print(f"  Session ID: {session_id[:16] if session_id else 'N/A'}...")
         print(f"  Success: {result1.success}")
-        print(f"  Active session: {inferencer.active_session_id[:16] if inferencer.active_session_id else 'N/A'}...")
+        print(
+            f"  Active session: {inferencer.active_session_id[:16] if inferencer.active_session_id else 'N/A'}..."
+        )
         output1 = getattr(result1, "output", "")
         print(f"  Response: {output1[:100]}...")
 
@@ -479,7 +485,9 @@ async def test_session_continuation() -> bool:
             print("\n⚠️ No session ID returned - cannot test continuation")
             # Still pass if first call worked
             if result1.success:
-                print("\n✅ SESSION TEST PASSED (no continuation, but first call worked)")
+                print(
+                    "\n✅ SESSION TEST PASSED (no continuation, but first call worked)"
+                )
                 return True
             return False
 
@@ -545,7 +553,7 @@ def test_command_construction() -> bool:
 
         # Construct a command
         command = inferencer.construct_command(
-            {"prompt": "Test prompt with $pecial \"characters\" and `backticks`"},
+            {"prompt": 'Test prompt with $pecial "characters" and `backticks`'},
             output_format="json",
         )
 

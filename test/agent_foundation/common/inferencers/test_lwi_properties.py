@@ -9,14 +9,14 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from hypothesis import given, settings, HealthCheck
-from hypothesis import strategies as st
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from hypothesis import given, HealthCheck, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_inferencer(return_value="mock_result"):
     """Create a mock InferencerBase-like object with ainfer."""
@@ -62,6 +62,7 @@ def _make_lwi_with_workspace(step_configs, response_builder, workspace_root):
 # Feature: linear-workflow-inheritance, Property 1: Iteration counter tracks loop cycles
 # Validates: Requirements 1.1, 1.4
 # ---------------------------------------------------------------------------
+
 
 @settings(max_examples=100, deadline=None)
 @given(n_loops=st.integers(min_value=0, max_value=5))
@@ -111,12 +112,12 @@ def test_iteration_counter_tracks_loop_cycles(n_loops):
     assert captured_state["iteration"] == n_loops + 1
 
 
-
 # ---------------------------------------------------------------------------
 # Property 2: Iteration workspace directory creation
 # Feature: linear-workflow-inheritance, Property 2: Iteration workspace directory creation
 # Validates: Requirements 1.2, 1.3
 # ---------------------------------------------------------------------------
+
 
 @settings(max_examples=100, deadline=None)
 @given(n_iters=st.integers(min_value=1, max_value=5))
@@ -173,6 +174,7 @@ def test_iteration_workspace_directory_creation(n_iters):
 # Validates: Requirements 4.1, 4.3
 # ---------------------------------------------------------------------------
 
+
 @settings(max_examples=100, deadline=None)
 @given(n_steps=st.integers(min_value=1, max_value=5))
 def test_step_completion_markers_written(n_steps):
@@ -218,15 +220,16 @@ def test_step_completion_markers_written(n_steps):
 # Validates: Requirements 5.1, 5.2, 5.3, 5.4
 # ---------------------------------------------------------------------------
 
+
 @settings(max_examples=100, deadline=None)
 @given(text=st.text())
 def test_extract_response_text_type_dispatch(text):
     """For any result type, extract_response_text returns the correct string."""
     from agent_foundation.common.inferencers.agentic_inferencers.common import (
         DualInferencerResponse,
+        extract_response_text,
         InferencerResponse,
         ResponseSelectors,
-        extract_response_text,
     )
 
     # Case 1: DualInferencerResponse -> str(result.base_response)
@@ -254,6 +257,7 @@ def test_extract_response_text_type_dispatch(text):
 # Feature: linear-workflow-inheritance, Property 5: Iteration records accumulate with loop cycles
 # Validates: Requirements 6.1, 6.2
 # ---------------------------------------------------------------------------
+
 
 @settings(max_examples=100, deadline=None)
 @given(n_loops=st.integers(min_value=0, max_value=5))
@@ -315,6 +319,7 @@ def test_iteration_records_accumulate(n_loops):
 # Validates: Requirements 6.4
 # ---------------------------------------------------------------------------
 
+
 @settings(max_examples=100, deadline=None)
 @given(data=st.dictionaries(st.text(min_size=1), st.text()))
 def test_default_snapshot_excludes_private_keys(data):
@@ -356,6 +361,7 @@ def test_default_snapshot_excludes_private_keys(data):
 # Feature: linear-workflow-inheritance, Property 7: Child inferencer deduplication by identity
 # Validates: Requirements 7.1, 7.2, 7.3
 # ---------------------------------------------------------------------------
+
 
 @settings(max_examples=100, deadline=None)
 @given(

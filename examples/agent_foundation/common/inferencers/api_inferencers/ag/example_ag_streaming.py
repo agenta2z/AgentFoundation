@@ -26,10 +26,7 @@ Run:
 import asyncio
 import time
 
-from agent_foundation.apis.ag import (
-    AIGatewayClaudeModels,
-    detect_available_mode,
-)
+from agent_foundation.apis.ag import AIGatewayClaudeModels, detect_available_mode
 from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
     AgClaudeApiInferencer,
 )
@@ -38,6 +35,7 @@ from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_infere
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 1: Sync streaming via infer_streaming()
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def example_sync_streaming(mode: str):
     """Demonstrates the sync streaming bridge — works in regular (non-async) code."""
@@ -78,6 +76,7 @@ def example_sync_streaming(mode: str):
 # Example 2: Async streaming via ainfer_streaming()
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def example_async_streaming(mode: str):
     """Demonstrates native async streaming — best for async applications."""
     inferencer = AgClaudeApiInferencer(
@@ -116,6 +115,7 @@ async def example_async_streaming(mode: str):
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 3: Streaming vs Sync — side-by-side comparison
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def example_streaming_vs_sync(mode: str):
     """Compares streaming and sync inference for the same prompt."""
@@ -167,6 +167,7 @@ async def example_streaming_vs_sync(mode: str):
 # Example 4: Multi-turn streaming with set_messages()
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def example_multiturn_streaming(mode: str):
     """Demonstrates multi-turn conversation with streaming responses."""
     inferencer = AgClaudeApiInferencer(
@@ -197,7 +198,9 @@ async def example_multiturn_streaming(mode: str):
         print(f"  Turn {i} (assistant): ", end="", flush=True)
 
         response_parts = []
-        async for chunk in inferencer.ainfer_streaming(""):  # prompt ignored when messages are set
+        async for chunk in inferencer.ainfer_streaming(
+            ""
+        ):  # prompt ignored when messages are set
             print(chunk, end="", flush=True)
             response_parts.append(chunk)
 
@@ -212,6 +215,7 @@ async def example_multiturn_streaming(mode: str):
 # ──────────────────────────────────────────────────────────────────────────────
 # Example 5: Streaming with different gateway modes
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def example_streaming_modes():
     """Demonstrates streaming across different gateway modes."""
@@ -242,7 +246,9 @@ async def example_streaming_modes():
             elapsed_ms = int((time.time() - start) * 1000)
             ttft_ms = int((first_chunk_time - start) * 1000) if first_chunk_time else 0
             result = "".join(parts)
-            print(f"  [{mode:14s}] {elapsed_ms}ms total, {ttft_ms}ms TTFT — {result.strip()}")
+            print(
+                f"  [{mode:14s}] {elapsed_ms}ms total, {ttft_ms}ms TTFT — {result.strip()}"
+            )
 
         except Exception as e:
             print(f"  [{mode:14s}] FAILED: {e}")
@@ -253,6 +259,7 @@ async def example_streaming_modes():
 # ──────────────────────────────────────────────────────────────────────────────
 # Main — run all examples
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def _async_main(mode: str):
     await example_async_streaming(mode)
@@ -270,13 +277,15 @@ if __name__ == "__main__":
         description="Tutorial: AgClaudeApiInferencer Streaming",
     )
     parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["direct", "proximity", "slauth_server", "auto"],
         default=None,
         help="Force a specific gateway mode. If omitted, auto-detects.",
     )
     parser.add_argument(
-        "--example", "-e",
+        "--example",
+        "-e",
         type=int,
         choices=[1, 2, 3, 4, 5],
         default=None,
@@ -289,7 +298,9 @@ if __name__ == "__main__":
     print("|   AgClaudeApiInferencer — Streaming Tutorial                       |")
     print("+" + "=" * 68 + "+")
     print()
-    print(f"  User: {os.environ.get('AI_GATEWAY_USER_ID') or os.environ.get('USER', '(unknown)')}")
+    print(
+        f"  User: {os.environ.get('AI_GATEWAY_USER_ID') or os.environ.get('USER', '(unknown)')}"
+    )
 
     # Detect mode
     if args.mode:
@@ -327,6 +338,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

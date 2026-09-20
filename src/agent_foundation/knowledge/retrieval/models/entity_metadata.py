@@ -7,13 +7,12 @@ automatic timestamp management.
 
 Requirements: 1.1, 1.6
 """
+
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Tuple
 
-from attr import attrs, attrib
-
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
-
 
 
 @attrs
@@ -28,6 +27,7 @@ class EntityMetadata:
         updated_at: ISO 8601 last-update timestamp. Auto-generated if None.
         spaces: List of space labels this metadata belongs to. Defaults to ["main"].
     """
+
     entity_id: str = attrib()
     entity_type: str = attrib()
     properties: Dict[str, Any] = attrib(factory=dict)
@@ -129,11 +129,6 @@ class EntityMetadata:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             spaces=data.get("spaces", ["main"]),
-            history=[
-                DataOperationRecord.from_dict(r)
-                for r in data.get("history", [])
-            ],
+            history=[DataOperationRecord.from_dict(r) for r in data.get("history", [])],
             is_active=data.get("is_active", True),
         )
-
-

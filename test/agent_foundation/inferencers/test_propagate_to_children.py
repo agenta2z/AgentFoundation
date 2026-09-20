@@ -20,12 +20,11 @@ import functools
 from unittest.mock import MagicMock
 
 import pytest
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +32,7 @@ from agent_foundation.common.inferencers.templated_inferencer_base import (
 # Inherits TemplatedInferencerBase so template_extra_feed + _propagate_to_children
 # are available — these moved off InferencerBase in the templated-base refactor.
 # ---------------------------------------------------------------------------
+
 
 @attrs
 class StubInferencer(TemplatedInferencerBase):
@@ -47,6 +47,7 @@ class StubInferencer(TemplatedInferencerBase):
 
 class DuckTypedCallable:
     """A callable wrapper that exposes template_extra_feed as a dict attr."""
+
     def __init__(self, **kwargs):
         self.template_extra_feed = kwargs.get("template_extra_feed", {})
 
@@ -56,12 +57,14 @@ class DuckTypedCallable:
 
 class NonMatchingCallable:
     """A callable WITHOUT template_extra_feed — should be skipped."""
+
     def __call__(self):
         return "no feed"
 
 
 class StringFeedCallable:
     """A callable with template_extra_feed as a string — should be skipped."""
+
     template_extra_feed = "not a dict"
 
     def __call__(self):
@@ -71,6 +74,7 @@ class StringFeedCallable:
 # ---------------------------------------------------------------------------
 # Basic propagation
 # ---------------------------------------------------------------------------
+
 
 class TestBasicPropagation:
     def test_propagates_to_direct_child(self):
@@ -123,6 +127,7 @@ class TestBasicPropagation:
 # Parent-wins semantics
 # ---------------------------------------------------------------------------
 
+
 class TestParentWinsSemantics:
     def test_parent_overrides_child_default(self):
         child = StubInferencer()
@@ -170,9 +175,12 @@ class TestParentWinsSemantics:
 # functools.partial handling
 # ---------------------------------------------------------------------------
 
+
 class TestPartialPropagation:
     def test_top_level_partial(self):
-        factory = functools.partial(StubInferencer, template_extra_feed={"yaml_key": "yaml_val"})
+        factory = functools.partial(
+            StubInferencer, template_extra_feed={"yaml_key": "yaml_val"}
+        )
         parent = StubInferencer(worker_factory=factory)
         parent.template_extra_feed = {"runtime": "ctx"}
 
@@ -185,7 +193,9 @@ class TestPartialPropagation:
         assert merged["yaml_key"] == "yaml_val"
 
     def test_partial_parent_wins(self):
-        factory = functools.partial(StubInferencer, template_extra_feed={"key": "child_val"})
+        factory = functools.partial(
+            StubInferencer, template_extra_feed={"key": "child_val"}
+        )
         parent = StubInferencer(worker_factory=factory)
         parent.template_extra_feed = {"key": "parent_val"}
 
@@ -197,7 +207,13 @@ class TestPartialPropagation:
     def test_partial_in_dict(self):
         f1 = functools.partial(StubInferencer, template_extra_feed={})
         f2 = functools.partial(StubInferencer, template_extra_feed={"existing": "keep"})
-        parent = StubInferencer(children_dict={"research": f1, "investigation": f2, "__default__": "research"})
+        parent = StubInferencer(
+            children_dict={
+                "research": f1,
+                "investigation": f2,
+                "__default__": "research",
+            }
+        )
         parent.template_extra_feed = {"role_name": "PGM"}
 
         parent._propagate_to_children()
@@ -232,6 +248,7 @@ class TestPartialPropagation:
 # ---------------------------------------------------------------------------
 # Duck-typed callable fallback
 # ---------------------------------------------------------------------------
+
 
 class TestDuckTypedCallable:
     def test_top_level_duck_typed(self):
@@ -277,7 +294,9 @@ class TestDuckTypedCallable:
         parent.template_extra_feed = {"key": "val"}
 
         parent._propagate_to_children()  # should not raise
-        assert not hasattr(obj, "template_extra_feed") or obj.template_extra_feed != {"key": "val"}
+        assert not hasattr(obj, "template_extra_feed") or obj.template_extra_feed != {
+            "key": "val"
+        }
 
     def test_string_feed_callable_skipped(self):
         obj = StringFeedCallable()
@@ -292,6 +311,7 @@ class TestDuckTypedCallable:
 # ---------------------------------------------------------------------------
 # Multi-level nesting (3+ levels)
 # ---------------------------------------------------------------------------
+
 
 class TestMultiLevelNesting:
     def test_three_levels_direct(self):
@@ -334,33 +354,41 @@ class TestMultiLevelNesting:
 # Mixed dict with heterogeneous values
 # ---------------------------------------------------------------------------
 
+
 class TestMixedDict:
     def test_dict_with_inferencer_partial_duck_and_string(self):
         inf = StubInferencer()
         partial_f = functools.partial(StubInferencer)
         duck = DuckTypedCallable()
-        parent = StubInferencer(children_dict={
-            "direct": inf,
-            "factory": partial_f,
-            "wrapper": duck,
-            "__default__": "direct",  # string — should be preserved
-        })
+        parent = StubInferencer(
+            children_dict={
+                "direct": inf,
+                "factory": partial_f,
+                "wrapper": duck,
+                "__default__": "direct",  # string — should be preserved
+            }
+        )
         parent.template_extra_feed = {"ctx": "val"}
 
         parent._propagate_to_children()
 
         assert inf.template_extra_feed["ctx"] == "val"
-        assert parent.children_dict["factory"].keywords["template_extra_feed"]["ctx"] == "val"
+        assert (
+            parent.children_dict["factory"].keywords["template_extra_feed"]["ctx"]
+            == "val"
+        )
         assert duck.template_extra_feed["ctx"] == "val"
         assert parent.children_dict["__default__"] == "direct"
 
     def test_dict_preserves_non_changed_entries(self):
         inf = StubInferencer()
-        parent = StubInferencer(children_dict={
-            "worker": inf,
-            "config": {"some": "data"},  # plain dict value, not an inferencer
-            "count": 42,
-        })
+        parent = StubInferencer(
+            children_dict={
+                "worker": inf,
+                "config": {"some": "data"},  # plain dict value, not an inferencer
+                "count": 42,
+            }
+        )
         parent.template_extra_feed = {"ctx": "val"}
 
         parent._propagate_to_children()
@@ -373,6 +401,7 @@ class TestMixedDict:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     def test_propagation_idempotent(self):

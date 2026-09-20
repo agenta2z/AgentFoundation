@@ -19,7 +19,6 @@ import re
 from functools import partial
 from typing import Any, Callable, ClassVar, Dict, List, Mapping, Optional, Union
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusAttemptRecord,
     ConsensusConfig,
@@ -31,6 +30,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ResponseSelectors,
     severity_at_most,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+    LinearWorkflowInferencer,
+    WorkflowStepConfig,
+)
 from agent_foundation.common.inferencers.constants import (
     DEFAULT_PLACEHOLDER_DUAL_COUNTER_FEEDBACK,
     DEFAULT_PLACEHOLDER_DUAL_INPUT,
@@ -38,30 +41,24 @@ from agent_foundation.common.inferencers.constants import (
     DEFAULT_PLACEHOLDER_DUAL_PROPOSAL,
     DEFAULT_PLACEHOLDER_DUAL_REASONING,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
-    LinearWorkflowInferencer,
-    WorkflowStepConfig,
-)
 from agent_foundation.common.inferencers.inferencer_base import (
+    _is_bookkeeping_sidecar,
     InferencerBase,
 )
 from agent_foundation.common.inferencers.template_defaults import (
     FOLLOWUP_TEMPLATE_DEFAULTS,
     REVIEW_TEMPLATE_DEFAULTS,
 )
+from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.input_and_response import InputAndResponse
-from rich_python_utils.common_objects.workflow.common.exceptions import (
-    WorkflowAborted,
-)
+from rich_python_utils.common_objects.workflow.common.exceptions import WorkflowAborted
 from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
     StepResultSaveOptions,
 )
 from rich_python_utils.common_objects.workflow.workflow import Workflow
 from rich_python_utils.io_utils.artifact import artifact_type
-from rich_python_utils.string_utils.formatting.template_manager import (
-    TemplateManager,
-)
+from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 from rich_python_utils.string_utils.xml_helpers import unescape_xml
 
 logger = logging.getLogger(__name__)
@@ -174,14 +171,18 @@ class DualInferencer(LinearWorkflowInferencer):
     # Dual's own SLOT_DEFAULTS (review_inferencer.template_key=review) is
     # applied separately when ``_walk`` enters the Dual node.
     _TEMPLATE_TRANSPARENT_SLOTS: ClassVar[List[str]] = [
-        "base_inferencer", "review_inferencer", "fixer_inferencer",
-    ]
-
-    _workspace_propagation_skip: frozenset = frozenset((
         "base_inferencer",
         "review_inferencer",
         "fixer_inferencer",
-    ))
+    ]
+
+    _workspace_propagation_skip: frozenset = frozenset(
+        (
+            "base_inferencer",
+            "review_inferencer",
+            "fixer_inferencer",
+        )
+    )
 
     base_inferencer: InferencerBase = attrib(default=None)
     review_inferencer: InferencerBase = attrib(default=None)
@@ -491,6 +492,25 @@ class DualInferencer(LinearWorkflowInferencer):
         self.__dict__["step_configs_backing"] = value
 
     # ------------------------------------------------------------------
+    # Part 3 "write once, link" (default ON).
+    #
+    # ``_maybe_replace_with_file_reference`` writes the base/fix ``<Response>``
+    # once to ``artifacts/round{NN}_{basename}``. With this flag on, the
+    # subsequent ``log_info(..., is_artifact=True)`` for that SAME response
+    # records a LINK (``__parts_file__`` pointing at that one artifact,
+    # WORKSPACE-relative) instead of the JSON logger writing a SECOND copy under
+    # ``.jsonl.parts/<Category>/`` — retiring the double-write so the workspace is
+    # the single source. Safe by default: the read side
+    # (``_resolve_parts_references`` in ``json_io``) tries the ``.parts/`` dir
+    # FIRST (every existing REFERENCE log stays byte-identical) and AUTO-DERIVES
+    # the base for a LINK marker by walking up from ``parts_dir`` — so marker-
+    # resolving readers (session RESTORE, meta_agent ``SessionLogReader``) resolve
+    # a LINK with NO ``workspace_root`` threading. Readers that scan
+    # ``.jsonl.parts/`` directly simply find the single-sourced response under
+    # ``artifacts/`` instead (no crash; the file still exists).
+    _link_response_artifacts: bool = True
+
+    # ------------------------------------------------------------------
     # Block WorkNodeBase.run() / arun() — callers must use infer()/ainfer()
     # ------------------------------------------------------------------
 
@@ -516,9 +536,7 @@ class DualInferencer(LinearWorkflowInferencer):
         attempt = self._run_get("_current_attempt", 0)
         if self._workspace is not None:
             return self._workspace.checkpoint_path(
-                os.path.join(
-                    f"attempt_{attempt:02d}", f"step_{result_id}.json"
-                )
+                os.path.join(f"attempt_{attempt:02d}", f"step_{result_id}.json")
             )
         if self.checkpoint_dir:
             return os.path.join(
@@ -576,9 +594,8 @@ class DualInferencer(LinearWorkflowInferencer):
         review_inferencer and fixer_inferencer get per-round workspaces
         at runtime (in ``_step_review_impl`` / ``_step_fix_impl``).
         """
-        from agent_foundation.common.inferencers.inferencer_base import (
-            InferencerBase,
-        )
+        from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
         base = getattr(self, "base_inferencer", None)
         if base is not None and isinstance(base, InferencerBase):
             if getattr(base, "_workspace", None) is None:
@@ -660,14 +677,23 @@ class DualInferencer(LinearWorkflowInferencer):
             self._symlink_child_output(child_ws)
             propose_ws = getattr(self, "_propose_child_ws", None)
             if propose_ws is not None and propose_ws is not child_ws:
-                propose_fd = getattr(propose_ws, "deliverables_dir", None)
-                own_fd = getattr(self._workspace, "deliverables_dir", None)
-                if propose_fd and own_fd and os.path.isdir(propose_fd):
-                    os.makedirs(own_fd, exist_ok=True)
-                    for entry in os.listdir(propose_fd):
+                # Lift the propose child's outputs/ deliverables (and any loose
+                # sidecars) into this node's outputs/. ``_symlink_or_copy`` skips
+                # entries that already exist, so the fix child's output — surfaced
+                # by ``_symlink_child_output`` above — always takes precedence.
+                propose_out = getattr(propose_ws, "outputs_dir", None)
+                own_out = getattr(self._workspace, "outputs_dir", None)
+                if propose_out and own_out and os.path.isdir(propose_out):
+                    own_name = self.output_path or "output.md"
+                    os.makedirs(own_out, exist_ok=True)
+                    for entry in os.listdir(propose_out):
+                        if _is_bookkeeping_sidecar(entry):
+                            continue
+                        if entry == own_name:
+                            continue
                         self._symlink_or_copy(
-                            os.path.join(propose_fd, entry),
-                            os.path.join(own_fd, entry),
+                            os.path.join(propose_out, entry),
+                            os.path.join(own_out, entry),
                         )
             resolved = self.resolve_output_path()
             if resolved and os.path.isfile(resolved):
@@ -728,7 +754,36 @@ class DualInferencer(LinearWorkflowInferencer):
             counter = None
         if counter is None:
             return self.base_inferencer
-        return self._role_get("fixer_inferencer") if self._role_get("fixer_inferencer") is not None else self.base_inferencer
+        return (
+            self._role_get("fixer_inferencer")
+            if self._role_get("fixer_inferencer") is not None
+            else self.base_inferencer
+        )
+
+    def _prior_task_instructions(self) -> str:
+        """The author snapshot captured at propose-completion (``""`` if none).
+
+        Stored in ``self._state`` — which is checkpointed — so it survives a
+        cross-process resume, unlike a bare instance attribute on a leaf.
+        """
+        st = getattr(self, "_state", None)
+        if isinstance(st, dict):
+            return str(st.get("prior_task_instructions", "") or "")
+        return ""
+
+    def _proposer_task_instructions(self) -> str:
+        """Contract rendered by this Dual's author, for a parent orchestrator.
+
+        Prefers the value captured at propose-completion: by the time a parent asks,
+        the winning flow may have re-rendered in the fixer role and overwritten its
+        own snapshot. Falls back to a live walk down the INPUT side (``base_inferencer``
+        — a proposer leaf for a plain Dual, or an orchestrator that delegates further).
+        """
+        stored = self._prior_task_instructions()
+        if stored:
+            return stored
+        getter = getattr(self.base_inferencer, "_proposer_task_instructions", None)
+        return (getter() or "") if callable(getter) else ""
 
     def _resolve_prior_proposer_output_path(self) -> Optional[str]:
         """Resolve the on-disk file path of the active proposer's prior output.
@@ -743,10 +798,10 @@ class DualInferencer(LinearWorkflowInferencer):
         implementation, evaluation, or any future Dual usage):
 
           Tier 1 — Deliverable file (preferred for orchestrators: BTA, PTI):
-            If the active proposer's workspace has non-empty
-            ``final_deliverables/``, return the deliverable file matching the
-            proposer's ``_output_path`` basename (typically ``output.md``);
-            else the first non-dotfile deliverable in alphabetical order.
+            If the active proposer's workspace has non-empty ``outputs/``,
+            return the deliverable file matching the proposer's ``_output_path``
+            basename (typically ``output.md``); else the first non-dotfile
+            deliverable in alphabetical order.
             (Dotfiles like ``.self_promoted`` are filtered.)
 
           Tier 2 — Outputs file (canonical for leaf inferencers):
@@ -777,7 +832,10 @@ class DualInferencer(LinearWorkflowInferencer):
         if ws is None:
             return None
 
-        from agent_foundation.common.inferencers.inferencer_workspace import DEFAULT_OUTPUT_FILENAME
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            DEFAULT_OUTPUT_FILENAME,
+        )
+
         out_basename = os.path.basename(
             getattr(proposer, "_output_path", None) or DEFAULT_OUTPUT_FILENAME
         )
@@ -799,15 +857,15 @@ class DualInferencer(LinearWorkflowInferencer):
                 n for n in (names or []) if not os.path.basename(n).startswith(".")
             ):
                 # deliverable_paths() may return either basenames or full paths.
-                candidate = (
-                    name if os.path.isabs(name) else ws.deliverable_path(name)
-                )
+                candidate = name if os.path.isabs(name) else ws.deliverable_path(name)
                 if candidate and os.path.isfile(candidate):
                     return candidate
 
         # Tier 2: outputs/<basename>
         try:
-            out_path = ws.output_path(out_basename) if hasattr(ws, "output_path") else None
+            out_path = (
+                ws.output_path(out_basename) if hasattr(ws, "output_path") else None
+            )
         except Exception:
             out_path = None
         if out_path and os.path.isfile(out_path):
@@ -815,8 +873,9 @@ class DualInferencer(LinearWorkflowInferencer):
 
         return None
 
-    def _record_round_audit(self, round_idx, phase, inferencer, extra=None,
-                            workspace_root_at_phase=None):
+    def _record_round_audit(
+        self, round_idx, phase, inferencer, extra=None, workspace_root_at_phase=None
+    ):
         """Record a single round phase to structured log + navigation symlink.
 
         Fail-safe: exceptions are logged but never propagate — audit must
@@ -836,7 +895,10 @@ class DualInferencer(LinearWorkflowInferencer):
         """
         if not self.enable_round_audit or self._workspace is None:
             return
-        if workspace_root_at_phase is None and getattr(inferencer, "_workspace", None) is None:
+        if (
+            workspace_root_at_phase is None
+            and getattr(inferencer, "_workspace", None) is None
+        ):
             return
 
         try:
@@ -854,9 +916,11 @@ class DualInferencer(LinearWorkflowInferencer):
                 "timestamp": _dt.utcnow().isoformat(),
                 **(extra or {}),
             }
-            outputs_dir = getattr(self._workspace, "outputs_dir", None)
-            if outputs_dir:
-                log_path = os.path.join(outputs_dir, "round_log.jsonl")
+            # Part 2 (Axis A): round_log.jsonl is framework BOOKKEEPING → artifacts/
+            # (not outputs/, which is the deliverable set). Sole writer; no prod reader.
+            artifacts_dir = getattr(self._workspace, "artifacts_dir", None)
+            if artifacts_dir:
+                log_path = os.path.join(artifacts_dir, "round_log.jsonl")
                 os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(_json.dumps(log_entry) + "\n")
@@ -869,7 +933,10 @@ class DualInferencer(LinearWorkflowInferencer):
                     logger.error(
                         "Audit: cross-worker leakage at round_%02d/%s: "
                         "target %s outside %s",
-                        round_idx, phase, target, self._workspace.root,
+                        round_idx,
+                        phase,
+                        target,
+                        self._workspace.root,
                     )
         except Exception as exc:
             logger.warning("Round audit for %s/%s failed: %s", round_idx, phase, exc)
@@ -918,6 +985,18 @@ class DualInferencer(LinearWorkflowInferencer):
 
         for attempt in range(1, config.max_consensus_attempts + 1):
             if attempt > 1:
+                # U1a: release this Dual's OWN subtree path-claims before the
+                # retry re-derives the review panel — otherwise a slot rebound to
+                # a different leaf class trips the store's CollisionError guard.
+                # Scoped to the Dual's own subtree (never the whole store), so
+                # sibling workers sharing the per-turn store are untouched.
+                from agent_foundation.common.inferencers.run_context import (
+                    active_run_context,
+                )
+
+                _ctx = active_run_context()
+                if _ctx is not None:
+                    _ctx._store.evict_subtree(_ctx.path)
                 await self._areset_sub_inferencers()
 
             logger.info(
@@ -1207,6 +1286,7 @@ class DualInferencer(LinearWorkflowInferencer):
                 ),
             ]
         else:
+
             def _check_loop_condition(state, result):
                 if state is None:
                     self.log_warning(
@@ -1322,6 +1402,9 @@ class DualInferencer(LinearWorkflowInferencer):
             is_artifact=True,
             parts_min_size=0,
             parts_subfolder=_sf,
+            # Part 3: LINK to the artifact just written by
+            # _maybe_replace_with_file_reference (opt-in; {} by default).
+            **self._response_artifact_log_kwargs(),
         )
 
         state["base_output_str"] = base_output_str
@@ -1329,10 +1412,35 @@ class DualInferencer(LinearWorkflowInferencer):
         state["consensus_iteration"] = 0
         self._state = state
         self._record_round_audit(
-            state["total_iterations"] + 1, "propose", self.base_inferencer,
+            state["total_iterations"] + 1,
+            "propose",
+            self.base_inferencer,
             workspace_root_at_phase=_propose_ws_snapshot,
         )
-        await self._emit_stage_status("propose", "completed")
+        # Resolve the base inferencer's canonical output (BTA aggregator's
+        # final deliverable / outputs file) so the UI's NodeDetailPanel can
+        # fetch and render it for the Propose container. Without this, the
+        # detail panel falls back to "Output not found." Reuses the existing
+        # _resolve_prior_proposer_output_path() helper (lines 733-816), which
+        # already handles the deliverables -> outputs -> basename 3-tier
+        # resolution and is battle-tested for review/followup feed building
+        # (call sites at lines 2057 and 2152).
+        _propose_output_path = self._resolve_prior_proposer_output_path() or ""
+        # Snapshot the task contract the PROPOSER actually rendered, for the
+        # reviewer/fixer ``<OriginalTaskInstructions>`` reference block. Captured
+        # HERE — at propose-completion — because (a) the contract is round-independent
+        # (the reviewed artifact varies via ``main_response``/``prior_output_path``,
+        # never via ``task_instructions``), so one capture serves every later round,
+        # and (b) MultiFlowDual reuses the winning flow as the fixer right after this
+        # step, which would overwrite that leaf's own snapshot. Kept in ``state``
+        # (checkpointed) so it survives a cross-process resume. First non-empty wins.
+        if not state.get("prior_task_instructions"):
+            _getter = getattr(self.base_inferencer, "_proposer_task_instructions", None)
+            if callable(_getter):
+                state["prior_task_instructions"] = _getter() or ""
+        await self._emit_stage_status(
+            "propose", "completed", output_path=_propose_output_path
+        )
         return base_output_str
 
     async def _step_review_impl(self, step_input, state):
@@ -1352,6 +1460,13 @@ class DualInferencer(LinearWorkflowInferencer):
             state = dict(self._pending_state)
             self._state = state
 
+        # Emit "running" for the review stage so the UI shows live progress.
+        # The terminal "completed" state is bulk-stamped by _emit_graph_reconcile
+        # at end-of-run (carrying no output_path); a future enhancement can wire
+        # per-stage output_path resolution if/when reviewers produce
+        # filesystem deliverables worth fetching in NodeDetailPanel.
+        await self._emit_stage_status("review", "running")
+
         # Read with fallback for old checkpoint compat
         consensus_iter = state.get("consensus_iteration", state.get("iteration", 0))
         consensus_iter += 1
@@ -1363,17 +1478,27 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Context path for the primary reviewer — independent of workspace.
         # Single reviewer: review/. Multi-reviewer panel: review/panelist_00/.
-        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            indexed_child_name,
+        )
+
         _review_child = self._rc_child("review")
         _has_panel = bool(self._role_get("reviewers"))
         if _has_panel and _review_child is not None:
             _review_child = _review_child.child(indexed_child_name("panelist", 0))
 
         # Per-round workspace (orthogonal to context path).
-        if self._workspace is not None and self._role_get("review_inferencer") is not None:
-            round_ws = self._workspace.child(indexed_child_name("round", consensus_iter))
+        if (
+            self._workspace is not None
+            and self._role_get("review_inferencer") is not None
+        ):
+            round_ws = self._workspace.child(
+                indexed_child_name("round", consensus_iter)
+            )
             if _has_panel:
-                review_ws = round_ws.child("review").child(indexed_child_name("panelist", 0))
+                review_ws = round_ws.child("review").child(
+                    indexed_child_name("panelist", 0)
+                )
             else:
                 review_ws = round_ws.child("review")
             review_ws.ensure_dirs()
@@ -1452,8 +1577,12 @@ class DualInferencer(LinearWorkflowInferencer):
                 base_output=state["base_output_str"],
                 review_input="",
                 review_output="",
-                review_feedback={"approved": True, "severity": "NONE",
-                                 "issues": [], "reasoning": "Review role disabled."},
+                review_feedback={
+                    "approved": True,
+                    "severity": "NONE",
+                    "issues": [],
+                    "reasoning": "Review role disabled.",
+                },
                 consensus_reached=True,
             )
             state["attempt_record"]["iterations"].append(iteration_record)
@@ -1486,9 +1615,13 @@ class DualInferencer(LinearWorkflowInferencer):
         # (e.g. /review/panelist_00), not the bare /review slot.
         _eff_review_ws = None
         if _review_child is not None:
-            _eff_review_ws = getattr(_review_child.handles, "get", lambda *a: None)(
-                "workspace_override"
-            ) if hasattr(_review_child, "handles") else None
+            _eff_review_ws = (
+                getattr(_review_child.handles, "get", lambda *a: None)(
+                    "workspace_override"
+                )
+                if hasattr(_review_child, "handles")
+                else None
+            )
         if _eff_review_ws is None:
             _eff_review_ws = self._read_child_workspace(
                 self._role_get("review_inferencer"), "review"
@@ -1496,47 +1629,88 @@ class DualInferencer(LinearWorkflowInferencer):
         _review_ws_snapshot = (
             str(_eff_review_ws.root) if _eff_review_ws is not None else None
         )
-        if review_leaf_can_render:
-            # Reuse _review_extra_feed computed above for the logging prompt —
-            # same dict, no re-computation, no re-rendering by Dual.
-            # The leaf's _render_prompt fires once inside ainfer().
-            _raw_review = str(
-                await self._role_get("review_inferencer").ainfer(
-                    state["inference_input"],
-                    run_context=_review_child,
-                    extra_feed=_review_extra_feed,
-                    **self._run_get("_current_extra_inference_args", {}),
+        _primary_review_failed = False
+        # U4-B: bind before the try so a CONTAINED primary reviewer (which fails
+        # before ``review_output_str`` is assigned inside the try) does not
+        # UnboundLocalError at the ReviewResponse log after the panel block.
+        review_output_str = ""
+        try:
+            if review_leaf_can_render:
+                # Reuse _review_extra_feed computed above for the logging prompt —
+                # same dict, no re-computation, no re-rendering by Dual.
+                # The leaf's _render_prompt fires once inside ainfer().
+                _raw_review = str(
+                    await self._role_get("review_inferencer").ainfer(
+                        state["inference_input"],
+                        run_context=_review_child,
+                        extra_feed=_review_extra_feed,
+                        **self._run_get("_current_extra_inference_args", {}),
+                    )
                 )
-            )
-        else:
-            _raw_review = str(
-                await self._role_get("review_inferencer").ainfer(
-                    review_prompt,
-                    run_context=_review_child,
-                    **self._run_get("_current_extra_inference_args", {}),
+            else:
+                _raw_review = str(
+                    await self._role_get("review_inferencer").ainfer(
+                        review_prompt,
+                        run_context=_review_child,
+                        **self._run_get("_current_extra_inference_args", {}),
+                    )
                 )
+            _sf = f"Round{total_iters:02d}"
+            self.log_debug(
+                _raw_review,
+                "RawReviewResponse",
+                is_artifact=True,
+                parts_min_size=0,
+                parts_subfolder=_sf,
             )
-        _sf = f"Round{total_iters:02d}"
-        self.log_debug(
-            _raw_review,
-            "RawReviewResponse",
-            is_artifact=True,
-            parts_min_size=0,
-            parts_subfolder=_sf,
-        )
 
-        review_output_str = self.response_parser(_raw_review)
-        if review_output_str is None:
-            raise InferencerExecutionError(
-                tool=f"<{self.phase or 'DualInferencer'}.review>",
-                error=(
-                    "response_parser returned None — model emitted no clean "
-                    "<Response> block (likely truncated by max_tokens, deliberately "
-                    "skipped after a tool call, or prompt-template echo). "
-                    f"raw_size_bytes={len(_raw_review)}"
-                ),
+            review_output_str = self.response_parser(_raw_review)
+            if review_output_str is None:
+                raise InferencerExecutionError(
+                    tool=f"<{self.phase or 'DualInferencer'}.review>",
+                    error=(
+                        "response_parser returned None — model emitted no clean "
+                        "<Response> block (likely truncated by max_tokens, deliberately "
+                        "skipped after a tool call, or prompt-template echo). "
+                        f"raw_size_bytes={len(_raw_review)}"
+                    ),
+                )
+            parsed_review = self.review_parser(review_output_str)
+        except BaseException as _rerr:
+            # U4-B: contain a failing PRIMARY reviewer — the seam a bare await left
+            # exposed (e.g. an all-non-winners metamate flow bound as panelist 0).
+            # Never-contain floor FIRST — cooperative cancellation, any non-Exception
+            # BaseException, and the surfaceable allowlist ALWAYS propagate.
+            import asyncio as _asyncio
+
+            if (
+                isinstance(
+                    _rerr,
+                    (
+                        _asyncio.CancelledError,
+                        KeyboardInterrupt,
+                        SystemExit,
+                        MemoryError,
+                    ),
+                )
+                or not isinstance(_rerr, Exception)
+                or isinstance(_rerr, getattr(self, "surfaceable_exceptions", ()))
+            ):
+                raise
+            # Contain ONLY when a declarative `reviewers` panel exists to anchor the
+            # review on survivors; otherwise fail-loud. The single-reviewer path is
+            # UNCHANGED — it re-raises exactly as before.
+            if not self._role_get("reviewers"):
+                raise
+            logger.warning(
+                "[%s] PRIMARY review inferencer failed (%s: %s); dropping from the "
+                "panel — consensus proceeds on the remaining reviewers.",
+                self.phase or "DualInferencer",
+                type(_rerr).__name__,
+                str(_rerr)[:200],
             )
-        parsed_review = self.review_parser(review_output_str)
+            parsed_review = None
+            _primary_review_failed = True
         # §3 Part B: multi-reviewer panel — run k reviewers and merge the parsed
         # reviews. Effective k is ``1 + len(reviewers)`` when a declarative
         # ``reviewers`` panel is supplied (``review_inferencer`` is panelist 0), else
@@ -1550,9 +1724,7 @@ class DualInferencer(LinearWorkflowInferencer):
             else self.num_reviewers
         )
         if _panel_k and _panel_k > 1:
-            from agent_foundation.common.inferencers.flow_parsers import (
-                merge_reviews,
-            )
+            from agent_foundation.common.inferencers.flow_parsers import merge_reviews
 
             # §3: each additional panelist runs under its OWN child node
             # (review/panelist_i) so its state + Tier-3 live handles are isolated
@@ -1561,19 +1733,32 @@ class DualInferencer(LinearWorkflowInferencer):
             # is set, panelist i is an INDEPENDENT instance (its own definition
             # state); else the single ``review_inferencer`` is reused per child ctx.
             # No child without an active ctx => legacy-mint, byte-identical.
-            _panel = [parsed_review]
-            from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name as _icn
-            self._record_round_audit(
-                total_iters, "review", self._role_get("review_inferencer"),
-                workspace_root_at_phase=_review_ws_snapshot,
-                extra={
-                    "audit_kind": "panelist",
-                    "panelist": _icn("panelist", 0),
-                    "approved": parsed_review.get("approved"),
-                    "severity": parsed_review.get("severity"),
-                    "num_issues": len(parsed_review.get("issues", [])),
-                },
+            # U4-B: if the PRIMARY reviewer was contained (dropped), the panel is
+            # anchored solely by the surviving additional reviewers; the all-dropped
+            # case is caught by the fail-loud empty-panel guard below.
+            _panel = [] if _primary_review_failed else [parsed_review]
+            from agent_foundation.common.inferencers.inferencer_workspace import (
+                indexed_child_name as _icn,
             )
+
+            # U4-B: panelist 0 (the primary reviewer) only has an audit record when
+            # it actually produced a review. If it was CONTAINED (dropped),
+            # ``parsed_review`` is None here — skip its audit (the surviving
+            # panelists are audited in the loop below).
+            if not _primary_review_failed:
+                self._record_round_audit(
+                    total_iters,
+                    "review",
+                    self._role_get("review_inferencer"),
+                    workspace_root_at_phase=_review_ws_snapshot,
+                    extra={
+                        "audit_kind": "panelist",
+                        "panelist": _icn("panelist", 0),
+                        "approved": parsed_review.get("approved"),
+                        "severity": parsed_review.get("severity"),
+                        "num_issues": len(parsed_review.get("issues", [])),
+                    },
+                )
             _rev_parent = self._rc_child("review")
             _round_ws = self._run_get("_current_round_ws")
             for _i in range(1, _panel_k):
@@ -1582,34 +1767,67 @@ class DualInferencer(LinearWorkflowInferencer):
                     if _panel_extra
                     else self._role_get("review_inferencer")
                 )
-                from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+                from agent_foundation.common.inferencers.inferencer_workspace import (
+                    indexed_child_name,
+                )
+
                 _pname = indexed_child_name("panelist", _i)
                 _panelist_ctx = (
-                    _rev_parent.child(_pname)
-                    if _rev_parent is not None
-                    else None
+                    _rev_parent.child(_pname) if _rev_parent is not None else None
                 )
                 if _round_ws is not None:
                     _panelist_ws = _round_ws.child("review").child(_pname)
                     _panelist_ws.ensure_dirs()
                     self._publish_workspace_to_ctx(_panelist_ctx, _panelist_ws)
-                if self._leaf_can_self_render(_panelist):
-                    _rk = str(
-                        await _panelist.ainfer(
-                            state["inference_input"],
-                            run_context=_panelist_ctx,
-                            extra_feed=_review_extra_feed,
-                            **self._run_get("_current_extra_inference_args", {}),
+                try:
+                    if self._leaf_can_self_render(_panelist):
+                        _rk = str(
+                            await _panelist.ainfer(
+                                state["inference_input"],
+                                run_context=_panelist_ctx,
+                                extra_feed=_review_extra_feed,
+                                **self._run_get("_current_extra_inference_args", {}),
+                            )
                         )
-                    )
-                else:
-                    _rk = str(
-                        await _panelist.ainfer(
-                            review_prompt,
-                            run_context=_panelist_ctx,
-                            **self._run_get("_current_extra_inference_args", {}),
+                    else:
+                        _rk = str(
+                            await _panelist.ainfer(
+                                review_prompt,
+                                run_context=_panelist_ctx,
+                                **self._run_get("_current_extra_inference_args", {}),
+                            )
                         )
+                except BaseException as _perr:
+                    # U4-B: contain a failing review panelist (mirror the BTA worker
+                    # sentinel). Never-contain floor — cooperative cancellation + any
+                    # non-Exception BaseException — ALWAYS propagates. Otherwise DROP
+                    # this panelist (WARN) and let consensus proceed on the survivors
+                    # (>=1 remains: the primary reviewer anchors _panel). merge_reviews
+                    # / all(...) already tolerate a shortened panel.
+                    import asyncio as _asyncio
+
+                    if isinstance(
+                        _perr,
+                        (
+                            _asyncio.CancelledError,
+                            KeyboardInterrupt,
+                            SystemExit,
+                            MemoryError,
+                        ),
+                    ) or not isinstance(_perr, Exception):
+                        raise
+                    if isinstance(_perr, getattr(self, "surfaceable_exceptions", ())):
+                        # U4-B: per-inferencer surfaceable allowlist — always surface.
+                        raise
+                    logger.warning(
+                        "[%s] review panelist %r failed (%s: %s); dropping from "
+                        "panel — consensus proceeds on survivors.",
+                        self.phase or "DualInferencer",
+                        _pname,
+                        type(_perr).__name__,
+                        str(_perr)[:200],
                     )
+                    continue
                 _rk_out = self.response_parser(_rk)
                 if _rk_out is not None:
                     _parsed_panelist = self.review_parser(_rk_out)
@@ -1619,13 +1837,19 @@ class DualInferencer(LinearWorkflowInferencer):
                     _panel.append(_parsed_panelist)
                 _panelist_ws_root = None
                 if _panelist_ctx is not None:
-                    _pw = getattr(_panelist_ctx.handles, "get", lambda *a: None)(
-                        "workspace_override"
-                    ) if hasattr(_panelist_ctx, "handles") else None
+                    _pw = (
+                        getattr(_panelist_ctx.handles, "get", lambda *a: None)(
+                            "workspace_override"
+                        )
+                        if hasattr(_panelist_ctx, "handles")
+                        else None
+                    )
                     if _pw is not None:
                         _panelist_ws_root = str(_pw.root)
                 self._record_round_audit(
-                    total_iters, "review", _panelist,
+                    total_iters,
+                    "review",
+                    _panelist,
                     workspace_root_at_phase=_panelist_ws_root,
                     extra={
                         "audit_kind": "panelist",
@@ -1635,18 +1859,27 @@ class DualInferencer(LinearWorkflowInferencer):
                         "num_issues": len(_parsed_panelist.get("issues", [])),
                     },
                 )
+            if not _panel:
+                # U4-B: every panelist was dropped (defensive — the primary
+                # reviewer normally anchors _panel). Fail loud rather than
+                # aggregate an empty panel into a false consensus.
+                raise RuntimeError(
+                    f"all {_panel_k} review panelists failed; no surviving "
+                    "review to reach consensus."
+                )
             _aggregator = self.review_aggregator or merge_reviews
             _merged = _aggregator(_panel)
             # Consensus only when EVERY panelist approves; issues are the merged
             # (deduped, never-downgraded) union — the schema _default_check_consensus
             # expects. Other top-level fields carry over from the first review.
-            parsed_review = dict(parsed_review)
+            # U4-B: a CONTAINED primary reviewer leaves ``parsed_review`` None here —
+            # seed a fresh dict so the merged consensus (issues/approved/severity
+            # computed from the SURVIVING panel) has a home, not ``dict(None)``.
+            parsed_review = dict(parsed_review) if parsed_review else {}
             parsed_review["issues"] = _merged.get(
                 "issues", parsed_review.get("issues", [])
             )
-            parsed_review["approved"] = all(
-                bool(r.get("approved")) for r in _panel
-            )
+            parsed_review["approved"] = all(bool(r.get("approved")) for r in _panel)
             # Never-downgrade the top-level severity: it becomes the WORST across the
             # panel, so the consensus check's severity fallback (approved=False ->
             # accept when severity is within threshold) can't be fooled by panelist
@@ -1680,7 +1913,9 @@ class DualInferencer(LinearWorkflowInferencer):
                 "severity": parsed_review.get("severity", "UNKNOWN"),
                 "threshold": threshold,
                 "num_issues": len(parsed_review.get("issues", [])),
-                "issue_severities": [i.get("severity") for i in parsed_review.get("issues", [])],
+                "issue_severities": [
+                    i.get("severity") for i in parsed_review.get("issues", [])
+                ],
             },
             "ReviewIteration",
         )
@@ -1702,7 +1937,9 @@ class DualInferencer(LinearWorkflowInferencer):
         self._state = state
 
         self._record_round_audit(
-            total_iters, "review", self._role_get("review_inferencer"),
+            total_iters,
+            "review",
+            self._role_get("review_inferencer"),
             workspace_root_at_phase=_review_ws_snapshot,
             extra={
                 "audit_kind": "merged" if _has_panel else "review",
@@ -1731,6 +1968,9 @@ class DualInferencer(LinearWorkflowInferencer):
         """
         self._check_cancelled()  # §2.1/P-#6: halt at the fix-step boundary
         state = self._state
+        # Emit "running" for the fix stage so the UI shows live progress.
+        # Terminal "completed" comes from _emit_graph_reconcile (no output_path).
+        await self._emit_stage_status("fix", "running")
         # Read with fallback for old checkpoint compat
         iteration = state.get("consensus_iteration", state.get("iteration", 0))
         total_iters = state["total_iterations"]
@@ -1747,7 +1987,9 @@ class DualInferencer(LinearWorkflowInferencer):
             _fix_child = self._rc_child("fix")
             self._publish_workspace_to_ctx(_fix_child, fix_ws)
             if _fix_child is None:
-                self._role_get("fixer_inferencer")._workspace = fix_ws  # legacy (byte-identical)
+                self._role_get(
+                    "fixer_inferencer"
+                )._workspace = fix_ws  # legacy (byte-identical)
 
         self.log_info(
             {
@@ -1842,10 +2084,10 @@ class DualInferencer(LinearWorkflowInferencer):
 
         # Fix #8: snapshot workspace root BEFORE ainfer() — role reassignment
         # during the call may mutate _workspace.root on the inferencer.
-        _eff_fix_ws = self._read_child_workspace(self._role_get("fixer_inferencer"), "fix")
-        _fix_ws_snapshot = (
-            str(_eff_fix_ws.root) if _eff_fix_ws is not None else None
+        _eff_fix_ws = self._read_child_workspace(
+            self._role_get("fixer_inferencer"), "fix"
         )
+        _fix_ws_snapshot = str(_eff_fix_ws.root) if _eff_fix_ws is not None else None
         if fixer_leaf_can_render:
             # Reuse _fixer_extra_feed computed above — same dict, one render.
             _raw_fix = str(
@@ -1865,7 +2107,9 @@ class DualInferencer(LinearWorkflowInferencer):
                 )
             )
         # Track canonical output child for _finalize_output symlink
-        _eff_fix_ws_out = self._read_child_workspace(self._role_get("fixer_inferencer"), "fix")
+        _eff_fix_ws_out = self._read_child_workspace(
+            self._role_get("fixer_inferencer"), "fix"
+        )
         if _eff_fix_ws_out is not None:
             self._run_set("_last_output_child_ws", _eff_fix_ws_out)
         self.log_debug(
@@ -1887,12 +2131,24 @@ class DualInferencer(LinearWorkflowInferencer):
                     f"raw_size_bytes={len(_raw_fix)}"
                 ),
             )
+        # Part 3 ("write once, link"): persist the fix artifact ONCE FIRST so the
+        # FollowupResponse log below can LINK to that single file (via
+        # ``_response_artifact_log_kwargs``) instead of the logger writing a 2nd
+        # copy. When link mode is off the kwargs are ``{}`` and this is
+        # byte-identical to before — the artifact is simply written a few lines
+        # earlier (same path, same skip-if-exists semantics).
+        _fix_persisted = self._maybe_replace_with_file_reference(
+            fix_output_str,
+            round_index=iteration,
+            inference_config=getattr(self, "_current_inference_config", {}),
+        )
         self.log_info(
             fix_output_str,
             "FollowupResponse",
             is_artifact=True,
             parts_min_size=0,
             parts_subfolder=f"Round{total_iters:02d}",
+            **self._response_artifact_log_kwargs(),
         )
         parsed_counter = self.followup_response_parser(fix_output_str)
         counter_feedback_str = (
@@ -1900,7 +2156,6 @@ class DualInferencer(LinearWorkflowInferencer):
             if parsed_counter.get("items")
             else None
         )
-        improved_proposal = fix_output_str
 
         iteration_record = getattr(self, "_last_iteration_record", None)
         if iteration_record is not None:
@@ -1908,15 +2163,13 @@ class DualInferencer(LinearWorkflowInferencer):
             state["attempt_record"]["iterations"].append(iteration_record)
 
         state["counter_feedback_str"] = counter_feedback_str
-        state["base_output_str"] = self._maybe_replace_with_file_reference(
-            improved_proposal,
-            round_index=iteration,
-            inference_config=getattr(self, "_current_inference_config", {}),
-        )
+        state["base_output_str"] = _fix_persisted
         self._state = state
         self._pending_state = dict(state)
         self._record_round_audit(
-            total_iters, "fix", self._role_get("fixer_inferencer"),
+            total_iters,
+            "fix",
+            self._role_get("fixer_inferencer"),
             workspace_root_at_phase=_fix_ws_snapshot,
             extra={
                 "audit_kind": "fix",
@@ -1962,6 +2215,7 @@ class DualInferencer(LinearWorkflowInferencer):
             raise _RoleDisabledError(role)
 
         from jinja2 import Template
+
         rendered = Template(prompt_value).render(**feed)
         return post_process(rendered)
 
@@ -2006,6 +2260,7 @@ class DualInferencer(LinearWorkflowInferencer):
         from agent_foundation.common.inferencers.templated_inferencer_base import (
             TemplatedInferencerBase,
         )
+
         if leaf is None:
             return False
         if not isinstance(leaf, TemplatedInferencerBase):
@@ -2051,9 +2306,7 @@ class DualInferencer(LinearWorkflowInferencer):
         Splits feed assembly from rendering so the same dict can be used
         for both paths during the migration period (Phase 2-5).
         """
-        config = (inference_config or {}).get(
-            "consensus_config", self.consensus_config
-        )
+        config = (inference_config or {}).get("consensus_config", self.consensus_config)
         prior_output_path = self._resolve_prior_proposer_output_path() or ""
         # When the reviewer lacks local file access, inline the FULL artifact
         # content (from output.md on disk) as main_response instead of the
@@ -2061,8 +2314,14 @@ class DualInferencer(LinearWorkflowInferencer):
         # prior_output_path; API reviewers cannot.
         main_response = proposal
         reviewer = self._role_get("review_inferencer")
-        reviewer_has_local = getattr(reviewer, "has_local_access", False) if reviewer else False
-        if not reviewer_has_local and prior_output_path and os.path.isfile(prior_output_path):
+        reviewer_has_local = (
+            getattr(reviewer, "has_local_access", False) if reviewer else False
+        )
+        if (
+            not reviewer_has_local
+            and prior_output_path
+            and os.path.isfile(prior_output_path)
+        ):
             try:
                 main_response = open(prior_output_path, encoding="utf-8").read()
             except (OSError, UnicodeDecodeError):
@@ -2076,6 +2335,11 @@ class DualInferencer(LinearWorkflowInferencer):
             # Outer-template slots (always set; safe with empty-string sentinel).
             "main_response": main_response,
             "prior_output_path": prior_output_path,
+            # The AUTHOR's own rendered task contract, relayed verbatim for
+            # <OriginalTaskInstructions>. Passed as DATA (like prior_output_path)
+            # precisely so the reviewer never re-renders ``task_instructions`` in its
+            # own context and rebinds the author's placeholders to itself.
+            "prior_task_instructions": self._prior_task_instructions(),
             # Consensus threshold guidance for review templates.
             "consensus_threshold": str(config.consensus_threshold),
             "approve_hint": config.approve_hint(),
@@ -2104,8 +2368,11 @@ class DualInferencer(LinearWorkflowInferencer):
         leaf templating capability.
         """
         feed = self._build_review_feed(
-            inference_input, proposal, counter_feedback,
-            iteration=iteration, attempt=attempt,
+            inference_input,
+            proposal,
+            counter_feedback,
+            iteration=iteration,
+            attempt=attempt,
             inference_config=inference_config,
         )
         return self._render_role_prompt("review", feed, inference_config)
@@ -2151,6 +2418,26 @@ class DualInferencer(LinearWorkflowInferencer):
 
         prior_output_path = self._resolve_prior_proposer_output_path() or ""
 
+        # Fix 3b (A-nolocal, FIXER): mirror the reviewer's no-local feed
+        # content-expansion (see _build_review_feed). When the FIXER lacks local
+        # file access, inline the FULL prior deliverable (output.md, which now
+        # carries the proposal_index fence — G1) as main_response so the no-local
+        # fixer emits the complete updated deliverable+index; a local fixer reads
+        # the file itself via prior_output_path. No-op for research_propose (its
+        # fixers are local ClaudeCodeCLI), additive for the general case.
+        main_response = proposal
+        fixer = self._role_get("fixer_inferencer")
+        fixer_has_local = getattr(fixer, "has_local_access", False) if fixer else False
+        if (
+            not fixer_has_local
+            and prior_output_path
+            and os.path.isfile(prior_output_path)
+        ):
+            try:
+                main_response = open(prior_output_path, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                pass
+
         feed = {
             self.placeholder_input: inference_input,
             self.placeholder_proposal: proposal,
@@ -2161,8 +2448,12 @@ class DualInferencer(LinearWorkflowInferencer):
             "attempt": attempt,
             "round_index": iteration,
             # Outer-template slots (always set; safe empty-string sentinels).
-            "main_response": proposal,
+            "main_response": main_response,
             "prior_output_path": prior_output_path,
+            # Author's own rendered contract, relayed verbatim (see _build_review_feed).
+            # The fixer's OWN write target stays ``{{ output_path }}`` in followup.jinja2
+            # — only the reference block is sourced from the author.
+            "prior_task_instructions": self._prior_task_instructions(),
             "reviewer_response": review_output if review_output is not None else "",
             # Consensus threshold guidance for followup templates.
             "consensus_threshold": str(config.consensus_threshold),
@@ -2187,8 +2478,13 @@ class DualInferencer(LinearWorkflowInferencer):
         orchestrator-side render. See ``_build_review_prompt`` rationale.
         """
         feed = self._build_followup_feed(
-            inference_input, proposal, parsed_review, inference_config,
-            iteration=iteration, attempt=attempt, review_output=review_output,
+            inference_input,
+            proposal,
+            parsed_review,
+            inference_config,
+            iteration=iteration,
+            attempt=attempt,
+            review_output=review_output,
         )
         return self._render_role_prompt("followup", feed, inference_config)
 
@@ -2295,7 +2591,9 @@ class DualInferencer(LinearWorkflowInferencer):
 
         for issue in parsed_review.get("issues", []):
             issue_sev = issue.get("severity")
-            if issue_sev is not None and not severity_at_most(issue_sev, threshold, levels):
+            if issue_sev is not None and not severity_at_most(
+                issue_sev, threshold, levels
+            ):
                 self.log_info(
                     {
                         "result": "REJECTED",
@@ -2328,7 +2626,9 @@ class DualInferencer(LinearWorkflowInferencer):
         self.log_info(
             {
                 "result": "REACHED" if reached else "NOT_REACHED",
-                "reason": "severity within threshold" if reached else "severity exceeds threshold",
+                "reason": "severity within threshold"
+                if reached
+                else "severity exceeds threshold",
                 "approved": parsed_review.get("approved"),
                 "severity": severity_str,
                 "threshold": threshold,
@@ -2363,12 +2663,26 @@ class DualInferencer(LinearWorkflowInferencer):
         loop on guaranteed rejection. Saving the artifact is the value-add;
         truncating the response is not.
         """
+        # Reset the per-run link pointer; set below only on the workspace path.
+        # (Transient, ctx-isolated — same seam as the other per-run trackers.)
+        self._run_set("_last_response_artifact_relpath", None)
         # -- Workspace mode --
         if self._workspace is not None and self.output_path:
             basename = self.output_path
             resolved_path = self._workspace.artifact_path(
                 f"round{round_index:02d}_{basename}"
             )
+            # Record the WORKSPACE-relative path so a subsequent artifact log can
+            # LINK to this one file instead of writing a second copy (Part 3).
+            try:
+                self._run_set(
+                    "_last_response_artifact_relpath",
+                    os.path.relpath(resolved_path, self._workspace.root),
+                )
+            except (ValueError, AttributeError):
+                # relpath can fail across drives (Windows) / a None root — a
+                # missing pointer just means the log degrades to a normal copy.
+                self._run_set("_last_response_artifact_relpath", None)
             if os.path.isfile(resolved_path) and os.path.getsize(resolved_path) > 0:
                 logger.info(
                     "[DualInferencer] Workspace artifact exists (%d bytes): %s",
@@ -2431,6 +2745,26 @@ class DualInferencer(LinearWorkflowInferencer):
                     e,
                 )
         return response_str
+
+    def _response_artifact_log_kwargs(self) -> dict:
+        """Part 3 "write once, link": kwargs for the ``log_*`` of a base/fix
+        ``<Response>`` whose content ``_maybe_replace_with_file_reference`` just
+        wrote once to ``artifacts/round{NN}_{basename}``.
+
+        Returns ``{"parts_mode": "link", "parts_link_paths": {"item": <relpath>}}``
+        so the JSON logger records a LINK to that ONE file instead of writing a
+        second copy — but ONLY when opt-in (``_link_response_artifacts``) is on
+        AND a workspace-relative path was recorded. Otherwise returns ``{}`` so
+        the log call is byte-identical to today (a fresh ``.jsonl.parts/`` copy).
+        The ``"item"`` key matches the field logged: these artifact logs pass the
+        response as the ``item`` payload with ``parts_key_path_root="item"``.
+        """
+        if not self._link_response_artifacts:
+            return {}
+        relpath = self._run_get("_last_response_artifact_relpath", None)
+        if not relpath:
+            return {}
+        return {"parts_mode": "link", "parts_link_paths": {"item": relpath}}
 
     def _assign_issue_ids(self, parsed_review: dict, iteration: int) -> dict:
         """Assign unique IDs to each issue in the parsed review."""

@@ -22,19 +22,19 @@ Architecture:
 
 Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 4.2, 4.4, 4.6
 """
+
 import json
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from attr import attrs, attrib
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
 
 logger = logging.getLogger(__name__)
@@ -43,16 +43,19 @@ logger = logging.getLogger(__name__)
 _GLOBAL_ENTITY_SENTINEL = "__global__"
 
 
-
 def _piece_to_record(piece, vector):
     """Convert a KnowledgePiece and its embedding vector to a LanceDB record."""
     return {
         "piece_id": piece.piece_id,
         "content": piece.content,
         "embedding_text": piece.embedding_text or "",
-        "knowledge_type": piece.knowledge_type.value if piece.knowledge_type else KnowledgeType.Fact.value,
+        "knowledge_type": piece.knowledge_type.value
+        if piece.knowledge_type
+        else KnowledgeType.Fact.value,
         "tags": json.dumps(piece.tags, ensure_ascii=False),
-        "entity_id": piece.entity_id if piece.entity_id is not None else _GLOBAL_ENTITY_SENTINEL,
+        "entity_id": piece.entity_id
+        if piece.entity_id is not None
+        else _GLOBAL_ENTITY_SENTINEL,
         "source": piece.source or "",
         "created_at": piece.created_at or "",
         "updated_at": piece.updated_at or "",
@@ -75,15 +78,22 @@ def _piece_to_record(piece, vector):
         "spaces": json.dumps(piece.spaces, ensure_ascii=False),
         "primary_space": piece.spaces[0] if piece.spaces else "main",
         # Space suggestion fields
-        "pending_space_suggestions": json.dumps(piece.pending_space_suggestions, ensure_ascii=False) if piece.pending_space_suggestions else "",
-        "space_suggestion_reasons": json.dumps(piece.space_suggestion_reasons, ensure_ascii=False) if piece.space_suggestion_reasons else "",
+        "pending_space_suggestions": json.dumps(
+            piece.pending_space_suggestions, ensure_ascii=False
+        )
+        if piece.pending_space_suggestions
+        else "",
+        "space_suggestion_reasons": json.dumps(
+            piece.space_suggestion_reasons, ensure_ascii=False
+        )
+        if piece.space_suggestion_reasons
+        else "",
         "space_suggestion_status": piece.space_suggestion_status or "",
         # Operation history as JSON string
-        "history": json.dumps([r.to_dict() for r in piece.history], ensure_ascii=False) if piece.history else "[]",
+        "history": json.dumps([r.to_dict() for r in piece.history], ensure_ascii=False)
+        if piece.history
+        else "[]",
     }
-
-
-
 
 
 def _record_to_piece(record):
@@ -145,12 +155,20 @@ def _record_to_piece(record):
 
     # Deserialize space suggestion fields
     pending_space_suggestions_raw = record.get("pending_space_suggestions", "")
-    pending_space_suggestions = _parse_json_list(pending_space_suggestions_raw) if pending_space_suggestions_raw else None
+    pending_space_suggestions = (
+        _parse_json_list(pending_space_suggestions_raw)
+        if pending_space_suggestions_raw
+        else None
+    )
     if pending_space_suggestions is not None and len(pending_space_suggestions) == 0:
         pending_space_suggestions = None
 
     space_suggestion_reasons_raw = record.get("space_suggestion_reasons", "")
-    space_suggestion_reasons = _parse_json_list(space_suggestion_reasons_raw) if space_suggestion_reasons_raw else None
+    space_suggestion_reasons = (
+        _parse_json_list(space_suggestion_reasons_raw)
+        if space_suggestion_reasons_raw
+        else None
+    )
     if space_suggestion_reasons is not None and len(space_suggestion_reasons) == 0:
         space_suggestion_reasons = None
 
@@ -159,7 +177,9 @@ def _record_to_piece(record):
     # Deserialize operation history from JSON string
     history_raw = record.get("history", "[]")
     history_list = _parse_json_list(history_raw) if history_raw else []
-    history = [DataOperationRecord.from_dict(r) for r in history_list if isinstance(r, dict)]
+    history = [
+        DataOperationRecord.from_dict(r) for r in history_list if isinstance(r, dict)
+    ]
 
     return KnowledgePiece(
         content=record.get("content", ""),
@@ -192,7 +212,6 @@ def _record_to_piece(record):
         space_suggestion_status=space_suggestion_status,
         history=history,
     )
-
 
 
 def _get_embedding_text(piece):
@@ -268,7 +287,9 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         if not needs_spaces and not needs_history:
             return  # Already fully migrated
 
-        logger.info("Migrating LanceDB table '%s' to add spaces columns...", self.table_name)
+        logger.info(
+            "Migrating LanceDB table '%s' to add spaces columns...", self.table_name
+        )
         try:
             all_records = self._table.search().limit(100000).to_list()
             for record in all_records:
@@ -285,9 +306,17 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
             self._table = self._db.create_table(self.table_name, all_records)
             self._fts_index_created = False
             self._create_fts_index()
-            logger.info("Schema migration complete for table '%s' (%d records).", self.table_name, len(all_records))
+            logger.info(
+                "Schema migration complete for table '%s' (%d records).",
+                self.table_name,
+                len(all_records),
+            )
         except Exception as exc:
-            logger.error("LanceDB schema migration failed for table '%s': %s", self.table_name, exc)
+            logger.error(
+                "LanceDB schema migration failed for table '%s': %s",
+                self.table_name,
+                exc,
+            )
 
     def _ensure_table(self, first_record):
         """Create the table with the first record if it doesn't exist yet."""
@@ -405,7 +434,15 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         self._rebuild_fts_index()
         return True
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
+    def search(
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
+        spaces=None,
+    ):
         """Hybrid search combining vector similarity and BM25 full-text search.
 
         score = hybrid_alpha * vector_score + (1 - hybrid_alpha) * bm25_score
@@ -517,10 +554,7 @@ class LanceDBKnowledgePieceStore(KnowledgePieceStore):
         try:
             if where_clause:
                 results = (
-                    self._table.search()
-                    .where(where_clause)
-                    .limit(limit)
-                    .to_list()
+                    self._table.search().where(where_clause).limit(limit).to_list()
                 )
             else:
                 results = self._table.search().limit(limit).to_list()
@@ -616,9 +650,7 @@ def _build_where_clause(entity_id, knowledge_type, spaces=None):
     conditions.append(f"entity_id = '{_escape_sql(entity_value)}'")
 
     if knowledge_type is not None:
-        conditions.append(
-            f"knowledge_type = '{_escape_sql(knowledge_type.value)}'"
-        )
+        conditions.append(f"knowledge_type = '{_escape_sql(knowledge_type.value)}'")
 
     if spaces:
         in_values = ", ".join(f"'{_escape_sql(s)}'" for s in spaces)

@@ -4,13 +4,12 @@ import os
 import tempfile
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.chunker import (
+    chunk_markdown_file,
     ChunkerConfig,
     DocumentChunk,
-    MarkdownChunker,
-    chunk_markdown_file,
     estimate_tokens,
+    MarkdownChunker,
 )
 
 

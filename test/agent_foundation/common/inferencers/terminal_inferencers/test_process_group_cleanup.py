@@ -32,12 +32,14 @@ _CHILD_SCRIPT = textwrap.dedent("""\
 
 @unittest.skipUnless(hasattr(os, "killpg"), "POSIX-only (os.killpg)")
 class TestProcessGroupCleanup(unittest.TestCase):
-
     def test_killpg_reaches_orphaned_grandchild(self):
         """Grandchild survives parent exit but is killed via PGID."""
+
         async def run():
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", _CHILD_SCRIPT,
+                sys.executable,
+                "-c",
+                _CHILD_SCRIPT,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
@@ -63,9 +65,12 @@ class TestProcessGroupCleanup(unittest.TestCase):
 
     def test_pgid_persists_after_leader_reaped(self):
         """PGID remains reachable via killpg after the session leader exits."""
+
         async def run():
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", _CHILD_SCRIPT,
+                sys.executable,
+                "-c",
+                _CHILD_SCRIPT,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,

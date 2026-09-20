@@ -12,11 +12,9 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.automation.schema.action_graph import ActionGraph
 from agent_foundation.automation.schema.action_metadata import ActionMetadataRegistry
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +26,9 @@ SERIALIZABLE_ACTION_TYPES = ["click", "input_text", "visit_url", "scroll", "wait
 
 # Simple string targets for click/input_text/scroll
 simple_target_strategy = st.text(
-    alphabet=st.characters(whitelist_categories=("L", "Nd"), whitelist_characters="-_#."),
+    alphabet=st.characters(
+        whitelist_categories=("L", "Nd"), whitelist_characters="-_#."
+    ),
     min_size=1,
     max_size=20,
 )
@@ -56,11 +56,15 @@ def action_spec(draw):
         wait_val = draw(st.floats(min_value=0.1, max_value=5.0, allow_nan=False))
         return action_type, None, None, wait_val
     elif action_type == "visit_url":
-        url = draw(st.sampled_from([
-            "https://example.com",
-            "https://test.org/page",
-            "https://demo.io",
-        ]))
+        url = draw(
+            st.sampled_from(
+                [
+                    "https://example.com",
+                    "https://test.org/page",
+                    "https://demo.io",
+                ]
+            )
+        )
         return action_type, url, None, None
     else:
         target = draw(simple_target_strategy)
@@ -77,6 +81,7 @@ def action_graph_actions(draw):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_graph(action_specs, executor):
     """Build an ActionGraph from a list of action specs."""

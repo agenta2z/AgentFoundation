@@ -9,6 +9,7 @@ Feature: knowledge-space-restructuring
 
 **Validates: Requirements 21.4, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6**
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -22,8 +23,6 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.ingestion.document_ingester import (
     DocumentIngester,
     IngesterConfig,
@@ -36,6 +35,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from hypothesis import given, settings, strategies as st
 
 # ── Strategies ───────────────────────────────────────────────────────────────
 
@@ -55,7 +55,11 @@ def piece_dict_strategy(draw):
     piece_id = draw(_identifier_text)
     knowledge_type = draw(st.sampled_from([kt.value for kt in KnowledgeType]))
     info_type = draw(st.sampled_from(["user_profile", "instructions", "context"]))
-    domain = draw(st.sampled_from(["general", "model_optimization", "data_engineering", "testing"]))
+    domain = draw(
+        st.sampled_from(
+            ["general", "model_optimization", "data_engineering", "testing"]
+        )
+    )
     space = draw(st.sampled_from(["main", "personal"]))
 
     return {
@@ -155,7 +159,9 @@ def piece_dict_with_entity_strategy(draw):
     piece_id = draw(_identifier_text)
     knowledge_type = draw(st.sampled_from([kt.value for kt in KnowledgeType]))
     info_type = draw(st.sampled_from(["user_profile", "instructions", "context"]))
-    domain = draw(st.sampled_from(["general", "model_optimization", "data_engineering"]))
+    domain = draw(
+        st.sampled_from(["general", "model_optimization", "data_engineering"])
+    )
     entity_id = draw(st.one_of(_user_entity_id, _non_user_entity_id))
 
     d = {
@@ -293,16 +299,18 @@ class TestSpaceClassifierIntegration:
             priority=10,
             mode="suggestion",
         )
-        classifier = SpaceClassifier(rules=[
-            suggestion_rule,
-            SpaceRule(
-                name="main_default",
-                space="main",
-                condition=lambda _: True,
-                priority=0,
-                mode="auto",
-            ),
-        ])
+        classifier = SpaceClassifier(
+            rules=[
+                suggestion_rule,
+                SpaceRule(
+                    name="main_default",
+                    space="main",
+                    condition=lambda _: True,
+                    priority=0,
+                    mode="auto",
+                ),
+            ]
+        )
 
         ingester = DocumentIngester(
             inferencer=lambda p: "",

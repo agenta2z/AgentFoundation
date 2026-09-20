@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
 """
+
 import math
 import sys
 from datetime import datetime, timedelta, timezone
@@ -21,14 +22,13 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, strategies as st
-
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
 from agent_foundation.knowledge.retrieval.temporal_decay import (
     apply_temporal_decay,
     TemporalDecayConfig,
 )
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
-from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
+from hypothesis import given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -78,10 +78,14 @@ def piece_with_known_age(draw, info_type_strategy):
     """
     info_type = draw(info_type_strategy)
     score = draw(
-        st.floats(min_value=0.01, max_value=100.0, allow_nan=False, allow_infinity=False)
+        st.floats(
+            min_value=0.01, max_value=100.0, allow_nan=False, allow_infinity=False
+        )
     )
     age_days = draw(
-        st.floats(min_value=0.01, max_value=365.0, allow_nan=False, allow_infinity=False)
+        st.floats(
+            min_value=0.01, max_value=365.0, allow_nan=False, allow_infinity=False
+        )
     )
     return info_type, score, age_days
 
@@ -165,7 +169,9 @@ class TestTemporalDecayWithFloorAndEvergreenExemption:
                 expected_score = orig * expected_mult
                 # Use abs_tol to handle tiny timing drift (< 1 second)
                 # and rel_tol for normal floating point comparison
-                assert math.isclose(sp.score, expected_score, rel_tol=1e-4, abs_tol=1e-9), (
+                assert math.isclose(
+                    sp.score, expected_score, rel_tol=1e-4, abs_tol=1e-9
+                ), (
                     f"Score mismatch for {pid}: got {sp.score}, "
                     f"expected {expected_score} (orig={orig}, age={age_days}d)"
                 )

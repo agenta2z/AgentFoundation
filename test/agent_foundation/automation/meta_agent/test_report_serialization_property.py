@@ -16,30 +16,30 @@ from __future__ import annotations
 
 import json
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.automation.meta_agent.models import SynthesisReport
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
 # Required fields that must appear in every serialized SynthesisReport
 # ---------------------------------------------------------------------------
 
-REQUIRED_FIELDS = frozenset({
-    "total_steps",
-    "deterministic_count",
-    "parameterizable_count",
-    "agent_node_count",
-    "optional_count",
-    "user_input_boundary_count",
-    "branch_count",
-    "loop_count",
-    "synthesis_strategy",
-    "target_strategy_coverage",
-    "template_variables",
-    "warnings",
-})
+REQUIRED_FIELDS = frozenset(
+    {
+        "total_steps",
+        "deterministic_count",
+        "parameterizable_count",
+        "agent_node_count",
+        "optional_count",
+        "user_input_boundary_count",
+        "branch_count",
+        "loop_count",
+        "synthesis_strategy",
+        "target_strategy_coverage",
+        "template_variables",
+        "warnings",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,9 @@ target_strategy_coverage = st.dictionaries(
 
 template_variables = st.lists(
     st.text(
-        alphabet=st.characters(whitelist_categories=("L", "Nd"), whitelist_characters="_"),
+        alphabet=st.characters(
+            whitelist_categories=("L", "Nd"), whitelist_characters="_"
+        ),
         min_size=1,
         max_size=20,
     ),

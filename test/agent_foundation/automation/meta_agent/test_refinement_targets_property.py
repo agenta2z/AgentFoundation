@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
@@ -30,6 +28,7 @@ from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +69,9 @@ target_spec_st = st.builds(
 
 
 @st.composite
-def target_with_fallback_st(draw, min_size: int = 1, max_size: int = 3) -> TargetSpecWithFallback:
+def target_with_fallback_st(
+    draw, min_size: int = 1, max_size: int = 3
+) -> TargetSpecWithFallback:
     """Generate a TargetSpecWithFallback with unique strategies."""
     specs = draw(
         st.lists(
@@ -118,11 +119,13 @@ def refinement_scenario_st(draw) -> Dict[str, Any]:
         for tid in additional_ids:
             add_targets[tid] = draw(target_with_fallback_st(min_size=1, max_size=4))
 
-        positions.append({
-            "action_type": action_type,
-            "original_targets": orig_targets,
-            "additional_targets": add_targets,
-        })
+        positions.append(
+            {
+                "action_type": action_type,
+                "original_targets": orig_targets,
+                "additional_targets": add_targets,
+            }
+        )
 
     return {
         "original_trace_ids": original_ids,
@@ -259,7 +262,8 @@ class TestRefinementTargetsProperty:
         original_strategy_counts: Dict[int, int] = {}
         for pos in original_patterns.deterministic_steps:
             sample = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
             if sample is not None and isinstance(sample.target, TargetSpecWithFallback):
                 original_strategy_counts[pos.index] = len(
@@ -272,7 +276,8 @@ class TestRefinementTargetsProperty:
 
         for pos in refined_patterns.deterministic_steps:
             sample = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
             if sample is None:
                 continue
@@ -312,7 +317,8 @@ class TestRefinementTargetsProperty:
         original_pairs_per_pos: Dict[int, Set[Tuple[str, str]]] = {}
         for pos in original_patterns.deterministic_steps:
             sample = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
             if sample is not None and isinstance(sample.target, TargetSpecWithFallback):
                 original_pairs_per_pos[pos.index] = _extract_strategy_pairs(
@@ -328,7 +334,8 @@ class TestRefinementTargetsProperty:
                 continue
 
             sample = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
             if sample is None:
                 continue

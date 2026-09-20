@@ -52,9 +52,9 @@ class AdvancedFLUIDDecay(nn.Module):
         """
         super().__init__()
 
-        assert num_timescales == len(
-            init_timescales
-        ), f"Expected {num_timescales} initial timescales, got {len(init_timescales)}"
+        assert num_timescales == len(init_timescales), (
+            f"Expected {num_timescales} initial timescales, got {len(init_timescales)}"
+        )
 
         # Store bounds for clamping
         self.log_min_tau = math.log(min_timescale)

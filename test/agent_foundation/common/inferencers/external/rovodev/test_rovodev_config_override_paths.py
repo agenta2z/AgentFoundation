@@ -12,12 +12,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from rich_python_utils.path_utils import AllowedPath, PathAccess
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
     RovoDevCliInferencer,
 )
+from rich_python_utils.path_utils import AllowedPath, PathAccess
 
 
 def _ws_mock(root: str) -> MagicMock:
@@ -80,7 +78,9 @@ class TestComposeConfigOverrideMergesPaths:
         # modelId preserved
         assert parsed["agent"]["modelId"] == "anthropic:claude-opus-4-7"
         # path added
-        assert str(external.resolve()) in parsed["toolPermissions"]["allowedExternalPaths"]
+        assert (
+            str(external.resolve()) in parsed["toolPermissions"]["allowedExternalPaths"]
+        )
 
     def test_workspace_root_auto_injection_lands_in_override(self, tmp_path):
         codebase = tmp_path / "codebase"
@@ -233,7 +233,10 @@ class TestConstructCommandIntegration:
         command = inf.construct_command("hello")
         assert _has_config_override(command), command
         parsed = _extract_config_override(command)
-        assert str(task_tree.resolve()) in parsed["toolPermissions"]["allowedExternalPaths"]
+        assert (
+            str(task_tree.resolve())
+            in parsed["toolPermissions"]["allowedExternalPaths"]
+        )
 
     def test_construct_command_non_legacy_mode_includes_paths(self, tmp_path):
         task_tree = tmp_path / "task_tree"
@@ -251,7 +254,10 @@ class TestConstructCommandIntegration:
         command = inf.construct_command("hello")
         assert _has_config_override(command), command
         parsed = _extract_config_override(command)
-        assert str(task_tree.resolve()) in parsed["toolPermissions"]["allowedExternalPaths"]
+        assert (
+            str(task_tree.resolve())
+            in parsed["toolPermissions"]["allowedExternalPaths"]
+        )
 
     def test_no_workspace_and_no_paths_still_emits_modelid_override(self):
         # Regression guard: removing the unconditional --config-override emission

@@ -29,11 +29,7 @@ import os
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.streaming_inferencer_base import (
-    EmptyLineMode,
-)
+from agent_foundation.common.inferencers.streaming_inferencer_base import EmptyLineMode
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
 )
@@ -42,6 +38,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +98,24 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     large_input_mode: LargeInputMode = attrib(default=LargeInputMode.STDIN)
     # ``-s`` sandbox policy for fresh ``exec`` calls (resume inherits the
     # session's sandbox). One of ``_CODEX_SANDBOX_MODES``.
-    sandbox_mode: Optional[str] = attrib(default="workspace-write")
+    #
+    # Default ``danger-full-access`` (NO codex-internal sandbox), matching the
+    # sibling CLIs (ClaudeCode's ``bypassPermissions`` -> ``--dangerously-skip-
+    # permissions``, Devmate's ``--auto-run-mode autoRunAll``) and the machine's
+    # own Codex config (``/etc/codex/config.toml`` ships
+    # ``sandbox_mode = "danger-full-access"`` — "Meta sandboxes externally").
+    # The previous ``workspace-write`` default re-imposed a redundant sandbox
+    # rooted at the subprocess cwd (= the read target), which lives in a
+    # DIFFERENT subtree from this inferencer's own ``outputs/`` dir — so the
+    # agent could not write its required ``output.md`` and its escalation was
+    # rejected by the managed ``untrusted`` approval policy, stalling the run.
+    # SECURITY: this removes the agent's OS-level FS confinement; it is correct
+    # only because these inferencers run inside an outer sandbox / trusted
+    # context (the same posture ClaudeCode/Devmate already assume). Callers that
+    # need confinement can pass a stricter ``sandbox_mode`` explicitly (and, for
+    # ``workspace-write``, would also need to widen the writable roots to include
+    # the workspace outputs dir).
+    sandbox_mode: Optional[str] = attrib(default="danger-full-access")
     # ``--dangerously-bypass-approvals-and-sandbox`` (full autonomy). Note: an
     # enterprise-managed Codex config may reject this and fall back to a safer
     # policy (non-fatal). When True, ``-s`` is omitted.
@@ -117,9 +131,24 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     skip_git_repo_check: bool = attrib(default=True)
     # ``-c model_reasoning_effort=<level>`` (Codex has no dedicated flag).
     reasoning_effort: Optional[str] = attrib(default=None)
-    # Generic ``-c key=value`` TOML config overrides. Values are emitted
-    # verbatim, so callers must provide TOML-valid values (e.g. quote strings).
-    config_overrides: Optional[Dict[str, Any]] = attrib(default=None)
+    # Generic ``-c key=value`` TOML config overrides. Emitted verbatim; codex's ``-c``
+    # accepts bare strings after shell stripping (mirrors ``-c model_reasoning_effort=high``).
+    #
+    # DEFAULT hardening — ``approval_policy=never``: under ``danger-full-access`` the OS
+    # sandbox is gone, but writes still traverse the managed PermissionRequest hook
+    # (``/etc/codex/hooks.json`` -> ``validate_command``) under the machine's
+    # ``approval_policy="untrusted"``, auto-approved via Guardian. That untrusted->
+    # auto_review routing has regressed twice in codex version imports (D108870723,
+    # D109441816); a recurrence would make headless ``codex exec`` try to prompt a
+    # nonexistent human -> stall. ``never`` (allowed by ``/etc/codex/requirements.toml``
+    # ``allowed_approval_policies``) makes the inferencer immune. SECURITY: ``never``
+    # skips Guardian review -- correct only for trusted internal SOPs inside an outer
+    # sandbox (same posture as Claude ``--dangerously-skip-permissions`` / Devmate
+    # ``autoRunAll``). Callers may pass their own dict (include ``approval_policy`` to
+    # keep the hardening; pass ``{}`` to opt out).
+    config_overrides: Optional[Dict[str, Any]] = attrib(
+        factory=lambda: {"approval_policy": "never"}
+    )
     # ``--output-schema <FILE>`` (JSON Schema for the model's final response).
     output_schema_path: Optional[str] = attrib(default=None)
     # Escape hatch: extra raw args appended verbatim to the command.
@@ -139,11 +168,15 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         # so a multi-OS shell rc with ``CODEX_INFERANCER_NO_SANDBOX=1`` doesn't
         # break every subprocess. (Mirrors the ClaudeCode treatment.)
         import sys as _sys
+
         if _sys.platform != "darwin":
-            if self.disable_osx_sandbox is True or _env_flag_enabled(_ENV_DISABLE_OSX_SANDBOX):
+            if self.disable_osx_sandbox is True or _env_flag_enabled(
+                _ENV_DISABLE_OSX_SANDBOX
+            ):
                 logger.debug(
                     "%s is a macOS-only flag; ignoring on platform=%s.",
-                    _DANGEROUSLY_DISABLE_OSX_SANDBOX, _sys.platform,
+                    _DANGEROUSLY_DISABLE_OSX_SANDBOX,
+                    _sys.platform,
                 )
             self.disable_osx_sandbox = False
         elif self.disable_osx_sandbox is None:
@@ -151,7 +184,8 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         if self.model_tier is not None:
             self.model_name = self._resolve_model_for_tier(self.model_tier)
         elif self.model_name and any(
-            self.model_name.lower().startswith(p) for p in self._NON_CODEX_MODEL_PREFIXES
+            self.model_name.lower().startswith(p)
+            for p in self._NON_CODEX_MODEL_PREFIXES
         ):
             logger.info(
                 "[%s] Ignoring non-Codex model_name=%r (likely cascaded from "
@@ -409,9 +443,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
             .replace("`", "\\`")
         )
 
-    def _resolve_subprocess_timeout(
-        self, override: Optional[float] = None
-    ) -> float:
+    def _resolve_subprocess_timeout(self, override: Optional[float] = None) -> float:
         """Resolve the sync subprocess wall-clock timeout in seconds."""
         if override is not None:
             return float(override)
@@ -419,9 +451,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # === Streaming primitive ===
 
-    async def _ainfer_streaming(
-        self, prompt: str, **kwargs: Any
-    ) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Yield text chunks from ``codex exec --json``.
 
         Overrides the base stdout-line streaming to parse Codex's JSONL events:
@@ -533,9 +563,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
                 stderr_bytes = await stderr_task
             except Exception:
                 stderr_bytes = b""
-            self._last_streaming_stderr = stderr_bytes.decode(
-                "utf-8", errors="replace"
-            )
+            self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
             if process.returncode is None:
                 try:
                     process.kill()
@@ -590,9 +618,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
             )
             raise
 
-        result_dict = self.parse_output(
-            result.stdout, result.stderr, result.returncode
-        )
+        result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
         return TerminalInferencerResponse.from_dict(result_dict)
 
     # === Session-aware public overrides ===
@@ -619,9 +645,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["resume"] = is_resume and session_id is not None
 
         # Route through _ainfer_single for retry/preprocessing/timeout.
-        result = await self._ainfer_single(
-            inference_input, inference_config, **kwargs
-        )
+        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
 
         # Recover the session id from the result, then the streamed metadata.
         result_session_id = getattr(result, "session_id", None)

@@ -1,5 +1,3 @@
-
-
 """Mock unit tests for PlanThenImplementInferencer resume detection,
 analysis-only mode, and backward compatibility.
 
@@ -13,14 +11,12 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 
 @attrs
@@ -225,12 +221,8 @@ class ResumeDetectionTest(unittest.TestCase):
             )
             # Iteration 2: plan done, impl pending
             iter2_ws = os.path.join(ws, "followup_iterations", "iteration_2")
-            _create_file(
-                os.path.join(iter2_ws, "request.txt"), "iteration 2 handoff"
-            )
-            _create_file(
-                os.path.join(iter2_ws, "outputs", "round0_plan.md"), "plan v2"
-            )
+            _create_file(os.path.join(iter2_ws, "request.txt"), "iteration 2 handoff")
+            _create_file(os.path.join(iter2_ws, "outputs", "round0_plan.md"), "plan v2")
             _create_completion_marker(iter2_ws, "plan")
             os.makedirs(os.path.join(iter2_ws, "results"), exist_ok=True)
 
@@ -264,16 +256,14 @@ class AnalysisOnlyModeTest(unittest.IsolatedAsyncioTestCase):
             _create_completion_marker(ws, "plan")
             _create_completion_marker(ws, "impl")
             _create_file(
-                os.path.join(
-                    ws, "outputs", "benchmarks", "round0", "results.json"
-                ),
+                os.path.join(ws, "outputs", "benchmarks", "round0", "results.json"),
                 '{"metric": 42}',
             )
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
 
             mock_analyzer = MockInferencer(
                 _response=(
-                    '<Response>```json\n'
+                    "<Response>```json\n"
                     '{"should_continue": false, "summary": "done", '
                     '"next_iteration_request": ""}\n'
                     "```</Response>"
@@ -491,9 +481,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 {
                     "should_continue": should_continue,
                     "summary": "Stale analysis from previous run.",
-                    "next_iteration_request": "Fix tests"
-                    if should_continue
-                    else "",
+                    "next_iteration_request": "Fix tests" if should_continue else "",
                     "analysis_doc_path": os.path.join(
                         ws, "analysis", "iteration_1_analysis.md"
                     ),
@@ -517,7 +505,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
             nonlocal analyzer_called
             analyzer_called = True
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "Fresh analysis.", '
                 '"next_iteration_request": ""}\n'
                 "```</Response>"
@@ -569,7 +557,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
             nonlocal analyzer_called
             analyzer_called = True
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "Fresh re-analysis.", '
                 '"next_iteration_request": ""}\n'
                 "```</Response>"
@@ -607,7 +595,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
 
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, '
                 '"summary": "FRESH_ANALYSIS_MARKER", '
                 '"next_iteration_request": ""}\n'
@@ -651,7 +639,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
         """
         IMPL_TEXT = "# Implementation Report\nThe feature was implemented."
         ANALYSIS_TEXT = (
-            '<Response>```json\n'
+            "<Response>```json\n"
             '{"should_continue": false, "summary": "ANALYSIS_OUTPUT_HERE", '
             '"next_iteration_request": ""}\n'
             "```</Response>"
@@ -697,7 +685,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
             nonlocal analyzer_called
             analyzer_called = True
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "done", '
                 '"next_iteration_request": ""}\n'
                 "```</Response>"
@@ -713,9 +701,7 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
             _create_completion_marker(ws, "plan")
             _create_completion_marker(ws, "impl")
             _create_file(
-                os.path.join(
-                    ws, "outputs", "benchmarks", "round0", "results.json"
-                ),
+                os.path.join(ws, "outputs", "benchmarks", "round0", "results.json"),
                 '{"metric": 42}',
             )
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
@@ -786,8 +772,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
         for i in range(num_impl_rounds):
             _create_file(
                 os.path.join(ws, "outputs", f"round{i}_implementation.md"),
-                f"# Implementation Report (Round {i})\n"
-                f"Changes applied in round {i}.",
+                f"# Implementation Report (Round {i})\nChanges applied in round {i}.",
             )
 
         _create_completion_marker(ws, "plan")
@@ -795,9 +780,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         for i in range(num_impl_rounds):
             _create_file(
-                os.path.join(
-                    ws, "outputs", "benchmarks", f"round{i}", "results.json"
-                ),
+                os.path.join(ws, "outputs", "benchmarks", f"round{i}", "results.json"),
                 json.dumps({"round": i, "latency_ms": 100 - i * 10}),
             )
 
@@ -816,9 +799,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
                     {
                         "should_continue": stale_continue,
                         "summary": "STALE_SUMMARY_MARKER",
-                        "next_iteration_request": "fix perf"
-                        if stale_continue
-                        else "",
+                        "next_iteration_request": "fix perf" if stale_continue else "",
                         "analysis_doc_path": os.path.join(
                             ws, "analysis", "iteration_1_analysis.md"
                         ),
@@ -848,7 +829,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
             captured_config.update(inference_config or {})
             captured_input = inp
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, '
                 '"summary": "FRESH_E2E_ANALYSIS", '
                 '"next_iteration_request": ""}\n'
@@ -936,7 +917,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
             nonlocal call_count
             call_count += 1
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, '
                 '"summary": "Fresh analysis done.", '
                 '"next_iteration_request": ""}\n'
@@ -977,7 +958,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, '
                 '"summary": "All benchmarks passed.", '
                 '"next_iteration_request": ""}\n'
@@ -1044,7 +1025,7 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             captured_config.update(inference_config or {})
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, '
                 '"summary": "Baseline analysis.", '
                 '"next_iteration_request": ""}\n'
@@ -1286,7 +1267,8 @@ class InitialPlanFileTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(len(call_configs) >= 1)
             self.assertIn(
-                "initial_response_override", call_configs[0],
+                "initial_response_override",
+                call_configs[0],
                 "First iteration must have the override",
             )
 
@@ -1399,9 +1381,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
 
             # Create workspace files so checkpoint validation passes
             _create_file(os.path.join(ws, "request.txt"), "test request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_completion_marker(ws, "plan")
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
 
@@ -1426,15 +1406,11 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                     "iteration_records": [],
                 },
             }
-            with open(
-                os.path.join(ckpt_dir, "step___wf_checkpoint__.json"), "w"
-            ) as f:
+            with open(os.path.join(ckpt_dir, "step___wf_checkpoint__.json"), "w") as f:
                 json.dump(ckpt, f)
 
             # Write sentinel result
-            with open(
-                os.path.join(ckpt_dir, "step___synth_sentinel__.json"), "w"
-            ) as f:
+            with open(os.path.join(ckpt_dir, "step___synth_sentinel__.json"), "w") as f:
                 json.dump({"_synthetic": True}, f)
 
             # Write in-progress marker for step 2
@@ -1445,9 +1421,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 "attempt": 1,
             }
             with open(
-                os.path.join(
-                    ckpt_dir, "step___wf_step_in_progress__.json"
-                ),
+                os.path.join(ckpt_dir, "step___wf_step_in_progress__.json"),
                 "w",
             ) as f:
                 json.dump(marker, f)
@@ -1456,9 +1430,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
 
             async def mock_executor_ainfer(inp, inference_config=None, **kw):
                 nonlocal was_attempted
-                was_attempted = getattr(
-                    pti, "_step_was_previously_attempted", False
-                )
+                was_attempted = getattr(pti, "_step_was_previously_attempted", False)
                 return "impl output"
 
             executor = MockInferencer()
@@ -1529,7 +1501,6 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(marker_data["step_name"], "implement")
             self.assertIn("started_at", marker_data)
 
-
     async def test_flag_reset_after_successful_resume(self):
         """After a successful resumed step, _step_was_previously_attempted resets.
 
@@ -1560,15 +1531,11 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                     "iteration_records": [],
                 },
             }
-            with open(
-                os.path.join(ckpt_dir, "step___wf_checkpoint__.json"), "w"
-            ) as f:
+            with open(os.path.join(ckpt_dir, "step___wf_checkpoint__.json"), "w") as f:
                 json.dump(ckpt, f)
 
             # Write sentinel result
-            with open(
-                os.path.join(ckpt_dir, "step___synth_sentinel__.json"), "w"
-            ) as f:
+            with open(os.path.join(ckpt_dir, "step___synth_sentinel__.json"), "w") as f:
                 json.dump({"_synthetic": True}, f)
 
             # Write in-progress marker for step 2
@@ -1579,9 +1546,7 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 "attempt": 1,
             }
             with open(
-                os.path.join(
-                    ckpt_dir, "step___wf_step_in_progress__.json"
-                ),
+                os.path.join(ckpt_dir, "step___wf_step_in_progress__.json"),
                 "w",
             ) as f:
                 json.dump(marker, f)
@@ -1618,9 +1583,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """impl_done=True when output AND marker both exist."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_file(
                 os.path.join(ws, "outputs", "round0_implementation.md"), "impl"
             )
@@ -1642,9 +1605,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """impl_done=False, impl_partial=True when marker is absent."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_file(
                 os.path.join(ws, "outputs", "round0_implementation.md"), "impl"
             )
@@ -1665,9 +1626,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """impl_done=False, impl_partial=False when no impl file exists."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_completion_marker(ws, "plan")
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
 
@@ -1684,9 +1643,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """plan_done=True, plan_partial=False when plan marker exists."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_completion_marker(ws, "plan")
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
 
@@ -1705,9 +1662,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             # Intentionally NO .plan_completed marker
             os.makedirs(os.path.join(ws, "results"), exist_ok=True)
 
@@ -1738,9 +1693,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """_synthesize_checkpoint_from_workspace sets state flag when impl_partial."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "original request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_file(
                 os.path.join(ws, "outputs", "round0_implementation.md"), "impl"
             )
@@ -1773,9 +1726,7 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
         """Workspace with markers produces same resume behavior as before."""
         with tempfile.TemporaryDirectory() as ws:
             _create_file(os.path.join(ws, "request.txt"), "original request")
-            _create_file(
-                os.path.join(ws, "outputs", "round0_plan.md"), "plan"
-            )
+            _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
             _create_file(
                 os.path.join(ws, "outputs", "round0_implementation.md"), "impl"
             )

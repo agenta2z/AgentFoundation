@@ -30,34 +30,33 @@ from os import environ, path
 from typing import AsyncIterator, Dict, List, Sequence, Tuple, Union
 
 import httpx
-from ai_gateway.client import AIGatewayClient
-from ai_gateway.constants import AIGatewayHeaders
-from ai_gateway.models.common import HttpHeaders
-from ai_gateway.models.wrapper import RequestWrapper
-
 from agent_foundation.apis.ag.gateway_mode import (
+    build_direct_headers,
     DEFAULT_AI_GATEWAY_BASE_URL,
     DEFAULT_CLOUD_ID,
     DEFAULT_PROXIMITY_PORT,
     DEFAULT_SLAUTH_GROUPS,
     DEFAULT_SLAUTH_SERVER_URL,
     DEFAULT_USE_CASE_ID,
-    GatewayMode,
-    build_direct_headers,
     detect_available_mode,
+    GatewayMode,
     get_direct_slauth_token,
 )
 from agent_foundation.apis.common import _resolve_llm_timeout
+from ai_gateway.client import AIGatewayClient
+from ai_gateway.constants import AIGatewayHeaders
+from ai_gateway.models.common import HttpHeaders
+from ai_gateway.models.wrapper import RequestWrapper
 from rich_python_utils.console_utils import hprint_message
 
 logger = logging.getLogger(__name__)
 
 # Env var names (shared semantics with the Claude backend)
-ENV_NAME_AI_GATEWAY_USER_ID = 'AI_GATEWAY_USER_ID'
-ENV_NAME_AI_GATEWAY_CLOUD_ID = 'AI_GATEWAY_CLOUD_ID'
-ENV_NAME_AI_GATEWAY_USE_CASE_ID = 'AI_GATEWAY_USE_CASE_ID'
-ENV_NAME_AI_GATEWAY_BASE_URL = 'AI_GATEWAY_BASE_URL'
-ENV_NAME_SLAUTH_SERVER_URL = 'SLAUTH_SERVER_URL'
+ENV_NAME_AI_GATEWAY_USER_ID = "AI_GATEWAY_USER_ID"
+ENV_NAME_AI_GATEWAY_CLOUD_ID = "AI_GATEWAY_CLOUD_ID"
+ENV_NAME_AI_GATEWAY_USE_CASE_ID = "AI_GATEWAY_USE_CASE_ID"
+ENV_NAME_AI_GATEWAY_BASE_URL = "AI_GATEWAY_BASE_URL"
+ENV_NAME_SLAUTH_SERVER_URL = "SLAUTH_SERVER_URL"
 
 # The relative path of the OpenAI chat-completions route on the AI Gateway.
 # Verified live: POST {base_url}/v1/openai/v1/chat/completions -> 200.
@@ -75,16 +74,17 @@ class AIGatewayOpenAIModels(StrEnum):
     them (the request path and code already support any chat model id — you can
     also pass a raw string model id directly to ``generate_text``).
     """
+
     # GPT-5.x family (reasoning-capable) — confirmed available.
-    GPT_55 = 'gpt-5.5-2026-04-23'
-    GPT_5 = 'gpt-5-latest'
+    GPT_55 = "gpt-5.5-2026-04-23"
+    GPT_5 = "gpt-5-latest"
 
 
 # Conservative default output budgets. Reasoning models need headroom for the
 # internal reasoning trace BEFORE the visible answer, so defaults are generous.
 DEFAULT_MAX_TOKENS = {
-    f'{AIGatewayOpenAIModels.GPT_55}': 8192,
-    f'{AIGatewayOpenAIModels.GPT_5}': 8192,
+    f"{AIGatewayOpenAIModels.GPT_55}": 8192,
+    f"{AIGatewayOpenAIModels.GPT_5}": 8192,
 }
 
 # Models that use the newer reasoning-style request contract: they require
@@ -119,7 +119,7 @@ def _get_messages(
         # If it's a path to an existing file, read its contents as the prompt.
         try:
             if path.isfile(prompt_or_messages):
-                with open(prompt_or_messages, 'r', encoding='utf-8') as f:
+                with open(prompt_or_messages, "r", encoding="utf-8") as f:
                     text = f.read()
         except (OSError, ValueError):
             text = prompt_or_messages
@@ -150,12 +150,19 @@ def _resolve_config(
 ) -> dict:
     """Resolve configuration from parameters, env vars, and defaults."""
     return {
-        "base_url": base_url or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
-        "cloud_id": cloud_id or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
-        "use_case_id": use_case_id or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
-        "slauth_server_url": slauth_server_url or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
-        "user_id": user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get('USER', ''),
-        "groups": groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
+        "base_url": base_url
+        or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
+        "cloud_id": cloud_id
+        or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
+        "use_case_id": use_case_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
+        "slauth_server_url": slauth_server_url
+        or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
+        "user_id": user_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USER_ID)
+        or environ.get("USER", ""),
+        "groups": groups
+        or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
     }
 
 
@@ -210,7 +217,9 @@ def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
     """Extract the assistant message text from an OpenAI chat-completion."""
     choices = response_data.get("choices")
     if not choices:
-        raise Exception(f"Unexpected OpenAI response format (no choices): {response_data}")
+        raise Exception(
+            f"Unexpected OpenAI response format (no choices): {response_data}"
+        )
 
     message = choices[0].get("message", {})
     generated_text = (message.get("content") or "").strip()
@@ -224,7 +233,9 @@ def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
     return generated_text.strip()
 
 
-def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_direct(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the AI Gateway OpenAI route using an atlas-CLI SLAuth token."""
     env = "prod" if "prod" in config["base_url"] else "staging"
     token = get_direct_slauth_token(env=env, groups=config.get("groups"))
@@ -238,11 +249,15 @@ def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeou
 
     resp = httpx.post(url, json=request_payload, headers=headers, timeout=timeout)
     if not (200 <= resp.status_code < 300):
-        raise Exception(f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}")
+        raise Exception(
+            f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}"
+        )
     return resp.json()
 
 
-def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_sdk(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the AI Gateway SDK's typed ``client.openai.v1_chat_completions``.
 
     Uses a pre-minted SLAuth token (atlas CLI), so it needs no local slauth
@@ -267,18 +282,22 @@ def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: 
                 raise ValueError("pre-minted SLAuth token is empty")
             self._token = t
 
-        def filter(self, request: ClientRequest, chain: SyncFilterChain) -> ClientResponse:
+        def filter(
+            self, request: ClientRequest, chain: SyncFilterChain
+        ) -> ClientResponse:
             tok = self._token
             if not tok.lower().startswith(("slauth ", "bearer ")):
                 tok = f"SLAUTH {tok}"
             request.headers["Authorization"] = tok
             return chain.next(request)
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: config["user_id"],
-        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
-        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: config["user_id"],
+            AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+            AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+        }
+    )
 
     client = AIGatewayClient.sync(
         base_url=config["base_url"],
@@ -310,7 +329,9 @@ def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: 
     return body
 
 
-def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_slauth_server(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the SDK + ``SlauthServerAuthFilter`` (needs local slauth server)."""
     from ai_gateway.models.common import HttpMethod
 
@@ -324,11 +345,13 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
         groups=group_set,
     )
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: config["user_id"],
-        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
-        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: config["user_id"],
+            AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+            AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+        }
+    )
 
     client = AIGatewayClient.sync(
         base_url=config["base_url"],
@@ -337,8 +360,8 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
     )
 
     request = RequestWrapper(
-        body=json.dumps(request_payload).encode('utf-8'),
-        headers=HttpHeaders({'Content-Type': 'application/json'}),
+        body=json.dumps(request_payload).encode("utf-8"),
+        headers=HttpHeaders({"Content-Type": "application/json"}),
     )
     response = client.raw.http(
         method=HttpMethod.POST,
@@ -347,9 +370,9 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
     )
 
     if not (200 <= response.http_status.code < 300):
-        raw_body = getattr(response, 'raw_body', None) or response.body
+        raw_body = getattr(response, "raw_body", None) or response.body
         raw_str = (
-            raw_body.decode('utf-8', errors='replace')
+            raw_body.decode("utf-8", errors="replace")
             if isinstance(raw_body, (bytes, bytearray))
             else str(raw_body)
         )
@@ -357,7 +380,7 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
             f"SLAuth server mode: AI Gateway returned status {response.http_status.code}: {raw_str}"
         )
 
-    return json.loads(response.body.decode('utf-8'))
+    return json.loads(response.body.decode("utf-8"))
 
 
 def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
@@ -373,14 +396,17 @@ def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
             )
             # The OpenAI route has no proximity proxy; prefer direct/sdk.
             resolved_mode = (
-                detected if detected in (GatewayMode.DIRECT, GatewayMode.SLAUTH_SERVER)
+                detected
+                if detected in (GatewayMode.DIRECT, GatewayMode.SLAUTH_SERVER)
                 else GatewayMode.DIRECT
             )
         except RuntimeError:
             resolved_mode = GatewayMode.DIRECT
 
     if is_auto:
-        modes_to_try = [resolved_mode] + [m for m in _FALLBACK_MODES if m != resolved_mode]
+        modes_to_try = [resolved_mode] + [
+            m for m in _FALLBACK_MODES if m != resolved_mode
+        ]
     else:
         modes_to_try = [resolved_mode]
 
@@ -388,27 +414,27 @@ def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
 
 
 def generate_text(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, Dict]:
     """Generate text using an OpenAI model via the AI Gateway.
 
@@ -450,7 +476,11 @@ def generate_text(
         connect_timeout=connect_timeout,
         response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 120
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 120
+    )
 
     if verbose:
         hprint_message(
@@ -470,11 +500,17 @@ def generate_text(
     for mode in modes_to_try:
         try:
             if mode == GatewayMode.DIRECT:
-                response_data = _send_via_direct(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_direct(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.SDK:
-                response_data = _send_via_sdk(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_sdk(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.SLAUTH_SERVER:
-                response_data = _send_via_slauth_server(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_slauth_server(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             else:
                 raise ValueError(f"Unsupported gateway mode for OpenAI route: {mode}")
 
@@ -488,32 +524,34 @@ def generate_text(
             last_error = e
             if is_auto and mode != modes_to_try[-1]:
                 next_mode = modes_to_try[modes_to_try.index(mode) + 1]
-                logger.warning("Gateway mode '%s' failed: %s. Trying '%s'...", mode, e, next_mode)
+                logger.warning(
+                    "Gateway mode '%s' failed: %s. Trying '%s'...", mode, e, next_mode
+                )
                 continue
             raise
 
 
 async def generate_text_streaming(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> AsyncIterator[str]:
     """Stream text from an OpenAI model via the AI Gateway (SSE).
 
@@ -533,7 +571,9 @@ async def generate_text_streaming(
         groups=groups,
     )
 
-    resolved_mode, is_auto, _ = _resolve_mode_order(gateway_mode, config, proximity_port)
+    resolved_mode, is_auto, _ = _resolve_mode_order(
+        gateway_mode, config, proximity_port
+    )
 
     model_str = f"{model}"
 
@@ -542,7 +582,11 @@ async def generate_text_streaming(
         connect_timeout=connect_timeout,
         response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 300
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 300
+    )
 
     # Only the direct mode supports SSE here; otherwise do a single call.
     if resolved_mode == GatewayMode.DIRECT:
@@ -557,7 +601,9 @@ async def generate_text_streaming(
             **kwargs,
         )
         env = "prod" if "prod" in config["base_url"] else "staging"
-        token = await asyncio.to_thread(get_direct_slauth_token, env=env, groups=config.get("groups"))
+        token = await asyncio.to_thread(
+            get_direct_slauth_token, env=env, groups=config.get("groups")
+        )
         headers = build_direct_headers(
             token=token,
             user_id=config["user_id"],
@@ -566,10 +612,16 @@ async def generate_text_streaming(
         )
         url = f"{config['base_url']}{OPENAI_CHAT_COMPLETIONS_PATH}"
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(request_timeout, connect=10)) as client:
-            async with client.stream("POST", url, json=request_payload, headers=headers) as response:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(request_timeout, connect=10)
+        ) as client:
+            async with client.stream(
+                "POST", url, json=request_payload, headers=headers
+            ) as response:
                 if not (200 <= response.status_code < 300):
-                    error_text = (await response.aread()).decode("utf-8", errors="replace")
+                    error_text = (await response.aread()).decode(
+                        "utf-8", errors="replace"
+                    )
                     raise Exception(
                         f"Direct streaming: AI Gateway returned status {response.status_code}: {error_text}"
                     )
@@ -618,27 +670,27 @@ async def generate_text_streaming(
 
 
 async def generate_text_async(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayOpenAIModels = AIGatewayOpenAIModels.GPT_55,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, Dict]:
     """Async wrapper around the sync ``generate_text`` (via a worker thread)."""
     return await asyncio.to_thread(
@@ -667,7 +719,7 @@ async def generate_text_async(
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     _r = generate_text(
         "Hello! Reply with exactly: PONG",
         model=AIGatewayOpenAIModels.GPT_55,

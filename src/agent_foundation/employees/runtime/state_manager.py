@@ -24,6 +24,7 @@ class EmployeeRuntimeState:
 
     Maps to the OpenStartup dashboard's employee metrics/status display.
     """
+
     employee_id: str
     status: EmployeeStatus = EmployeeStatus.active
     current_task_id: str | None = None
@@ -100,7 +101,9 @@ class StateManager:
                 data = json.load(f)
             return EmployeeRuntimeState.from_dict(data)
         except (json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.warning("[StateManager] Failed to load state for '%s': %s", employee_id, e)
+            logger.warning(
+                "[StateManager] Failed to load state for '%s': %s", employee_id, e
+            )
             return EmployeeRuntimeState(employee_id=employee_id)
 
     def save(self, state: EmployeeRuntimeState) -> None:

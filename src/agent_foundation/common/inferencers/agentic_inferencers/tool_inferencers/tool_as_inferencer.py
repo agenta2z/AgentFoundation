@@ -26,11 +26,10 @@ import signal
 from collections.abc import Callable, Mapping
 from typing import Any, AsyncIterator, Literal, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 from rich_python_utils.cli_utils.cmd_helpers import render_argv
 
 
@@ -178,9 +177,7 @@ class ToolAsInferencer(StreamingInferencerBase):
                 scrub failure.
         """
         if not self.command:
-            raise ValueError(
-                f"ToolAsInferencer({self.tool_name!r}): command is empty"
-            )
+            raise ValueError(f"ToolAsInferencer({self.tool_name!r}): command is empty")
         binary = self.command[0]
         # Allow either a bare binary name ("python3") OR an absolute path
         # whose basename matches an allowed binary.
@@ -225,9 +222,7 @@ class ToolAsInferencer(StreamingInferencerBase):
     # Streaming primitive
     # ---------------------------------------------------------------------
 
-    async def _ainfer_streaming(
-        self, prompt: str, **kwargs: Any
-    ) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Spawn the subprocess, async-merge stdout+stderr, yield lines.
 
         The base class :meth:`StreamingInferencerBase.ainfer_streaming`
@@ -279,13 +274,9 @@ class ToolAsInferencer(StreamingInferencerBase):
         # pumper tasks read each pipe in parallel; the consumer (this
         # generator) drains the queue. A sentinel `(None, None)` marks
         # each pumper's completion; we yield until both have signalled.
-        line_queue: asyncio.Queue[tuple[Optional[str], Optional[str]]] = (
-            asyncio.Queue()
-        )
+        line_queue: asyncio.Queue[tuple[Optional[str], Optional[str]]] = asyncio.Queue()
 
-        async def _pump(
-            stream: Optional[asyncio.StreamReader], channel: str
-        ) -> None:
+        async def _pump(stream: Optional[asyncio.StreamReader], channel: str) -> None:
             if stream is None:
                 await line_queue.put((None, channel))
                 return
@@ -296,7 +287,9 @@ class ToolAsInferencer(StreamingInferencerBase):
                         break
                     try:
                         line = raw.decode("utf-8", errors="replace")
-                    except Exception as e:  # pragma: no cover — replace mode shouldn't raise
+                    except (
+                        Exception
+                    ) as e:  # pragma: no cover — replace mode shouldn't raise
                         logger.warning(
                             "[ToolAsInferencer:%s] decode failed on %s: %s",
                             self.tool_name,
@@ -379,7 +372,9 @@ class ToolAsInferencer(StreamingInferencerBase):
             self._last_response = ToolInferencerResponse(
                 stdout=stdout_text,
                 stderr=stderr_text,
-                return_code=proc.returncode if proc.returncode is not None else return_code,
+                return_code=proc.returncode
+                if proc.returncode is not None
+                else return_code,
                 success=success,
                 parsed=parsed,
                 cache_path=None,  # base class owns the cache path
@@ -449,9 +444,7 @@ class ToolAsInferencer(StreamingInferencerBase):
         Tools are usually invoked through ``ainfer``; this exists for the
         rare sync caller and to satisfy the ABC.
         """
-        from rich_python_utils.common_utils.async_function_helper import (
-            _run_async,
-        )
+        from rich_python_utils.common_utils.async_function_helper import _run_async
 
         return _run_async(self._ainfer(inference_input, inference_config, **kwargs))
 

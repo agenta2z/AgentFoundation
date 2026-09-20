@@ -20,20 +20,20 @@ Mapping:
 
 Requirements: 12.1, 12.2, 12.3, 12.4
 """
+
 from typing import List, Optional, Tuple
 
-from attr import attrs, attrib
-
-from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
-    RetrievalServiceBase,
-)
-from rich_python_utils.service_utils.retrieval_service.document import Document
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
+from rich_python_utils.service_utils.retrieval_service.document import Document
+from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
+    RetrievalServiceBase,
+)
 
 
 @attrs
@@ -186,7 +186,9 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
             ValueError: If a piece with the same piece_id already exists.
         """
         doc = self._piece_to_doc(piece)
-        return self.retrieval_service.add(doc, namespace=self._namespace(piece.entity_id))
+        return self.retrieval_service.add(
+            doc, namespace=self._namespace(piece.entity_id)
+        )
 
     def get_by_id(self, piece_id: str) -> Optional[KnowledgePiece]:
         """Get a knowledge piece by its ID.
@@ -226,7 +228,9 @@ class RetrievalKnowledgePieceStore(KnowledgePieceStore):
             True if the piece was found and updated, False if not found.
         """
         doc = self._piece_to_doc(piece)
-        return self.retrieval_service.update(doc, namespace=self._namespace(piece.entity_id))
+        return self.retrieval_service.update(
+            doc, namespace=self._namespace(piece.entity_id)
+        )
 
     def remove(self, piece_id: str) -> bool:
         """Remove a knowledge piece from the store.

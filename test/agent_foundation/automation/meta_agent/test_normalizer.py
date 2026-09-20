@@ -12,11 +12,7 @@ Requirements: 2.1, 2.2, 2.3, 2.4, 2.6
 """
 
 import pytest
-
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
 from agent_foundation.automation.meta_agent.normalizer import (
     KNOWN_CANONICAL_TYPES,
     TraceNormalizer,
@@ -27,6 +23,7 @@ from webaxon.automation.meta_agent.web_normalizer_config import WEB_ACTION_TYPE_
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_step(action_type: str, **kwargs) -> TraceStep:
     """Create a TraceStep with the given action_type and optional overrides."""
@@ -45,6 +42,7 @@ def _make_trace(steps: list[TraceStep], trace_id: str = "t-1") -> ExecutionTrace
 # ---------------------------------------------------------------------------
 # Action type mapping tests (Req 2.1, 2.2)
 # ---------------------------------------------------------------------------
+
 
 class TestActionTypeMapping:
     """Verify ACTION_TYPE_MAP entries are applied correctly when provided via custom_type_map."""
@@ -67,7 +65,15 @@ class TestActionTypeMapping:
 
     @pytest.mark.parametrize(
         "canonical",
-        ["visit_url", "click", "no_op", "wait", "input_text", "extract_text", "select_option"],
+        [
+            "visit_url",
+            "click",
+            "no_op",
+            "wait",
+            "input_text",
+            "extract_text",
+            "select_option",
+        ],
     )
     def test_canonical_types_pass_through(self, canonical: str):
         normalizer = TraceNormalizer()
@@ -96,7 +102,10 @@ class TestActionTypeMapping:
     def test_empty_default_means_passthrough(self):
         """With no custom_type_map, unknown types pass through unchanged."""
         normalizer = TraceNormalizer()
-        assert normalizer.normalize_action_type("ElementInteraction.Click") == "ElementInteraction.Click"
+        assert (
+            normalizer.normalize_action_type("ElementInteraction.Click")
+            == "ElementInteraction.Click"
+        )
 
     def test_empty_default_flags_unknown(self):
         """With no custom_type_map, agent-internal types are flagged as unrecognized."""
@@ -109,6 +118,7 @@ class TestActionTypeMapping:
 # ---------------------------------------------------------------------------
 # UserInputsRequired → wait(True) (Req 2.6)
 # ---------------------------------------------------------------------------
+
 
 class TestUserInputsRequired:
     def test_converts_to_wait_action(self):
@@ -136,6 +146,7 @@ class TestUserInputsRequired:
 # Unrecognized action type flagging (Req 2.3)
 # ---------------------------------------------------------------------------
 
+
 class TestUnrecognizedActionType:
     def test_unknown_type_flagged_in_metadata(self):
         normalizer = TraceNormalizer()
@@ -161,6 +172,7 @@ class TestUnrecognizedActionType:
 # Wait duration normalization (Req 2.4)
 # ---------------------------------------------------------------------------
 
+
 class TestWaitDurationNormalization:
     def test_single_wait_duration_unchanged(self):
         normalizer = TraceNormalizer()
@@ -173,12 +185,8 @@ class TestWaitDurationNormalization:
     def test_all_same_durations_unchanged(self):
         normalizer = TraceNormalizer()
         traces = [
-            _make_trace(
-                [_make_step("wait", args={"seconds": 3.0})], trace_id="t-1"
-            ),
-            _make_trace(
-                [_make_step("wait", args={"seconds": 3.0})], trace_id="t-2"
-            ),
+            _make_trace([_make_step("wait", args={"seconds": 3.0})], trace_id="t-1"),
+            _make_trace([_make_step("wait", args={"seconds": 3.0})], trace_id="t-2"),
         ]
         result = normalizer.normalize(traces)
         assert result[0].steps[0].args["seconds"] == 3.0
@@ -187,15 +195,9 @@ class TestWaitDurationNormalization:
     def test_varied_durations_normalized_to_median(self):
         normalizer = TraceNormalizer()
         traces = [
-            _make_trace(
-                [_make_step("wait", args={"seconds": 1.0})], trace_id="t-1"
-            ),
-            _make_trace(
-                [_make_step("wait", args={"seconds": 5.0})], trace_id="t-2"
-            ),
-            _make_trace(
-                [_make_step("wait", args={"seconds": 3.0})], trace_id="t-3"
-            ),
+            _make_trace([_make_step("wait", args={"seconds": 1.0})], trace_id="t-1"),
+            _make_trace([_make_step("wait", args={"seconds": 5.0})], trace_id="t-2"),
+            _make_trace([_make_step("wait", args={"seconds": 3.0})], trace_id="t-3"),
         ]
         result = normalizer.normalize(traces)
         # median of [1.0, 5.0, 3.0] = 3.0
@@ -205,12 +207,8 @@ class TestWaitDurationNormalization:
     def test_even_count_durations_median(self):
         normalizer = TraceNormalizer()
         traces = [
-            _make_trace(
-                [_make_step("wait", args={"seconds": 2.0})], trace_id="t-1"
-            ),
-            _make_trace(
-                [_make_step("wait", args={"seconds": 4.0})], trace_id="t-2"
-            ),
+            _make_trace([_make_step("wait", args={"seconds": 2.0})], trace_id="t-1"),
+            _make_trace([_make_step("wait", args={"seconds": 4.0})], trace_id="t-2"),
         ]
         result = normalizer.normalize(traces)
         # median of [2.0, 4.0] = 3.0
@@ -245,11 +243,10 @@ class TestWaitDurationNormalization:
 # custom_type_map override (Req 2.2)
 # ---------------------------------------------------------------------------
 
+
 class TestCustomTypeMap:
     def test_custom_map_adds_new_mapping(self):
-        normalizer = TraceNormalizer(
-            custom_type_map={"MyCustomAction": "click"}
-        )
+        normalizer = TraceNormalizer(custom_type_map={"MyCustomAction": "click"})
         assert normalizer.normalize_action_type("MyCustomAction") == "click"
 
     def test_custom_map_overrides_default(self):
@@ -268,9 +265,7 @@ class TestCustomTypeMap:
 
     def test_custom_mapped_type_recognized_as_canonical(self):
         """A type mapped via custom_type_map should not be flagged unrecognized."""
-        normalizer = TraceNormalizer(
-            custom_type_map={"SpecialAction": "special_op"}
-        )
+        normalizer = TraceNormalizer(custom_type_map={"SpecialAction": "special_op"})
         step = _make_step("SpecialAction")
         result = normalizer.normalize_step(step)
         assert result.action_type == "special_op"
@@ -281,6 +276,7 @@ class TestCustomTypeMap:
 # ---------------------------------------------------------------------------
 # Empty / None target handling (Req 2.1)
 # ---------------------------------------------------------------------------
+
 
 class TestTargetHandling:
     def test_none_target_passes_through(self):
@@ -313,6 +309,7 @@ class TestTargetHandling:
 # Full normalize() integration (Req 2.1, 2.4)
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeTraces:
     def test_returns_new_trace_objects(self):
         normalizer = TraceNormalizer()
@@ -323,9 +320,7 @@ class TestNormalizeTraces:
 
     def test_preserves_trace_metadata(self):
         normalizer = TraceNormalizer()
-        original = _make_trace(
-            [_make_step("click")], trace_id="my-trace"
-        )
+        original = _make_trace([_make_step("click")], trace_id="my-trace")
         result = normalizer.normalize([original])
         assert result[0].trace_id == "my-trace"
         assert result[0].task_description == "test task"
@@ -333,11 +328,13 @@ class TestNormalizeTraces:
     def test_normalizes_all_steps(self):
         normalizer = TraceNormalizer(custom_type_map=WEB_ACTION_TYPE_MAP)
         traces = [
-            _make_trace([
-                _make_step("ElementInteraction.Click"),
-                _make_step("ElementInteraction.InputText", args={"text": "hi"}),
-                _make_step("visit_url", target="https://example.com"),
-            ]),
+            _make_trace(
+                [
+                    _make_step("ElementInteraction.Click"),
+                    _make_step("ElementInteraction.InputText", args={"text": "hi"}),
+                    _make_step("visit_url", target="https://example.com"),
+                ]
+            ),
         ]
         result = normalizer.normalize(traces)
         types = [s.action_type for s in result[0].steps]
