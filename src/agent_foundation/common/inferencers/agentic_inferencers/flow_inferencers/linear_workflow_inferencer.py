@@ -825,6 +825,51 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         # Non-dynamic mode: fall through to base leaf behavior
         return super()._finalize_output(response)
 
+    def _publish_partial_output(self, error: BaseException) -> None:
+        """Publish the last completed dynamic step when the workflow aborts.
+
+        ``InferencerBase`` calls :meth:`_finalize_output` only on the normal
+        return path, so an exception escaping ``Workflow._arun`` leaves
+        ``outputs/`` empty even when an earlier round already produced — and
+        passed — a full artifact. Canonical-output resolution is single-tier
+        and never descends into ``children/``, so that artifact would be
+        unreachable rather than merely stale.
+
+        No selection logic is duplicated: ``dynamic_step_results`` records a
+        step only after it returns, so :meth:`_finalize_output` already picks
+        the last step that completed. Mirrors the ``DegradedOutput`` contract
+        used by ``DualInferencer`` — publish the best artifact available and
+        record why it is degraded. Never raises; the original error must win.
+        """
+        try:
+            if not getattr(self, "dynamic_mode", False) or self._workspace is None:
+                return
+            if not (self._state or {}).get("dynamic_step_results"):
+                return
+            self.log_warning(
+                {
+                    "event": "DEGRADED_OUTPUT",
+                    "message": (
+                        "Workflow aborted before normal finalization — publishing "
+                        "the last dynamic step that completed. Later rounds did "
+                        "NOT run, so their refinements are absent."
+                    ),
+                    "completed_steps": len(self._state["dynamic_step_results"]),
+                    "error_type": type(error).__name__,
+                },
+                "DegradedOutput",
+            )
+            # Guarded above, so this always takes the dynamic-mode branch and
+            # never reaches the base implementation's <Response> summary path
+            # (which would be handed ``None`` here).
+            self._finalize_output(None)
+        except Exception:
+            _logger.warning(
+                "Failed to publish partial output after %s",
+                type(error).__name__,
+                exc_info=True,
+            )
+
     # ------------------------------------------------------------------
     # Iteration workspace helpers
     # ------------------------------------------------------------------
@@ -1701,8 +1746,14 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         # failure.
         await self._emit_lwi_topology(reset=True)
 
-        # Run the workflow
-        await Workflow._arun(self, inference_input, **_inference_args)
+        # Run the workflow. A step that aborts — e.g. a round whose guardrail
+        # retries are exhausted — must not discard an earlier round that already
+        # passed, so surface whatever completed before re-raising.
+        try:
+            await Workflow._arun(self, inference_input, **_inference_args)
+        except BaseException as workflow_error:
+            self._publish_partial_output(workflow_error)
+            raise
 
         # v4 Phase 5.1 — final reconcile so any per-step status gaps are
         # corrected to the terminal "completed" state.

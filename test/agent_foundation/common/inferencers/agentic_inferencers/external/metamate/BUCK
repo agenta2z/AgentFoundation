@@ -13,3 +13,21 @@ python_unittest(
         "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
     ],
 )
+
+# ``# @autodeps-skip``: autodeps follows only DIRECT import edges, so it strips
+# the ``:agent_foundation`` parent dep — this module imports from
+# ``...external.metamate`` (which lives in ``:metamate_lib``) but not from the
+# parent package. The parent still has to be in the graph: it supplies ``attrs``
+# and the base inferencer the metamate modules import at runtime. Same reason the
+# sibling ``external/metamate/BUCK`` marks every target.
+python_unittest(
+    # @autodeps-skip
+    name = "test_metamate_timeout_scopes",
+    srcs = ["test_metamate_timeout_scopes.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)

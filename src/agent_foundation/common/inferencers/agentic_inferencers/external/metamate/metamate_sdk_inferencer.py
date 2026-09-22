@@ -127,7 +127,12 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         max_continuations: Max auto-continue follow-ups per query.
         poll_interval_seconds: Seconds between poll attempts.
         timeout_seconds: Per-call timeout for ``engine_start_v2``.
-        total_timeout_seconds: Max total time for entire operation.
+        stream_total_timeout_seconds: Wall-clock cap for ONE streaming poll loop.
+            Distinct from the inherited ``total_timeout_seconds``, which
+            ``InferencerBase`` spends on the whole retry loop (every attempt plus
+            every guardrail evaluation). Overriding that one here used to cap both
+            scopes with a single number, so one attempt was allowed the entire
+            budget and any retry was guaranteed to breach it.
         idle_timeout_seconds: Max idle time between chunks.
         code_scope_judge: Async ``(task) -> CodeSearchScope`` that scopes the code
             search. Defaults to :func:`judge_code_scope` (enabled); pass ``None``
@@ -145,7 +150,14 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     max_continuations: int = attrib(default=MAX_CONTINUATIONS)
     poll_interval_seconds: float = attrib(default=DEFAULT_POLL_INTERVAL)
     timeout_seconds: int = attrib(default=DEFAULT_TIMEOUT)
-    total_timeout_seconds: int = attrib(default=1800)
+    # Deliberately does NOT override InferencerBase's ``total_timeout_seconds``
+    # (default 0 = no cumulative cap), matching the ClaudeCodeCLI / Codex /
+    # Devmate leaves. A finite value there is spent on attempts AND guardrail
+    # evaluations, and is min()'d with the per-attempt cap — so it silently
+    # defeated the flow config's ``attempt_timeout_seconds: 7200`` hang guard
+    # and killed nodes that were still making progress. One streaming call is
+    # bounded below; the whole node stays bounded by max_retry x attempt cap.
+    stream_total_timeout_seconds: int = attrib(default=1800)
     idle_timeout_seconds: int = attrib(default=600)
     # Source of MetamateGraphQLClient. None = honor METAMATE_USE_STANDALONE env
     # var (default off → upstream //msl/metamate/cli:metamate_graphql). True
@@ -276,14 +288,15 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 start_time = time.monotonic()
 
                 while True:
-                    # Check total timeout budget
+                    # Check this streaming call's own budget
                     elapsed = time.monotonic() - start_time
                     if (
-                        self.total_timeout_seconds > 0
-                        and elapsed > self.total_timeout_seconds
+                        self.stream_total_timeout_seconds > 0
+                        and elapsed > self.stream_total_timeout_seconds
                     ):
                         self.log_info(
-                            f"Total timeout reached ({self.total_timeout_seconds}s)",
+                            "Stream total timeout reached "
+                            f"({self.stream_total_timeout_seconds}s)",
                             "Timeout",
                         )
                         break

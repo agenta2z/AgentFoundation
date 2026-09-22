@@ -161,3 +161,15 @@ python_unittest(
         "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
     ],
 )
+
+python_unittest(
+    name = "test_unified_finalize_output",
+    srcs = ["test_unified_finalize_output.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)

@@ -904,5 +904,101 @@ class TestFinalizeSurfacingUnderRunContext(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class TestLWIPartialOutputOnAbort(unittest.TestCase):
+    """A round that aborts must not discard an earlier round that passed.
+
+    ``_finalize_output`` runs only on the normal return path, so without the
+    failure-path publish an exhausted guardrail leaves ``outputs/`` empty even
+    though ``children/initial/outputs/output.md`` holds a passing artifact —
+    and canonical resolution never descends into ``children/``.
+    """
+
+    def _make_lwi(self, tmpdir):
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+            LinearWorkflowInferencer,
+        )
+
+        return LinearWorkflowInferencer(
+            dynamic_mode=True,
+            default_initial_inferencer=_Mock(
+                scripted_response="<Response>Initial</Response>"
+            ),
+            default_followup_inferencer=_Mock(
+                scripted_response="<Response>Followup</Response>"
+            ),
+            max_dynamic_steps=2,
+            workspace=InferencerWorkspace(root=tmpdir),
+            output_path="output.md",
+        )
+
+    def test_publishes_last_completed_step_when_workflow_aborts(self):
+        from unittest import mock
+
+        from rich_python_utils.common_objects.workflow.workflow import Workflow
+        from rich_python_utils.common_utils.function_helper import (
+            OutputValidationExhaustedError,
+        )
+
+        tmpdir = tempfile.mkdtemp(prefix="lwi_partial_")
+        try:
+            lwi = self._make_lwi(tmpdir)
+
+            # `initial` passed and wrote a full artifact; `round01` then aborts.
+            child_ws = lwi._workspace.child("initial")
+            child_ws.ensure_dirs()
+            with open(child_ws.output_path("output.md"), "w") as f:
+                f.write("# Full artifact from initial")
+
+            async def _abort_after_initial(self, inference_input, **kwargs):
+                self._state = {"dynamic_step_results": ["r0"]}
+                raise OutputValidationExhaustedError(
+                    "Output validation failed", "update"
+                )
+
+            with mock.patch.object(Workflow, "_arun", _abort_after_initial):
+                with self.assertRaises(OutputValidationExhaustedError):
+                    asyncio.run(lwi._ainfer("task"))
+
+            own = os.path.join(lwi._workspace.outputs_dir, "output.md")
+            self.assertTrue(
+                os.path.exists(own),
+                "a passing earlier round must still be published when a later "
+                "round aborts",
+            )
+            self.assertIn("Full artifact from initial", open(own).read())
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_publish_when_no_step_completed(self):
+        tmpdir = tempfile.mkdtemp(prefix="lwi_partial_none_")
+        try:
+            lwi = self._make_lwi(tmpdir)
+            lwi._state = {"dynamic_step_results": []}
+
+            lwi._publish_partial_output(RuntimeError("boom"))
+
+            own = os.path.join(lwi._workspace.outputs_dir, "output.md")
+            self.assertFalse(
+                os.path.exists(own),
+                "nothing completed, so there is no artifact to publish",
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_never_raises_when_child_artifact_missing(self):
+        tmpdir = tempfile.mkdtemp(prefix="lwi_partial_missing_")
+        try:
+            lwi = self._make_lwi(tmpdir)
+            # A step is recorded but never wrote its artifact to disk.
+            lwi._state = {"dynamic_step_results": ["r0"]}
+
+            lwi._publish_partial_output(RuntimeError("boom"))
+
+            own = os.path.join(lwi._workspace.outputs_dir, "output.md")
+            self.assertFalse(os.path.exists(own))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
