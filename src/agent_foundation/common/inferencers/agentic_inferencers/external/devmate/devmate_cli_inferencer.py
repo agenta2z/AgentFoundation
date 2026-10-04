@@ -8,9 +8,18 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, TextIO, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Union,
+)
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     InferencerExecutionError,
     MaxIterationsExhaustedError,
@@ -29,6 +38,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_inference
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -45,10 +55,7 @@ _PORT_FILE_RACE_BACKOFF_SECONDS: float = 2.5
 
 
 def _looks_like_port_file_race(error_text: str) -> bool:
-    return (
-        "ENOENT" in error_text
-        and "port" in error_text.lower()
-    )
+    return "ENOENT" in error_text and "port" in error_text.lower()
 
 
 def _looks_like_max_iterations(error_text: str) -> bool:
@@ -79,7 +86,18 @@ def _looks_like_acl_pipeline_failure(error_text: str) -> bool:
     )
 
 
-from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+def _field(obj: Any, name: str, default: Any = None) -> Any:
+    """Read ``name`` from a dict result (legacy path) or a response object."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+from agent_foundation.common.inferencers.run_context import (
+    bridge_entrypoint,
+    frame_for,
+    RuntimeKey,
+)
 
 
 @attrs
@@ -185,6 +203,10 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         active_session_id (str): Currently active session ID.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     # Devmate runs as a CLI subprocess with file-edit / write tools, so it
     # HAS local file access. Override ``InferencerBase``'s False default
     # (inferencer_base.py:117) so that:
@@ -245,7 +267,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     # (``devmate_standalone/devai/devmate_terminal:devmate_terminal``,
     # also published as ``dmt``) and set ``cli_mode="print"`` to use its
     # headless non-interactive mode.
-    cli_binary: str = attrib(default="devmate")
+    cli_binary: str = attrib(default="dm")
     # CLI invocation style. Controls how ``construct_command`` shapes
     # the argv:
     #   ``"run"``  — canonical devmate: ``devmate run <config>
@@ -260,10 +282,10 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
     #                drops into the TUI which panics in non-interactive
     #                contexts.
     cli_mode: str = attrib(
-        default="run",
-        validator=lambda _self, _attr, v: v in ("run", "print")
+        default="dm",
+        validator=lambda _self, _attr, v: v in ("run", "print", "dm")
         or (_ for _ in ()).throw(
-            ValueError(f"cli_mode must be 'run' or 'print', got {v!r}")
+            ValueError(f"cli_mode must be 'run', 'print', or 'dm', got {v!r}")
         ),
     )
     # Whether the configured ``cli_binary`` honors ``--no-create-commit``.
@@ -287,9 +309,42 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # Session management - inherited from StreamingInferencerBase via TerminalSessionInferencerBase:
     #   auto_resume, active_session_id, new_session, anew_session, resume_session, aresume_session
+    _FANOUT_DROPPED_ARGS = (
+        TerminalSessionTemplatedInferencerBase._FANOUT_DROPPED_ARGS
+        + ("filter_session_info", "stream_callback", "output_stream")
+    )
 
-    # Internal state for dump file path (same concurrency constraints as base class)
-    _output_file: Optional[str] = attrib(default=None, init=False, repr=False)
+    # The call's ``--dump-final-structs-to-file`` path: a component of the call's
+    # invocation, so overlapping calls never read or delete each other's dump (B28).
+    # Outside an invocation (a direct hook call) it lives on the instance.
+    _OUTPUT_FILE = RuntimeKey("DevmateCliInferencer.output_file")
+
+    def _error_streak(self) -> int:
+        """Consecutive failed calls on the current session (B33): session-scoped,
+        so a host branch's failures never force another branch onto a new session."""
+        return self._session_scoped_get(
+            "consecutive_error_count", 0, backing="_consecutive_error_count"
+        )
+
+    def _set_error_streak(self, value: int) -> None:
+        self._session_scoped_set(
+            "consecutive_error_count", value, backing="_consecutive_error_count"
+        )
+
+    @property
+    def _output_file(self) -> Optional[str]:
+        frame = frame_for(self)
+        if frame is not None:
+            return frame.get(self._OUTPUT_FILE)
+        return self.__dict__.get("_output_file")
+
+    @_output_file.setter
+    def _output_file(self, value: Optional[str]) -> None:
+        frame = frame_for(self)
+        if frame is not None:
+            frame.put(self._OUTPUT_FILE, value)
+        else:
+            self.__dict__["_output_file"] = value
 
     def __attrs_post_init__(self):
         """Translate model_id, then super() runs source_path auto-detect, then apply Devmate ~/fbsource default + sync config."""
@@ -321,7 +376,9 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # only enforces ``timeout`` when set). Floor at the shared default,
         # scaling with ``idle_timeout_seconds``. (Async/streaming uses idle timeouts.)
         if self.timeout is None:
-            self.timeout = max(self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
+            self.timeout = max(
+                self.idle_timeout_seconds, DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+            )
 
         # If both shell controls are set, generate an extended config that
         # restricts execute_command to the allowed commands. If only
@@ -350,6 +407,26 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # True so pre_exec_scripts are joined with ``&&`` into the SAME
         # shell that already starts in effective_cwd. A pre-exec ``cd``
         # would be a no-op.
+
+        # Fix 4: redirect dm-core's conversation store to a per-user writable dir.
+        # dm-core persists conversations to ``os.tmpdir()/devmate/conversations``
+        # (FileBasedDevmateStorage) with no dedicated redirect env — only ``TMPDIR``
+        # (the os.tmpdir base) is honored. Under concurrent orchestrated runs the
+        # shared ``/tmp/devmate/conversations`` became unwritable (EACCES x41K) ->
+        # session-save failed -> no ``dm --resume`` footer -> every retry
+        # re-investigated from scratch. Pointing TMPDIR at a per-uid dir (stable across
+        # a leaf's retries so resume works; isolated per user so concurrent runs don't
+        # collide) sidesteps the shared-dir permission/collision entirely. The dm
+        # launcher (``/usr/local/bin/dm`` -> ``devmate_env.sh``) does not reset TMPDIR.
+        # Elements are chained with ``&&`` by ``_build_full_command`` (TSIB:426), so
+        # this must NOT abort the chain if mkdir fails — the trailing ``|| true``
+        # guarantees ``dm`` still runs (TMPDIR is already exported by then).
+        _tmpdir_prep = (
+            'export TMPDIR="/tmp/devmate-$(id -u)" '
+            '&& mkdir -p "$TMPDIR/devmate/conversations" 2>/dev/null || true'
+        )
+        if _tmpdir_prep not in (self.pre_exec_scripts or []):
+            self.pre_exec_scripts = list(self.pre_exec_scripts or []) + [_tmpdir_prep]
 
     # ------------------------------------------------------------------
     # Root-in-Sapling fallback (Issue 1 fix). Devmate's server REQUIRES its CWD
@@ -393,7 +470,9 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 logger.info(
                     "[%s] target %r is not a Sapling/EdenSCM repo; rooting the devmate "
                     "server in %r and analyzing the target via absolute paths.",
-                    type(self).__name__, self.effective_cwd, root,
+                    type(self).__name__,
+                    self.effective_cwd,
+                    root,
                 )
                 self._devmate_reroot_logged = True
             elif mode == "no_repo":
@@ -401,7 +480,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                     "[%s] target %r is not a Sapling/EdenSCM repo and no ~/fbsource or "
                     "~/www repo was found; devmate cannot start here and will produce no "
                     "output. Use an fbsource/www target or set devmate_repo_root.",
-                    type(self).__name__, self.effective_cwd,
+                    type(self).__name__,
+                    self.effective_cwd,
                 )
                 self._devmate_reroot_logged = True
         return super()._resolve_subprocess_cwd(cwd if mode == "native" else root)
@@ -478,6 +558,123 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             return f"{self.session_arg_name} '{session_id}'"
         return ""
 
+    # --- dm / devmate-core (supported harness) -------------------------------
+    # dm (devmate-core) is the supported agent harness (same one that powers
+    # VS Code Devmate). It replaces the deprecated Devmate Platform path
+    # (`devmate run` / --orchestrator-type devmate-platform), which
+    # authenticates against the RETIRED `TIER:devmate_agent` ACL (migrated to
+    # `TIER:agentic_coding_platform` in D108827214 and now allowlist-gated by
+    # D107276072). dm needs no execution ACL. Select via cli_binary="dm" +
+    # cli_mode="dm".
+    _DM_MODEL_MAP = {
+        "claude-opus-4.7-1m": "claude-opus-4.7-long",
+        "claude-opus-4.7": "claude-opus-4.7-long",
+        "claude-opus-4.6-1m": "claude-opus-4.6-long",
+        "claude-opus-4.6": "claude-opus-4.6",
+        "claude-opus-4.8": "claude-opus-4.8",
+        "claude-sonnet-4.6-1m": "claude-sonnet-4.6-long",
+        "claude-sonnet-4.6": "claude-sonnet-4.6-long",
+        "claude-sonnet-4.5": "claude-sonnet-4.6-long",
+        "claude-haiku-4.5": "claude-haiku-4.5",
+        "opus": "claude-opus-4.7-long",
+        "sonnet": "claude-sonnet-4.6-long",
+        "haiku": "claude-haiku-4.5",
+    }
+    _DM_KNOWN_MODELS = frozenset(
+        {
+            "avocado-code-internal-0529",
+            "claude-opus-4.8",
+            "claude-opus-4.7-long",
+            "claude-opus-4.6",
+            "claude-opus-4.6-long",
+            "claude-sonnet-4.6-long",
+            "claude-haiku-4.5",
+            "gpt-5-5",
+            "gemini-3-1-pro",
+            "opus",
+            "sonnet",
+            "haiku",
+            "gpt",
+            "codex",
+            "gemini",
+            "avocado",
+        }
+    )
+    _DM_DEFAULT_MODEL = "claude-opus-4.7-long"
+
+    def _resolve_dm_model(self, model):
+        # Map an AgentFoundation/Anthropic model tag onto a dm model id.
+        # dm uses "-long" for 1M-context (not the Devmate Platform "-1m").
+        if model in self._DM_KNOWN_MODELS:
+            return model
+        if model in self._DM_MODEL_MAP:
+            return self._DM_MODEL_MAP[model]
+        if isinstance(model, str) and model.endswith("-1m"):
+            cand = model[:-3] + "-long"
+            if cand in self._DM_KNOWN_MODELS:
+                return cand
+        return self._DM_DEFAULT_MODEL
+
+    def _construct_dm_command(self, escaped_prompt, model, session_id, is_resume):
+        # Build a supported `dm -p` (devmate-core) command. No execution ACL,
+        # no devmate-server, no orchestrator-type. dm reads the repo from CWD
+        # (set by _resolve_subprocess_cwd). A path-style config_name is passed
+        # as a dm --agent config; the plain "freeform" name uses dm defaults
+        # (rich tool set, no patchgen 8192 truncation).
+        dm_model = self._resolve_dm_model(model)
+        parts = [
+            self.cli_binary,
+            "-p",
+            "--agent-harness",
+            "native",
+            "--auto-run-mode",
+            "autoRunAll",
+            "-m",
+            dm_model,
+        ]
+        if is_resume and session_id:
+            parts += ["--resume", str(session_id)]
+        if self.config_name and ("/" in self.config_name or os.sep in self.config_name):
+            parts += ["--agent", self.config_name]
+        if self.extra_cli_args:
+            parts.extend(self.extra_cli_args)
+        parts.append('"' + escaped_prompt + '"')
+        return " ".join(parts)
+
+    def _clean_dm_output(self, raw):
+        # Extract the final assistant message from `dm -p` plain output. dm
+        # prints a banner, a prompt echo, an optional "Failed to save session"
+        # notice, the final message (first line prefixed by a bullet, then
+        # 2-space-indented continuation lines), then a Logs/Resume footer.
+        if not raw:
+            return ""
+        import re
+
+        raw = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw)
+        lines = raw.splitlines()
+        start = None
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith("\u25cf"):
+                start = i
+        if start is None:
+            return raw.strip()
+        out = [lines[start].lstrip()[1:].lstrip()]
+        for ln in lines[start + 1 :]:
+            stripped = ln.strip()
+            if (
+                stripped.startswith("Logs available")
+                or stripped.startswith("Resume with")
+                or stripped.startswith("dm --resume")
+            ):
+                break
+            if ln.startswith("  "):
+                out.append(ln[2:])
+            elif stripped == "":
+                out.append("")
+            else:
+                break
+        return "\n".join(out).strip()
+
     def construct_command(self, inference_input: Any, **kwargs) -> str:
         """
         Construct the DevMate CLI command as a shell command string.
@@ -497,6 +694,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 - context_files: Override context files
                 - session_id: Session ID for continuation
                 - resume: Whether to resume a previous session
+                - dump_output: Override dump_output for this call
 
         Returns:
             Shell command string with properly quoted arguments.
@@ -544,6 +742,11 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # selects between the canonical ``devmate run`` shape and the
         # standalone ``dmt print`` shape (the standalone's ``run`` subcommand
         # drops into the TUI and panics in non-interactive contexts).
+        if self.cli_mode == "dm":
+            return self._construct_dm_command(
+                escaped_prompt, model, session_id, is_resume
+            )
+
         if self.cli_mode == "print":
             # Standalone DMT print mode:
             #   dmt print "<PROMPT>" -c <config> [--resume-session-id <ID>]
@@ -612,7 +815,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             command_parts.append("--headless")
 
         # Add dump output file (use mkstemp for security)
-        if self.dump_output:
+        if kwargs.get("dump_output", self.dump_output):
             fd, self._output_file = tempfile.mkstemp(
                 suffix=".json", prefix="devmate_output_"
             )
@@ -718,7 +921,18 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         if "output" not in result:
             session_id = self._extract_session_id(result["raw_output"])
             trajectory_url = self._extract_trajectory_url(result["raw_output"])
-            cleaned_output = self._clean_devmate_output(result["raw_output"])
+            if self.cli_mode == "dm":
+                cleaned_output = self._clean_dm_output(result["raw_output"])
+                # dm prints "Resume with: dm --resume <session_id>" in its footer.
+                _dm_blob = (
+                    (result.get("stderr", "") or "") + "\n" + result["raw_output"]
+                )
+                _dm_blob = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", _dm_blob)
+                _dm_sid = re.search(r"dm --resume\s+(\S+)", _dm_blob)
+                if _dm_sid:
+                    session_id = _dm_sid.group(1)
+            else:
+                cleaned_output = self._clean_devmate_output(result["raw_output"])
 
             result["output"] = cleaned_output
             if session_id:
@@ -755,17 +969,18 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # Surface the real failure reason when the cleaned output is empty — so an
         # empty devmate flow is never silent (e.g. "Failed to find repo root" goes
         # to stderr, the ACL flake to stdout/raw_output). The streaming path
-        # captures stderr separately into ``_last_streaming_stderr``.
+        # captures stderr separately into its ``TerminalStreamResult``.
         if not (result.get("output") or "").strip():
             err_blob = (
                 (result.get("stderr") or "")
-                or (getattr(self, "_last_streaming_stderr", "") or "")
+                or self._stream_result().stderr
                 or (result.get("raw_output") or "")
             )
             if err_blob.strip():
                 logger.warning(
                     "[%s] devmate produced EMPTY output; failure detail: %s",
-                    type(self).__name__, err_blob.strip()[:500],
+                    type(self).__name__,
+                    err_blob.strip()[:500],
                 )
 
         return result
@@ -832,12 +1047,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         # 1. UUID v4 (or any 8-4-4-4-12 hex grouping) anywhere after a
         #    ``Session ID:`` marker — survives OSC8 escape codes.
-        uuid_pattern = (
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-        )
-        m = re.search(
-            r"Session ID:.*?(" + uuid_pattern + r")", output, flags=re.DOTALL
-        )
+        uuid_pattern = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        m = re.search(r"Session ID:.*?(" + uuid_pattern + r")", output, flags=re.DOTALL)
         if m:
             return m.group(1)
 
@@ -982,10 +1193,10 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             new_session = True
         elif (
             self.session_mode == SessionMode.NEW_SESSION_ON_CONSECUTIVE_ERRORS
-            and self._consecutive_error_count >= self.consecutive_error_threshold
+            and self._error_streak() >= self.consecutive_error_threshold
         ):
             new_session = True
-            self._consecutive_error_count = 0
+            self._set_error_streak(0)
 
         if new_session:
             self.active_session_id = None
@@ -1002,38 +1213,94 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-    def infer(
-        self, inference_input: Any, inference_config: Any = None, *, run_context=None, **kwargs
-    ) -> Any:
-        """Sync inference with session-mode policy + active-session propagation.
+    def _prepare_call(self, inference_args: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the session-mode policy inside the invocation, under the call's
+        run context, so a claim-rejected call touches no session state."""
+        self._apply_session_policy(inference_args)
+        return inference_args
 
-        Without this override, the sync ``__call__`` path (i.e.,
-        ``inferencer(prompt)``) would skip the session-id resolution and
-        devmate would never see ``--resume --session-id``, silently
-        creating a new session on every call.
+    def _conclude_call(self, result: Any) -> Any:
+        """Propagate the sync response's session_id back into
+        ``active_session_id`` so chained calls auto-resume."""
+        self._adopt_result_session(result)
+        return result
 
-        M3/N-I5: ``run_context`` is keyword-only and forwarded to
-        ``super().infer`` (which installs the bridge); session policy is applied
-        before delegation (byte-identical with no context).
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Propagate the response's session_id, then promote ``success=False`` to
+        an exception (fault tolerance).
+
+        This runs after the retry loop: ``async_execute_with_retry`` retries on
+        EXCEPTIONS, but Devmate's ``_ainfer`` does not raise on ``success=False``.
+        ``session_mode``'s ``_consecutive_error_count`` and the framework's
+        ``max_retry`` (default 1) are independent counters and do not conflict.
+        Raising here fails the invocation, so it publishes no outcome.
         """
-        self._apply_session_policy(kwargs)
-        result = super().infer(
-            inference_input, inference_config, run_context=run_context, **kwargs
-        )
+        # ``_ainfer`` may return either a plain dict (legacy path) or a
+        # ``TerminalInferencerResponse`` (current path). Accept both so the
+        # session-id propagation and error-promotion logic work in either case.
+        self._adopt_result_session(result)
 
-        # Propagate the response's session_id back into ``active_session_id``
-        # so chained calls auto-resume. (Async path already does this; the
-        # sync path didn't.)
-        def _field(obj: Any, name: str, default: Any = None) -> Any:
-            if isinstance(obj, dict):
-                return obj.get(name, default)
-            return getattr(obj, name, default)
+        # --- Fault-tolerance: promote failures to exceptions ---
+        result_success = _field(result, "success", True)
+        if not result_success:
+            self._set_error_streak(self._error_streak() + 1)
+            error_text = _field(result, "error", "") or ""
 
+            if self.session_mode == SessionMode.NEW_SESSION_ON_ERROR:
+                self.active_session_id = None
+
+            # Transient devai backend ACL flake ("ACL permissions for requested
+            # pipeline failed … plugboard.pipeline.devai"). It lands on
+            # stdout/raw_output, not necessarily ``error``/``stderr`` (which may
+            # just be "Command failed with code 1"), so check a combined blob.
+            # Reset the session + back off before raising, so the next attempt (a
+            # caller's retry) starts with a fresh session instead of yielding an
+            # empty flow — this is a backend flake, not a real inference failure.
+            acl_blob = " ".join(
+                str(_field(result, k, "") or "")
+                for k in ("error", "stderr", "raw_output", "output")
+            )
+            if _looks_like_acl_pipeline_failure(acl_blob):
+                self.active_session_id = None
+                logger.warning(
+                    "[%s] transient devai ACL failure (plugboard.pipeline.devai); "
+                    "resetting session and retrying.",
+                    type(self).__name__,
+                )
+                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
+
+            if _looks_like_port_file_race(error_text):
+                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
+
+            if _looks_like_tool_use_corruption(error_text):
+                self.active_session_id = None
+
+            if _looks_like_max_iterations(error_text):
+                self.active_session_id = None
+                _m = re.search(r"Max iterations of (\d+) reached", error_text)
+                raise MaxIterationsExhaustedError(
+                    tool="devmate",
+                    return_code=_field(result, "return_code"),
+                    stderr=_field(result, "stderr", "") or "",
+                    error=error_text,
+                    max_iterations=int(_m.group(1)) if _m else None,
+                    session_id=_field(result, "session_id"),
+                )
+
+            raise InferencerExecutionError(
+                tool="devmate",
+                return_code=_field(result, "return_code"),
+                stderr=_field(result, "stderr", "") or "",
+                error=error_text,
+            )
+
+        self._set_error_streak(0)
+        return result
+
+    def _adopt_result_session(self, result: Any) -> None:
         result_session_id = _field(result, "session_id")
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
-
-        return result
 
     @bridge_entrypoint
     async def ainfer(
@@ -1074,93 +1341,17 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         KiroCli (kiro_cli_inferencer.py:270) all route through
         ``_ainfer_single``; only DevmateCli was the outlier.
 
-        Fault-tolerance runs AFTER ``_ainfer_single`` returns. This is
-        compatible with the framework's retry chain: ``async_execute_with_retry``
-        retries on EXCEPTIONS, but Devmate's ``_ainfer`` does not raise on
-        ``success=False`` — the promotion-to-exception happens here, after
-        retries have exhausted. ``session_mode``'s
-        ``_consecutive_error_count`` and the framework's ``max_retry`` (default 1)
-        are independent counters and do not conflict.
+        The session-mode policy and the fault-tolerance run inside the
+        invocation, in ``_prepare_call`` / ``_aconclude_call``.
         """
-        self._apply_session_policy(kwargs)
+        return await self._ainfer_single(inference_input, inference_config, **kwargs)
 
-        result = await self._ainfer_single(
-            inference_input, inference_config, **kwargs
-        )
-
-        # ``_ainfer`` may return either a plain dict (legacy path) or a
-        # ``TerminalInferencerResponse`` (current path). Accept both so the
-        # session-id propagation and error-promotion logic work in either case.
-        def _field(obj: Any, name: str, default: Any = None) -> Any:
-            if isinstance(obj, dict):
-                return obj.get(name, default)
-            return getattr(obj, name, default)
-
-        result_session_id = _field(result, "session_id")
-        if result_session_id and result_session_id != self.active_session_id:
-            self.active_session_id = result_session_id
-
-        # --- Fault-tolerance: promote failures to exceptions ---
-        result_success = _field(result, "success", True)
-        if not result_success:
-            self._consecutive_error_count += 1
-            error_text = _field(result, "error", "") or ""
-
-            if self.session_mode == SessionMode.NEW_SESSION_ON_ERROR:
-                self.active_session_id = None
-
-            # Transient devai backend ACL flake ("ACL permissions for requested
-            # pipeline failed … plugboard.pipeline.devai"). It lands on
-            # stdout/raw_output, not necessarily ``error``/``stderr`` (which may
-            # just be "Command failed with code 1"), so check a combined blob.
-            # Reset the session + back off so the retry loop (async_execute_with_retry
-            # around _ainfer) re-tries with a fresh session instead of yielding an
-            # empty flow — this is a backend flake, not a real inference failure.
-            acl_blob = " ".join(
-                str(_field(result, k, "") or "")
-                for k in ("error", "stderr", "raw_output", "output")
-            )
-            if _looks_like_acl_pipeline_failure(acl_blob):
-                self.active_session_id = None
-                logger.warning(
-                    "[%s] transient devai ACL failure (plugboard.pipeline.devai); "
-                    "resetting session and retrying.",
-                    type(self).__name__,
-                )
-                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
-
-            if _looks_like_port_file_race(error_text):
-                await asyncio.sleep(_PORT_FILE_RACE_BACKOFF_SECONDS)
-
-            if _looks_like_tool_use_corruption(error_text):
-                self.active_session_id = None
-
-            if _looks_like_max_iterations(error_text):
-                self.active_session_id = None
-                _m = re.search(r"Max iterations of (\d+) reached", error_text)
-                raise MaxIterationsExhaustedError(
-                    tool="devmate",
-                    return_code=_field(result, "return_code"),
-                    stderr=_field(result, "stderr", "") or "",
-                    error=error_text,
-                    max_iterations=int(_m.group(1)) if _m else None,
-                    session_id=_field(result, "session_id"),
-                )
-
-            raise InferencerExecutionError(
-                tool="devmate",
-                return_code=_field(result, "return_code"),
-                stderr=_field(result, "stderr", "") or "",
-                error=error_text,
-            )
-
-        self._consecutive_error_count = 0
-        return result
-
-    async def ainfer_streaming(
+    def ainfer_streaming(
         self,
         prompt: str,
         filter_session_info: bool = True,
+        *,
+        run_context=None,
         **kwargs,
     ) -> AsyncIterator[str]:
         """
@@ -1169,6 +1360,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         Args:
             prompt: The prompt to send to DevMate.
             filter_session_info: If True (default), filters out session header/footer.
+            run_context: Optional host RunContext for this call.
             **kwargs: Additional arguments:
                 - session_id: Session ID for continuation
                 - resume: Whether to resume a previous session
@@ -1181,75 +1373,103 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             async for line in inferencer.ainfer_streaming("Explain this code"):
                 print(line, end="")
         """
-        # Temporarily disable dump_output for streaming (incompatible)
-        original_dump_output = self.dump_output
+        return super().ainfer_streaming(
+            prompt,
+            filter_session_info=filter_session_info,
+            run_context=run_context,
+            **kwargs,
+        )
+
+    async def _ainfer_streaming_pipeline(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        filter_session_info: bool = False,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """DevMate's streaming transport: session resolution, cache, and the
+        optional session header/footer filter.
+
+        ``filter_session_info`` defaults to False here -- the raw transport that
+        ``_ainfer`` accumulates -- while the public ``ainfer_streaming`` defaults
+        it to True for human-facing consumers.
+        """
         if self.dump_output:
             self.log_debug(
                 "dump_output=True is incompatible with streaming; disabled for this call.",
                 "AsyncStream",
             )
-            self.dump_output = False
+        kwargs["dump_output"] = False
 
+        # Handle new_session flag
+        new_session = kwargs.pop("new_session", False)
+        if new_session:
+            self.active_session_id = None
+
+        # Determine session context
+        session_id = kwargs.get("session_id", self.active_session_id)
+        is_resume = kwargs.get("resume", True)
+
+        if session_id is None:
+            if self.auto_resume and self.active_session_id:
+                session_id = self.active_session_id
+            else:
+                is_resume = False
+
+        kwargs["session_id"] = session_id
+        kwargs["resume"] = is_resume and session_id is not None
+
+        # Track state for filtering
+        content_started = False
+        pending_empty_lines = []
+
+        # Open cache file if configured. v5 Fix #3 — gate on resolved
+        # cache folder so ctx-dispatched leaves also write cache.
+        _cache_folder = self._effective_cache_folder()
+        cache_file = (
+            self._open_cache_file(inference_input, _cache_folder)
+            if _cache_folder
+            else None
+        )
+        success = False
+        error = None
+
+        lines = self._ainfer_streaming({"prompt": inference_input}, **kwargs)
         try:
-            # Handle new_session flag
-            new_session = kwargs.pop("new_session", False)
-            if new_session:
-                self.active_session_id = None
+            async for line in lines:
+                self._append_to_cache(cache_file, line)
+                if filter_session_info:
+                    if self._is_session_info_line(line):
+                        continue
 
-            # Determine session context
-            session_id = kwargs.get("session_id", self.active_session_id)
-            is_resume = kwargs.get("resume", True)
+                    stripped = line.strip()
+                    if not stripped:
+                        if content_started:
+                            pending_empty_lines.append(line)
+                        continue
 
-            if session_id is None:
-                if self.auto_resume and self.active_session_id:
-                    session_id = self.active_session_id
+                    content_started = True
+
+                    for empty_line in pending_empty_lines:
+                        yield empty_line
+                    pending_empty_lines = []
+
+                    yield line
                 else:
-                    is_resume = False
+                    yield line
 
-            kwargs["session_id"] = session_id
-            kwargs["resume"] = is_resume and session_id is not None
-
-            # Track state for filtering
-            content_started = False
-            pending_empty_lines = []
-
-            # Open cache file if configured
-            cache_file = self._open_cache_file(prompt) if self.cache_folder else None
-            success = False
-            error = None
-
+            success = True
+        except Exception as e:
+            error = e
+            raise
+        finally:
+            # Close the transport by ownership (an early close or a failure runs
+            # its cleanup now, not at garbage collection).
             try:
-                async for line in self._ainfer_streaming({"prompt": prompt}, **kwargs):
-                    self._append_to_cache(cache_file, line)
-                    if filter_session_info:
-                        if self._is_session_info_line(line):
-                            continue
-
-                        stripped = line.strip()
-                        if not stripped:
-                            if content_started:
-                                pending_empty_lines.append(line)
-                            continue
-
-                        content_started = True
-
-                        for empty_line in pending_empty_lines:
-                            yield empty_line
-                        pending_empty_lines = []
-
-                        yield line
-                    else:
-                        yield line
-
-                success = True
-            except Exception as e:
-                error = e
-                raise
+                await lines.aclose()
             finally:
                 self._finalize_cache(cache_file, success, error)
-
-        finally:
-            self.dump_output = original_dump_output
 
     # === Streaming Methods ===
 
@@ -1270,6 +1490,25 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         # Empty lines pass through (will be filtered later if needed)
         if not stripped:
             return False
+
+        # dm (devmate-core) banner / footer / prompt-echo / box-drawing
+        # art lines are noise in streaming mode -- filter them out.
+        if self.cli_mode == "dm":
+            clean = re.sub(r"\\x1b\\[[0-9;]*[A-Za-z]", "", stripped)
+            dm_patterns = [
+                r"^Running non-interactively",
+                r"Powered by dm-core",
+                r"^Error: Failed to save session",
+                r"^Logs available",
+                r"^Resume with",
+                r"^dm --resume",
+                r"^\u276f",
+            ]
+            for pattern in dm_patterns:
+                if re.search(pattern, clean, re.IGNORECASE):
+                    return True
+            if sum(1 for c in clean if ord(c) > 0x2000) >= 3:
+                return True
 
         # Patterns for session info lines to filter
         session_patterns = [
@@ -1296,6 +1535,8 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
         stream_callback: Optional[Callable[[str], None]] = None,
         output_stream: Optional[TextIO] = None,
         filter_session_info: bool = True,
+        *,
+        run_context=None,
         **kwargs,
     ) -> Iterator[str]:
         """
@@ -1321,6 +1562,7 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
                 trajectory URL, and other session header/footer info from
                 the streaming output. The session info is still available
                 via get_streaming_result() after streaming completes.
+            run_context: Optional host RunContext for this call.
             **kwargs: Additional arguments:
                 - model_name: Override model name
                 - max_tokens: Override max tokens
@@ -1343,114 +1585,134 @@ class DevmateCliInferencer(TerminalSessionTemplatedInferencerBase):
             >>> result = inferencer.get_streaming_result()
             >>> print(f"Session ID: {result.get('session_id')}")
         """
-        # Temporarily disable dump_output for streaming (incompatible)
-        original_dump_output = self.dump_output
+        return super().infer_streaming(
+            prompt,
+            stream_callback=stream_callback,
+            output_stream=output_stream,
+            filter_session_info=filter_session_info,
+            run_context=run_context,
+            **kwargs,
+        )
+
+    def _infer_streaming_pipeline(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        output_stream: Optional[TextIO] = None,
+        filter_session_info: bool = True,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """DevMate's native sync streaming transport: session resolution, cache,
+        the optional session header/footer filter, and the per-line
+        ``stream_callback`` / ``output_stream`` sinks."""
         if self.dump_output:
             self.log_debug(
                 "dump_output=True is incompatible with streaming; disabled for this call. "
                 "Use infer() for dump_output functionality.",
                 "Stream",
             )
-            self.dump_output = False
+        kwargs["dump_output"] = False
+
+        # Handle new_session flag
+        new_session = kwargs.pop("new_session", False)
+        if new_session:
+            self.active_session_id = None
+
+        # Determine session context (same logic as parent's _infer)
+        session_id = kwargs.get("session_id", self.active_session_id)
+        is_resume = kwargs.get("resume", True)
+
+        # If no session to resume, this will be a new session
+        if session_id is None:
+            is_resume = False
+
+        # Update kwargs with session info for construct_command
+        kwargs["session_id"] = session_id
+        kwargs["resume"] = is_resume
+
+        if is_resume and session_id:
+            self.log_debug(
+                f"Streaming with session resume: {session_id[:8]}...", "Stream"
+            )
+        else:
+            self.log_debug("Streaming new session", "Stream")
+
+        # Track state for filtering
+        content_started = False
+        pending_empty_lines = []
+
+        # Open cache file if configured. v5 Fix #3 — gate on resolved value.
+        _cache_folder = self._effective_cache_folder()
+        cache_file = (
+            self._open_cache_file(inference_input, _cache_folder)
+            if _cache_folder
+            else None
+        )
+        cache_success = False
+        cache_error = None
 
         try:
-            # Handle new_session flag
-            new_session = kwargs.pop("new_session", False)
-            if new_session:
-                self.active_session_id = None
+            # Use the parent's _infer_streaming method with filtering
+            for line in self._infer_streaming(
+                {"prompt": inference_input},
+                stream_callback=None,  # We handle callback ourselves after filtering
+                output_stream=None,  # We handle output stream ourselves after filtering
+                **kwargs,
+            ):
+                # Cache raw line before filtering
+                self._append_to_cache(cache_file, line)
 
-            # Determine session context (same logic as parent's _infer)
-            session_id = kwargs.get("session_id", self.active_session_id)
-            is_resume = kwargs.get("resume", True)
+                if filter_session_info:
+                    # Check if this is a session info line
+                    if self._is_session_info_line(line):
+                        # Skip session info lines
+                        continue
 
-            # If no session to resume, this will be a new session
-            if session_id is None:
-                is_resume = False
+                    # Handle empty lines
+                    stripped = line.strip()
+                    if not stripped:
+                        # Buffer empty lines - only output them if content follows
+                        if content_started:
+                            pending_empty_lines.append(line)
+                        continue
 
-            # Update kwargs with session info for construct_command
-            kwargs["session_id"] = session_id
-            kwargs["resume"] = is_resume
+                    # This is actual content
+                    content_started = True
 
-            if is_resume and session_id:
-                self.log_debug(
-                    f"Streaming with session resume: {session_id[:8]}...", "Stream"
-                )
-            else:
-                self.log_debug("Streaming new session", "Stream")
-
-            # Track state for filtering
-            content_started = False
-            pending_empty_lines = []
-
-            # Open cache file if configured
-            cache_file = self._open_cache_file(prompt) if self.cache_folder else None
-            cache_success = False
-            cache_error = None
-
-            try:
-                # Use the parent's _infer_streaming method with filtering
-                for line in self._infer_streaming(
-                    {"prompt": prompt},
-                    stream_callback=None,  # We handle callback ourselves after filtering
-                    output_stream=None,  # We handle output stream ourselves after filtering
-                    **kwargs,
-                ):
-                    # Cache raw line before filtering
-                    self._append_to_cache(cache_file, line)
-
-                    if filter_session_info:
-                        # Check if this is a session info line
-                        if self._is_session_info_line(line):
-                            # Skip session info lines
-                            continue
-
-                        # Handle empty lines
-                        stripped = line.strip()
-                        if not stripped:
-                            # Buffer empty lines - only output them if content follows
-                            if content_started:
-                                pending_empty_lines.append(line)
-                            continue
-
-                        # This is actual content
-                        content_started = True
-
-                        # Output any pending empty lines first
-                        for empty_line in pending_empty_lines:
-                            if stream_callback:
-                                stream_callback(empty_line)
-                            if output_stream:
-                                output_stream.write(empty_line)
-                                output_stream.flush()
-                            yield empty_line
-                        pending_empty_lines = []
-
-                        # Output the content line
+                    # Output any pending empty lines first
+                    for empty_line in pending_empty_lines:
                         if stream_callback:
-                            stream_callback(line)
+                            stream_callback(empty_line)
                         if output_stream:
-                            output_stream.write(line)
+                            output_stream.write(empty_line)
                             output_stream.flush()
-                        yield line
-                    else:
-                        # No filtering - pass through everything
-                        if stream_callback:
-                            stream_callback(line)
-                        if output_stream:
-                            output_stream.write(line)
-                            output_stream.flush()
-                        yield line
+                        yield empty_line
+                    pending_empty_lines = []
 
-                cache_success = True
-            except Exception as e:
-                cache_error = e
-                raise
-            finally:
-                self._finalize_cache(cache_file, cache_success, cache_error)
+                    # Output the content line
+                    if stream_callback:
+                        stream_callback(line)
+                    if output_stream:
+                        output_stream.write(line)
+                        output_stream.flush()
+                    yield line
+                else:
+                    # No filtering - pass through everything
+                    if stream_callback:
+                        stream_callback(line)
+                    if output_stream:
+                        output_stream.write(line)
+                        output_stream.flush()
+                    yield line
 
+            cache_success = True
+        except Exception as e:
+            cache_error = e
+            raise
         finally:
-            # Restore original setting
-            self.dump_output = original_dump_output
+            self._finalize_cache(cache_file, cache_success, cache_error)
 
     def get_streaming_result(self) -> Dict[str, Any]:
         """

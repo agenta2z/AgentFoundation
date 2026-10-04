@@ -21,7 +21,6 @@ import unittest
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
     LinearWorkflowInferencer,
     WorkflowStepConfig,
@@ -31,9 +30,9 @@ from test.agent_foundation.common.inferencers._helpers.factories import (
     _make_sequential_mock,
 )
 from test.agent_foundation.common.inferencers._helpers.realistic_responses import (
-    PTI_PLAN_OUTPUT,
-    PTI_EXECUTOR_OUTPUT,
     DUAL_REVIEW_RESPONSE_COSMETIC,
+    PTI_EXECUTOR_OUTPUT,
+    PTI_PLAN_OUTPUT,
 )
 
 
@@ -119,10 +118,12 @@ class TestOnLoopExhausted(unittest.TestCase):
         exhausted_calls = []
 
         def on_exhausted(state, result):
-            exhausted_calls.append({
-                "iteration": state.get("iteration", 0),
-                "last_result": result,
-            })
+            exhausted_calls.append(
+                {
+                    "iteration": state.get("iteration", 0),
+                    "last_result": result,
+                }
+            )
 
         lwi = LinearWorkflowInferencer(
             step_configs=[
@@ -143,7 +144,8 @@ class TestOnLoopExhausted(unittest.TestCase):
 
         # on_loop_exhausted should have been invoked exactly once
         self.assertEqual(
-            len(exhausted_calls), 1,
+            len(exhausted_calls),
+            1,
             f"Expected exactly 1 on_loop_exhausted call, got {len(exhausted_calls)}",
         )
         self.assertEqual(exhausted_calls[0]["last_result"], "doing work")

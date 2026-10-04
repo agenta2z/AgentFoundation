@@ -30,10 +30,10 @@ Only re-raise issues if you have NEW evidence or the author misunderstood.
 {% endif %}
 
 ---
-{% if task_instructions %}
+{% if prior_task_instructions %}
 Here are the original task instructions for your reference.
 <OriginalTaskInstructions>
-{{ task_instructions }}
+{{ prior_task_instructions }}
 </OriginalTaskInstructions>
 {% endif %}
 
@@ -63,7 +63,7 @@ Above are only example checks. In general, check for any issues, problems, or mi
 
 Wrap your response in `<Response>` tags with a JSON review.
 
-**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used as the proposal text, which may cause downstream failures.
+**IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be used, which may cause downstream failures.
 
 For each issue found, assign an `issue_id` in the format `<round_index>-<issue_index>` (e.g. `2-1`, `2-2`, … for round 2) and rate its `severity`:
 - **CRITICAL**: Blocks progress; artifact cannot proceed as-is

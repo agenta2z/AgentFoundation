@@ -10,8 +10,8 @@ Two scenarios:
 """
 
 import os
-import pytest
 
+import pytest
 from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 
 
@@ -20,7 +20,13 @@ def plan_template_manager():
     """TemplateManager configured with AgentFoundation's prompt_templates."""
     templates_dir = os.path.join(
         os.path.dirname(__file__),
-        "..", "..", "..", "src", "agent_foundation", "resources", "prompt_templates",
+        "..",
+        "..",
+        "..",
+        "src",
+        "agent_foundation",
+        "resources",
+        "prompt_templates",
     )
     templates_dir = os.path.normpath(templates_dir)
     assert os.path.isdir(templates_dir), f"Templates dir not found: {templates_dir}"

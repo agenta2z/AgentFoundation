@@ -9,6 +9,7 @@ Feature: retrieval-pipeline-refactor
 
 **Validates: Requirements 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,17 +33,15 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-from hypothesis import given, settings, strategies as st, assume, HealthCheck
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
-
 from agent_foundation.knowledge.retrieval.graph_walk import (
-    SeedNode,
-    find_search_seeds,
     find_identity_seeds,
+    find_search_seeds,
+    SeedNode,
 )
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
 from conftest import InMemoryEntityGraphStore
+from hypothesis import assume, given, HealthCheck, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────
@@ -53,9 +52,13 @@ _identifier_text = st.text(
     max_size=30,
 )
 
-_space_strategy = st.sampled_from(["main", "personal", "developmental", "work", "testing"])
+_space_strategy = st.sampled_from(
+    ["main", "personal", "developmental", "work", "testing"]
+)
 
-_node_type_strategy = st.sampled_from(["service", "person", "product", "location", "concept"])
+_node_type_strategy = st.sampled_from(
+    ["service", "person", "product", "location", "concept"]
+)
 
 
 @st.composite
@@ -81,7 +84,9 @@ def search_results_strategy(min_size=1, max_size=5):
     return st.lists(
         st.tuples(
             graph_node_with_spaces_strategy(),
-            st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            ),
         ),
         min_size=min_size,
         max_size=max_size,
@@ -306,20 +311,22 @@ class TestSeedFinderPreconditionGuards:
 # ── Additional imports for graph walk property tests ─────────────────────────
 
 from unittest.mock import patch
+
 from agent_foundation.knowledge.retrieval.graph_walk import (
+    _should_skip_piece,
     graph_walk,
     merge_graph_contexts,
-    _should_skip_piece,
 )
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from rich_python_utils.service_utils.graph_service.graph_node import GraphEdge
 
 
 # ── In-memory piece store for property tests ─────────────────────────────────
+
 
 class InMemoryPieceStore(KnowledgePieceStore):
     """Minimal in-memory piece store for graph walk property tests."""
@@ -343,7 +350,15 @@ class InMemoryPieceStore(KnowledgePieceStore):
     def remove(self, piece_id: str) -> bool:
         return self._pieces.pop(piece_id, None) is not None
 
-    def search(self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5, spaces=None):
+    def search(
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
+        spaces=None,
+    ):
         return [(p, 0.5) for p in list(self._pieces.values())[:top_k]]
 
     def list_all(self, entity_id=None, knowledge_type=None, spaces=None):
@@ -352,18 +367,29 @@ class InMemoryPieceStore(KnowledgePieceStore):
 
 # ── Strategies for graph walk tests ──────────────────────────────────────────
 
-_relation_type_strategy = st.sampled_from([
-    "WORKS_AT", "KNOWS", "USES", "MANAGES", "BELONGS_TO", "CREATED_BY",
-])
+_relation_type_strategy = st.sampled_from(
+    [
+        "WORKS_AT",
+        "KNOWS",
+        "USES",
+        "MANAGES",
+        "BELONGS_TO",
+        "CREATED_BY",
+    ]
+)
 
-_info_type_strategy = st.sampled_from(["context", "user_profile", "instructions", "episodic"])
+_info_type_strategy = st.sampled_from(
+    ["context", "user_profile", "instructions", "episodic"]
+)
 
 
 @st.composite
 def seed_node_strategy(draw, source=None, spaces=None):
     """Generate a SeedNode with random node, score, and source."""
     node = draw(graph_node_with_spaces_strategy(spaces=spaces))
-    score = draw(st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
     if source is None:
         source = draw(st.sampled_from(["search", "identity"]))
     return SeedNode(node=node, score=score, source=source)
@@ -373,12 +399,18 @@ def seed_node_strategy(draw, source=None, spaces=None):
 def graph_context_entry_strategy(draw, min_depth=0, max_depth=3):
     """Generate a graph context entry dict."""
     return {
-        "relation_type": draw(st.sampled_from(["SEARCH_HIT", "IDENTITY", "WORKS_AT", "KNOWS", "RELATED"])),
+        "relation_type": draw(
+            st.sampled_from(["SEARCH_HIT", "IDENTITY", "WORKS_AT", "KNOWS", "RELATED"])
+        ),
         "target_node_id": draw(_identifier_text),
         "target_label": draw(st.text(max_size=20)),
         "piece": None,
         "depth": draw(st.integers(min_value=min_depth, max_value=max_depth)),
-        "score": draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)),
+        "score": draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        ),
     }
 
 
@@ -419,14 +451,18 @@ class TestDepthDecayedScoring:
                 is_active=True,
             )
             graph_store.add_node(neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id=prev_node_id,
-                target_id=neighbor.node_id,
-                edge_type="RELATED",
-            ))
+            graph_store.add_relation(
+                GraphEdge(
+                    source_id=prev_node_id,
+                    target_id=neighbor.node_id,
+                    edge_type="RELATED",
+                )
+            )
             prev_node_id = neighbor.node_id
 
-        result = graph_walk(graph_store, piece_store, [seed], traversal_depth=traversal_depth)
+        result = graph_walk(
+            graph_store, piece_store, [seed], traversal_depth=traversal_depth
+        )
 
         # Depth-0 entry should have score == seed.score
         depth_0_entries = [e for e in result if e["depth"] == 0]
@@ -496,15 +532,20 @@ class TestGraphWalkSpaceFiltering:
                 is_active=True,
             )
             graph_store.add_node(neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id=seed_node.node_id,
-                target_id=neighbor.node_id,
-                edge_type="KNOWS",
-            ))
+            graph_store.add_relation(
+                GraphEdge(
+                    source_id=seed_node.node_id,
+                    target_id=neighbor.node_id,
+                    edge_type="KNOWS",
+                )
+            )
 
         result = graph_walk(
-            graph_store, piece_store, [seed],
-            traversal_depth=1, spaces=filter_spaces,
+            graph_store,
+            piece_store,
+            [seed],
+            traversal_depth=1,
+            spaces=filter_spaces,
         )
 
         filter_set = set(filter_spaces)
@@ -568,11 +609,13 @@ class TestGraphWalkEdgeRelationLookup:
                 is_active=True,
             )
             graph_store.add_node(neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id=seed_node.node_id,
-                target_id=neighbor.node_id,
-                edge_type=edge_type,
-            ))
+            graph_store.add_relation(
+                GraphEdge(
+                    source_id=seed_node.node_id,
+                    target_id=neighbor.node_id,
+                    edge_type=edge_type,
+                )
+            )
             expected_relations[neighbor.node_id] = edge_type
 
             # Add a depth-2 neighbor from each depth-1 neighbor
@@ -584,11 +627,13 @@ class TestGraphWalkEdgeRelationLookup:
                 is_active=True,
             )
             graph_store.add_node(d2_neighbor)
-            graph_store.add_relation(GraphEdge(
-                source_id=neighbor.node_id,
-                target_id=d2_neighbor.node_id,
-                edge_type="CHILD_OF",
-            ))
+            graph_store.add_relation(
+                GraphEdge(
+                    source_id=neighbor.node_id,
+                    target_id=d2_neighbor.node_id,
+                    edge_type="CHILD_OF",
+                )
+            )
 
         result = graph_walk(graph_store, piece_store, [seed], traversal_depth=2)
 
@@ -600,7 +645,10 @@ class TestGraphWalkEdgeRelationLookup:
                 assert entry["target_node_id"] in expected_relations, (
                     f"Unexpected depth-1 node: {entry['target_node_id']}"
                 )
-                assert entry["relation_type"] == expected_relations[entry["target_node_id"]], (
+                assert (
+                    entry["relation_type"]
+                    == expected_relations[entry["target_node_id"]]
+                ), (
                     f"Expected relation_type={expected_relations[entry['target_node_id']]}, "
                     f"got {entry['relation_type']}"
                 )
@@ -623,7 +671,9 @@ class TestGraphWalkPieceDedup:
 
     @given(
         info_type=_info_type_strategy,
-        ignore_mode=st.sampled_from(["bool_true", "list_match", "list_no_match", "false"]),
+        ignore_mode=st.sampled_from(
+            ["bool_true", "list_match", "list_no_match", "false"]
+        ),
     )
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     def test_walk_piece_dedup(self, info_type: str, ignore_mode: str):
@@ -659,12 +709,14 @@ class TestGraphWalkPieceDedup:
         )
         graph_store.add_node(seed_node)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id=seed_node.node_id,
-            target_id=neighbor.node_id,
-            edge_type="WORKS_AT",
-            properties={"piece_id": "piece_1"},
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id=seed_node.node_id,
+                target_id=neighbor.node_id,
+                edge_type="WORKS_AT",
+                properties={"piece_id": "piece_1"},
+            )
+        )
 
         seed = SeedNode(node=seed_node, score=0.9, source="search")
         already_retrieved = {"piece_1": info_type}
@@ -684,7 +736,9 @@ class TestGraphWalkPieceDedup:
             should_skip = False
 
         result = graph_walk(
-            graph_store, piece_store, [seed],
+            graph_store,
+            piece_store,
+            [seed],
             traversal_depth=1,
             already_retrieved_piece_ids=already_retrieved,
             ignore_already_retrieved=ignore,
@@ -783,7 +837,9 @@ class TestMergeDedupAndTiebreaker:
 
     @given(
         search_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=6),
-        identity_entries=st.lists(graph_context_entry_strategy(), min_size=0, max_size=6),
+        identity_entries=st.lists(
+            graph_context_entry_strategy(), min_size=0, max_size=6
+        ),
     )
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     def test_merge_dedup_and_tiebreaker(
@@ -800,7 +856,9 @@ class TestMergeDedupAndTiebreaker:
         merged = merge_graph_contexts(search_entries, identity_entries)
 
         # Property 1: No duplicate (target_node_id, relation_type) keys
-        keys = [(e["target_node_id"], e.get("relation_type", "RELATED")) for e in merged]
+        keys = [
+            (e["target_node_id"], e.get("relation_type", "RELATED")) for e in merged
+        ]
         assert len(keys) == len(set(keys)), "Duplicate keys found in merged result"
 
         # Property 2 & 3: For each key, the kept entry has the best score/depth
@@ -809,7 +867,8 @@ class TestMergeDedupAndTiebreaker:
             key = (entry["target_node_id"], entry.get("relation_type", "RELATED"))
             # Find all entries with this key from the input
             candidates = [
-                e for e in all_entries
+                e
+                for e in all_entries
                 if (e["target_node_id"], e.get("relation_type", "RELATED")) == key
             ]
             assert len(candidates) >= 1
@@ -836,6 +895,8 @@ class TestMergeDedupAndTiebreaker:
         node_ids_in_merged = [e["target_node_id"] for e in merged]
         for nid in set(node_ids_in_merged):
             entries_for_node = [e for e in merged if e["target_node_id"] == nid]
-            relation_types = [e.get("relation_type", "RELATED") for e in entries_for_node]
+            relation_types = [
+                e.get("relation_type", "RELATED") for e in entries_for_node
+            ]
             # All relation_types for the same node must be unique
             assert len(relation_types) == len(set(relation_types))

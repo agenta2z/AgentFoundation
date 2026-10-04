@@ -1,50 +1,23 @@
 """Recovery prompt templates for streaming inferencer fallback.
 
-Provides a lazy-initialized TemplateManager for rendering recovery prompts
-when streaming inference is interrupted and needs cache-based recovery.
+Backward-compatible re-export shim. The canonical implementation lives in
+``agent_foundation.common.inferencers.recovery`` and its template directory is
+resolved via ``constants.paths.DEFAULT_RECOVERY_DIR`` (which points at
+``agent_foundation/resources/prompt_templates``).
+
+This module previously carried its OWN copy of ``render_recovery_prompt`` plus a
+divergent local template path (``common/inferencers/resources/prompt_templates``)
+that had drifted from the canonical templates (it still shipped the old
+``reference.jinja2`` and lacked ``judge.jinja2``). It now simply re-exports the
+canonical symbols so there is a single source of truth.
 
 Public API:
     render_recovery_prompt(template_key, prompt, partial_output) — Render by key.
     DEFAULT_RECOVERY_DIR — Path to the default recovery template directory.
 """
 
-from pathlib import Path
-
-DEFAULT_RECOVERY_DIR = str(
-    Path(__file__).resolve().parent.parent / "resources" / "prompt_templates"
-)
-
-_RECOVERY_TM = None
-
-
-def render_recovery_prompt(
-    template_key: str, prompt: str, partial_output: str
-) -> str:
-    """Render a recovery prompt template by key.
-
-    Uses a lazy-initialized standalone TemplateManager backed by the
-    default recovery templates in ``resources/prompt_templates/``.
-
-    Args:
-        template_key: Slash-separated key, e.g. ``"recovery/continue"``.
-        prompt: The original prompt/task text.
-        partial_output: The cached partial output from the failed attempt.
-
-    Returns:
-        The rendered recovery prompt string.
-    """
-    global _RECOVERY_TM
-    if _RECOVERY_TM is None:
-        from rich_python_utils.string_utils.formatting.template_manager import (
-            TemplateManager,
-        )
-
-        _RECOVERY_TM = TemplateManager(
-            templates=DEFAULT_RECOVERY_DIR,
-            active_template_type=None,
-        )
-    return _RECOVERY_TM(template_key, prompt=prompt, partial_output=partial_output)
-
+from agent_foundation.common.inferencers.constants.paths import DEFAULT_RECOVERY_DIR
+from agent_foundation.common.inferencers.recovery import render_recovery_prompt
 
 __all__ = [
     "DEFAULT_RECOVERY_DIR",

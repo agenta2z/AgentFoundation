@@ -26,12 +26,15 @@ def main() -> None:
     n.call.dual = DualState(chosen_role="fixer", review_workspace="/ws/review")
     # dict state + a conversation pause blob (D7 form)
     store.node("/leaf").call = {"attempt": 2}
-    store.node("/conv").conversation = {"sop_state": {"phase": "p2"}, "messages": [1, 2]}
+    store.node("/conv").conversation = {
+        "sop_state": {"phase": "p2"},
+        "messages": [1, 2],
+    }
 
     with tempfile.TemporaryDirectory() as tmp:
         path = str(Path(tmp) / "run_state" / "store.json")
-        store.save(path)                       # persist (host does this post-run)
-        restored = RunStateStore.load(path)    # rehydrate (host does this on resume)
+        store.save(path)  # persist (host does this post-run)
+        restored = RunStateStore.load(path)  # rehydrate (host does this on resume)
 
     rebuilt = restored.node("/review/worker_0").call
     assert isinstance(rebuilt, MFDualState) and rebuilt.dual.chosen_role == "fixer"

@@ -30,34 +30,33 @@ from os import environ, path
 from typing import AsyncIterator, Dict, List, Sequence, Tuple, Union
 
 import httpx
-from ai_gateway.client import AIGatewayClient
-from ai_gateway.constants import AIGatewayHeaders
-from ai_gateway.models.common import HttpHeaders
-from ai_gateway.models.wrapper import RequestWrapper
-
 from agent_foundation.apis.ag.gateway_mode import (
+    build_direct_headers,
     DEFAULT_AI_GATEWAY_BASE_URL,
     DEFAULT_CLOUD_ID,
     DEFAULT_PROXIMITY_PORT,
     DEFAULT_SLAUTH_GROUPS,
     DEFAULT_SLAUTH_SERVER_URL,
     DEFAULT_USE_CASE_ID,
-    GatewayMode,
-    build_direct_headers,
     detect_available_mode,
+    GatewayMode,
     get_direct_slauth_token,
 )
 from agent_foundation.apis.common import _resolve_llm_timeout
+from ai_gateway.client import AIGatewayClient
+from ai_gateway.constants import AIGatewayHeaders
+from ai_gateway.models.common import HttpHeaders
+from ai_gateway.models.wrapper import RequestWrapper
 from rich_python_utils.console_utils import hprint_message
 
 logger = logging.getLogger(__name__)
 
 # Env var names (shared semantics with the other AG backends)
-ENV_NAME_AI_GATEWAY_USER_ID = 'AI_GATEWAY_USER_ID'
-ENV_NAME_AI_GATEWAY_CLOUD_ID = 'AI_GATEWAY_CLOUD_ID'
-ENV_NAME_AI_GATEWAY_USE_CASE_ID = 'AI_GATEWAY_USE_CASE_ID'
-ENV_NAME_AI_GATEWAY_BASE_URL = 'AI_GATEWAY_BASE_URL'
-ENV_NAME_SLAUTH_SERVER_URL = 'SLAUTH_SERVER_URL'
+ENV_NAME_AI_GATEWAY_USER_ID = "AI_GATEWAY_USER_ID"
+ENV_NAME_AI_GATEWAY_CLOUD_ID = "AI_GATEWAY_CLOUD_ID"
+ENV_NAME_AI_GATEWAY_USE_CASE_ID = "AI_GATEWAY_USE_CASE_ID"
+ENV_NAME_AI_GATEWAY_BASE_URL = "AI_GATEWAY_BASE_URL"
+ENV_NAME_SLAUTH_SERVER_URL = "SLAUTH_SERVER_URL"
 
 # The relative path of the Gemini (Google) OpenAI-compatible chat-completions
 # route on the AI Gateway. Verified live (HTTP 200). This matches the SDK
@@ -74,16 +73,17 @@ class AIGatewayGeminiModels(StrEnum):
     offers them (any chat model id can also be passed directly as a string to
     ``generate_text``).
     """
-    GEMINI_31_PRO = 'gemini-3.1-pro-preview'
-    GEMINI_3_FLASH = 'gemini-3-flash-preview'
-    GEMINI_25_PRO = 'gemini-2.5-pro'
+
+    GEMINI_31_PRO = "gemini-3.1-pro-preview"
+    GEMINI_3_FLASH = "gemini-3-flash-preview"
+    GEMINI_25_PRO = "gemini-2.5-pro"
 
 
 # Conservative default output budgets (reasoning headroom included).
 DEFAULT_MAX_TOKENS = {
-    f'{AIGatewayGeminiModels.GEMINI_31_PRO}': 8192,
-    f'{AIGatewayGeminiModels.GEMINI_3_FLASH}': 8192,
-    f'{AIGatewayGeminiModels.GEMINI_25_PRO}': 8192,
+    f"{AIGatewayGeminiModels.GEMINI_31_PRO}": 8192,
+    f"{AIGatewayGeminiModels.GEMINI_3_FLASH}": 8192,
+    f"{AIGatewayGeminiModels.GEMINI_25_PRO}": 8192,
 }
 
 # Cascade order for auto mode. SDK preferred over slauth_server (no local server).
@@ -98,7 +98,7 @@ def _get_messages(
         text = prompt_or_messages
         try:
             if path.isfile(prompt_or_messages):
-                with open(prompt_or_messages, 'r', encoding='utf-8') as f:
+                with open(prompt_or_messages, "r", encoding="utf-8") as f:
                     text = f.read()
         except (OSError, ValueError):
             text = prompt_or_messages
@@ -128,12 +128,19 @@ def _resolve_config(
 ) -> dict:
     """Resolve configuration from parameters, env vars, and defaults."""
     return {
-        "base_url": base_url or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
-        "cloud_id": cloud_id or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
-        "use_case_id": use_case_id or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
-        "slauth_server_url": slauth_server_url or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
-        "user_id": user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get('USER', ''),
-        "groups": groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
+        "base_url": base_url
+        or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
+        "cloud_id": cloud_id
+        or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
+        "use_case_id": use_case_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
+        "slauth_server_url": slauth_server_url
+        or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
+        "user_id": user_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USER_ID)
+        or environ.get("USER", ""),
+        "groups": groups
+        or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
     }
 
 
@@ -184,7 +191,9 @@ def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
     """Extract the assistant message text from a Gemini chat-completion."""
     choices = response_data.get("choices")
     if not choices:
-        raise Exception(f"Unexpected Gemini response format (no choices): {response_data}")
+        raise Exception(
+            f"Unexpected Gemini response format (no choices): {response_data}"
+        )
 
     message = choices[0].get("message", {})
     generated_text = (message.get("content") or "").strip()
@@ -198,7 +207,9 @@ def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
     return generated_text.strip()
 
 
-def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_direct(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the AI Gateway Gemini route using an atlas-CLI SLAuth token."""
     env = "prod" if "prod" in config["base_url"] else "staging"
     token = get_direct_slauth_token(env=env, groups=config.get("groups"))
@@ -212,11 +223,15 @@ def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeou
 
     resp = httpx.post(url, json=request_payload, headers=headers, timeout=timeout)
     if not (200 <= resp.status_code < 300):
-        raise Exception(f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}")
+        raise Exception(
+            f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}"
+        )
     return resp.json()
 
 
-def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_sdk(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the SDK's typed ``client.google.v1_chat_completions``.
 
     Uses a pre-minted SLAuth token (atlas CLI); needs no local slauth server.
@@ -238,18 +253,22 @@ def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: 
                 raise ValueError("pre-minted SLAuth token is empty")
             self._token = t
 
-        def filter(self, request: ClientRequest, chain: SyncFilterChain) -> ClientResponse:
+        def filter(
+            self, request: ClientRequest, chain: SyncFilterChain
+        ) -> ClientResponse:
             tok = self._token
             if not tok.lower().startswith(("slauth ", "bearer ")):
                 tok = f"SLAUTH {tok}"
             request.headers["Authorization"] = tok
             return chain.next(request)
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: config["user_id"],
-        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
-        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: config["user_id"],
+            AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+            AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+        }
+    )
 
     client = AIGatewayClient.sync(
         base_url=config["base_url"],
@@ -281,7 +300,9 @@ def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: 
     return body
 
 
-def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_slauth_server(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send via the SDK + ``SlauthServerAuthFilter`` (needs local slauth server)."""
     from ai_gateway.models.common import HttpMethod
 
@@ -295,11 +316,13 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
         groups=group_set,
     )
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: config["user_id"],
-        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
-        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: config["user_id"],
+            AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+            AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+        }
+    )
 
     client = AIGatewayClient.sync(
         base_url=config["base_url"],
@@ -308,8 +331,8 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
     )
 
     request = RequestWrapper(
-        body=json.dumps(request_payload).encode('utf-8'),
-        headers=HttpHeaders({'Content-Type': 'application/json'}),
+        body=json.dumps(request_payload).encode("utf-8"),
+        headers=HttpHeaders({"Content-Type": "application/json"}),
     )
     response = client.raw.http(
         method=HttpMethod.POST,
@@ -318,9 +341,9 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
     )
 
     if not (200 <= response.http_status.code < 300):
-        raw_body = getattr(response, 'raw_body', None) or response.body
+        raw_body = getattr(response, "raw_body", None) or response.body
         raw_str = (
-            raw_body.decode('utf-8', errors='replace')
+            raw_body.decode("utf-8", errors="replace")
             if isinstance(raw_body, (bytes, bytearray))
             else str(raw_body)
         )
@@ -328,7 +351,7 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
             f"SLAuth server mode: AI Gateway returned status {response.http_status.code}: {raw_str}"
         )
 
-    return json.loads(response.body.decode('utf-8'))
+    return json.loads(response.body.decode("utf-8"))
 
 
 def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
@@ -343,14 +366,17 @@ def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
                 slauth_server_url=config["slauth_server_url"],
             )
             resolved_mode = (
-                detected if detected in (GatewayMode.DIRECT, GatewayMode.SLAUTH_SERVER)
+                detected
+                if detected in (GatewayMode.DIRECT, GatewayMode.SLAUTH_SERVER)
                 else GatewayMode.DIRECT
             )
         except RuntimeError:
             resolved_mode = GatewayMode.DIRECT
 
     if is_auto:
-        modes_to_try = [resolved_mode] + [m for m in _FALLBACK_MODES if m != resolved_mode]
+        modes_to_try = [resolved_mode] + [
+            m for m in _FALLBACK_MODES if m != resolved_mode
+        ]
     else:
         modes_to_try = [resolved_mode]
 
@@ -358,29 +384,29 @@ def _resolve_mode_order(gateway_mode: str, config: dict, proximity_port: int):
 
 
 def generate_text(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        top_p: float = None,
-        seed: int = None,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    top_p: float = None,
+    seed: int = None,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, Dict]:
     """Generate text using a Gemini model via the AI Gateway."""
     if "api_key" in kwargs:
@@ -388,30 +414,53 @@ def generate_text(
     messages = _get_messages(prompt_or_messages)
 
     config = _resolve_config(
-        user_id=user_id, cloud_id=cloud_id, use_case_id=use_case_id,
-        base_url=base_url, slauth_server_url=slauth_server_url, groups=groups,
+        user_id=user_id,
+        cloud_id=cloud_id,
+        use_case_id=use_case_id,
+        base_url=base_url,
+        slauth_server_url=slauth_server_url,
+        groups=groups,
     )
-    resolved_mode, is_auto, modes_to_try = _resolve_mode_order(gateway_mode, config, proximity_port)
+    resolved_mode, is_auto, modes_to_try = _resolve_mode_order(
+        gateway_mode, config, proximity_port
+    )
 
     model_str = f"{model}"
     request_payload = _build_request_payload(
-        messages=messages, model_str=model_str, max_new_tokens=max_new_tokens,
-        temperature=temperature, top_p=top_p, seed=seed, system=system,
-        reasoning_effort=reasoning_effort, **kwargs,
+        messages=messages,
+        model_str=model_str,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+        system=system,
+        reasoning_effort=reasoning_effort,
+        **kwargs,
     )
 
     timeout_value = _resolve_llm_timeout(
-        timeout=timeout, connect_timeout=connect_timeout, response_timeout=response_timeout,
+        timeout=timeout,
+        connect_timeout=connect_timeout,
+        response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 120
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 120
+    )
 
     if verbose:
         hprint_message(
             {
-                "model": model_str, "gateway_mode": str(resolved_mode),
-                "base_url": config["base_url"], "use_case_id": config["use_case_id"],
-                "temperature": temperature, "seed": seed,
-                "reasoning_effort": reasoning_effort, "timeout": timeout_value, **kwargs,
+                "model": model_str,
+                "gateway_mode": str(resolved_mode),
+                "base_url": config["base_url"],
+                "use_case_id": config["use_case_id"],
+                "temperature": temperature,
+                "seed": seed,
+                "reasoning_effort": reasoning_effort,
+                "timeout": timeout_value,
+                **kwargs,
             },
             title="AI Gateway Gemini API Parameters",
         )
@@ -420,11 +469,17 @@ def generate_text(
     for mode in modes_to_try:
         try:
             if mode == GatewayMode.DIRECT:
-                response_data = _send_via_direct(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_direct(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.SDK:
-                response_data = _send_via_sdk(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_sdk(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.SLAUTH_SERVER:
-                response_data = _send_via_slauth_server(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_slauth_server(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             else:
                 raise ValueError(f"Unsupported gateway mode for Gemini route: {mode}")
 
@@ -437,34 +492,36 @@ def generate_text(
             last_error = e
             if is_auto and mode != modes_to_try[-1]:
                 next_mode = modes_to_try[modes_to_try.index(mode) + 1]
-                logger.warning("Gateway mode '%s' failed: %s. Trying '%s'...", mode, e, next_mode)
+                logger.warning(
+                    "Gateway mode '%s' failed: %s. Trying '%s'...", mode, e, next_mode
+                )
                 continue
             raise
 
 
 async def generate_text_streaming(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        top_p: float = None,
-        seed: int = None,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    top_p: float = None,
+    seed: int = None,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> AsyncIterator[str]:
     """Stream text from a Gemini model via the AI Gateway (SSE, direct mode)."""
     if "api_key" in kwargs:
@@ -472,35 +529,64 @@ async def generate_text_streaming(
     messages = _get_messages(prompt_or_messages)
 
     config = _resolve_config(
-        user_id=user_id, cloud_id=cloud_id, use_case_id=use_case_id,
-        base_url=base_url, slauth_server_url=slauth_server_url, groups=groups,
+        user_id=user_id,
+        cloud_id=cloud_id,
+        use_case_id=use_case_id,
+        base_url=base_url,
+        slauth_server_url=slauth_server_url,
+        groups=groups,
     )
-    resolved_mode, is_auto, _ = _resolve_mode_order(gateway_mode, config, proximity_port)
+    resolved_mode, is_auto, _ = _resolve_mode_order(
+        gateway_mode, config, proximity_port
+    )
     model_str = f"{model}"
 
     timeout_value = _resolve_llm_timeout(
-        timeout=timeout, connect_timeout=connect_timeout, response_timeout=response_timeout,
+        timeout=timeout,
+        connect_timeout=connect_timeout,
+        response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 300
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 300
+    )
 
     if resolved_mode == GatewayMode.DIRECT:
         request_payload = _build_request_payload(
-            messages=messages, model_str=model_str, max_new_tokens=max_new_tokens,
-            temperature=temperature, top_p=top_p, seed=seed, system=system,
-            stream=True, reasoning_effort=reasoning_effort, **kwargs,
+            messages=messages,
+            model_str=model_str,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            system=system,
+            stream=True,
+            reasoning_effort=reasoning_effort,
+            **kwargs,
         )
         env = "prod" if "prod" in config["base_url"] else "staging"
-        token = await asyncio.to_thread(get_direct_slauth_token, env=env, groups=config.get("groups"))
+        token = await asyncio.to_thread(
+            get_direct_slauth_token, env=env, groups=config.get("groups")
+        )
         headers = build_direct_headers(
-            token=token, user_id=config["user_id"],
-            cloud_id=config["cloud_id"], use_case_id=config["use_case_id"],
+            token=token,
+            user_id=config["user_id"],
+            cloud_id=config["cloud_id"],
+            use_case_id=config["use_case_id"],
         )
         url = f"{config['base_url']}{GEMINI_CHAT_COMPLETIONS_PATH}"
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(request_timeout, connect=10)) as client:
-            async with client.stream("POST", url, json=request_payload, headers=headers) as response:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(request_timeout, connect=10)
+        ) as client:
+            async with client.stream(
+                "POST", url, json=request_payload, headers=headers
+            ) as response:
                 if not (200 <= response.status_code < 300):
-                    error_text = (await response.aread()).decode("utf-8", errors="replace")
+                    error_text = (await response.aread()).decode(
+                        "utf-8", errors="replace"
+                    )
                     raise Exception(
                         f"Direct streaming: AI Gateway returned status {response.status_code}: {error_text}"
                     )
@@ -525,59 +611,92 @@ async def generate_text_streaming(
         return
 
     result = await asyncio.to_thread(
-        generate_text, prompt_or_messages=prompt_or_messages, model=model,
-        max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p, seed=seed,
-        stop=stop, system=system, reasoning_effort=reasoning_effort, user_id=user_id,
-        cloud_id=cloud_id, use_case_id=use_case_id, base_url=base_url,
-        slauth_server_url=slauth_server_url, timeout=timeout, gateway_mode=str(resolved_mode),
-        proximity_port=proximity_port, groups=groups, **kwargs,
+        generate_text,
+        prompt_or_messages=prompt_or_messages,
+        model=model,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+        stop=stop,
+        system=system,
+        reasoning_effort=reasoning_effort,
+        user_id=user_id,
+        cloud_id=cloud_id,
+        use_case_id=use_case_id,
+        base_url=base_url,
+        slauth_server_url=slauth_server_url,
+        timeout=timeout,
+        gateway_mode=str(resolved_mode),
+        proximity_port=proximity_port,
+        groups=groups,
+        **kwargs,
     )
     yield result
 
 
 async def generate_text_async(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        top_p: float = None,
-        seed: int = None,
-        stop: List[str] = None,
-        system: str = None,
-        reasoning_effort: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs,
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayGeminiModels = AIGatewayGeminiModels.GEMINI_31_PRO,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    top_p: float = None,
+    seed: int = None,
+    stop: List[str] = None,
+    system: str = None,
+    reasoning_effort: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, Dict]:
     """Async wrapper around the sync ``generate_text`` (via a worker thread)."""
     return await asyncio.to_thread(
-        generate_text, prompt_or_messages=prompt_or_messages, model=model,
-        max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p, seed=seed,
-        stop=stop, system=system, reasoning_effort=reasoning_effort, user_id=user_id,
-        cloud_id=cloud_id, use_case_id=use_case_id, base_url=base_url,
-        slauth_server_url=slauth_server_url, timeout=timeout, connect_timeout=connect_timeout,
-        response_timeout=response_timeout, return_raw_results=return_raw_results,
-        verbose=verbose, gateway_mode=gateway_mode, proximity_port=proximity_port,
-        groups=groups, **kwargs,
+        generate_text,
+        prompt_or_messages=prompt_or_messages,
+        model=model,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+        stop=stop,
+        system=system,
+        reasoning_effort=reasoning_effort,
+        user_id=user_id,
+        cloud_id=cloud_id,
+        use_case_id=use_case_id,
+        base_url=base_url,
+        slauth_server_url=slauth_server_url,
+        timeout=timeout,
+        connect_timeout=connect_timeout,
+        response_timeout=response_timeout,
+        return_raw_results=return_raw_results,
+        verbose=verbose,
+        gateway_mode=gateway_mode,
+        proximity_port=proximity_port,
+        groups=groups,
+        **kwargs,
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     _r = generate_text(
         "Hello! Reply with exactly: PONG",
         model=AIGatewayGeminiModels.GEMINI_31_PRO,
-        max_new_tokens=2000, temperature=0.0, seed=42,
-        user_id=environ.get("USER"), verbose=True,
+        max_new_tokens=2000,
+        temperature=0.0,
+        seed=42,
+        user_id=environ.get("USER"),
+        verbose=True,
     )
     hprint_message({"response": _r}, title="AI Gateway Gemini")

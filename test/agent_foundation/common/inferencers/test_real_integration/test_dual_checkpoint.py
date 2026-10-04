@@ -8,7 +8,6 @@ import json
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -19,11 +18,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
     DualInferencer,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    count_cache_files,
-    skip_claude,
-)
+from .conftest import count_cache_files, DEFAULT_TIMEOUT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -54,7 +49,9 @@ def _make_claude(tmp_workspace, **overrides):
     return ClaudeCodeCliInferencer(**kwargs)
 
 
-def _make_dual(tmp_workspace, base_overrides=None, review_overrides=None, **dual_kwargs):
+def _make_dual(
+    tmp_workspace, base_overrides=None, review_overrides=None, **dual_kwargs
+):
     """Create a DualInferencer with two ClaudeCodeCliInferencer children.
 
     Args:
@@ -127,7 +124,8 @@ async def test_checkpoint_creation(tmp_workspace):
 
     # Verify per-attempt directory structure (attempt_01/)
     attempt_dirs = [
-        d for d in os.listdir(checkpoint_dir)
+        d
+        for d in os.listdir(checkpoint_dir)
         if os.path.isdir(os.path.join(checkpoint_dir, d)) and d.startswith("attempt_")
     ]
     assert len(attempt_dirs) >= 1, "Expected at least one attempt_XX directory"
@@ -279,7 +277,9 @@ async def test_resume_from_second_review_iteration(tmp_workspace):
             base_inferencer=base2,
             review_inferencer=review2,
             fixer_inferencer=fixer2,
-            consensus_config=ConsensusConfig(max_iterations=3, max_consensus_attempts=1),
+            consensus_config=ConsensusConfig(
+                max_iterations=3, max_consensus_attempts=1
+            ),
             enable_checkpoint=True,
             checkpoint_dir=checkpoint_dir,
         )
@@ -535,7 +535,9 @@ async def test_fixer_receives_correct_review_feedback(tmp_workspace):
 
     # If review feedback was captured, verify it's non-empty
     if review_feedback_captured is not None:
-        assert review_feedback_captured, "Review checkpoint should contain feedback data"
+        assert review_feedback_captured, (
+            "Review checkpoint should contain feedback data"
+        )
 
     # The result should have valid structure
     assert hasattr(result, "consensus_achieved")

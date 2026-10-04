@@ -5,6 +5,7 @@ Usage::
     python -m agent_foundation.resources.tools.task bta "Build auth system"
     python -m agent_foundation.resources.tools.task pti "Write docs" --model sonnet
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,14 +29,19 @@ def main(argv: list[str] | None = None) -> int:
     for param in meta.get("parameters", []):
         name = param["name"]
         if param.get("positional"):
-            parser.add_argument(name, nargs="?" if not param.get("required") else None,
-                                help=param.get("description", ""))
+            parser.add_argument(
+                name,
+                nargs="?" if not param.get("required") else None,
+                help=param.get("description", ""),
+            )
         elif param["type"] == "flag":
-            parser.add_argument(name, action="store_true",
-                                help=param.get("description", ""))
+            parser.add_argument(
+                name, action="store_true", help=param.get("description", "")
+            )
         elif param.get("multi"):
-            parser.add_argument(name, action="append",
-                                help=param.get("description", ""))
+            parser.add_argument(
+                name, action="append", help=param.get("description", "")
+            )
         else:
             kwargs: dict[str, Any] = {"help": param.get("description", "")}
             if "default" in param:
@@ -43,8 +49,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.add_argument(name, **kwargs)
 
     args = parser.parse_args(argv)
-    arguments = {k.lstrip("-").replace("-", "_"): v
-                 for k, v in vars(args).items() if v is not None}
+    arguments = {
+        k.lstrip("-").replace("-", "_"): v
+        for k, v in vars(args).items()
+        if v is not None
+    }
 
     async def _run():
         result = await execute(arguments, {})

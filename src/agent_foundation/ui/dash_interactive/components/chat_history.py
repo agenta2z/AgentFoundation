@@ -1,11 +1,12 @@
 """
 Chat history list component for displaying conversation sessions.
 """
+
 from typing import Any, Dict, List, Optional
-from dash import html, dcc
-from dash.dependencies import Input, Output, State, ALL
 
 from agent_foundation.ui.dash_interactive.components.base import BaseComponent
+from dash import dcc, html
+from dash.dependencies import ALL, Input, Output, State
 
 
 class ChatHistoryList(BaseComponent):
@@ -27,7 +28,7 @@ class ChatHistoryList(BaseComponent):
         component_id: str = "chat-history",
         sessions: Optional[List[Dict[str, Any]]] = None,
         show_settings: bool = True,
-        style: Optional[Dict[str, Any]] = None
+        style: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the chat history list component.
@@ -45,14 +46,14 @@ class ChatHistoryList(BaseComponent):
     def _get_default_style(self) -> Dict[str, Any]:
         """Get default styling for the chat history sidebar."""
         return {
-            'width': '300px',
-            'height': '100vh',
-            'backgroundColor': '#202123',
-            'color': '#ECECF1',
-            'overflowY': 'auto',
-            'display': 'flex',
-            'flexDirection': 'column',
-            'borderRight': '1px solid #4D4D4F'
+            "width": "300px",
+            "height": "100vh",
+            "backgroundColor": "#202123",
+            "color": "#ECECF1",
+            "overflowY": "auto",
+            "display": "flex",
+            "flexDirection": "column",
+            "borderRight": "1px solid #4D4D4F",
         }
 
     def layout(self) -> html.Div:
@@ -74,48 +75,40 @@ class ChatHistoryList(BaseComponent):
         if self.show_settings:
             children.append(self._create_settings())
 
-        return html.Div(
-            id=self.get_id(),
-            children=children,
-            style=self.style
-        )
+        return html.Div(id=self.get_id(), children=children, style=self.style)
 
     def _create_header(self) -> html.Div:
         """Create header section with New Chat button."""
         return html.Div(
             children=[
                 html.Button(
-                    '+ New Chat',
-                    id=self.get_id('new-chat-btn'),
+                    "+ New Chat",
+                    id=self.get_id("new-chat-btn"),
                     style={
-                        'width': '90%',
-                        'margin': '15px 5%',
-                        'padding': '12px',
-                        'backgroundColor': 'transparent',
-                        'color': '#ECECF1',
-                        'border': '1px solid #4D4D4F',
-                        'borderRadius': '6px',
-                        'cursor': 'pointer',
-                        'fontSize': '14px',
-                        'fontWeight': '500',
-                        'transition': 'background-color 0.2s'
+                        "width": "90%",
+                        "margin": "15px 5%",
+                        "padding": "12px",
+                        "backgroundColor": "transparent",
+                        "color": "#ECECF1",
+                        "border": "1px solid #4D4D4F",
+                        "borderRadius": "6px",
+                        "cursor": "pointer",
+                        "fontSize": "14px",
+                        "fontWeight": "500",
+                        "transition": "background-color 0.2s",
                     },
-                    n_clicks=0
+                    n_clicks=0,
                 )
             ],
-            style={'borderBottom': '1px solid #4D4D4F'}
+            style={"borderBottom": "1px solid #4D4D4F"},
         )
 
     def _create_session_list(self) -> html.Div:
         """Create scrollable list of chat sessions."""
         return html.Div(
-            id=self.get_id('session-list'),
+            id=self.get_id("session-list"),
             children=self._render_sessions(),
-            style={
-                'flex': '1',
-                'overflowY': 'auto',
-                'padding': '10px 0'
-            }
+            style={"flex": "1", "overflowY": "auto", "padding": "10px 0"},
         )
 
     def _render_sessions(self) -> List[html.Div]:
@@ -130,11 +123,11 @@ class ChatHistoryList(BaseComponent):
                 html.Div(
                     "No conversations yet",
                     style={
-                        'padding': '20px',
-                        'textAlign': 'center',
-                        'color': '#8E8EA0',
-                        'fontSize': '13px'
-                    }
+                        "padding": "20px",
+                        "textAlign": "center",
+                        "color": "#8E8EA0",
+                        "fontSize": "13px",
+                    },
                 )
             ]
 
@@ -142,66 +135,67 @@ class ChatHistoryList(BaseComponent):
         for session in self.sessions:
             # Build metadata display (timestamp and session_id)
             metadata_children = []
-            if session.get('timestamp'):
+            if session.get("timestamp"):
                 metadata_children.append(
                     html.Div(
-                        session.get('timestamp', ''),
-                        style={
-                            'fontSize': '11px',
-                            'color': '#8E8EA0'
-                        }
+                        session.get("timestamp", ""),
+                        style={"fontSize": "11px", "color": "#8E8EA0"},
                     )
                 )
             # Add session_id display
-            if session.get('id'):
+            if session.get("id"):
                 metadata_children.append(
                     html.Div(
                         f"ID: {session.get('id', '')}",
                         style={
-                            'fontSize': '10px',
-                            'color': '#6E6E80',
-                            'marginTop': '2px',
-                            'fontFamily': 'monospace',
-                            'whiteSpace': 'nowrap',
-                            'overflow': 'hidden',
-                            'textOverflow': 'ellipsis'
-                        }
+                            "fontSize": "10px",
+                            "color": "#6E6E80",
+                            "marginTop": "2px",
+                            "fontFamily": "monospace",
+                            "whiteSpace": "nowrap",
+                            "overflow": "hidden",
+                            "textOverflow": "ellipsis",
+                        },
                     )
                 )
 
             session_div = html.Div(
                 children=[
                     html.Div(
-                        session.get('title', 'Untitled Conversation'),
+                        session.get("title", "Untitled Conversation"),
                         style={
-                            'fontSize': '14px',
-                            'fontWeight': '400',
-                            'marginBottom': '4px',
-                            'whiteSpace': 'nowrap',
-                            'overflow': 'hidden',
-                            'textOverflow': 'ellipsis'
-                        }
+                            "fontSize": "14px",
+                            "fontWeight": "400",
+                            "marginBottom": "4px",
+                            "whiteSpace": "nowrap",
+                            "overflow": "hidden",
+                            "textOverflow": "ellipsis",
+                        },
                     ),
                     html.Div(
                         children=metadata_children,
                         style={
-                            'display': 'flex',
-                            'flexDirection': 'column',
-                            'gap': '2px'
-                        }
-                    ) if metadata_children else None
+                            "display": "flex",
+                            "flexDirection": "column",
+                            "gap": "2px",
+                        },
+                    )
+                    if metadata_children
+                    else None,
                 ],
-                id={'type': self.get_id('session-item'), 'index': session['id']},
+                id={"type": self.get_id("session-item"), "index": session["id"]},
                 n_clicks=0,
                 style={
-                    'padding': '12px 16px',
-                    'margin': '0 8px',
-                    'borderRadius': '6px',
-                    'cursor': 'pointer',
-                    'transition': 'background-color 0.2s',
-                    'backgroundColor': '#343541' if session.get('active') else 'transparent'
+                    "padding": "12px 16px",
+                    "margin": "0 8px",
+                    "borderRadius": "6px",
+                    "cursor": "pointer",
+                    "transition": "background-color 0.2s",
+                    "backgroundColor": "#343541"
+                    if session.get("active")
+                    else "transparent",
                 },
-                className='session-item'
+                className="session-item",
             )
             session_divs.append(session_div)
 
@@ -211,55 +205,51 @@ class ChatHistoryList(BaseComponent):
         """Create settings section at the bottom."""
         return html.Div(
             children=[
-                html.Hr(style={'border': '1px solid #4D4D4F', 'margin': '0'}),
+                html.Hr(style={"border": "1px solid #4D4D4F", "margin": "0"}),
                 html.Div(
                     children=[
                         html.Div(
-                            '⚙️ Settings',
-                            id=self.get_id('settings-btn'),
+                            "⚙️ Settings",
+                            id=self.get_id("settings-btn"),
                             n_clicks=0,
                             style={
-                                'padding': '12px 16px',
-                                'cursor': 'pointer',
-                                'fontSize': '14px',
-                                'transition': 'background-color 0.2s'
+                                "padding": "12px 16px",
+                                "cursor": "pointer",
+                                "fontSize": "14px",
+                                "transition": "background-color 0.2s",
                             },
-                            className='settings-item'
+                            className="settings-item",
                         ),
                         html.Div(
-                            '📊 Debug Mode',
-                            id=self.get_id('debug-toggle'),
+                            "📊 Debug Mode",
+                            id=self.get_id("debug-toggle"),
                             n_clicks=0,
                             style={
-                                'padding': '12px 16px',
-                                'cursor': 'pointer',
-                                'fontSize': '14px',
-                                'transition': 'background-color 0.2s'
+                                "padding": "12px 16px",
+                                "cursor": "pointer",
+                                "fontSize": "14px",
+                                "transition": "background-color 0.2s",
                             },
-                            className='settings-item'
-                        )
+                            className="settings-item",
+                        ),
                     ]
-                )
+                ),
             ],
-            style={
-                'marginTop': 'auto'
-            }
+            style={"marginTop": "auto"},
         )
 
     def get_callback_inputs(self) -> List[Input]:
         """Get list of callback inputs."""
         return [
-            Input(self.get_id('new-chat-btn'), 'n_clicks'),
-            Input({'type': self.get_id('session-item'), 'index': ALL}, 'n_clicks'),
-            Input(self.get_id('settings-btn'), 'n_clicks'),
-            Input(self.get_id('debug-toggle'), 'n_clicks')
+            Input(self.get_id("new-chat-btn"), "n_clicks"),
+            Input({"type": self.get_id("session-item"), "index": ALL}, "n_clicks"),
+            Input(self.get_id("settings-btn"), "n_clicks"),
+            Input(self.get_id("debug-toggle"), "n_clicks"),
         ]
 
     def get_callback_outputs(self) -> List[Output]:
         """Get list of callback outputs."""
-        return [
-            Output(self.get_id('session-list'), 'children')
-        ]
+        return [Output(self.get_id("session-list"), "children")]
 
     def update_sessions(self, sessions: List[Dict[str, Any]]) -> List[html.Div]:
         """

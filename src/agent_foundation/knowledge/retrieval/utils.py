@@ -29,8 +29,7 @@ def sanitize_id(entity_id: str) -> str:
         'already%25encoded'
     """
     return (
-        entity_id
-        .replace("%", "%25")
+        entity_id.replace("%", "%25")
         .replace(":", "%3A")
         .replace("/", "%2F")
         .replace("\\", "%5C")
@@ -57,8 +56,7 @@ def unsanitize_id(safe_id: str) -> str:
         'already%encoded'
     """
     return (
-        safe_id
-        .replace("%5C", "\\")
+        safe_id.replace("%5C", "\\")
         .replace("%2F", "/")
         .replace("%3A", ":")
         .replace("%25", "%")
@@ -124,4 +122,3 @@ def count_tokens(text: str) -> int:
         1
     """
     return len(text) // 4
-

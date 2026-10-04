@@ -125,143 +125,15 @@ Utilities:
 Requirements: All
 """
 
-# ── Data Models ──────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-    KnowledgeType,
-)
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
-    GraphEdge,
-)
-
-# ── Enums ────────────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.models.enums import (
-    Space,
-    MergeStrategy,
-    MergeAction,
-    DedupAction,
-    MergeType,
-    ValidationStatus,
-    SuggestionStatus,
-    UpdateAction,
-    DeleteMode,
-)
-
-# ── Result Types ─────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.models.results import (
-    DedupResult,
-    MergeCandidate,
-    MergeResult,
-    ValidationResult,
-    ScoredPiece,
-    MergeJobResult,
-    OperationResult,
-)
-
-# ── Store ABCs ───────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-
-# ── Adapter-Based Store Implementations ──────────────────────────────────
-from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
-    KeyValueMetadataStore,
-)
-from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
-    RetrievalKnowledgePieceStore,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
-)
-from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
-    LanceDBKnowledgePieceStore,
-)
-
-# ── Orchestrator ─────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-
-# ── Data Loading ─────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
-
-# ── Provider ─────────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.provider import InfoType
-
-# ── Consolidation Mode ───────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
-
-# ── Budget-Aware Provider ────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.knowledge_provider import (
-    BudgetAwareKnowledgeProvider,
-)
-
-# ── Hybrid Search ────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.hybrid_search import (
-    HybridSearchConfig,
-    HybridRetriever,
-)
-
-# ── MMR Re-ranking ───────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.mmr_reranking import (
-    MMRConfig,
-    apply_mmr_reranking,
-)
-
-# ── Temporal Decay ───────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.temporal_decay import (
-    TemporalDecayConfig,
-    apply_temporal_decay,
-)
-
-# ── Query Decomposition & Agentic Models ─────────────────────────────────
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
-    SubQuery,
-    AgenticRetrievalResult,
-    create_domain_decomposer,
-    create_llm_decomposer,
-)
-
-# ── Retrieval Pipeline ──────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
-    RetrievalPipeline,
-    QueryExpander,
-    PostProcessor,
-)
-from agent_foundation.knowledge.retrieval.post_processors import (
-    FlatStringPostProcessor,
-    GroupedDictPostProcessor,
-    AggregatingPostProcessor,
-    BudgetAwarePostProcessor,
-)
-
-# ── Ingestion CLI (legacy) ──────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.ingestion_cli import KnowledgeIngestionCLI
-
-# ── Formatter ────────────────────────────────────────────────────────────
-from agent_foundation.knowledge.retrieval.formatter import (
-    KnowledgeFormatter,
-    RetrievalResult,
-)
-
-# ── Taxonomy ─────────────────────────────────────────────────────────────
-from agent_foundation.knowledge.ingestion.taxonomy import (
-    DOMAIN_TAXONOMY,
-    get_all_domains,
-    get_domain_tags,
-    validate_domain,
-    validate_tags,
-    format_taxonomy_for_prompt,
-)
-
 # ── Chunking ─────────────────────────────────────────────────────────────
 from agent_foundation.knowledge.ingestion.chunker import (
-    DocumentChunk,
-    ChunkerConfig,
-    MarkdownChunker,
     chunk_markdown_file,
+    ChunkerConfig,
+    DocumentChunk,
     estimate_tokens,
+    MarkdownChunker,
 )
+from agent_foundation.knowledge.ingestion.debug_session import IngestionDebugSession
 
 # ── Deduplication ────────────────────────────────────────────────────────
 from agent_foundation.knowledge.ingestion.deduplicator import (
@@ -269,16 +141,27 @@ from agent_foundation.knowledge.ingestion.deduplicator import (
     ThreeTierDeduplicator,
 )
 
+# ── Pipeline Orchestration ───────────────────────────────────────────────
+from agent_foundation.knowledge.ingestion.document_ingester import DocumentIngester
+from agent_foundation.knowledge.ingestion.knowledge_deleter import (
+    ConfirmationRequiredError,
+    DeleteConfig,
+    KnowledgeDeleter,
+)
+
+# ── Knowledge Lifecycle ──────────────────────────────────────────────────
+from agent_foundation.knowledge.ingestion.knowledge_updater import (
+    KnowledgeUpdater,
+    UpdateConfig,
+)
+
 # ── Merge Strategy ───────────────────────────────────────────────────────
 from agent_foundation.knowledge.ingestion.merge_strategy import (
     MergeStrategyConfig,
     MergeStrategyManager,
 )
-
-# ── Validation ───────────────────────────────────────────────────────────
-from agent_foundation.knowledge.ingestion.validator import (
-    ValidationConfig,
-    KnowledgeValidator,
+from agent_foundation.knowledge.ingestion.post_ingestion_merge_job import (
+    PostIngestionMergeJob,
 )
 
 # ── Skill Synthesis ──────────────────────────────────────────────────────
@@ -288,56 +171,169 @@ from agent_foundation.knowledge.ingestion.skill_synthesizer import (
     SkillSynthesizer,
 )
 
-# ── Knowledge Lifecycle ──────────────────────────────────────────────────
-from agent_foundation.knowledge.ingestion.knowledge_updater import (
-    UpdateConfig,
-    KnowledgeUpdater,
+# ── Space Classification & Migration ─────────────────────────────────────
+from agent_foundation.knowledge.ingestion.space_classifier import (
+    ClassificationResult,
+    SpaceClassifier,
+    SpaceRule,
 )
-from agent_foundation.knowledge.ingestion.knowledge_deleter import (
-    DeleteConfig,
-    ConfirmationRequiredError,
-    KnowledgeDeleter,
+from agent_foundation.knowledge.ingestion.space_migration import (
+    MigrationReport,
+    SpaceMigrationUtility,
+)
+
+# ── Taxonomy ─────────────────────────────────────────────────────────────
+from agent_foundation.knowledge.ingestion.taxonomy import (
+    DOMAIN_TAXONOMY,
+    format_taxonomy_for_prompt,
+    get_all_domains,
+    get_domain_tags,
+    validate_domain,
+    validate_tags,
+)
+
+# ── Validation ───────────────────────────────────────────────────────────
+from agent_foundation.knowledge.ingestion.validator import (
+    KnowledgeValidator,
+    ValidationConfig,
 )
 
 # ── Knowledge Packs ─────────────────────────────────────────────────
 from agent_foundation.knowledge.packs import (
-    KnowledgePack,
-    PackStatus,
-    PackSource,
-    PackInstallResult,
-    PackManagerConfig,
-    KnowledgePackManager,
     ClawhubClient,
     ClawhubPackAdapter,
-    parse_skill_md,
+    KnowledgePack,
+    KnowledgePackManager,
     LocalPackLoader,
+    PackInstallResult,
+    PackManagerConfig,
+    PackSource,
+    PackStatus,
+    parse_skill_md,
 )
 
-# ── Pipeline Orchestration ───────────────────────────────────────────────
-from agent_foundation.knowledge.ingestion.document_ingester import DocumentIngester
-from agent_foundation.knowledge.ingestion.post_ingestion_merge_job import (
-    PostIngestionMergeJob,
-)
-from agent_foundation.knowledge.ingestion.debug_session import IngestionDebugSession
+# ── Data Loading ─────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 
-# ── Space Classification & Migration ─────────────────────────────────────
-from agent_foundation.knowledge.ingestion.space_classifier import (
-    SpaceClassifier,
-    SpaceRule,
-    ClassificationResult,
+# ── Formatter ────────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.formatter import (
+    KnowledgeFormatter,
+    RetrievalResult,
 )
-from agent_foundation.knowledge.ingestion.space_migration import (
-    SpaceMigrationUtility,
-    MigrationReport,
+
+# ── Hybrid Search ────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.hybrid_search import (
+    HybridRetriever,
+    HybridSearchConfig,
+)
+
+# ── Ingestion CLI (legacy) ──────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.ingestion_cli import KnowledgeIngestionCLI
+
+# ── Orchestrator ─────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+
+# ── Budget-Aware Provider ────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.knowledge_provider import (
+    BudgetAwareKnowledgeProvider,
+)
+
+# ── MMR Re-ranking ───────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.mmr_reranking import (
+    apply_mmr_reranking,
+    MMRConfig,
+)
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+# ── Consolidation Mode ───────────────────────────────────────────────────
+
+# ── Enums ────────────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.models.enums import (
+    ConsolidationMode,
+    DedupAction,
+    DeleteMode,
+    MergeAction,
+    MergeStrategy,
+    MergeType,
+    Space,
+    SuggestionStatus,
+    UpdateAction,
+    ValidationStatus,
+)
+
+# ── Data Models ──────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
+)
+
+# ── Result Types ─────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.models.results import (
+    DedupResult,
+    MergeCandidate,
+    MergeJobResult,
+    MergeResult,
+    OperationResult,
+    ScoredPiece,
+    ValidationResult,
+)
+from agent_foundation.knowledge.retrieval.post_processors import (
+    AggregatingPostProcessor,
+    BudgetAwarePostProcessor,
+    FlatStringPostProcessor,
+    GroupedDictPostProcessor,
+)
+
+# ── Provider ─────────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.provider import InfoType
+# ── Retrieval Pipeline ──────────────────────────────────────────────────
+
+# ── Query Decomposition & Agentic Models ─────────────────────────────────
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+    AgenticRetrievalResult,
+    create_domain_decomposer,
+    create_llm_decomposer,
+    PostProcessor,
+    QueryExpander,
+    RetrievalPipeline,
+    SubQuery,
+)
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
+
+# ── Store ABCs ───────────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+
+# ── Adapter-Based Store Implementations ──────────────────────────────────
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
+    KeyValueMetadataStore,
+)
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+    LanceDBKnowledgePieceStore,
+)
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
+    RetrievalKnowledgePieceStore,
+)
+
+# ── Temporal Decay ───────────────────────────────────────────────────────
+from agent_foundation.knowledge.retrieval.temporal_decay import (
+    apply_temporal_decay,
+    TemporalDecayConfig,
 )
 
 # ── Utilities ────────────────────────────────────────────────────────────
 from agent_foundation.knowledge.retrieval.utils import (
-    sanitize_id,
-    unsanitize_id,
-    parse_entity_type,
     cosine_similarity,
     count_tokens,
+    parse_entity_type,
+    sanitize_id,
+    unsanitize_id,
+)
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
 )
 
 __all__ = [

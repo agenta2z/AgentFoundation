@@ -1,5 +1,3 @@
-
-
 """Comprehensive tests for DualInferencer checkpoint/resume from different
 workspace conditions.
 
@@ -43,6 +41,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +129,8 @@ class Tier1_BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -157,7 +157,8 @@ class Tier1_BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         self.assertEqual(result.total_iterations, 2)
@@ -181,7 +182,8 @@ class Tier1_BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertFalse(result.consensus_achieved)
         # 2 review rounds: initial review + one after fix
@@ -222,7 +224,8 @@ class Tier1_BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
         # base_inferencer.ainfer was called twice (propose + fix)
         self.assertEqual(base.ainfer.call_count, 2)
@@ -256,7 +259,8 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         attempt_dir = os.path.join(self.tmpdir, "attempt_01")
@@ -283,7 +287,8 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            await dual._ainfer("request")
 
         attempt_dir = os.path.join(self.tmpdir, "attempt_01")
         for root, _dirs, files in os.walk(attempt_dir):
@@ -316,7 +321,8 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
                 consensus_threshold=Severity.COSMETIC,
             ),
         )
-        r_off = await dual_off._ainfer("request")
+        async with aopen_invocation(dual_off):
+            r_off = await dual_off._ainfer("request")
 
         # With checkpoint
         dual_on = DualInferencer(
@@ -331,13 +337,12 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
             enable_checkpoint=True,
             checkpoint_dir=self.tmpdir,
         )
-        r_on = await dual_on._ainfer("request")
+        async with aopen_invocation(dual_on):
+            r_on = await dual_on._ainfer("request")
 
         self.assertEqual(r_off.consensus_achieved, r_on.consensus_achieved)
         self.assertEqual(r_off.total_iterations, r_on.total_iterations)
-        self.assertEqual(
-            len(r_off.consensus_history), len(r_on.consensus_history)
-        )
+        self.assertEqual(len(r_off.consensus_history), len(r_on.consensus_history))
         self.assertEqual(
             r_off.consensus_history[0].consensus_reached,
             r_on.consensus_history[0].consensus_reached,
@@ -360,7 +365,8 @@ class Tier2_CheckpointNormalCompletionTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=nested,
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
         self.assertTrue(os.path.isdir(nested))
 
@@ -400,9 +406,7 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         """Crash during review step → resume skips propose, runs review."""
         # --- Run 1: propose succeeds, review crashes ---
         base_run1 = _make_mock_inferencer("proposal v1")
-        review_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("review crash")
-        )
+        review_run1 = _make_mock_inferencer(side_effect=RuntimeError("review crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -417,7 +421,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError) as ctx:
-            await dual_run1._ainfer("request")
+            async with aopen_invocation(dual_run1):
+                await dual_run1._ainfer("request")
         self.assertIn("review crash", str(ctx.exception))
         base_run1.ainfer.assert_called_once()  # propose ran once
 
@@ -441,7 +446,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual_run2._ainfer("request")
+        async with aopen_invocation(dual_run2):
+            result = await dual_run2._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -457,9 +463,7 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         review_run1 = _make_mock_inferencer(
             _review_json(approved=False, severity="MAJOR")
         )
-        fixer_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("fixer crash")
-        )
+        fixer_run1 = _make_mock_inferencer(side_effect=RuntimeError("fixer crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -475,7 +479,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError) as ctx:
-            await dual_run1._ainfer("request")
+            async with aopen_invocation(dual_run1):
+                await dual_run1._ainfer("request")
         self.assertIn("fixer crash", str(ctx.exception))
 
         # --- Run 2: resume with working fixer ---
@@ -496,7 +501,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual_run2._ainfer("request")
+        async with aopen_invocation(dual_run2):
+            result = await dual_run2._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         # Base NOT called — resumed past propose
@@ -537,7 +543,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError) as ctx:
-            await dual_run1._ainfer("request")
+            async with aopen_invocation(dual_run1):
+                await dual_run1._ainfer("request")
         self.assertIn("review crash iter 2", str(ctx.exception))
 
         # Verify: propose=1, review=2 (reject + crash), fix=1
@@ -563,7 +570,8 @@ class Tier3_ResumeFromCrashTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual_run2._ainfer("request")
+        async with aopen_invocation(dual_run2):
+            result = await dual_run2._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         base_run2.ainfer.assert_not_called()
@@ -591,9 +599,7 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
 
         # Run 1: propose with unique text, then crash at review
         base_run1 = _make_mock_inferencer(original_proposal)
-        review_run1 = _make_mock_inferencer(
-            side_effect=RuntimeError("crash")
-        )
+        review_run1 = _make_mock_inferencer(side_effect=RuntimeError("crash"))
 
         dual_run1 = DualInferencer(
             base_inferencer=base_run1,
@@ -608,7 +614,8 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError):
-            await dual_run1._ainfer("request")
+            async with aopen_invocation(dual_run1):
+                await dual_run1._ainfer("request")
 
         # Run 2: resume — review gets the original proposal
         captured_review_prompt = []
@@ -633,7 +640,8 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual_run2._ainfer("request")
+        async with aopen_invocation(dual_run2):
+            result = await dual_run2._ainfer("request")
         self.assertTrue(result.consensus_achieved)
 
         # The review prompt should contain the original proposal text
@@ -670,7 +678,8 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError):
-            await dual_run1._ainfer("request")
+            async with aopen_invocation(dual_run1):
+                await dual_run1._ainfer("request")
 
         # Run 2: resume at review (iter 2) → approve
         dual_run2 = DualInferencer(
@@ -686,7 +695,8 @@ class Tier4_StateRestorationTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual_run2._ainfer("request")
+        async with aopen_invocation(dual_run2):
+            result = await dual_run2._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         # Total: iter 1 (run 1) + iter 2 (partially run1, completed run2)
@@ -724,7 +734,8 @@ class Tier5_MultiAttemptTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertEqual(len(result.consensus_history), 2)
         self.assertFalse(result.consensus_history[0].consensus_reached)
@@ -743,9 +754,7 @@ class Tier5_MultiAttemptTest(unittest.IsolatedAsyncioTestCase):
 
             dual = DualInferencer(
                 base_inferencer=_make_mock_inferencer("proposal"),
-                review_inferencer=_make_mock_inferencer(
-                    side_effect=review_responses
-                ),
+                review_inferencer=_make_mock_inferencer(side_effect=review_responses),
                 fixer_inferencer=_make_mock_inferencer(_fix_response("fixed")),
                 consensus_config=ConsensusConfig(
                     max_iterations=2,
@@ -756,7 +765,8 @@ class Tier5_MultiAttemptTest(unittest.IsolatedAsyncioTestCase):
                 checkpoint_dir=tmpdir,
             )
 
-            result = await dual._ainfer("request")
+            async with aopen_invocation(dual):
+                result = await dual._ainfer("request")
 
             self.assertTrue(result.consensus_achieved)
             # Both attempt directories should exist
@@ -802,7 +812,8 @@ class Tier6_EdgeCasesTest(unittest.IsolatedAsyncioTestCase):
 
         # _get_result_path returns "" when checkpoint_dir is falsy,
         # which means _exists_result(path="") returns False → no resume attempted
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
 
     async def test_corrupted_checkpoint_falls_back_gracefully(self):
@@ -828,7 +839,8 @@ class Tier6_EdgeCasesTest(unittest.IsolatedAsyncioTestCase):
 
         # Should not crash — _try_load_checkpoint catches exceptions and
         # falls back to backward scan, which also finds nothing → fresh start
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
 
     async def test_checkpoint_disabled_no_files_written(self):
@@ -848,7 +860,8 @@ class Tier6_EdgeCasesTest(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=ckpt_dir,
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
         self.assertEqual(
             _count_json_files(ckpt_dir),

@@ -1,6 +1,6 @@
-from typing import Union, Callable, Mapping, Optional, Any, MutableMapping
+from typing import Any, Callable, Mapping, MutableMapping, Optional, Union
 
-from attr import attrs, attrib
+from attr import attrib, attrs
 
 
 @attrs
@@ -35,13 +35,15 @@ class MultiActionExecutor:
     callable: Optional[Callable] = attrib(default=None)
 
     # Option 2: Mapping of action_type → callable or string ID
-    callable_mapping: Optional[Mapping[str, Union[str, Callable]]] = attrib(default=None)
+    callable_mapping: Optional[Mapping[str, Union[str, Callable]]] = attrib(
+        default=None
+    )
 
     # For resolving string IDs in mapping
     executor_ids: Optional[Mapping[str, Callable]] = attrib(default=None)
 
     # Fallback key when action_type not found in mapping
-    default_key: str = attrib(default='default')
+    default_key: str = attrib(default="default")
 
     # State management for stateful executors (e.g., browser instances)
     executor_states: Optional[Mapping[str, Any]] = attrib(default=None)
@@ -50,7 +52,9 @@ class MultiActionExecutor:
         # Auto-detect: if callable is actually a Mapping, treat it as callable_mapping
         if self.callable is not None and isinstance(self.callable, Mapping):
             if self.callable_mapping is not None:
-                raise ValueError("Cannot provide both 'callable' (as mapping) and 'callable_mapping'")
+                raise ValueError(
+                    "Cannot provide both 'callable' (as mapping) and 'callable_mapping'"
+                )
             self.callable_mapping = self.callable
             self.callable = None
 
@@ -77,7 +81,9 @@ class MultiActionExecutor:
         # Resolve string ID if needed
         if isinstance(executor, str):
             if not self.executor_ids:
-                raise ValueError(f"No executor_ids provided but found string ID '{executor}'")
+                raise ValueError(
+                    f"No executor_ids provided but found string ID '{executor}'"
+                )
             if executor not in self.executor_ids:
                 raise ValueError(f"Executor ID '{executor}' not found in executor_ids")
             return self.executor_ids[executor]
@@ -132,7 +138,7 @@ class MultiActionExecutor:
             self.executor_states = dict(self.executor_states)
         self.executor_states[action_type] = state
 
-    def copy(self, clear_states: bool = True) -> 'MultiActionExecutor':
+    def copy(self, clear_states: bool = True) -> "MultiActionExecutor":
         """Create a copy of the MultiActionExecutor.
 
         Args:
@@ -144,8 +150,12 @@ class MultiActionExecutor:
         """
         return MultiActionExecutor(
             callable=self.callable,
-            callable_mapping=dict(self.callable_mapping) if self.callable_mapping else None,
+            callable_mapping=dict(self.callable_mapping)
+            if self.callable_mapping
+            else None,
             executor_ids=self.executor_ids,
             default_key=self.default_key,
-            executor_states=None if clear_states else (dict(self.executor_states) if self.executor_states else None)
+            executor_states=None
+            if clear_states
+            else (dict(self.executor_states) if self.executor_states else None),
         )

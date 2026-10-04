@@ -6,15 +6,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from agent_foundation.knowledge.cli import (
     _build_parser,
     _create_kb,
     _get_default_data_dir,
     main,
 )
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 
 
 class TestGetDefaultDataDir:
@@ -148,9 +147,7 @@ class TestMainSearch:
 
         main(["search", "q", "--entity-id", "e1", "--domain", "testing"])
 
-        mock_kb.retrieve.assert_called_once_with(
-            "q", entity_id="e1", domain="testing"
-        )
+        mock_kb.retrieve.assert_called_once_with("q", entity_id="e1", domain="testing")
 
     @patch("agent_foundation.knowledge.cli._create_kb")
     def test_search_no_query_exits_with_error(self, mock_create_kb, capsys):

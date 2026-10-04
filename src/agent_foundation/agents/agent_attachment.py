@@ -1,9 +1,11 @@
 from typing import Any, Callable
 
-from attr import attrs, attrib
+from attr import attrib, attrs
 
 
-def default_agent_attachment_formatter(id: str, description: str, content: Any, show_content: bool) -> str:
+def default_agent_attachment_formatter(
+    id: str, description: str, content: Any, show_content: bool
+) -> str:
     """
     Default formatter for agent attachments.
 
@@ -43,10 +45,13 @@ class AgentAttachment:
         content: The actual content (can be any type)
         formatter: Function to format the attachment for display
     """
+
     id: str = attrib()
     description: str = attrib()
     content: Any = attrib()
-    formatter: Callable[[str, str, Any, bool], str] = attrib(default=default_agent_attachment_formatter)
+    formatter: Callable[[str, str, Any, bool], str] = attrib(
+        default=default_agent_attachment_formatter
+    )
 
     def __str__(self) -> str:
         """Returns a string representation without the full content."""

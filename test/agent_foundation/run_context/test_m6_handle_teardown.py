@@ -16,10 +16,10 @@ path (not by the absent active ctx). NB: orchestrator-side slot-binding of
 import asyncio
 
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
+    RunContext,
 )
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,

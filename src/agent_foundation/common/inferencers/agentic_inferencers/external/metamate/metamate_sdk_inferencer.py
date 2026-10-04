@@ -18,10 +18,15 @@ import asyncio
 import logging
 import time
 import uuid as uuid_mod
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.code_scope_judge import (
+    judge_code_scope,
+    resolve_scope_directive,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.common import (
     _TERMINAL_STATUSES,
+    answer_format_directive,
     AUTO_CONTINUE_REPLY,
     DEFAULT_API_KEY,
     DEFAULT_MODE,
@@ -29,17 +34,22 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
     DEFAULT_STREAM_TYPE,
     DEFAULT_SURFACE,
     DEFAULT_TIMEOUT,
+    DEFAULT_TOOL_CALL_BUDGET,
     get_assistant_message_status,
+    http_error_details,
     MAX_CONTINUATIONS,
     needs_continuation,
     parse_assistant_text,
     resolve_conversation_fbid,
     resolve_metamate_client_cls,
+    summarize_tool_activity,
+    tool_call_budget_directive,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    LiveHandleField,
     StreamingInferencerBase,
 )
 from agent_foundation.common.inferencers.templated_inferencer_base import (
@@ -123,9 +133,36 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         max_continuations: Max auto-continue follow-ups per query.
         poll_interval_seconds: Seconds between poll attempts.
         timeout_seconds: Per-call timeout for ``engine_start_v2``.
-        total_timeout_seconds: Max total time for entire operation.
+        stream_total_timeout_seconds: Wall-clock cap for ONE streaming poll loop.
+            Distinct from the inherited ``total_timeout_seconds``, which
+            ``InferencerBase`` spends on the whole retry loop (every attempt plus
+            every guardrail evaluation). Overriding that one here used to cap both
+            scopes with a single number, so one attempt was allowed the entire
+            budget and any retry was guaranteed to breach it.
         idle_timeout_seconds: Max idle time between chunks.
+        code_scope_judge: Async ``(task) -> CodeSearchScope`` that scopes the code
+            search. Defaults to :func:`judge_code_scope` (enabled); pass ``None``
+            to disable. ``_ainfer`` prepends its ``to_directive()`` to every task,
+            degrading to the default ``fbsource`` scope if the judge fails.
+        tool_call_budget: Tool calls per turn; ``_ainfer`` appends a work budget to
+            every task (``tool_call_budget_directive``). Defaults to
+            ``DEFAULT_TOOL_CALL_BUDGET`` (6); pass ``None`` to disable. A call's
+            ``tool_call_budget=`` keyword overrides it.
+        max_answer_findings: Findings the answer may have; ``_ainfer`` appends a
+            format cap after the work budget (``answer_format_directive``).
+            Defaults to ``None`` (off). A call's ``max_answer_findings=`` keyword
+            overrides it.
     """
+
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    _FANOUT_SINGLE_CALL_ARGS = StreamingInferencerBase._FANOUT_SINGLE_CALL_ARGS + (
+        "conversation_uuid",
+        "conversation_fbid",
+        "return_sdk_response",
+    )
 
     api_key: str = attrib(default=DEFAULT_API_KEY)
     surface: str = attrib(default=DEFAULT_SURFACE)
@@ -137,7 +174,14 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     max_continuations: int = attrib(default=MAX_CONTINUATIONS)
     poll_interval_seconds: float = attrib(default=DEFAULT_POLL_INTERVAL)
     timeout_seconds: int = attrib(default=DEFAULT_TIMEOUT)
-    total_timeout_seconds: int = attrib(default=1800)
+    # Deliberately does NOT override InferencerBase's ``total_timeout_seconds``
+    # (default 0 = no cumulative cap), matching the ClaudeCodeCLI / Codex /
+    # Devmate leaves. A finite value there is spent on attempts AND guardrail
+    # evaluations, and is min()'d with the per-attempt cap — so it silently
+    # defeated the flow config's ``attempt_timeout_seconds: 7200`` hang guard
+    # and killed nodes that were still making progress. One streaming call is
+    # bounded below; the whole node stays bounded by max_retry x attempt cap.
+    stream_total_timeout_seconds: int = attrib(default=1800)
     idle_timeout_seconds: int = attrib(default=600)
     # Source of MetamateGraphQLClient. None = honor METAMATE_USE_STANDALONE env
     # var (default off → upstream //msl/metamate/cli:metamate_graphql). True
@@ -147,10 +191,41 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # full contract.
     use_standalone: Optional[bool] = attrib(default=None)
 
-    # Internal state
-    _conversation_uuid: Optional[str] = attrib(default=None, init=False, repr=False)
-    _conversation_fbid: Optional[str] = attrib(default=None, init=False, repr=False)
-    _last_token_count: int = attrib(default=0, init=False, repr=False)
+    # Opt-in code-search scope judge (integration seam 2). Default ``None`` =
+    # disabled. Set to an async callable ``(task: str) -> CodeSearchScope`` — typically
+    # ``judge_code_scope`` from this package — to enable: ``_ainfer`` awaits it on
+    # each (already-rendered) task and prepends the returned ``to_directive()``, a
+    # host-owned directive that keeps remote ``code_search`` off ``repo:"all"`` (the
+    # ACL fan-out that dies "Unauthorized" under the ~512 MiB HHVM cap). The judge
+    # runs its OWN Claude inferencer, never Metamate, so enabling this does not
+    # recurse. On by default — an unscoped Metamate search is the failure this
+    # exists to prevent; pass ``None`` to disable. A judge failure degrades to the
+    # default ``fbsource`` directive (see ``resolve_scope_directive``) and can
+    # never break the inference it is scoping.
+    code_scope_judge: Optional[Callable[[str], Awaitable[Any]]] = attrib(
+        default=judge_code_scope
+    )
+
+    # Work budget per turn: ``_ainfer`` appends ``tool_call_budget_directive`` (at
+    # most this many tool calls, then answer from what was verified) to each
+    # (already-rendered) task. On by default: MetaMate cuts every turn at 120 s and
+    # at its per-request memory budget, whoever the caller is, and an unbudgeted
+    # turn is the failure this exists to prevent; pass ``None`` to disable. A
+    # call's ``tool_call_budget=`` keyword overrides it (``None`` disables it for
+    # that call), e.g. a ``bta_inferencer`` template's ``worker_inference_args``.
+    tool_call_budget: Optional[int] = attrib(default=DEFAULT_TOOL_CALL_BUDGET)
+
+    # Answer-format cap: ``_ainfer`` appends ``answer_format_directive`` (at most
+    # this many findings of a few bullets each) after the work budget. Off by
+    # default: it pays off on shard-sized tasks such as a fan-out worker's, while
+    # on a full task it trades killed requests for early give-ups. A call's
+    # ``max_answer_findings=`` keyword overrides it.
+    max_answer_findings: Optional[int] = attrib(default=None)
+
+    # The conversation a resumed call continues: session-scoped like
+    # ``active_session_id`` (this branch's slot under a host ctx).
+    _conversation_uuid = LiveHandleField("conversation_uuid", "_conversation_uuid")
+    _conversation_fbid = LiveHandleField("conversation_fbid", "_conversation_fbid")
 
     def __attrs_post_init__(self) -> None:
         super().__attrs_post_init__()
@@ -162,6 +237,16 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             f"timeout={self.timeout_seconds}s",
             "Config",
         )
+
+    async def preflight(self) -> None:
+        """U2b: surface the missing MetamateGraphQLClient dependency EARLY.
+
+        ``resolve_metamate_client_cls`` raises ``MissingDependencyError`` (U2d)
+        when the Buck-only ``msl`` client isn't available; running it here lets
+        ``preflight_all`` aggregate it into ONE clear startup error instead of a
+        worker crashing ~40 min into the run.
+        """
+        resolve_metamate_client_cls(self.use_standalone)
 
     def reset_session(self) -> None:
         """Clear conversation state so the next call starts fresh.
@@ -199,6 +284,7 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         Yields:
             Text deltas as they arrive from MetaMate.
         """
+        stats = self._stream_stats()
         MetamateGraphQLClient = resolve_metamate_client_cls(self.use_standalone)
 
         client = MetamateGraphQLClient(cat=self.cat_token)
@@ -215,7 +301,24 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             """Background task: start conversation, poll, yield deltas."""
             nonlocal conv_uuid, conv_fbid
 
+            # What ``MetamateConversationSummary`` reports when the call ends.
+            phase = "engine_start"
+            outcome = "cancelled"
+            polls = 0
+            last_outputs: Any = ()
+            last_accumulated_text = ""
+            error: Optional[Exception] = None
+            stream_started = time.monotonic()
             try:
+                self.log_info(
+                    {
+                        "request_id": request_id,
+                        "prompt_chars": len(prompt),
+                        "prompt_bytes": len(prompt.encode("utf-8")),
+                        "conversation_uuid": conv_uuid,
+                    },
+                    "EngineStartPayload",
+                )
                 result = await asyncio.to_thread(
                     client.engine_start_v2,
                     prompt=prompt,
@@ -238,27 +341,31 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                     "EngineStart",
                 )
 
-                last_accumulated_text = ""
+                phase = "poll"
                 continuations_sent = 0
                 start_time = time.monotonic()
 
                 while True:
-                    # Check total timeout budget
+                    # Check this streaming call's own budget
                     elapsed = time.monotonic() - start_time
                     if (
-                        self.total_timeout_seconds > 0
-                        and elapsed > self.total_timeout_seconds
+                        self.stream_total_timeout_seconds > 0
+                        and elapsed > self.stream_total_timeout_seconds
                     ):
                         self.log_info(
-                            f"Total timeout reached ({self.total_timeout_seconds}s)",
+                            "Stream total timeout reached "
+                            f"({self.stream_total_timeout_seconds}s)",
                             "Timeout",
                         )
+                        outcome = "timeout"
                         break
 
                     bridge_outputs = await asyncio.to_thread(
                         client.get_conversation_for_stream,
                         conv_uuid,
                     )
+                    polls += 1
+                    last_outputs = bridge_outputs
 
                     text = parse_assistant_text(bridge_outputs)
                     status = get_assistant_message_status(bridge_outputs)
@@ -271,7 +378,7 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                             delta = text
                         if delta:
                             await chunk_queue.put(delta)
-                            self._last_token_count += len(delta)
+                            stats.tokens += len(delta)
                         last_accumulated_text = text
 
                     # Check for terminal status
@@ -297,6 +404,7 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                                 "AutoContinue",
                             )
                             follow_up_id = str(uuid_mod.uuid4())
+                            phase = "auto_continue"
                             result = await asyncio.to_thread(
                                 client.engine_start_v2,
                                 prompt=AUTO_CONTINUE_REPLY,
@@ -316,14 +424,29 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                             # parse_assistant_text() grows monotonically.
                             # Keeping the current value ensures the delta logic
                             # only yields genuinely new text.
+                            phase = "poll"
                             continue
+                        outcome = "terminal"
                         break
 
                     await asyncio.sleep(self.poll_interval_seconds)
 
             except Exception as exc:
+                outcome = "failed"
+                error = exc
                 error_holder.append(exc)
             finally:
+                self._log_conversation_summary(
+                    request_id=request_id,
+                    conversation_uuid=conv_uuid,
+                    outcome=outcome,
+                    phase=phase,
+                    polls=polls,
+                    elapsed_s=time.monotonic() - stream_started,
+                    text_chars=len(last_accumulated_text),
+                    last_outputs=last_outputs,
+                    error=error,
+                )
                 await chunk_queue.put(None)
 
         poll_task = asyncio.create_task(_poll_loop())
@@ -351,10 +474,46 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
             self._conversation_uuid = conv_uuid
             self._conversation_fbid = conv_fbid
-            self._session_id = conv_uuid
+            self.active_session_id = conv_uuid
 
             if error_holder:
                 raise error_holder[0]
+
+    def _log_conversation_summary(
+        self,
+        *,
+        request_id: str,
+        conversation_uuid: Optional[str],
+        outcome: str,
+        phase: str,
+        polls: int,
+        elapsed_s: float,
+        text_chars: int,
+        last_outputs: Any,
+        error: Optional[Exception],
+    ) -> None:
+        """One record per stream call: how it ended (``terminal``, ``timeout``,
+        ``failed``, ``cancelled``), in which phase, after how many polls, what
+        tools the agent had called, and for a failure what the server said. A
+        parent that tolerates the failure (a BTA quorum) keeps only the error's
+        type, so this record is where the server's side survives."""
+        record: dict[str, Any] = {
+            "request_id": request_id,
+            "conversation_uuid": conversation_uuid,
+            "outcome": outcome,
+            "phase": phase,
+            "polls": polls,
+            "elapsed_s": round(elapsed_s, 1),
+            "text_chars": text_chars,
+            **summarize_tool_activity(last_outputs),
+        }
+        if error is not None:
+            record["error"] = {
+                "type": type(error).__name__,
+                "message": str(error)[:500],
+                "http": http_error_details(error),
+            }
+        self.log_info(record, "MetamateConversationSummary")
 
     # === Overrides ===
 
@@ -379,6 +538,26 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             Response text string, or SDKInferencerResponse if
             ``return_sdk_response=True``.
         """
+        # Integration seam 2: let the scope judge decide the code-search scope for
+        # THIS task and prepend its host-owned directive. At this point
+        # ``inference_input`` is the already-rendered prompt string (rendered
+        # upstream in ``__ainfer_single_impl`` before ``_ainfer``), so the directive
+        # travels verbatim down to ``engine_start_v2(prompt=...)``. Setting
+        # ``code_scope_judge=None`` leaves the prompt untouched.
+        if self.code_scope_judge is not None and isinstance(inference_input, str):
+            directive = await resolve_scope_directive(
+                self.code_scope_judge, inference_input
+            )
+            inference_input = f"{directive}\n\n{inference_input}"
+        budget = kwargs.pop("tool_call_budget", self.tool_call_budget)
+        if budget and isinstance(inference_input, str):
+            inference_input = f"{inference_input}{tool_call_budget_directive(budget)}"
+        max_findings = kwargs.pop("max_answer_findings", self.max_answer_findings)
+        if max_findings and isinstance(inference_input, str):
+            inference_input = (
+                f"{inference_input}{answer_format_directive(max_findings)}"
+            )
+
         new_session = kwargs.pop("new_session", False)
         explicit_session_id = kwargs.pop("session_id", None)
         return_sdk_response = kwargs.pop("return_sdk_response", False)
@@ -417,15 +596,15 @@ class MetamateSDKInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             kwargs["conversation_fbid"] = None
             logger.debug("Starting fresh conversation (no previous session)")
 
-        self._last_token_count = 0
+        stats = self._reset_stream_stats()
         response_text = await super()._ainfer(
             inference_input, inference_config, **kwargs
         )
         if return_sdk_response:
             return SDKInferencerResponse(
                 content=response_text,
-                session_id=self._session_id,
-                tokens_received=self._last_token_count,
+                session_id=self.active_session_id,
+                tokens_received=stats.tokens,
             )
         return response_text
 

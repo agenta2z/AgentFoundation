@@ -5,10 +5,7 @@ import os
 import tempfile
 
 import pytest
-
-from agent_foundation.common.inferencers.inferencer_workspace import (
-    InferencerWorkspace,
-)
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 @pytest.fixture
@@ -87,9 +84,7 @@ class TestEnsureDirs:
 
 class TestPathResolution:
     def test_output_path(self, ws):
-        assert ws.output_path("plan.md") == os.path.join(
-            ws.root, "outputs", "plan.md"
-        )
+        assert ws.output_path("plan.md") == os.path.join(ws.root, "outputs", "plan.md")
 
     def test_artifact_path(self, ws):
         assert ws.artifact_path("round01_plan.md") == os.path.join(
@@ -108,9 +103,7 @@ class TestPathResolution:
         )
 
     def test_log_path(self, ws):
-        assert ws.log_path("Round01") == os.path.join(
-            ws.root, "logs", "Round01"
-        )
+        assert ws.log_path("Round01") == os.path.join(ws.root, "logs", "Round01")
 
     def test_analysis_path(self, ws):
         assert ws.analysis_path("iter_1.md") == os.path.join(
@@ -158,9 +151,7 @@ class TestChildWorkspace:
         assert not os.path.exists(ws.output_path("plan.md"))
 
     def test_child_output(self, ws):
-        expected = os.path.join(
-            ws.root, "children", "planner", "outputs", "plan.md"
-        )
+        expected = os.path.join(ws.root, "children", "planner", "outputs", "plan.md")
         assert ws.child_output("planner", "plan.md") == expected
 
     def test_nested_children(self, ws):

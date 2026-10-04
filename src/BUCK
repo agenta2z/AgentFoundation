@@ -7,6 +7,7 @@ python_library(
     srcs = glob([
         "agent_foundation/**/*.py",
     ]),
+    base_module = "",
     # Bundle the framework's data files alongside the .py sources so consumers
     # built via Buck (e.g. the conversational AI host, derived-tool dispatcher,
     # SOP runner) can ``load_tool`` / load prompt templates at runtime. Without
@@ -22,10 +23,12 @@ python_library(
         "agent_foundation/**/*.md",
         "agent_foundation/**/*.toml",
     ]),
-    base_module = "",
     typing = False,
     visibility = ["PUBLIC"],
     deps = [
+        "fbsource//third-party/pypi/aiohttp:aiohttp",
+        "fbsource//third-party/pypi/anthropic:anthropic",
+        "fbsource//third-party/pypi/anyio:anyio",
         "fbsource//third-party/pypi/attrs:attrs",
         "fbsource//third-party/pypi/beautifulsoup4:beautifulsoup4",
         "fbsource//third-party/pypi/boto3:boto3",
@@ -37,18 +40,21 @@ python_library(
         # The agent_foundation inferencer code doesn't need it; UI components
         # that reference it will fail at runtime if instantiated.
         "fbsource//third-party/pypi/flask:flask",
+        "fbsource//third-party/pypi/gin-config:gin-config",
         "fbsource//third-party/pypi/httpx:httpx",
         "fbsource//third-party/pypi/hydra-core:hydra-core",
         "fbsource//third-party/pypi/jinja2:jinja2",
+        # Native orchestrator: per-session validation of AF tool-call arguments.
+        "fbsource//third-party/pypi/jsonschema:jsonschema",
         # OmegaConf + hydra-core: ``rich_python_utils.config_utils.instantiate``
         # uses Hydra's ``_target_`` resolution to build the topology graph from
         # YAML; OmegaConf is the underlying config object. Both are required
         # for any caller that runs a topology via the task or derived-tool
         # executor.
         "fbsource//third-party/pypi/lancedb:lancedb",
+        "fbsource//third-party/pypi/mcp:mcp",
         "fbsource//third-party/pypi/omegaconf:omegaconf",
-        # openai-codex-sdk (lazy-imported by CodexSdkInferencer).
-        "fbsource//third-party/pypi/openai-codex-sdk:openai-codex-sdk",
+        "fbsource//third-party/pypi/openai:openai",
         # NOTE: `lancedb` removed (2026-05-26). Optional knowledge-store backend
         # (used only by ``agent_foundation/knowledge/retrieval/stores/pieces/
         # lancedb_store.py``, which lazily ``import lancedb`` inside
@@ -64,14 +70,40 @@ python_library(
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/requests:requests",
         "fbsource//third-party/pypi/rich:rich",
+        "fbsource//third-party/pypi/starlette:starlette",
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
         "fbsource//third-party/pypi/websockets:websockets",
         "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
         "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        # Plugboard (Meta's internal LLM inference router, tier
+        # `metamate_platform.plugboard`): the owned Thrift interface plus the CAT
+        # auth + secure-thrift transport it needs. Depended on directly so
+        # `apis/plugboard/` needs no product-tree code.
+        "//ai_productivity/plugboard/if:plugboard-if-python-clients",
+        "//ai_productivity/plugboard/if:plugboard-if-python-types",
+        "//ai_productivity/plugboard/if:stream_defs-python-types",
+        "//c2p/secure_thrift/python:client",
+        "//configerator/structs/infrasec/if:acl-python-types",
+        "//crypto/cat/py:corp_crypto_auth_token_util",
         "//devai/devmate_sdk/python:devmate_python_sdk",
         "//gen_ai/metagen/pymetagen/lib:metagen",
-        # MetaMate inferencer sources are sub-packaged (see
-        # agentic_inferencers/external/metamate/BUCK) and would otherwise
-        # be excluded from the glob above by the BUCK-package boundary.
-        # Re-attach them here so existing imports still work transparently.
-    ],
+        # The native Metamate backend (conversational_native/session/metamate/BUCK)
+        # is sub-packaged too but deliberately NOT attached here: it depends on
+        # //msl/metamate/sdk, which this library must not carry. Hosts that run
+        # `kind: metamate` depend on that target directly.
+        # The MetaMate inferencer sources (external/metamate/BUCK) are sub-packaged
+        # — their own BUCK + base_module (so metamate/types.py doesn't shadow the
+        # stdlib) — so the glob above stops at that BUCK-package boundary and would
+        # drop them. Re-attach them here so existing imports keep working. (The
+        # sibling apis/ dir needs no such target: no stdlib-shadowing names, so
+        # removing its stray autodeps BUCK lets this glob absorb it directly.)
+    ] + select({
+        "DEFAULT": [],
+        # ServiceRouter is the Plugboard transport on a prod host; everywhere
+        # else the client falls back to secure-thrift (x2p), so it is linux-only.
+        "ovr_config//os:linux": [
+            "//servicerouter/client/python:async_client",
+            "//servicerouter/client/python:client_params",
+        ],
+    }),
 )

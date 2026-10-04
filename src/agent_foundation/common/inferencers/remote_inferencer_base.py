@@ -1,11 +1,10 @@
 from abc import abstractmethod
 from typing import Any, Dict, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 from rich_python_utils.string_utils import add_prefix
 
 

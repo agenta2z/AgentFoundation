@@ -1,0 +1,6 @@
+{# In-Progress SOPs — passive, resumable list #}
+{% if inprogress_sops is defined and inprogress_sops %}
+## In-Progress SOPs
+These SOPs are suspended and resumable. Mention them only if the user's request relates to one, or if explicitly asked. Resume with {{ sop_resume_usage | default("`/resume_sop <name>`") }}:
+{{ inprogress_sops }}
+{% endif %}

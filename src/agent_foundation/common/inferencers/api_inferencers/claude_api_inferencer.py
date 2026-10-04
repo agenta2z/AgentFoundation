@@ -1,7 +1,6 @@
-from attr import attrs
-
 from agent_foundation.apis.claude_llm import ClaudeModels, DEFAULT_CLAUDE_MODEL
 from agent_foundation.common.inferencers.api_inferencer_base import ApiInferencerBase
+from attr import attrs
 
 
 @attrs
@@ -40,7 +39,11 @@ class ClaudeApiInferencer(ApiInferencerBase):
 
     def __attrs_post_init__(self):
         super(ClaudeApiInferencer, self).__attrs_post_init__()
-        from agent_foundation.apis.claude_llm import generate_text, ENV_NAME_CLAUDE_API_KEY
+        from agent_foundation.apis.claude_llm import (
+            ENV_NAME_CLAUDE_API_KEY,
+            generate_text,
+        )
+
         self._inference_api = generate_text
 
         if not self._secret_key:

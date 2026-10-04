@@ -24,14 +24,13 @@ from agent_foundation.automation.meta_agent import (
     SynthesisReport,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.synthetic_data import (
-    SyntheticDataProvider,
-)
+from agent_foundation.automation.meta_agent.synthetic_data import SyntheticDataProvider
 
 
 # ---------------------------------------------------------------------------
 # Mock agent and action executor
 # ---------------------------------------------------------------------------
+
 
 class MockAgent:
     """Minimal agent that records a fixed sequence of actions per run.
@@ -61,6 +60,7 @@ class MockActionExecutor:
 # Helper: build a fake trace (simulates what TraceCollector would produce)
 # ---------------------------------------------------------------------------
 
+
 def _build_demo_trace(trace_id: str, search_query: str) -> ExecutionTrace:
     """Create a simple three-step trace that mimics a Google-search workflow."""
     return ExecutionTrace(
@@ -86,6 +86,7 @@ def _build_demo_trace(trace_id: str, search_query: str) -> ExecutionTrace:
 # Main example
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     # 1. Configure synthetic data ──────────────────────────────────────────
     #    The SyntheticDataProvider generates varied inputs so each agent run
@@ -96,8 +97,8 @@ def main() -> None:
 
     # 2. Pipeline configuration ────────────────────────────────────────────
     config = PipelineConfig(
-        run_count=3,                    # number of agent runs
-        validate=False,                 # skip validation (no real browser)
+        run_count=3,  # number of agent runs
+        validate=False,  # skip validation (no real browser)
         synthesis_strategy="rule_based",
         evaluation_strategy="exception_only",
         min_success_traces=1,

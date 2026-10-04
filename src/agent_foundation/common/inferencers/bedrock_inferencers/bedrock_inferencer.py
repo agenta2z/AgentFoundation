@@ -1,18 +1,20 @@
-from typing import Union, Sequence
-
-from attr import attrib, attrs
 import json
+from typing import Sequence, Union
+
+from agent_foundation.common.inferencers.remote_inferencer_base import (
+    RemoteInferencerBase,
+)
+from agent_foundation.common.infra.bedrock.client import (
+    get_bedrock_client,
+    get_bedrock_runtime_service_url,
+    get_bedrock_session,
+)
 from agent_foundation.common.infra.bedrock.constants import (
+    BEDROCK_RUNTIME_SERVICE_URL_PREFIX,
     BEDROCK_SERVICE_NAME_BEDROCK_RUNTIME,
     BEDROCK_SERVICE_REGION_US_WEST2,
-    BEDROCK_RUNTIME_SERVICE_URL_PREFIX
 )
-from agent_foundation.common.inferencers.remote_inferencer_base import RemoteInferencerBase
-from agent_foundation.common.infra.bedrock.client import (
-    get_bedrock_session,
-    get_bedrock_client,
-    get_bedrock_runtime_service_url
-)
+from attr import attrib, attrs
 
 
 @attrs
@@ -32,6 +34,7 @@ class BedrockInferencer(RemoteInferencerBase):
         access_key (str): Access key for authentication. Defaults to None. Use together with the 'secret_key' attribute
             from the `InferencerBase` class.
     """
+
     service_name: str = attrib(default=BEDROCK_SERVICE_NAME_BEDROCK_RUNTIME)
     region: str = attrib(default=BEDROCK_SERVICE_REGION_US_WEST2)
     read_timeout: int = attrib(default=3000)
@@ -61,20 +64,19 @@ class BedrockInferencer(RemoteInferencerBase):
 
     def get_client(self):
         """
-         Creates and returns the session and client objects for interacting with the Bedrock service.
+        Creates and returns the session and client objects for interacting with the Bedrock service.
 
-         This method sets up an AWS session and Bedrock client using the provided credentials and service configuration.
-         It supports custom AWS access keys and secret keys if specified.
+        This method sets up an AWS session and Bedrock client using the provided credentials and service configuration.
+        It supports custom AWS access keys and secret keys if specified.
 
-         Returns:
-             tuple: A tuple containing the AWS session and the Bedrock client objects.
+        Returns:
+            tuple: A tuple containing the AWS session and the Bedrock client objects.
 
-         Raises:
-             Exception: If there is an error in creating the session or client due to misconfiguration or connectivity issues.
-         """
+        Raises:
+            Exception: If there is an error in creating the session or client due to misconfiguration or connectivity issues.
+        """
         session = get_bedrock_session(
-            access_key=self.access_key,
-            secret_key=self.secret_key
+            access_key=self.access_key, secret_key=self.secret_key
         )
         client = get_bedrock_client(
             session,
@@ -83,7 +85,7 @@ class BedrockInferencer(RemoteInferencerBase):
             region=self.region,
             read_timeout=self.read_timeout,
             connect_timeout=self.connect_timeout,
-            max_attempts=self.max_attempts
+            max_attempts=self.max_attempts,
         )
 
         return session, client

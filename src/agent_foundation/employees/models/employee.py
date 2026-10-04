@@ -6,10 +6,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 import yaml
-
 from agent_foundation.employees.models.enums import EmployeeStatus
 from agent_foundation.employees.models.team_context import TeamContext
 
@@ -37,20 +36,20 @@ class AIEmployee:
     """
 
     # Identity
-    id: str                   # e.g. "alice_pm"
-    persona_name: str         # e.g. "Alice"
-    display_name: str         # e.g. "Alice — Platform PM"
+    id: str  # e.g. "alice_pm"
+    persona_name: str  # e.g. "Alice"
+    display_name: str  # e.g. "Alice — Platform PM"
     version: str = _YAML_VERSION
 
     # Role (composition — references AIEmployeeRole by id)
-    role_id: str = ""         # references AIEmployeeRole.id
+    role_id: str = ""  # references AIEmployeeRole.id
     role: "AIEmployeeRole | None" = field(default=None, repr=False)  # loaded at runtime
 
     # Team deployment (Phase 3)
     team_context: TeamContext | None = None
 
     # Persona / communication style
-    greeting: str = ""               # e.g. "Hi, I'm Alice..."
+    greeting: str = ""  # e.g. "Hi, I'm Alice..."
     communication_style: str = "professional"
 
     # Lifecycle
@@ -103,6 +102,7 @@ class AIEmployee:
 
         Note: role is NOT loaded here — call resolve_role(role_registry) after loading.
         """
+
         def _parse_dt(val: Any) -> datetime:
             if isinstance(val, datetime):
                 return val

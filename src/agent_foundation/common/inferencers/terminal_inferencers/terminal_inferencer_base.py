@@ -1,15 +1,21 @@
 """Abstract base class for terminal-based inferencers."""
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 from abc import abstractmethod
 from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import (
+    frame_for,
+    publish_result,
+    RuntimeKey,
+)
+from agent_foundation.common.inferencers.terminal_inferencers import process_groups
+from attr import attrib, attrs
 
 # Default wall-clock floor (seconds) for a CLI subprocess inference call.
 # Shared across the terminal CLI inferencers (codex, claude_code, devmate,
@@ -17,6 +23,19 @@ from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 # wedged child process can't hang a sync ``infer()`` forever. Callers raise it
 # via the relevant idle/request timeout knob or by setting ``timeout`` directly.
 DEFAULT_SUBPROCESS_TIMEOUT_SECONDS: int = 1800
+
+# How long a killed CLI's pipes get to deliver what is left in them: a process
+# that left the CLI's group (its own ``setsid``) may hold them open for good.
+_KILLED_PIPE_DRAIN_SECONDS: float = 3.0
+
+
+@attrs(frozen=True, slots=True)
+class TerminalStreamResult:
+    """One call's subprocess result, handed from the transport to ``_ainfer``."""
+
+    stdout: str = attrib(default="")
+    stderr: str = attrib(default="")
+    return_code: int = attrib(default=0)
 
 
 @attrs
@@ -67,9 +86,19 @@ class TerminalInferencerBase(InferencerBase):
     fail_on_pre_script_error: bool = attrib(default=True)
     fail_on_post_script_error: bool = attrib(default=False)
 
-    # Streaming output state (promoted from implicit instance attributes)
+    # A streaming transport publishes its call's result in the invocation (B28);
+    # the three fields are its bare compat getters (``get_streaming_result``).
+    _TERMINAL_RESULT = RuntimeKey(
+        "TerminalInferencerBase.stream_result",
+        compat={
+            "_last_streaming_output": "stdout",
+            "_last_streaming_stderr": "stderr",
+            "_last_streaming_return_code": "return_code",
+        },
+    )
     _last_streaming_output: str = attrib(default="", init=False, repr=False)
     _last_streaming_return_code: int = attrib(default=0, init=False, repr=False)
+    _last_streaming_stderr: str = attrib(default="", init=False, repr=False)
 
     def __attrs_post_init__(self):
         """target_path stays None if the leaf didn't set it — this is
@@ -77,6 +106,18 @@ class TerminalInferencerBase(InferencerBase):
         (orchestrator-spawned children get cwd = workspace.root).
         """
         super().__attrs_post_init__()
+
+    def _stream_result(self) -> TerminalStreamResult:
+        """The transport's result: this invocation's inside one, else (a bare
+        getter after the call) the compat fields."""
+        frame = frame_for(self)
+        if frame is not None:
+            return frame.get(self._TERMINAL_RESULT) or TerminalStreamResult()
+        return TerminalStreamResult(
+            stdout=self._last_streaming_output,
+            stderr=self._last_streaming_stderr,
+            return_code=self._last_streaming_return_code,
+        )
 
     def _resolve_subprocess_cwd(self, cwd: Optional[str] = None) -> Optional[str]:
         """Return ``cwd`` adapted for the platform's CreateProcess limit.
@@ -99,6 +140,120 @@ class TerminalInferencerBase(InferencerBase):
         if len(absolute) < 240:
             return absolute
         return "\\\\?\\" + absolute
+
+    # === Spawning: every CLI in its own process group ===
+    #
+    # A CLI runs in its own session (``start_new_session``: pgid == its pid),
+    # so the shell, the CLI and everything it spawns (MCP servers, background
+    # shells) are ended at once with one ``killpg``, and the group is
+    # registered in ``process_groups`` until ended, for the reaper to end it
+    # should the host exit first.
+
+    def _popen(
+        self, command: "List[str] | str", **popen_kwargs: Any
+    ) -> subprocess.Popen:
+        """``subprocess.Popen`` of ``command`` (a string runs in a shell) as
+        the leader of its own registered process group; end it with
+        ``_end_process_group``."""
+        process = subprocess.Popen(
+            command,
+            shell=isinstance(command, str),
+            start_new_session=True,
+            **popen_kwargs,
+        )
+        process_groups.register(process.pid)
+        return process
+
+    def _run_subprocess(
+        self,
+        command: "List[str] | str",
+        *,
+        input: Optional[str] = None,
+        timeout: Optional[float] = None,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> subprocess.CompletedProcess:
+        """``subprocess.run(command, input=..., capture_output=True,
+        text=True, timeout=...)`` in the CLI's own process group.
+
+        A timeout or an interruption (``KeyboardInterrupt``, a signal handler
+        raising) ends the CLI's whole tree, where ``subprocess.run`` kills the
+        direct child only (the shell, or the CLI's launcher) and then waits
+        for the pipes the survivors still hold. Whatever the CLI left running
+        once it exited is ended too.
+
+        Raises:
+            subprocess.TimeoutExpired: The tree was killed after ``timeout``.
+        """
+        with self._popen(
+            command,
+            stdin=subprocess.PIPE if input is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            env=env,
+        ) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except subprocess.TimeoutExpired as timed_out:
+                self._kill_process_tree(process)
+                try:
+                    timed_out.stdout, timed_out.stderr = process.communicate(
+                        timeout=_KILLED_PIPE_DRAIN_SECONDS
+                    )
+                except subprocess.TimeoutExpired:
+                    pass
+                raise
+            except BaseException:
+                self._kill_process_tree(process)
+                raise
+            finally:
+                self._end_process_group(process.pid)
+        return subprocess.CompletedProcess(
+            process.args, process.returncode, stdout, stderr
+        )
+
+    @staticmethod
+    def _kill_process_group(pgid: int) -> None:
+        """Send SIGKILL to all processes in the given process group.
+
+        With ``start_new_session=True``, the subprocess's PID equals its
+        PGID, so pass ``process.pid`` directly.  Safe to call after the
+        main process has exited — children retain the PGID even after
+        reparenting to init.
+
+        PGID collision with an unrelated process is impossible while any
+        group member exists: POSIX ``setsid()`` fails with ``EPERM``
+        when a process group with the target PGID is still occupied.
+
+        No-op on Windows (``os.killpg`` is POSIX-only).
+        """
+        if not hasattr(os, "killpg"):
+            return
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:  # gone (ProcessLookupError), or not ours to signal
+            pass
+
+    @classmethod
+    def _end_process_group(cls, pgid: int) -> None:
+        """Kill what is left of a CLI's process group and drop the group from
+        the reaper's registry: its pgid may name another group from now on."""
+        cls._kill_process_group(pgid)
+        process_groups.unregister(pgid)
+
+    @classmethod
+    def _kill_process_tree(cls, process: Any) -> None:
+        """Kill a CLI left before its end (a ``subprocess.Popen`` or an
+        ``asyncio.subprocess.Process``): its whole process group, and the
+        process itself where there are no process groups (Windows)."""
+        cls._kill_process_group(process.pid)
+        if process.returncode is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
 
     @abstractmethod
     def construct_command(self, inference_input: Any, **kwargs) -> "List[str] | str":
@@ -288,17 +443,11 @@ class TerminalInferencerBase(InferencerBase):
         self.log_debug(f"Working directory: {self.effective_cwd}", "WorkingDir")
 
         try:
-            run_kwargs = {}
-            if self.timeout is not None:
-                run_kwargs["timeout"] = self.timeout
-            result = subprocess.run(
+            result = self._run_subprocess(
                 command,
-                shell=use_shell,
+                timeout=self.timeout,
                 cwd=self._resolve_subprocess_cwd(),
                 env=env,
-                capture_output=True,
-                text=True,
-                **run_kwargs,
             )
 
             return {
@@ -355,9 +504,8 @@ class TerminalInferencerBase(InferencerBase):
             Lines of output as they become available.
 
         Note:
-            After iteration completes, the following attributes are set:
-            - _last_streaming_output: All accumulated output as a string
-            - _last_streaming_return_code: The process return code
+            After iteration completes, the call's ``TerminalStreamResult``
+            (accumulated output and return code) is published.
         """
         # Build environment with custom vars
         env = os.environ.copy()
@@ -373,11 +521,11 @@ class TerminalInferencerBase(InferencerBase):
             self.log_debug(f"Streaming command: {' '.join(command)}", "StreamCommand")
 
         accumulated_output: List[str] = []
+        process: Optional[subprocess.Popen] = None
 
         try:
-            process = subprocess.Popen(
+            process = self._popen(
                 command,
-                shell=use_shell,
                 cwd=self._resolve_subprocess_cwd(),
                 env=env,
                 stdout=subprocess.PIPE,
@@ -405,15 +553,34 @@ class TerminalInferencerBase(InferencerBase):
             process.stdout.close()
             process.wait()
 
-            # Store final result for later retrieval
-            self._last_streaming_output = "".join(accumulated_output)
-            self._last_streaming_return_code = process.returncode
+            publish_result(
+                self,
+                self._TERMINAL_RESULT,
+                TerminalStreamResult(
+                    stdout="".join(accumulated_output),
+                    return_code=process.returncode,
+                ),
+            )
 
         except Exception as e:
             self.log_debug(f"Streaming command error: {e}", "StreamError")
-            self._last_streaming_output = "".join(accumulated_output)
-            self._last_streaming_return_code = -1
+            publish_result(
+                self,
+                self._TERMINAL_RESULT,
+                TerminalStreamResult(
+                    stdout="".join(accumulated_output), return_code=-1
+                ),
+            )
             yield f"Error: {str(e)}\n"
+        finally:
+            if process is not None:
+                # Left before the command's end (the consumer closing the
+                # stream, an error), the command would keep running.
+                if process.returncode is None:
+                    self._kill_process_tree(process)
+                    process.stdout.close()
+                    process.wait()
+                self._end_process_group(process.pid)
 
     def _infer_streaming(
         self,
@@ -454,8 +621,9 @@ class TerminalInferencerBase(InferencerBase):
 
             if not pre_result["success"] and self.fail_on_pre_script_error:
                 yield f"Pre-execution script failed: {pre_result.get('error', '')}\n"
-                self._last_streaming_output = ""
-                self._last_streaming_return_code = -1
+                publish_result(
+                    self, self._TERMINAL_RESULT, TerminalStreamResult(return_code=-1)
+                )
                 return
 
         # 2. Construct the command
@@ -540,11 +708,13 @@ class TerminalInferencerBase(InferencerBase):
             pre_result = self._execute_scripts(pre_scripts, script_type="pre")
 
             if not pre_result["success"] and self.fail_on_pre_script_error:
-                return self._wrap_parse_output(self.parse_output(
-                    stdout="",
-                    stderr=f"Pre-execution script failed: {pre_result.get('error', '')}",
-                    return_code=-1,
-                ))
+                return self._wrap_parse_output(
+                    self.parse_output(
+                        stdout="",
+                        stderr=f"Pre-execution script failed: {pre_result.get('error', '')}",
+                        return_code=-1,
+                    )
+                )
 
         # 2. Construct the command
         command = self.construct_command(inference_input, **kwargs)

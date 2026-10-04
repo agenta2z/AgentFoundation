@@ -8,15 +8,15 @@ streaming token display via ``StreamingPanel``.
 All Rich / prompt_toolkit imports live inside method bodies so that
 importing this module does **not** eagerly pull in the libraries.
 """
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Iterable, Optional
 
-from attr import attrs, attrib
-
 from agent_foundation.ui.interactive_base import InteractionFlags
 from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
@@ -32,11 +32,11 @@ class RichTerminalInteractive(RichInteractiveBase):
         response: Any,
         flag: InteractionFlags = InteractionFlags.TurnCompleted,
     ) -> None:
-        from rich.console import Console
-        from rich.panel import Panel
-        from rich.markdown import Markdown
-        from agent_foundation.ui.cli.theme import ThemeManager, COLORS
+        from agent_foundation.ui.cli.theme import COLORS, ThemeManager
         from agent_foundation.ui.input_modes import InputMode
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.panel import Panel
 
         console = Console(theme=ThemeManager.get_theme())
         text = str(response)
@@ -85,8 +85,8 @@ class RichTerminalInteractive(RichInteractiveBase):
 
     def _send_pending_message(self) -> None:
         try:
-            from rich.console import Console
             from agent_foundation.ui.cli.theme import ThemeManager
+            from rich.console import Console
 
             console = Console(theme=ThemeManager.get_theme())
             console.print(f"\n[dim]{self.pending_message}[/dim]\n")
@@ -109,8 +109,8 @@ class RichTerminalInteractive(RichInteractiveBase):
         return ""
 
     def _collect_single_choice(self, mode_cfg):
-        from rich.console import Console
         from agent_foundation.ui.cli.theme import ThemeManager
+        from rich.console import Console
 
         console = Console(theme=ThemeManager.get_theme())
         prompt_text = mode_cfg.prompt or "Choose one:"
@@ -121,7 +121,9 @@ class RichTerminalInteractive(RichInteractiveBase):
             console.print(f"  [cyan]{idx + 1}.[/cyan] {opt.label}{desc}")
 
         if mode_cfg.allow_custom:
-            console.print(f"  [cyan]{len(mode_cfg.options) + 1}.[/cyan] [dim](custom)[/dim]")
+            console.print(
+                f"  [cyan]{len(mode_cfg.options) + 1}.[/cyan] [dim](custom)[/dim]"
+            )
 
         while True:
             raw = input("Select: ").strip()
@@ -144,8 +146,8 @@ class RichTerminalInteractive(RichInteractiveBase):
             console.print("[red]Invalid selection.[/red]")
 
     def _collect_multiple_choice(self, mode_cfg):
-        from rich.console import Console
         from agent_foundation.ui.cli.theme import ThemeManager
+        from rich.console import Console
 
         console = Console(theme=ThemeManager.get_theme())
         prompt_text = mode_cfg.prompt or "Choose one or more (comma-separated):"
@@ -161,7 +163,9 @@ class RichTerminalInteractive(RichInteractiveBase):
         raw = input("Select: ").strip()
         if raw.upper() == "A" and mode_cfg.show_select_all:
             return {
-                "selections": [{"choice_index": i} for i in range(len(mode_cfg.options))]
+                "selections": [
+                    {"choice_index": i} for i in range(len(mode_cfg.options))
+                ]
             }
 
         selections = []
@@ -177,7 +181,9 @@ class RichTerminalInteractive(RichInteractiveBase):
         return {"selections": selections}
 
     def _collect_exact_string(self, mode_cfg) -> str:
-        prompt_text = mode_cfg.prompt or f"Type '{mode_cfg.expected_string}' to confirm: "
+        prompt_text = (
+            mode_cfg.prompt or f"Type '{mode_cfg.expected_string}' to confirm: "
+        )
         return input(prompt_text)
 
     # -- streaming support ----------------------------------------------------
@@ -214,7 +220,9 @@ class RichTerminalInteractive(RichInteractiveBase):
 
     # -- async wrappers -------------------------------------------------------
 
-    async def asend_response(self, response, flag=InteractionFlags.TurnCompleted, **kwargs):
+    async def asend_response(
+        self, response, flag=InteractionFlags.TurnCompleted, **kwargs
+    ):
         """Async wrapper -- offloads to thread since Rich is synchronous."""
         await asyncio.to_thread(self.send_response, response, flag, **kwargs)
 

@@ -1,0 +1,100 @@
+{
+  "calls": [
+    {
+      "active_session_id": null,
+      "cli": [
+        {
+          "argv": [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "max",
+            "--dangerously-skip-permissions"
+          ],
+          "cwd": "<TMP>/ws",
+          "stdin": "turn 1"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "kwargs": {
+            "include_partial_messages": true,
+            "output_format": "stream-json",
+            "use_stdin": true,
+            "verbose": true
+          }
+        }
+      ],
+      "get_streaming_result": {
+        "error": null,
+        "output": "",
+        "raw_output": "",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "claude stderr noise\n",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "live_store": null,
+      "output": "reply to 'turn 1'",
+      "session_backing": null
+    },
+    {
+      "active_session_id": null,
+      "cli": [
+        {
+          "argv": [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "max",
+            "--dangerously-skip-permissions"
+          ],
+          "cwd": "<TMP>/ws",
+          "stdin": "turn 2"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "kwargs": {
+            "include_partial_messages": true,
+            "output_format": "stream-json",
+            "use_stdin": true,
+            "verbose": true
+          }
+        }
+      ],
+      "get_streaming_result": {
+        "error": null,
+        "output": "",
+        "raw_output": "",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "claude stderr noise\n",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "live_store": null,
+      "output": "reply to 'turn 2'",
+      "session_backing": null
+    }
+  ]
+}

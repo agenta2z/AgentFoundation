@@ -13,6 +13,7 @@ NOT in scope (intentionally removed):
   * Reflective base_response_path injection — reverted.
   * LWI dynamic_step_output_paths state channel — reverted.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,7 +22,6 @@ from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.common.inferencers.inferencer_workspace import (
     InferencerWorkspace,
     resolve_canonical_output_path,
@@ -32,7 +32,7 @@ from agent_foundation.common.inferencers.inferencer_workspace import (
 # Helper: build a workspace whose outputs/output.md exists
 # ----------------------------------------------------------------------
 def _make_ws_with_output(tmpdir: str, content: str = "X") -> InferencerWorkspace:
-    ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+    ws = InferencerWorkspace(root=tmpdir)
     ws.ensure_dirs()
     out_path = ws.output_path("output.md")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -42,7 +42,9 @@ def _make_ws_with_output(tmpdir: str, content: str = "X") -> InferencerWorkspace
 
 
 def _make_ws_with_deliverable(tmpdir: str, content: str = "X") -> InferencerWorkspace:
-    ws = InferencerWorkspace(root=tmpdir, use_final_deliverables_folder=True)
+    # Part 2: deliverable_path() targets outputs/ (final_deliverables/ retired), so
+    # this writes to outputs/output.md — same location _make_ws_with_output uses.
+    ws = InferencerWorkspace(root=tmpdir)
     ws.ensure_dirs()
     deliv_path = ws.deliverable_path("output.md")
     os.makedirs(os.path.dirname(deliv_path), exist_ok=True)
@@ -68,7 +70,9 @@ class TestMFDualResolveFlowOutputPath:
         inferencer._workspace = ws
 
         mfi = MagicMock(spec=MultiFlowInferencer)
-        mfi.flow_configs = [{"followup_inferencer": inferencer, "initial_inferencer": None}]
+        mfi.flow_configs = [
+            {"followup_inferencer": inferencer, "initial_inferencer": None}
+        ]
         mfi._resolve_flow_output_path = (
             MultiFlowInferencer._resolve_flow_output_path.__get__(mfi)
         )
@@ -80,7 +84,7 @@ class TestMFDualResolveFlowOutputPath:
             assert f.read() == "FLOW0_DELIV"
 
     def test_mfdual_resolve_flow_output_path_falls_back_to_outputs(self, tmp_path):
-        """Tier 2: outputs/output.md when no deliverable exists."""
+        """Resolves outputs/output.md (Part 2: outputs/ IS the deliverable set)."""
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
             MultiFlowInferencer,
         )
@@ -90,7 +94,9 @@ class TestMFDualResolveFlowOutputPath:
         inferencer._workspace = ws
 
         mfi = MagicMock(spec=MultiFlowInferencer)
-        mfi.flow_configs = [{"followup_inferencer": inferencer, "initial_inferencer": None}]
+        mfi.flow_configs = [
+            {"followup_inferencer": inferencer, "initial_inferencer": None}
+        ]
         mfi._resolve_flow_output_path = (
             MultiFlowInferencer._resolve_flow_output_path.__get__(mfi)
         )

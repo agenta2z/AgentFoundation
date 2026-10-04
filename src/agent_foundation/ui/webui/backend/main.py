@@ -180,9 +180,7 @@ app.include_router(config_router, prefix="/api", tags=["config"])
 # correctly. The routes themselves are lightweight (no heavy deps); they access
 # services from app.state at request time, which is initialized in lifespan().
 # In demo mode these routes return 503 ("Session store not available").
-from chatbot_demo_react.backend.routes.agent_routes import (
-    router as agent_router,
-)
+from chatbot_demo_react.backend.routes.agent_routes import router as agent_router
 from chatbot_demo_react.backend.routes.agent_websocket_routes import (
     router as agent_ws_router,
 )
@@ -196,9 +194,7 @@ from chatbot_demo_react.backend.routes.workspace_routes import (
 app.include_router(agent_ws_router, prefix="/ws", tags=["agent_websocket"])
 app.include_router(agent_router, prefix="/api/agent", tags=["agent"])
 app.include_router(workspace_router, prefix="/api/workspace", tags=["workspace"])
-app.include_router(
-    session_store_router, prefix="/api/sessions", tags=["session_store"]
-)
+app.include_router(session_store_router, prefix="/api/sessions", tags=["session_store"])
 
 
 # Health check endpoint

@@ -30,32 +30,30 @@ from agent_foundation.knowledge.ingestion.chunker import (
     MarkdownChunker,
 )
 from agent_foundation.knowledge.ingestion.debug_session import IngestionDebugSession
-from agent_foundation.knowledge.prompt_templates import get_structuring_prompt
-from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-    KnowledgeType,
-)
 from agent_foundation.knowledge.ingestion.deduplicator import (
     DedupConfig,
     ThreeTierDeduplicator,
-)
-from agent_foundation.knowledge.ingestion.space_classifier import (
-    SpaceClassifier,
 )
 from agent_foundation.knowledge.ingestion.merge_strategy import (
     MergeStrategyConfig,
     MergeStrategyManager,
 )
+from agent_foundation.knowledge.ingestion.space_classifier import SpaceClassifier
 from agent_foundation.knowledge.ingestion.validator import (
     KnowledgeValidator,
     ValidationConfig,
 )
+from agent_foundation.knowledge.prompt_templates import get_structuring_prompt
+from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.enums import (
     DedupAction,
     MergeAction,
     MergeType,
+)
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.models.results import MergeCandidate
 
@@ -288,8 +286,8 @@ class DocumentIngester:
                 piece["source"] = source_file
 
         # Step 4.5: Apply enhancements (dedup, validation, merge, space classification)
-        merged, enhancement_counts, pieces_to_deactivate = (
-            self._apply_enhancements(merged, user_spaces=spaces)
+        merged, enhancement_counts, pieces_to_deactivate = self._apply_enhancements(
+            merged, user_spaces=spaces
         )
 
         if enhancement_counts.get("updated"):
@@ -387,7 +385,7 @@ class DocumentIngester:
         if text.startswith("```"):
             first_newline = text.find("\n")
             if first_newline != -1:
-                text = text[first_newline + 1:]
+                text = text[first_newline + 1 :]
             if text.rstrip().endswith("```"):
                 text = text.rstrip()[:-3].rstrip()
 
@@ -527,9 +525,7 @@ class DocumentIngester:
                 elif dedup_result.action == DedupAction.UPDATE:
                     if dedup_result.existing_piece_id:
                         piece.supersedes = dedup_result.existing_piece_id
-                        pieces_to_deactivate.append(
-                            dedup_result.existing_piece_id
-                        )
+                        pieces_to_deactivate.append(dedup_result.existing_piece_id)
                         piece.version = 2
                         counts["updated"] += 1
 
@@ -607,14 +603,10 @@ class DocumentIngester:
                 existing = existing_pieces.get(piece_id)
                 if existing:
                     existing.is_active = False
-                    existing.updated_at = (
-                        datetime.now(timezone.utc).isoformat()
-                    )
+                    existing.updated_at = datetime.now(timezone.utc).isoformat()
                     kb.piece_store.update(existing)
             except Exception as e:
-                logger.warning(
-                    "Failed to deactivate piece %s: %s", piece_id, e
-                )
+                logger.warning("Failed to deactivate piece %s: %s", piece_id, e)
 
         return counts
 

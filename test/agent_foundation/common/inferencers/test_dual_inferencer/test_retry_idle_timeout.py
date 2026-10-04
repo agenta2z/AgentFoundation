@@ -1,5 +1,3 @@
-
-
 """Manual test script for retry with incremental idle timeout.
 
 Tests the execute_with_retry mechanism with configurable inferencers:
@@ -88,8 +86,7 @@ def make_retry_callback(inference_args: dict, inferencer_name: str):
         new_timeout = current * 2
         target["idle_timeout_seconds"] = new_timeout
         logger.info(
-            "[%s] on_retry_callback: attempt=%d, %s: %s — "
-            "idle_timeout_seconds %d → %d",
+            "[%s] on_retry_callback: attempt=%d, %s: %s — idle_timeout_seconds %d → %d",
             inferencer_name,
             attempt + 1,
             type(exception).__name__,
@@ -328,7 +325,9 @@ async def run_two_phase_test(
         )
         result["phase1_success"] = True
         result["phase1_response"] = str(phase1_response)
-        result["phase1_session_id"] = getattr(inferencer, "active_session_id", None) or getattr(inferencer, "_session_id", None)
+        result["phase1_session_id"] = getattr(
+            inferencer, "active_session_id", None
+        ) or getattr(inferencer, "_session_id", None)
         logger.info(f"Phase 1 completed successfully!")
         logger.info(f"Session ID: {result['phase1_session_id']}")
         logger.info(f"Response (200 chars): {str(phase1_response)[:200]}...")
@@ -390,19 +389,33 @@ async def run_two_phase_test(
         else:
             logger.warning("❌ Agent did NOT mention the secret number (42)")
             # Check if agent at least acknowledged there was a previous conversation
-            if any(phrase in response_text for phrase in [
-                "previous", "earlier", "before", "remember", "mentioned",
-                "secret", "number", "told", "said"
-            ]):
+            if any(
+                phrase in response_text
+                for phrase in [
+                    "previous",
+                    "earlier",
+                    "before",
+                    "remember",
+                    "mentioned",
+                    "secret",
+                    "number",
+                    "told",
+                    "said",
+                ]
+            ):
                 result["session_aware"] = True
-                logger.info("⚠️ Agent seems session-aware but didn't recall exact number")
+                logger.info(
+                    "⚠️ Agent seems session-aware but didn't recall exact number"
+                )
             else:
                 logger.warning("❌ Agent shows no session awareness")
 
     except Exception as e:
         result["phase2_error"] = f"{type(e).__name__}: {str(e)[:500]}"
         result["phase2_retries"] = retry_count[0]
-        logger.error(f"Phase 2 failed after {retry_count[0]} retries: {result['phase2_error']}")
+        logger.error(
+            f"Phase 2 failed after {retry_count[0]} retries: {result['phase2_error']}"
+        )
 
     return result
 
@@ -604,9 +617,7 @@ def main(
     # 3. Set up workspace
     if workspace is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        workspace_path = Path(
-            f"./_workspace/test_retry_{inferencer_type}_{timestamp}"
-        )
+        workspace_path = Path(f"./_workspace/test_retry_{inferencer_type}_{timestamp}")
     else:
         workspace_path = Path(workspace)
 
@@ -679,17 +690,13 @@ def main(
         "retry_prompt_mode": retry_prompt_mode,
         "timestamp": datetime.now().isoformat(),
     }
-    (paths["results_dir"] / "config.json").write_text(
-        json.dumps(config, indent=2)
-    )
+    (paths["results_dir"] / "config.json").write_text(json.dumps(config, indent=2))
 
     # 9. Run inference with retry
     logger.info("Starting inference with retry (idle_timeout doubling)...")
     logger.info(
         "Timeout schedule: %s",
-        " → ".join(
-            str(initial_idle_timeout * (2**i)) for i in range(max_retry)
-        ),
+        " → ".join(str(initial_idle_timeout * (2**i)) for i in range(max_retry)),
     )
 
     result = {
@@ -734,14 +741,10 @@ def main(
             )
             result["success"] = True
             result["response"] = str(response)
-            logger.info(
-                "Inference succeeded! Response length: %d", len(str(response))
-            )
+            logger.info("Inference succeeded! Response length: %d", len(str(response)))
         except Exception as e:
             result["error"] = f"{type(e).__name__}: {str(e)[:500]}"
-            logger.error(
-                "Inference failed after all retries: %s", result["error"]
-            )
+            logger.error("Inference failed after all retries: %s", result["error"])
 
     asyncio.run(run())
 

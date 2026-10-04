@@ -17,6 +17,7 @@ from typing import Optional
 
 # ─── Transport mode enum ───────────────────────────────────────────────────────
 
+
 class OpenClawMode(str, Enum):
     """Transport mode for ``OpenClawInferencer``.
 
@@ -272,7 +273,9 @@ def parse_cli_json_output(
     clean_stdout = strip_ansi_codes(strip_plugin_warnings(stdout))
     clean_stderr = strip_ansi_codes(strip_plugin_warnings(stderr))
 
-    data = extract_json_from_output(clean_stdout) or extract_json_from_output(clean_stderr)
+    data = extract_json_from_output(clean_stdout) or extract_json_from_output(
+        clean_stderr
+    )
     raw_output = stdout if stdout.strip() else stderr
 
     if data:
@@ -288,7 +291,8 @@ def parse_cli_json_output(
             "output": output_text,
             "raw_output": raw_output,
             "return_code": return_code,
-            "success": return_code == 0 and not data.get("meta", {}).get("aborted", False),
+            "success": return_code == 0
+            and not data.get("meta", {}).get("aborted", False),
             "session_id": agent_meta.get("sessionId"),
             "model": agent_meta.get("model"),
             "usage": agent_meta.get("usage", {}),

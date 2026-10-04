@@ -72,7 +72,9 @@ def send_and_print(inferencer, message, label=""):
     # Truncate long responses for readability
     display = output if len(output) < 200 else output[:200] + "..."
     print(f"  Claude: {display}")
-    print(f"  [{elapsed:.1f}s | session={session_id[:12] + '...' if session_id else 'none'}]")
+    print(
+        f"  [{elapsed:.1f}s | session={session_id[:12] + '...' if session_id else 'none'}]"
+    )
     print()
 
     return output, session_id
@@ -83,12 +85,14 @@ def main():
         description="Claude Code CLI — Session Resume & Isolation Demo"
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="sonnet",
         help="Model name/alias (default: sonnet)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default="/tmp",
         help="Working directory for Claude Code CLI (default: /tmp)",
     )
@@ -176,7 +180,7 @@ def main():
     response_c, _ = send_and_print(
         inf_c,
         "What is the secret word? Reply with just the word if you know it, "
-        'or say "I don\'t know any secret word" if you don\'t.',
+        "or say \"I don't know any secret word\" if you don't.",
         label="Session C — New (no prior context)",
     )
 
@@ -204,11 +208,21 @@ def main():
     # Check Session C (should not know either secret)
     c_no_secrets = "banana" not in response_c_lower and "dragon" not in response_c_lower
 
-    print(f"  Session A recall 'banana':     {'✅ PASS' if a_has_banana else '❌ FAIL'}")
-    print(f"  Session A no cross-leak:       {'✅ PASS' if a_no_dragon else '❌ FAIL (leaked dragon)'}")
-    print(f"  Session B recall 'dragon':     {'✅ PASS' if b_has_dragon else '❌ FAIL'}")
-    print(f"  Session B no cross-leak:       {'✅ PASS' if b_no_banana else '❌ FAIL (leaked banana)'}")
-    print(f"  Session C no secret knowledge: {'✅ PASS' if c_no_secrets else '⚠️  UNEXPECTED (knew a secret)'}")
+    print(
+        f"  Session A recall 'banana':     {'✅ PASS' if a_has_banana else '❌ FAIL'}"
+    )
+    print(
+        f"  Session A no cross-leak:       {'✅ PASS' if a_no_dragon else '❌ FAIL (leaked dragon)'}"
+    )
+    print(
+        f"  Session B recall 'dragon':     {'✅ PASS' if b_has_dragon else '❌ FAIL'}"
+    )
+    print(
+        f"  Session B no cross-leak:       {'✅ PASS' if b_no_banana else '❌ FAIL (leaked banana)'}"
+    )
+    print(
+        f"  Session C no secret knowledge: {'✅ PASS' if c_no_secrets else '⚠️  UNEXPECTED (knew a secret)'}"
+    )
     print()
 
     all_pass = a_pass and b_pass and c_no_secrets
@@ -217,7 +231,9 @@ def main():
     else:
         print("  ⚠️  Some checks failed — see details above.")
         if not a_pass or not b_pass:
-            print("     Session resume may not be working with this Claude Code version.")
+            print(
+                "     Session resume may not be working with this Claude Code version."
+            )
 
     print()
     print(f"  Session A ID: {session_id_a}")

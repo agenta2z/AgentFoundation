@@ -65,6 +65,14 @@ register_alias(
         ".flow_node_adapter.ConversationalFlowNodeAdapter",
     ],
 )
+# The vendor agent (Claude Code / Devmate / Codex / Metamate) owns the
+# conversation; AgentFoundation contributes instructions, SOP state and tools.
+register_alias(
+    "ConversationalNative",
+    f"{_P}.common.inferencers.agentic_inferencers.conversational_native"
+    ".native_inferencer.NativeConversationalInferencer",
+    "inferencer",
+)
 register_alias(
     "Dual",
     f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer.DualInferencer",
@@ -95,6 +103,35 @@ register_alias(
     f"{_P}.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer.RovoChatInferencer",
     "inferencer",
 )
+# MetaMate + Devmate — explicit CLI vs SDK variants (mirrors ClaudeCode*/Codex*
+# above). All four underlying classes exist; previously only bare ``Metamate``
+# (→ SDK) and ``Devmate`` (→ CLI) were registered — ambiguous AND asymmetric
+# (bare names mapped to OPPOSITE variants). Prefer these explicit names in
+# configs and ``*__FLOW_INFERENCERS`` env vars.
+register_alias(
+    "MetamateCLI",
+    f"{_P}.common.inferencers.agentic_inferencers.external.metamate.metamate_cli_inferencer.MetamateCliInferencer",
+    "inferencer",
+)
+register_alias(
+    "MetamateSDK",
+    f"{_P}.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer.MetamateSDKInferencer",
+    "inferencer",
+)
+register_alias(
+    "DevmateCLI",
+    f"{_P}.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer.DevmateCliInferencer",
+    "inferencer",
+)
+register_alias(
+    "DevmateSDK",
+    f"{_P}.common.inferencers.agentic_inferencers.external.devmate.devmate_sdk_inferencer.DevmateSDKInferencer",
+    "inferencer",
+)
+# DEPRECATED bare aliases — kept for backward-compat with existing configs/env
+# vars; prefer the explicit CLI/SDK names above. Historical asymmetry preserved:
+# bare ``Metamate`` → SDK, bare ``Devmate`` → CLI. Safe to delete once all
+# usages migrate to the explicit names.
 register_alias(
     "Metamate",
     f"{_P}.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer.MetamateSDKInferencer",
@@ -103,6 +140,14 @@ register_alias(
 register_alias(
     "Devmate",
     f"{_P}.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer.DevmateCliInferencer",
+    "inferencer",
+)
+# Wraps a plain callable as a first-class InferencerBase node (the reverse of
+# ``@agentic_function``): pass ``func=<callable>`` to drop deterministic code into
+# a topology wherever an inferencer is expected.
+register_alias(
+    "Function",
+    f"{_P}.common.inferencers.function_inferencer.FunctionInferencer",
     "inferencer",
 )
 
@@ -153,6 +198,18 @@ register_alias(
 register_alias(
     "RankingParser",
     f"{_P}.common.inferencers.flow_parsers.make_ranking_parser",
+    "config",
+)
+
+# --- Agentic-function parsers (imported and used DIRECTLY, not factory-called) ---
+# Unlike the MultiFlow ``make_*`` parsers above, these dotted paths point at the
+# parser callable itself: ``@agentic_function``'s ``parser=`` resolves an alias via
+# ``resolve_parser`` → ``_import_symbol`` and calls the imported symbol directly (no
+# no-arg factory step). ``CodeSearchScopeParser`` maps a validated ``scope_decision``
+# dict to a ``CodeSearchScope`` (the Metamate code scope judge's stage-2 composition).
+register_alias(
+    "CodeSearchScopeParser",
+    f"{_P}.common.inferencers.agentic_inferencers.external.metamate.code_scope_judge.code_search_scope_parser",
     "config",
 )
 

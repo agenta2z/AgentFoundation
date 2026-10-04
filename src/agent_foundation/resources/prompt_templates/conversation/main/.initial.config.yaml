@@ -13,3 +13,4 @@ rendering:
     - SOPDescription
     - SOPStatus
     - SOPNextStepGuidance
+    - SOPPhases

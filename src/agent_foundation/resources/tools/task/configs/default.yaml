@@ -67,16 +67,20 @@ _params:
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
   num_flows: ${len:${_params.flow_inferencers}}   # DERIVED from list length so TASK__FLOW_INFERENCERS drives the count without mismatch
+  flow_bta_inferencers: [null]       # per-flow `bta_inferencer` fan-out for the planner's flow leaves, positional like flow_inferencers; [null] = off. Required by the imported breakdown-multiflow-plan.yaml (`${_params.flow_bta_inferencers}`), which documents enabling; its templates resolve here under `planner_inferencer._params`, e.g. TASK__FLOW_BTA_INFERENCERS='[null,"${planner_inferencer._params.metamate_fan_out_roles}"]'.
+  flow_followup_bta_inferencers: ${_params.flow_bta_inferencers}   # followup-turn twin; TASK__FLOW_FOLLOWUP_BTA_INFERENCERS=null keeps followup turns unfanned. Required by the imported breakdown-multiflow-plan.yaml.
   plan_max_breakdown: 3              # planner BTA: number of sub-planning subtasks
   exec_max_breakdown: 4              # executor BTA: number of execution subtasks
   flow_max_dynamic_steps: 3          # per-flow MFDual followup iterations cap
+  min_successful_flows: 0            # K-of-N MFDual flow quorum: 0 = no quorum (any flow failure aborts the worker); >0 tolerates (num_flows - min_successful_flows) failures. Override via TASK__MIN_SUCCESSFUL_FLOWS. Required by breakdown-multiflow-plan.yaml:166 (`${_params.min_successful_flows}`) so configs that compose against default.yaml's `_params` block don't hit an OmegaConf interpolation error at load time.
+  min_successful_workers: 0          # BTA worker quorum sibling of min_successful_flows: 0 = disabled (framework default, breakdown_then_aggregate_inferencer.py attrib default=0). Override via TASK__MIN_SUCCESSFUL_WORKERS. Required by the imported breakdown-multiflow-plan.yaml (`${_params.min_successful_workers}`) so configs composing against default.yaml's `_params` block don't hit an OmegaConf interpolation error at load time.
   consensus_max_iterations: 3        # cheap-mode default for ALL Dual review-and-fix loops
   reviewer_strategy: all_non_winners  # MFDual reviewer rule (runner_up | all_non_winners | configured)
   fixer_strategy: winner              # MFDual fixer rule (winner | base)
   enable_deep_mode: true              # template mode: deep investigation + critical thinking
   enable_elegant_mode: true           # template mode: proper/elegant solutions, not hacky
   guardrail_model_tier: default       # model tier for the output guardrail judge (max/default/lite)
-  aggregator_max_retry: 3             # aggregator retry budget (guardrail RESTART consumes retries)
+  aggregator_max_retry: 3             # aggregator retry budget (guardrail RETRY/UPDATE consumes retries)
 
 # ---------------------------------------------------------------------------
 # GLOBAL CASCADES
@@ -109,7 +113,6 @@ _target_: PTI
 workspace:
   _target_: InferencerWorkspace
   root: ${_params.workspace_root}
-  use_final_deliverables_folder: true
 templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
 
 # ---- PLAN STAGE: imported from breakdown-multiflow-plan.yaml ----
@@ -149,7 +152,6 @@ executor_inferencer:
 
     aggregator_inferencer:
       _target_: ${_params.default_inferencer}
-      output_is_deliverable: true
 
   review_inferencer:
     _target_: ${_params.default_inferencer}
@@ -158,4 +160,3 @@ executor_inferencer:
   # NOT a full BTA re-implementation (that would be ~10-20× the cost).
   fixer_inferencer:
     _target_: ${_params.default_inferencer}
-    output_is_deliverable: true

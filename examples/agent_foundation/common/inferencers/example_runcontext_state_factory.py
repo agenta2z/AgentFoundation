@@ -9,13 +9,9 @@ from __future__ import annotations
 
 import asyncio
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.run_context import (
-    BTAState,
-    RunContext,
-)
+from agent_foundation.common.inferencers.run_context import BTAState, RunContext
+from attr import attrs
 
 
 @attrs

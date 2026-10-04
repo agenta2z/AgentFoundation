@@ -32,7 +32,14 @@ def _rj(approved, loc="f:1"):
         "severity": "COSMETIC",
         "issues": []
         if approved
-        else [{"severity": "COSMETIC", "category": "x", "description": "d", "location": loc}],
+        else [
+            {
+                "severity": "COSMETIC",
+                "category": "x",
+                "description": "d",
+                "location": loc,
+            }
+        ],
         "reasoning": "r",
     }
     return f"```json\n{json.dumps(review, indent=2)}\n```"
@@ -68,7 +75,8 @@ class MultiReviewerE2E(unittest.TestCase):
             review_inferencer=review,
             num_reviewers=2,
             consensus_config=ConsensusConfig(
-                max_iterations=3, max_consensus_attempts=1,
+                max_iterations=3,
+                max_consensus_attempts=1,
                 consensus_threshold=Severity.COSMETIC,
             ),
         )
@@ -84,7 +92,8 @@ class MultiReviewerE2E(unittest.TestCase):
             review_inferencer=r0,
             reviewers=[r1],
             consensus_config=ConsensusConfig(
-                max_iterations=3, max_consensus_attempts=1,
+                max_iterations=3,
+                max_consensus_attempts=1,
                 consensus_threshold=Severity.COSMETIC,
             ),
         )
@@ -99,7 +108,8 @@ class MultiReviewerE2E(unittest.TestCase):
             base_inferencer=_mk("proposal"),
             review_inferencer=review,
             consensus_config=ConsensusConfig(
-                max_iterations=3, max_consensus_attempts=1,
+                max_iterations=3,
+                max_consensus_attempts=1,
                 consensus_threshold=Severity.COSMETIC,
             ),
         )

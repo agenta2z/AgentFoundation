@@ -8,11 +8,12 @@ deliberate, documented carve-outs keep a small, fixed set of fields on ``self``:
     the reviewer/fixer *reference* picks on MFDual). They deliberately OUTLIVE the
     call for POST-call readers (``get_winner_flow_idx()`` + ~10 tests). Routing them
     through a finally-cleared context would return ``None`` and break dispatch.
-  * **§2.12 option-(a) — workspace + deliverable flags stay instance-backed** under a
-    context (``switch_role``). They are read POST-dispatch on the instance (e.g.
-    MFDual's alias-dispatched fixer asserted via ``fixer.output_is_deliverable``);
-    the ``_workspace`` getter is intentionally instance-pure. Proven by
-    ``test_alias_dispatched_fixer_inherits_output_is_deliverable``.
+  * **§2.12 option-(a) — workspace stays instance-backed** under a context
+    (``switch_role``). The ``_workspace`` getter is intentionally instance-pure,
+    read POST-dispatch on the instance. (Part 2 RETIRED the deliverable flags
+    ``output_is_deliverable`` / ``is_deliverable_boundary`` — role transitions now
+    carry only workspace + session state; promotion is role-based via
+    ``promote_child``.)
 
 So the *correct* gate is **purity modulo the documented carve-outs**: exercise each
 per-run mutation site under an active context and assert the instance-``__dict__``
@@ -22,19 +23,18 @@ carve-outs explicitly — converting the recurring "is M7 complete?" audit into 
 objective, self-documenting test.
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     enter_run,
     exit_run,
+    RunContext,
 )
 from agent_foundation.common.inferencers.run_context.purity import purity_snapshot
+from attr import attrs
 
 
 @attrs(slots=False)
@@ -43,78 +43,75 @@ class _Leaf(InferencerBase):
         return x
 
 
-# --- §2.12 option-(a): switch_role's deliberate instance-backed carve-outs --------
-# Each entry is read POST-dispatch on the instance (option-(a)) or is workspace-derived
-# state reconfigured by the _workspace setter cascade (§2.12). NOTHING ELSE may mutate.
-_ROLE_CARVEOUTS = frozenset({
-    "output_is_deliverable",          # §2.12 option-(a): post-call reader
-    "is_deliverable_boundary",        # §2.12 option-(a): post-call reader
-    "_role_history",                  # audit trail (deliberate, never read for dispatch)
-    "_InferencerBase__workspace",     # §2.12 option-(a): workspace backing (getter is ctx-aware)
-    "logger",                         # workspace-DERIVED (reconfigured by the setter cascade)
-    "_logger_awaiting_workspace",     # workspace-DERIVED
-    "_resolved_logger_configs",       # workspace-DERIVED
-    "_ws_log_relpaths",               # workspace-DERIVED: static {logger: relpath} tag (always "logs/session.jsonl")
-    "_pending_role_changes",          # transient template-layer stash, cleared in-method
-    "_session_id",                    # reset_session (Tier-3-aware; legacy backing)
-})
+# --- switch_role writes nothing onto self under a host ctx (plan v8 §5.9) ---------
+# The workspace is published to the role ctx, the session reset goes to the
+# branch's slot, the template attrs to the node's RoleState and the audit entry to
+# the node's provenance. With no ctx, the instance-backed workspace / audit trail
+# apply as before. Part 2: the deliverable flags (output_is_deliverable /
+# is_deliverable_boundary) are RETIRED — switch_role no longer accepts them.
 
 # --- D6: MultiFlow dispatch-state deliberately stays on the instance --------------
-_DISPATCH_CARVEOUTS = frozenset({
-    "_last_winner_idx",
-    "_last_reviewer_alias",
-    "_last_fixer_alias",
-    "_last_ranking",
-})
+_DISPATCH_CARVEOUTS = frozenset(
+    {
+        "_last_winner_idx",
+        "_last_reviewer_alias",
+        "_last_fixer_alias",
+        "_last_ranking",
+    }
+)
 
 # --- §2.5: MFDual reviewer/fixer *reference* picks are deliberate dispatch-state ---
 # ("reviewer/fixer reference picks already safe" — read post-call; the full
 # shared-instance model was dropped as over-engineering, D4). The reviewers panel is
 # populated the same way (reviewer_match_all_non_winners).
-_MFDUAL_DISPATCH_CARVEOUTS = frozenset({
-    "review_inferencer",
-    "fixer_inferencer",
-    "reviewers",
-    "_current_round_ws",
-})
+_MFDUAL_DISPATCH_CARVEOUTS = frozenset(
+    {
+        "review_inferencer",
+        "fixer_inferencer",
+        "reviewers",
+        "_current_round_ws",
+    }
+)
 
 
 def _delta_keys(holder):
     d = holder[0]
-    return set(d.added) | set(d.changed)
+    return set(d.added) | set(d.changed) | set(d.removed)
 
 
-def test_switch_role_self_mutation_is_confined_to_documented_carveouts():
-    """Under a context, switch_role mutates ONLY the §2.12 option-(a) carve-outs —
-    no orphan per-run field leaks onto self."""
+def test_switch_role_under_a_host_ctx_writes_nothing_onto_self():
+    """Under a host ctx, switch_role publishes the workspace to the role ctx and
+    records its audit entry in the node's provenance; self is untouched."""
     leaf = _Leaf()
+    role_ws = InferencerWorkspace(root="/tmp/pg/review")
     root = RunContext.root(workspace=InferencerWorkspace(root="/tmp/pg"))
     tok = enter_run(root)
     try:
         with purity_snapshot(leaf) as h:
-            leaf.switch_role(
-                "reviewer",
-                workspace=InferencerWorkspace(root="/tmp/pg/review"),
-                output_is_deliverable=True,
-                is_deliverable_boundary=True,
-            )
+            leaf.switch_role("reviewer", workspace=role_ws)
+        assert leaf._workspace is role_ws
     finally:
         exit_run(tok)
-    leaked = _delta_keys(h) - _ROLE_CARVEOUTS
-    assert not leaked, f"switch_role leaked non-carveout per-run fields: {sorted(leaked)}"
+    assert _delta_keys(h) == set()
+    (entry,) = root.store.peek("/").provenance
+    assert (entry["event"], entry["to_role"], entry["changed"]) == (
+        "switch_role",
+        "reviewer",
+        ["workspace"],
+    )
 
 
-def test_switch_role_without_workspace_touches_only_flags_and_audit():
-    """The minimal carve-out: with no workspace, only the flags + audit trail change."""
+def test_switch_role_without_a_ctx_keeps_the_instance_audit_trail():
+    """With no ctx, the workspace setter and the ``_role_history`` audit apply."""
     leaf = _Leaf()
-    root = RunContext.root(workspace=None)
-    tok = enter_run(root)
-    try:
-        with purity_snapshot(leaf) as h:
-            leaf.switch_role("reviewer", output_is_deliverable=True)
-    finally:
-        exit_run(tok)
-    assert _delta_keys(h) == {"output_is_deliverable", "_role_history"}
+    role_ws = InferencerWorkspace(root="/tmp/pg/review")
+    leaf.switch_role("reviewer", workspace=role_ws)
+    assert leaf._workspace is role_ws
+    (entry,) = leaf._role_history
+    assert (entry["to_role"], entry["changes"]) == (
+        "reviewer",
+        {"workspace": "/tmp/pg/review"},
+    )
 
 
 def test_multiflow_dispatch_state_is_confined_to_d6_carveouts():
@@ -174,10 +171,14 @@ def test_mfdual_reviewer_match_all_non_winners_dispatch_is_confined():
         exit_run(tok)
     # FULL purity: the reference picks did NOT mutate the shared instance (they live in
     # ctx scratch) — so a concurrent run on the same instance cannot clobber them.
-    assert not mutated, f"MFDual dispatch leaked onto the shared instance: {sorted(mutated)}"
+    assert not mutated, (
+        f"MFDual dispatch leaked onto the shared instance: {sorted(mutated)}"
+    )
     # and the instance attributes are untouched (still the construction definitions)
-    assert d.review_inferencer is None       # was never configured; resolution didn't touch self
-    assert d.reviewers is None               # ditto
+    assert (
+        d.review_inferencer is None
+    )  # was never configured; resolution didn't touch self
+    assert d.reviewers is None  # ditto
 
 
 def test_mfdual_concurrent_dispatch_role_isolation():
@@ -243,5 +244,6 @@ def test_gate_actually_catches_an_unexpected_orphan_field():
             leaf.__dict__["_some_new_orphan_counter"] = 7  # simulate a missed field
     finally:
         exit_run(tok)
-    leaked = _delta_keys(h) - _ROLE_CARVEOUTS
-    assert leaked == {"_some_new_orphan_counter"}  # gate sees it -> would fail a real run
+    assert _delta_keys(h) == {
+        "_some_new_orphan_counter"
+    }  # gate sees it -> would fail a real run

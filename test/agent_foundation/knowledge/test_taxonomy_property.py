@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 11.3, 11.4**
 """
+
 import sys
 from pathlib import Path
 
@@ -20,8 +21,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.ingestion.taxonomy import (
     DOMAIN_TAXONOMY,
     format_taxonomy_for_prompt,
@@ -29,6 +28,7 @@ from agent_foundation.knowledge.ingestion.taxonomy import (
     get_domain_tags,
     validate_domain,
 )
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────

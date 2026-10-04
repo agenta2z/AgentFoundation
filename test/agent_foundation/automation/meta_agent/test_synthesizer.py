@@ -8,7 +8,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
@@ -18,7 +17,10 @@ from agent_foundation.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
+from agent_foundation.automation.meta_agent.synthesizer import (
+    GraphSynthesizer,
+    RuleBasedSynthesizer,
+)
 from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
@@ -28,6 +30,7 @@ from agent_foundation.automation.meta_agent.target_converter import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _step(action_type: str, target=None, args=None, **kwargs) -> TraceStep:
     return TraceStep(action_type=action_type, target=target, args=args, **kwargs)
@@ -77,14 +80,19 @@ def _synthesizer(**kwargs):
 # Deterministic step synthesis  (Requirement 6.1)
 # ---------------------------------------------------------------------------
 
+
 class TestDeterministicStep:
     """A single deterministic step produces a standard action in the graph."""
 
     def test_single_deterministic_step(self):
         """One deterministic click step → one action in the graph."""
-        pos = _pos(0, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target="btn-submit"),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target="btn-submit"),
+            },
+        )
         patterns = _empty_patterns(
             deterministic_steps=[pos],
             step_order=[0],
@@ -102,12 +110,18 @@ class TestDeterministicStep:
 
     def test_deterministic_step_with_target_spec(self):
         """Deterministic step with TargetSpecWithFallback target is converted."""
-        target = TargetSpecWithFallback(strategies=[
-            TargetSpec(strategy="id", value="login-btn"),
-        ])
-        pos = _pos(0, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target=target),
-        })
+        target = TargetSpecWithFallback(
+            strategies=[
+                TargetSpec(strategy="id", value="login-btn"),
+            ]
+        )
+        pos = _pos(
+            0,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target=target),
+            },
+        )
         patterns = _empty_patterns(
             deterministic_steps=[pos],
             step_order=[0],
@@ -127,14 +141,19 @@ class TestDeterministicStep:
 # Parameterizable step synthesis  (Requirement 6.2)
 # ---------------------------------------------------------------------------
 
+
 class TestParameterizableStep:
     """Parameterizable steps produce actions with template variable placeholders."""
 
     def test_parameterizable_step_with_template_vars(self):
         """A parameterizable input_text step gets {search_query} placeholder."""
-        pos = _pos(0, AlignmentType.PARAMETERIZABLE, {
-            "t1": _step("input_text", target="search-box", args={"text": "hello"}),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.PARAMETERIZABLE,
+            {
+                "t1": _step("input_text", target="search-box", args={"text": "hello"}),
+            },
+        )
         info = ParameterizableInfo(
             variable_args={"text": "search_query"},
             constant_args={"delay": 100},
@@ -156,9 +175,13 @@ class TestParameterizableStep:
 
     def test_template_variables_in_report(self):
         """Template variable names appear in the SynthesisReport."""
-        pos = _pos(0, AlignmentType.PARAMETERIZABLE, {
-            "t1": _step("input_text", target="field", args={"text": "x"}),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.PARAMETERIZABLE,
+            {
+                "t1": _step("input_text", target="field", args={"text": "x"}),
+            },
+        )
         info = ParameterizableInfo(
             variable_args={"text": "user_name"},
             constant_args={},
@@ -178,15 +201,20 @@ class TestParameterizableStep:
 # Variable step synthesis  (Requirement 6.3)
 # ---------------------------------------------------------------------------
 
+
 class TestVariableStep:
     """Variable steps produce Agent Node actions."""
 
     def test_variable_step_creates_agent_node(self):
         """A variable step is synthesized as an agent action type."""
-        pos = _pos(0, AlignmentType.VARIABLE, {
-            "t1": _step("click", metadata={"variants": {"click": 2, "scroll": 1}}),
-            "t2": _step("scroll"),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.VARIABLE,
+            {
+                "t1": _step("click", metadata={"variants": {"click": 2, "scroll": 1}}),
+                "t2": _step("scroll"),
+            },
+        )
         patterns = _empty_patterns(
             variable_steps=[pos],
             step_order=[0],
@@ -202,9 +230,15 @@ class TestVariableStep:
 
     def test_variable_step_description_includes_variants(self):
         """The agent node target describes observed variants."""
-        pos = _pos(0, AlignmentType.VARIABLE, {
-            "t1": _step("click", metadata={"variants": {"click": 3, "input_text": 1}}),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.VARIABLE,
+            {
+                "t1": _step(
+                    "click", metadata={"variants": {"click": 3, "input_text": 1}}
+                ),
+            },
+        )
         patterns = _empty_patterns(
             variable_steps=[pos],
             step_order=[0],
@@ -225,15 +259,20 @@ class TestVariableStep:
 # Optional step synthesis  (Requirement 6.4)
 # ---------------------------------------------------------------------------
 
+
 class TestOptionalStep:
     """Optional steps produce actions with no_action_if_target_not_found=True."""
 
     def test_optional_step_sets_flag(self):
         """An optional step has no_action_if_target_not_found=True."""
-        pos = _pos(0, AlignmentType.OPTIONAL, {
-            "t1": _step("click", target="dismiss-popup"),
-            "t2": None,
-        })
+        pos = _pos(
+            0,
+            AlignmentType.OPTIONAL,
+            {
+                "t1": _step("click", target="dismiss-popup"),
+                "t2": None,
+            },
+        )
         patterns = _empty_patterns(
             optional_steps=[pos],
             step_order=[0],
@@ -252,6 +291,7 @@ class TestOptionalStep:
 # ---------------------------------------------------------------------------
 # User input boundary synthesis  (Requirement 6.5)
 # ---------------------------------------------------------------------------
+
 
 class TestUserInputBoundary:
     """User input boundaries produce wait(True) actions."""
@@ -277,29 +317,46 @@ class TestUserInputBoundary:
 # SynthesisReport counts  (Requirement 6.8)
 # ---------------------------------------------------------------------------
 
+
 class TestSynthesisReportCounts:
     """SynthesisReport counts match the patterns that were synthesized."""
 
     def test_report_counts_match_mixed_patterns(self):
         """A mix of pattern types produces matching report counts."""
-        det_pos = _pos(0, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target="btn"),
-        })
-        param_pos = _pos(1, AlignmentType.PARAMETERIZABLE, {
-            "t1": _step("input_text", target="field", args={"text": "a"}),
-        })
+        det_pos = _pos(
+            0,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target="btn"),
+            },
+        )
+        param_pos = _pos(
+            1,
+            AlignmentType.PARAMETERIZABLE,
+            {
+                "t1": _step("input_text", target="field", args={"text": "a"}),
+            },
+        )
         param_info = ParameterizableInfo(
             variable_args={"text": "query"},
             constant_args={},
         )
-        var_pos = _pos(2, AlignmentType.VARIABLE, {
-            "t1": _step("click"),
-            "t2": _step("scroll"),
-        })
-        opt_pos = _pos(3, AlignmentType.OPTIONAL, {
-            "t1": _step("click", target="popup"),
-            "t2": None,
-        })
+        var_pos = _pos(
+            2,
+            AlignmentType.VARIABLE,
+            {
+                "t1": _step("click"),
+                "t2": _step("scroll"),
+            },
+        )
+        opt_pos = _pos(
+            3,
+            AlignmentType.OPTIONAL,
+            {
+                "t1": _step("click", target="popup"),
+                "t2": None,
+            },
+        )
 
         patterns = _empty_patterns(
             deterministic_steps=[det_pos],
@@ -340,13 +397,19 @@ class TestSynthesisReportCounts:
 
     def test_target_strategy_coverage_tracked(self):
         """Target strategy coverage is tracked in the report."""
-        target = TargetSpecWithFallback(strategies=[
-            TargetSpec(strategy="id", value="submit"),
-            TargetSpec(strategy="css", value=".submit-btn"),
-        ])
-        pos = _pos(0, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target=target),
-        })
+        target = TargetSpecWithFallback(
+            strategies=[
+                TargetSpec(strategy="id", value="submit"),
+                TargetSpec(strategy="css", value=".submit-btn"),
+            ]
+        )
+        pos = _pos(
+            0,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target=target),
+            },
+        )
         patterns = _empty_patterns(
             deterministic_steps=[pos],
             step_order=[0],

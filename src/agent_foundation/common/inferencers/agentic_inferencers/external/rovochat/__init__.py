@@ -41,28 +41,14 @@ Quick Start::
     r2 = inferencer("What APIs should I use?")
 """
 
-# Inferencer
-from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer import (  # noqa: F401
-    RovoChatInferencer,
-)
-
-# Client
-from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.client import (  # noqa: F401
-    RovoChatClient,
-)
-
 # Auth
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.auth import (  # noqa: F401
     RovoChatAuth,
 )
 
-# Types
-from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.types import (  # noqa: F401
-    ConversationInfo,
-    RovoChatConfig,
-    RovoChatMessage,
-    RovoChatResponse,
-    StreamEvent,
+# Client
+from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.client import (  # noqa: F401
+    RovoChatClient,
 )
 
 # Exceptions
@@ -72,6 +58,20 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.e
     RovoChatConnectionError,
     RovoChatError,
     RovoChatTimeoutError,
+)
+
+# Inferencer
+from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.rovochat_inferencer import (  # noqa: F401
+    RovoChatInferencer,
+)
+
+# Types
+from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.types import (  # noqa: F401
+    ConversationInfo,
+    RovoChatConfig,
+    RovoChatMessage,
+    RovoChatResponse,
+    StreamEvent,
 )
 
 __all__ = [

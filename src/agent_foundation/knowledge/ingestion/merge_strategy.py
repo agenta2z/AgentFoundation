@@ -194,13 +194,9 @@ class MergeStrategyManager:
         piece.merge_suggestion_reason = top_candidate.reason
         piece.suggestion_status = SuggestionStatus.PENDING.value
 
-        return MergeResult(
-            action=MergeAction.PENDING_REVIEW, piece_id=piece.piece_id
-        )
+        return MergeResult(action=MergeAction.PENDING_REVIEW, piece_id=piece.piece_id)
 
     def _defer(self, piece: KnowledgePiece) -> MergeResult:
         """Defer merge to background job."""
         piece.merge_processed = False
-        return MergeResult(
-            action=MergeAction.DEFERRED, piece_id=piece.piece_id
-        )
+        return MergeResult(action=MergeAction.DEFERRED, piece_id=piece.piece_id)

@@ -6,6 +6,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 5.2, 5.3, 5.4**
 """
+
 import sys
 from pathlib import Path
 
@@ -18,13 +19,12 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.hybrid_search import (
     HybridRetriever,
     HybridSearchConfig,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -64,25 +64,37 @@ def hybrid_search_inputs(draw):
     # Split IDs into: vector-only, keyword-only, and shared
     indices = list(range(len(all_ids)))
     vector_indices = draw(
-        st.lists(st.sampled_from(indices), min_size=0, max_size=len(indices), unique=True)
+        st.lists(
+            st.sampled_from(indices), min_size=0, max_size=len(indices), unique=True
+        )
     )
     keyword_indices = draw(
-        st.lists(st.sampled_from(indices), min_size=0, max_size=len(indices), unique=True)
+        st.lists(
+            st.sampled_from(indices), min_size=0, max_size=len(indices), unique=True
+        )
     )
     # Ensure at least one result exists
     assume(len(vector_indices) > 0 or len(keyword_indices) > 0)
 
     # Build pieces
-    pieces = {pid: KnowledgePiece(content=f"content_{pid}", piece_id=pid) for pid in all_ids}
+    pieces = {
+        pid: KnowledgePiece(content=f"content_{pid}", piece_id=pid) for pid in all_ids
+    }
 
     # Build result lists with scores
-    score_st = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+    score_st = st.floats(
+        min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+    )
     vector_results = [(pieces[all_ids[i]], draw(score_st)) for i in vector_indices]
     keyword_results = [(pieces[all_ids[i]], draw(score_st)) for i in keyword_indices]
 
     # Config
-    vector_weight = draw(st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False))
-    keyword_weight = draw(st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False))
+    vector_weight = draw(
+        st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
+    keyword_weight = draw(
+        st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
     rrf_k = draw(st.integers(min_value=1, max_value=100))
     config = HybridSearchConfig(
         vector_weight=vector_weight,
@@ -131,11 +143,15 @@ class TestHybridRetrieverRRFScoreComputation:
         expected_scores = {}
         for rank, (piece, _score) in enumerate(vector_results):
             rrf = config.vector_weight / (config.rrf_k + rank + 1)
-            expected_scores[piece.piece_id] = expected_scores.get(piece.piece_id, 0) + rrf
+            expected_scores[piece.piece_id] = (
+                expected_scores.get(piece.piece_id, 0) + rrf
+            )
 
         for rank, (piece, _score) in enumerate(keyword_results):
             rrf = config.keyword_weight / (config.rrf_k + rank + 1)
-            expected_scores[piece.piece_id] = expected_scores.get(piece.piece_id, 0) + rrf
+            expected_scores[piece.piece_id] = (
+                expected_scores.get(piece.piece_id, 0) + rrf
+            )
 
         # Verify each result's score matches expected
         for scored_piece in results:
@@ -223,10 +239,13 @@ class TestHybridRetrieverRRFScoreComputation:
                 continue  # may have been cut by top_k
 
             # Compute expected: vector contribution + keyword contribution
-            v_rank = next(i for i, (p, _) in enumerate(vector_results) if p.piece_id == pid)
-            k_rank = next(i for i, (p, _) in enumerate(keyword_results) if p.piece_id == pid)
-            expected = (
-                config.vector_weight / (config.rrf_k + v_rank + 1)
-                + config.keyword_weight / (config.rrf_k + k_rank + 1)
+            v_rank = next(
+                i for i, (p, _) in enumerate(vector_results) if p.piece_id == pid
             )
+            k_rank = next(
+                i for i, (p, _) in enumerate(keyword_results) if p.piece_id == pid
+            )
+            expected = config.vector_weight / (
+                config.rrf_k + v_rank + 1
+            ) + config.keyword_weight / (config.rrf_k + k_rank + 1)
             assert abs(result_map[pid] - expected) < 1e-9

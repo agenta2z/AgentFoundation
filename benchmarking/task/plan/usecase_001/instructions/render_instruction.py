@@ -40,30 +40,68 @@ except ImportError:
     sys.exit("ERROR: PyYAML is required. pip install pyyaml")
 
 
-WORD = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
-        7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+WORD = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render judge-instruction template.")
-    ap.add_argument("--usecase-dir", type=pathlib.Path, default=None,
-                    help="Path to the usecase directory (default: parent of this script).")
-    ap.add_argument("--template", type=pathlib.Path, default=None,
-                    help="Path to template (default: <usecase>/instructions/judge_instruction.template.md).")
-    ap.add_argument("--out", type=pathlib.Path, default=None,
-                    help="Output path (default: <usecase>/instructions/judge_instruction.rendered.md).")
-    ap.add_argument("--axes", type=str,
-                    default="plan depth, comprehensiveness, correctness, elegance (design quality)",
-                    help="Comma-separated top-weighted axes string.")
-    ap.add_argument("--paths-style", choices=("benchmark", "original"), default="benchmark",
-                    help="Which path to list for each plan (default: benchmark copies in plans/).")
-    ap.add_argument("--force", action="store_true",
-                    help="Overwrite output file if it exists (default: refuse, to protect historical artifacts).")
+    ap.add_argument(
+        "--usecase-dir",
+        type=pathlib.Path,
+        default=None,
+        help="Path to the usecase directory (default: parent of this script).",
+    )
+    ap.add_argument(
+        "--template",
+        type=pathlib.Path,
+        default=None,
+        help="Path to template (default: <usecase>/instructions/judge_instruction.template.md).",
+    )
+    ap.add_argument(
+        "--out",
+        type=pathlib.Path,
+        default=None,
+        help="Output path (default: <usecase>/instructions/judge_instruction.rendered.md).",
+    )
+    ap.add_argument(
+        "--axes",
+        type=str,
+        default="plan depth, comprehensiveness, correctness, elegance (design quality)",
+        help="Comma-separated top-weighted axes string.",
+    )
+    ap.add_argument(
+        "--paths-style",
+        choices=("benchmark", "original"),
+        default="benchmark",
+        help="Which path to list for each plan (default: benchmark copies in plans/).",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite output file if it exists (default: refuse, to protect historical artifacts).",
+    )
     args = ap.parse_args()
 
-    usecase = (args.usecase_dir or pathlib.Path(__file__).resolve().parent.parent).resolve()
-    template_path = (args.template or (usecase / "instructions" / "judge_instruction.template.md")).resolve()
-    out_path = (args.out or (usecase / "instructions" / "judge_instruction.rendered.md")).resolve()
+    usecase = (
+        args.usecase_dir or pathlib.Path(__file__).resolve().parent.parent
+    ).resolve()
+    template_path = (
+        args.template or (usecase / "instructions" / "judge_instruction.template.md")
+    ).resolve()
+    out_path = (
+        args.out or (usecase / "instructions" / "judge_instruction.rendered.md")
+    ).resolve()
     plan_sources_path = (usecase / "plan_sources.yaml").resolve()
 
     for p in (template_path, plan_sources_path):
@@ -71,7 +109,9 @@ def main() -> int:
             sys.exit(f"ERROR: required file not found: {p}")
 
     if out_path.exists() and not args.force:
-        sys.exit(f"ERROR: refusing to overwrite existing {out_path}; pass --force or choose a different --out path.")
+        sys.exit(
+            f"ERROR: refusing to overwrite existing {out_path}; pass --force or choose a different --out path."
+        )
 
     # Load plan list
     ps = yaml.safe_load(plan_sources_path.read_text())
@@ -81,7 +121,9 @@ def main() -> int:
 
     n = len(plans)
     if n not in WORD:
-        sys.exit(f"ERROR: N={n} plans is outside the supported English-word range (1-10); extend WORD dict.")
+        sys.exit(
+            f"ERROR: N={n} plans is outside the supported English-word range (1-10); extend WORD dict."
+        )
 
     # Build the bullet list
     bullets = []
@@ -97,13 +139,17 @@ def main() -> int:
 
     # Render
     tmpl = template_path.read_text()
-    rendered = (tmpl
-                .replace("{{N_PLANS}}", str(n))
-                .replace("{{N_PLANS_WORD}}", WORD[n])
-                .replace("{{PLAN_LIST_BULLETS}}", plan_list_bullets)
-                .replace("{{TOP_WEIGHTED_AXES_CSV}}", args.axes)
-                .replace("{{USECASE_ID}}", usecase.name)
-                .replace("{{RENDERED_AT}}", _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")))
+    rendered = (
+        tmpl.replace("{{N_PLANS}}", str(n))
+        .replace("{{N_PLANS_WORD}}", WORD[n])
+        .replace("{{PLAN_LIST_BULLETS}}", plan_list_bullets)
+        .replace("{{TOP_WEIGHTED_AXES_CSV}}", args.axes)
+        .replace("{{USECASE_ID}}", usecase.name)
+        .replace(
+            "{{RENDERED_AT}}",
+            _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        )
+    )
 
     out_path.write_text(rendered)
     print(f"OK — wrote {out_path}")

@@ -15,17 +15,14 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Set
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    PatternExtractor,
-)
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +62,14 @@ def aligned_trace_set_st(draw) -> AlignedTraceSet:
 
     for idx in range(num_positions):
         atype = draw(
-            st.sampled_from([
-                AlignmentType.DETERMINISTIC,
-                AlignmentType.PARAMETERIZABLE,
-                AlignmentType.VARIABLE,
-                AlignmentType.OPTIONAL,
-            ])
+            st.sampled_from(
+                [
+                    AlignmentType.DETERMINISTIC,
+                    AlignmentType.PARAMETERIZABLE,
+                    AlignmentType.VARIABLE,
+                    AlignmentType.OPTIONAL,
+                ]
+            )
         )
 
         steps: Dict[str, Optional[TraceStep]] = {}
@@ -93,9 +92,7 @@ def aligned_trace_set_st(draw) -> AlignedTraceSet:
             action_type = draw(st.sampled_from(ACTION_TYPES))
             target = draw(st.sampled_from(TARGETS))
             for i, tid in enumerate(trace_ids):
-                steps[tid] = _make_step(
-                    action_type, target, {"text": f"value_{i}"}
-                )
+                steps[tid] = _make_step(action_type, target, {"text": f"value_{i}"})
 
         elif atype == AlignmentType.VARIABLE:
             # Different action types across traces.
@@ -181,9 +178,7 @@ class TestPatternCompletenessProperty:
 
     @given(aligned_set=aligned_trace_set_st())
     @settings(max_examples=200)
-    def test_every_position_in_exactly_one_category(
-        self, aligned_set: AlignedTraceSet
-    ):
+    def test_every_position_in_exactly_one_category(self, aligned_set: AlignedTraceSet):
         """
         The union of all category indices equals the set of all position
         indices, and no index appears in more than one category.

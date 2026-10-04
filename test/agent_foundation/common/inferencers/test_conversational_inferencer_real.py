@@ -1,5 +1,3 @@
-
-
 """Real E2E integration tests for ConversationalInferencer agentic loop.
 
 Uses real MetagenApiInferencer (real LLM calls) with:

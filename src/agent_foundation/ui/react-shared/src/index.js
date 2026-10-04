@@ -10,6 +10,16 @@ import './protocol/registerBuiltins';
 // Protocol / registry
 export { registerWidget, getWidget, unregisterWidget, listRegisteredWidgets } from './protocol/WidgetRegistry';
 export { default as ConversationToolWidget } from './protocol/ConversationToolWidget';
+export { default as ChatWidgetRenderer } from './protocol/ChatWidgetRenderer';
+
+// Display widgets — registry-rendered inline in chat by ChatWidgetRenderer.
+export { default as ApprovalWidget } from './protocol/ApprovalWidget';
+export { default as ChoiceWidget } from './protocol/ChoiceWidget';
+export { default as ProjectSummaryWidget } from './protocol/ProjectSummaryWidget';
+export { default as SprintProgressWidget } from './protocol/SprintProgressWidget';
+export { default as TaskAssignmentWidget } from './protocol/TaskAssignmentWidget';
+export { default as TaskListWidget } from './protocol/TaskListWidget';
+export { default as WorkloadChartWidget } from './protocol/WorkloadChartWidget';
 
 // Common primitives
 export { default as EmptyState } from './common/EmptyState';
@@ -46,6 +56,7 @@ export { default as PathAutocompleteInput } from './inputs/PathAutocompleteInput
 export { default as MultiValueInput } from './inputs/MultiValueInput';
 export { default as PathInputWidget } from './inputs/PathInputWidget';
 export { default as DefaultWidget } from './inputs/DefaultWidget';
+export { default as ProposalSelectionWidget } from './inputs/ProposalSelectionWidget';
 
 // Chat
 export { default as ChatInput } from './chat/ChatInput';
@@ -71,3 +82,21 @@ export { default as ProgressSection } from './progress/ProgressSection';
 export { default as CompletedSection } from './progress/CompletedSection';
 export { default as TaskProgressBar } from './progress/TaskProgressBar';
 export { default as TaskProgressPanel } from './progress/TaskProgressPanel';
+
+// Secondary tab bar (used by dashboards + multi-view panels)
+export { default as ViewTabBar } from './nav/ViewTabBar';
+
+// Generic Dashboard framework (DashboardPanel + view/dashboard registries + WidgetHostView)
+export {
+  registerView, getView, listRegisteredViews, unregisterView,
+  registerDashboard, getDashboard, listRegisteredDashboards, createDashboardReducer,
+  registerManifest, getManifest, normalizeManifest,
+  evaluateViewRules, getPipelineStages, getDashboardStatus, deriveStatusMap,
+  PipelineStatusBar, WidgetHostView, DashboardPanel,
+} from './dashboard';
+
+// Concrete dashboards — side-effect import registers the Experiment Hub's
+// views + dashboard reducer on first load (must come after the framework
+// export above so the registries exist).
+import './dashboards/experiment_hub';
+export { default as ExperimentHubDashboard } from './dashboards/experiment_hub';

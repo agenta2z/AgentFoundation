@@ -11,5 +11,63 @@ python_binary(
     main_function = "agent_foundation.scripts.run_research_propose.main",
     deps = [
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        # MetaMate GraphQL client (lazy-imported by ``MetamateSDKInferencer``).
+        # Without this dep, every Metamate flow in a multi-inferencer topology
+        # fails with ``RuntimeError: MetaMate upstream client not available:
+        # No module named 'msl'``. Matches the dep declared by the metamate
+        # SDK example at ``examples/.../external/metamate/BUCK``.
+        "//msl/metamate/cli:metamate_graphql",  # @manual
+    ],
+)
+
+# Live probe for the code-scope judge on its Plugboard backend: a backend smoke
+# call plus a fixed task set driven through the real ``judge_code_scope``.
+# Needs ``agent_foundation`` (the Plugboard inferencer + agentic_functions) in
+# addition to the metamate sources that define the judge.
+python_binary(
+    name = "probe_scope_judge",
+    srcs = ["probe_scope_judge.py"],
+    base_module = "agent_foundation.scripts",
+    main_function = "agent_foundation.scripts.probe_scope_judge.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+# Reproduction harness: re-drive flow_03's exact InferenceInput through
+# ``MetamateSDKInferencer.ainfer`` (verbatim, single attempt) to empirically
+# confirm whether the server still OOMs; ``--fanout`` sends it through the
+# research_propose ``bta_inferencer`` template instead.
+python_binary(
+    name = "reproduce_flow03",
+    srcs = ["reproduce_flow03.py"],
+    base_module = "agent_foundation.scripts",
+    main_function = "agent_foundation.scripts.reproduce_flow03.main",
+    deps = [
+        # ``metamate_lib`` declares no deps of its own, so the full library is
+        # required too: the scope judge (on by default) resolves its Plugboard
+        # inferencer out of ``agent_foundation`` at first call.
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        # MetaMate GraphQL client, lazy-imported by ``MetamateSDKInferencer``;
+        # ``preflight()`` fails fast without it ("No module named 'msl'").
+        "//msl/metamate/cli:metamate_graphql",  # @manual
+    ],
+)
+
+# Worker-prompt A/B against MetaMate's per-turn limits: replays fan-out worker
+# prompts under prompt variants (as sent, a tool budget, rounds) and records how
+# each request ended.
+python_binary(
+    name = "metamate_prompt_ab",
+    srcs = ["metamate_prompt_ab.py"],
+    main_function = "_tony_dev.CoreProjects.AgentFoundation.scripts.metamate_prompt_ab.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        # MetaMate GraphQL client, lazy-imported by ``MetamateSDKInferencer``.
+        "//msl/metamate/cli:metamate_graphql",  # @manual
     ],
 )

@@ -146,4 +146,3 @@ Then provide your complete improved proposal inside these tags:
 <ImprovedProposal>
 [your full improved proposal here]
 </ImprovedProposal>"""
-

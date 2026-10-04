@@ -12,15 +12,18 @@ and ``_extract_search_graph_knowledge`` (L3a) into two phases:
 
 Requirements: 1.1, 1.2, 1.3, 1.4, 2.1–2.4, 3.1–3.4
 """
+
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
 
 if TYPE_CHECKING:
     from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-    from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+    from agent_foundation.knowledge.retrieval.stores.pieces.base import (
+        KnowledgePieceStore,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -232,9 +235,7 @@ def graph_walk(
         # Filter neighbors by spaces
         if spaces:
             neighbors = [
-                (n, d)
-                for n, d in neighbors
-                if _node_passes_space_filter(n, spaces)
+                (n, d) for n, d in neighbors if _node_passes_space_filter(n, spaces)
             ]
 
         # Cache relations for depth-1 lookups (called ONCE per seed)
@@ -263,8 +264,7 @@ def graph_walk(
 
                 # Collect ALL matching edges for this neighbor
                 matching_rels = [
-                    rel for rel in relations_cache
-                    if rel.target_id == neighbor.node_id
+                    rel for rel in relations_cache if rel.target_id == neighbor.node_id
                 ]
 
                 if matching_rels:

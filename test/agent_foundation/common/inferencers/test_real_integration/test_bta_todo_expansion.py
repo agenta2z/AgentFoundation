@@ -6,7 +6,6 @@ LLM-protocol regression "system prompt no longer constrains output to JSON".
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )

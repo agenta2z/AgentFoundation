@@ -8,23 +8,23 @@ with no model conversion needed.
 
 Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
 """
+
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-from attr import attrs, attrib
-
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import (
     DataOperationRecord,
     generate_operation_id,
-)
-from rich_python_utils.service_utils.graph_service.graph_service_base import (
-    GraphServiceBase,
 )
 from rich_python_utils.service_utils.graph_service.graph_node import (
     GraphEdge,
     GraphNode,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from rich_python_utils.service_utils.graph_service.graph_service_base import (
+    GraphServiceBase,
+)
 
 
 @attrs
@@ -59,21 +59,25 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
         existing = self.graph_service.get_node(node.node_id)
         if existing:
             node.history = existing.history + node.history
-            node.history.append(DataOperationRecord(
-                operation="update",
-                timestamp=now,
-                operation_id=op_id,
-                source="GraphServiceEntityGraphStore.add_node",
-                properties_before=dict(existing.properties),
-                properties_after=dict(node.properties),
-            ))
+            node.history.append(
+                DataOperationRecord(
+                    operation="update",
+                    timestamp=now,
+                    operation_id=op_id,
+                    source="GraphServiceEntityGraphStore.add_node",
+                    properties_before=dict(existing.properties),
+                    properties_after=dict(node.properties),
+                )
+            )
         else:
-            node.history.append(DataOperationRecord(
-                operation="add",
-                timestamp=now,
-                operation_id=op_id,
-                source="GraphServiceEntityGraphStore.add_node",
-            ))
+            node.history.append(
+                DataOperationRecord(
+                    operation="add",
+                    timestamp=now,
+                    operation_id=op_id,
+                    source="GraphServiceEntityGraphStore.add_node",
+                )
+            )
         self.graph_service.add_node(node)
 
     def get_node(
@@ -124,13 +128,15 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
 
         # Soft-delete the node
         node.is_active = False
-        node.history.append(DataOperationRecord(
-            operation="delete",
-            timestamp=now,
-            operation_id=op_id,
-            source="GraphServiceEntityGraphStore.remove_node",
-            details={"delete_mode": "soft"},
-        ))
+        node.history.append(
+            DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.remove_node",
+                details={"delete_mode": "soft"},
+            )
+        )
         self.graph_service.add_node(node)  # upsert with updated state
 
         # Cascade: soft-delete all connected edges
@@ -139,15 +145,19 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
             if not edge.is_active:
                 continue
             edge.is_active = False
-            edge.history.append(DataOperationRecord(
-                operation="delete",
-                timestamp=now,
-                operation_id=op_id,
-                source="GraphServiceEntityGraphStore.remove_node",
-                details={"delete_mode": "soft", "cascade_from": node_id},
-            ))
+            edge.history.append(
+                DataOperationRecord(
+                    operation="delete",
+                    timestamp=now,
+                    operation_id=op_id,
+                    source="GraphServiceEntityGraphStore.remove_node",
+                    details={"delete_mode": "soft", "cascade_from": node_id},
+                )
+            )
             # Re-save edge — strategy varies by backend but add_edge handles it
-            self.graph_service.remove_edge(edge.source_id, edge.target_id, edge.edge_type)
+            self.graph_service.remove_edge(
+                edge.source_id, edge.target_id, edge.edge_type
+            )
             self.graph_service.add_edge(edge)
 
         return True
@@ -168,12 +178,14 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
         """
         now = datetime.now(timezone.utc).isoformat()
         op_id = operation_id or generate_operation_id("GraphStore", "add_relation")
-        relation.history.append(DataOperationRecord(
-            operation="add",
-            timestamp=now,
-            operation_id=op_id,
-            source="GraphServiceEntityGraphStore.add_relation",
-        ))
+        relation.history.append(
+            DataOperationRecord(
+                operation="add",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.add_relation",
+            )
+        )
         self.graph_service.add_edge(relation)
 
     def get_relations(
@@ -225,7 +237,9 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
             found or already inactive.
         """
         # Find the specific edge
-        edges = self.graph_service.get_edges(source_id, edge_type=relation_type, direction="outgoing")
+        edges = self.graph_service.get_edges(
+            source_id, edge_type=relation_type, direction="outgoing"
+        )
         target_edge = None
         for e in edges:
             if e.target_id == target_id and e.edge_type == relation_type:
@@ -237,13 +251,15 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
         now = datetime.now(timezone.utc).isoformat()
         op_id = operation_id or generate_operation_id("GraphStore", "remove_relation")
         target_edge.is_active = False
-        target_edge.history.append(DataOperationRecord(
-            operation="delete",
-            timestamp=now,
-            operation_id=op_id,
-            source="GraphServiceEntityGraphStore.remove_relation",
-            details={"delete_mode": "soft"},
-        ))
+        target_edge.history.append(
+            DataOperationRecord(
+                operation="delete",
+                timestamp=now,
+                operation_id=op_id,
+                source="GraphServiceEntityGraphStore.remove_relation",
+                details={"delete_mode": "soft"},
+            )
+        )
         # Delete and re-create to update stored state
         self.graph_service.remove_edge(source_id, target_id, relation_type)
         self.graph_service.add_edge(target_edge)
@@ -334,5 +350,3 @@ class GraphServiceEntityGraphStore(EntityGraphStore):
     def close(self):
         """Close the underlying graph service."""
         self.graph_service.close()
-
-

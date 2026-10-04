@@ -1,0 +1,20 @@
+Your previous attempt produced real, on-topic work, but it is incomplete or missing required parts. Do NOT start over or discard it — preserve the good work and finish it.
+{% if reason %}
+The specific issue to fix (keep the rest of your work): {{ reason }}
+{% endif %}
+{% if has_local_access %}
+Complete your prior work using your file tools: if you already wrote the deliverable to your output path, reopen that file and edit it in place (finish the truncated part and/or add the missing pieces); if you have not written it yet, write the completed deliverable to your output path now.
+{% else %}
+You do NOT have local filesystem access, so re-emit the COMPLETE deliverable inline in your `<Response>` — the full artifact, not a summary and not a path reference — continuing and completing the prior work shown below. Do NOT discard what you already produced.
+{% endif %}
+
+===BEGIN INPUT===
+{{ agent_prompt }}
+===END INPUT===
+{% if agent_response %}
+Your previous (incomplete) output so far, to build on:
+
+===BEGIN PREVIOUS OUTPUT===
+{{ agent_response }}
+===END PREVIOUS OUTPUT===
+{% endif %}

@@ -1,0 +1,7 @@
+<af_state_update nonce="{{ nonce }}" generation="{{ generation }}">
+{% if sop_active %}{{ section_sop_active }}{% else %}No SOP is active now.{% endif %}
+{% if not sop_progress_only %}{{ section_sop_paused }}
+{{ section_sop_inprogress }}
+{% if catalog_changes %}## SOP catalog changes since this session started
+{{ catalog_changes }}
+{% endif %}{% endif %}</af_state_update>

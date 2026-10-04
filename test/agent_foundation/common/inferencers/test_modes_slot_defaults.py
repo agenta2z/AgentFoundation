@@ -13,14 +13,12 @@ import os
 import unittest
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
-from jinja2 import Undefined as _JinjaUndefined
-
 from agent_foundation.common.inferencers.template_defaults import (
     AGGREGATION_DEFAULTS,
     InferencerTemplateDefaults,
     InferencerTemplateVersionDefaults,
 )
+from jinja2 import Environment, FileSystemLoader, Undefined as _JinjaUndefined
 
 
 class _ChainableUndefined(_JinjaUndefined):
@@ -74,7 +72,6 @@ def _render(root_space: str, template_key: str, **extra_feed) -> str:
 
 
 class TestModesMergeInApplyTo(unittest.TestCase):
-
     def test_modes_merged_into_node(self):
         defaults = InferencerTemplateDefaults(
             modes={"deep_mode": False, "elegant_mode": True},
@@ -109,7 +106,6 @@ class TestModesMergeInApplyTo(unittest.TestCase):
 
 
 class TestAggregationDefaultsModes(unittest.TestCase):
-
     def test_aggregation_defaults_has_modes(self):
         self.assertEqual(AGGREGATION_DEFAULTS.modes, {"deep_mode": False})
 
@@ -125,10 +121,10 @@ class TestAggregationDefaultsModes(unittest.TestCase):
 
 
 class TestImplementationInitialModes(unittest.TestCase):
-
     def test_deep_mode_rendered_when_enabled(self):
         rendered = _render(
-            "implementation", "initial",
+            "implementation",
+            "initial",
             enable_deep_mode=True,
             instructions={"modes": {"deep_mode": _DEEP_MODE_CONTENT}},
         )
@@ -136,7 +132,8 @@ class TestImplementationInitialModes(unittest.TestCase):
 
     def test_elegant_mode_rendered_when_enabled(self):
         rendered = _render(
-            "implementation", "initial",
+            "implementation",
+            "initial",
             enable_deep_mode=False,
             enable_elegant_mode=True,
             instructions={"modes": {"elegant_mode": _ELEGANT_MODE_CONTENT}},
@@ -145,7 +142,8 @@ class TestImplementationInitialModes(unittest.TestCase):
 
     def test_modes_absent_when_disabled(self):
         rendered = _render(
-            "implementation", "initial",
+            "implementation",
+            "initial",
             enable_deep_mode=False,
             enable_elegant_mode=False,
         )
@@ -154,10 +152,10 @@ class TestImplementationInitialModes(unittest.TestCase):
 
 
 class TestImplementationReviewModes(unittest.TestCase):
-
     def test_deep_mode_rendered(self):
         rendered = _render(
-            "implementation", "review",
+            "implementation",
+            "review",
             enable_deep_mode=True,
             instructions={"modes": {"deep_mode": _DEEP_MODE_CONTENT}},
         )
@@ -165,52 +163,60 @@ class TestImplementationReviewModes(unittest.TestCase):
 
     def test_no_elegant_mode_in_review(self):
         rendered = _render(
-            "implementation", "review",
+            "implementation",
+            "review",
             enable_deep_mode=True,
             enable_elegant_mode=True,
-            instructions={"modes": {
-                "deep_mode": _DEEP_MODE_CONTENT,
-                "elegant_mode": _ELEGANT_MODE_CONTENT,
-            }},
+            instructions={
+                "modes": {
+                    "deep_mode": _DEEP_MODE_CONTENT,
+                    "elegant_mode": _ELEGANT_MODE_CONTENT,
+                }
+            },
         )
         self.assertIn(_DEEP_MODE_CONTENT, rendered)
         self.assertNotIn(_ELEGANT_MODE_CONTENT, rendered)
 
 
 class TestImplementationFollowupModes(unittest.TestCase):
-
     def test_both_modes_rendered_when_enabled(self):
         rendered = _render(
-            "implementation", "followup",
+            "implementation",
+            "followup",
             enable_deep_mode=True,
             enable_elegant_mode=True,
-            instructions={"modes": {
-                "deep_mode": _DEEP_MODE_CONTENT,
-                "elegant_mode": _ELEGANT_MODE_CONTENT,
-            }},
+            instructions={
+                "modes": {
+                    "deep_mode": _DEEP_MODE_CONTENT,
+                    "elegant_mode": _ELEGANT_MODE_CONTENT,
+                }
+            },
         )
         self.assertIn(_DEEP_MODE_CONTENT, rendered)
         self.assertIn(_ELEGANT_MODE_CONTENT, rendered)
 
 
 class TestDeepResearchModes(unittest.TestCase):
-
     def test_both_modes_rendered(self):
         rendered = _render(
-            "deep_research", "initial",
+            "deep_research",
+            "initial",
             enable_deep_mode=True,
             enable_elegant_mode=True,
-            instructions={"modes": {
-                "deep_mode": _DEEP_MODE_CONTENT,
-                "elegant_mode": _ELEGANT_MODE_CONTENT,
-            }},
+            instructions={
+                "modes": {
+                    "deep_mode": _DEEP_MODE_CONTENT,
+                    "elegant_mode": _ELEGANT_MODE_CONTENT,
+                }
+            },
         )
         self.assertIn(_DEEP_MODE_CONTENT, rendered)
         self.assertIn(_ELEGANT_MODE_CONTENT, rendered)
 
     def test_modes_absent_when_disabled(self):
         rendered = _render(
-            "deep_research", "initial",
+            "deep_research",
+            "initial",
             enable_deep_mode=False,
             enable_elegant_mode=False,
         )
@@ -219,36 +225,42 @@ class TestDeepResearchModes(unittest.TestCase):
 
 
 class TestPlanReviewNoElegantMode(unittest.TestCase):
-
     def test_elegant_mode_removed_from_plan_review(self):
         rendered = _render(
-            "plan", "review",
+            "plan",
+            "review",
             enable_deep_mode=True,
             enable_elegant_mode=True,
-            instructions={"modes": {
-                "deep_mode": _DEEP_MODE_CONTENT,
-                "elegant_mode": _ELEGANT_MODE_CONTENT,
-            }},
+            instructions={
+                "modes": {
+                    "deep_mode": _DEEP_MODE_CONTENT,
+                    "elegant_mode": _ELEGANT_MODE_CONTENT,
+                }
+            },
         )
         self.assertIn(_DEEP_MODE_CONTENT, rendered)
         self.assertNotIn(_ELEGANT_MODE_CONTENT, rendered)
 
     def test_plan_initial_still_has_elegant(self):
         rendered = _render(
-            "plan", "initial",
+            "plan",
+            "initial",
             enable_deep_mode=True,
             enable_elegant_mode=True,
-            instructions={"modes": {
-                "deep_mode": _DEEP_MODE_CONTENT,
-                "elegant_mode": _ELEGANT_MODE_CONTENT,
-            }},
+            instructions={
+                "modes": {
+                    "deep_mode": _DEEP_MODE_CONTENT,
+                    "elegant_mode": _ELEGANT_MODE_CONTENT,
+                }
+            },
         )
         self.assertIn(_DEEP_MODE_CONTENT, rendered)
         self.assertIn(_ELEGANT_MODE_CONTENT, rendered)
 
     def test_plan_followup_still_has_elegant(self):
         rendered = _render(
-            "plan", "followup",
+            "plan",
+            "followup",
             enable_deep_mode=False,
             enable_elegant_mode=True,
             instructions={"modes": {"elegant_mode": _ELEGANT_MODE_CONTENT}},

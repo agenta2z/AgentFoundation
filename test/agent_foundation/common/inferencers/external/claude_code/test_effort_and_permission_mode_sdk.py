@@ -131,9 +131,7 @@ class CombinedRoutingTest(unittest.TestCase):
         inf = ClaudeCodeSdkInferencer(permission_mode="dontAsk", effort="xhigh")
         sdk_kwargs, extra_args = inf._build_permission_effort_kwargs()
         self.assertEqual(sdk_kwargs, {})
-        self.assertEqual(
-            extra_args, {"permission-mode": "dontAsk", "effort": "xhigh"}
-        )
+        self.assertEqual(extra_args, {"permission-mode": "dontAsk", "effort": "xhigh"})
 
 
 # ---------------------------------------------------------------------------
@@ -166,10 +164,15 @@ class _CapturedOptionsHelper:
         # Because the import is inside aconnect(), we patch the attribute on the
         # already-imported module so the local import resolves to our fakes.
         import claude_agent_sdk
-        with patch.object(claude_agent_sdk, "ClaudeAgentOptions", _fake_options), \
-             patch.object(
-                 claude_agent_sdk, "ClaudeSDKClient", lambda options: fake_client,
-             ):
+
+        with (
+            patch.object(claude_agent_sdk, "ClaudeAgentOptions", _fake_options),
+            patch.object(
+                claude_agent_sdk,
+                "ClaudeSDKClient",
+                lambda options: fake_client,
+            ),
+        ):
             await inferencer.aconnect()
         # Tear down the background task aconnect() left running so the loop
         # closes cleanly.

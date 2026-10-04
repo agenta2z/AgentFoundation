@@ -3,9 +3,10 @@
 Verifies the ported WebUIInteractive works correctly with native async queues,
 supports_widgets property, and push_input/aget_input round-trip.
 """
-import asyncio
-import pytest
 
+import asyncio
+
+import pytest
 from agent_foundation.ui.web_interactive import WebUIInteractive
 from agent_foundation.ui.widget_protocol import WidgetMessage, WidgetResponse
 
@@ -54,7 +55,9 @@ async def test_send_widget_success():
 
     async def push_after_delay():
         await asyncio.sleep(0.05)
-        await wi.push_input({"widget_id": "w2", "values": {"choice": "yes"}, "action": "submit"})
+        await wi.push_input(
+            {"widget_id": "w2", "values": {"choice": "yes"}, "action": "submit"}
+        )
 
     task = asyncio.create_task(push_after_delay())
     result = await wi.send_widget(msg)

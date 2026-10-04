@@ -150,7 +150,7 @@ def analyze_graph_breaks(model: nn.Module, sample_input: torch.Tensor) -> None:
     print(f"  Graph breaks: {len(explanation.break_reasons)}")
 
     for i, reason in enumerate(explanation.break_reasons):
-        print(f"  Break {i+1}: {reason}")
+        print(f"  Break {i + 1}: {reason}")
 
 
 def compile_model_optimally(

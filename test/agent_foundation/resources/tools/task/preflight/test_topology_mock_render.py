@@ -17,25 +17,36 @@ import pytest
 
 
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
+YAML_PATH = (
+    _HERE.parents[5]
+    / "src"
+    / "agent_foundation"
+    / "resources"
+    / "tools"
+    / "task"
+    / "configs"
+    / "default.yaml"
+)
 OPENSTARTUP_PATH = Path(
     os.environ.get(
         "OPENSTARTUP_PATH",
         str(_HERE.parents[4]),
     )
 )
-TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
+TEMPLATES_DIR = (
+    OPENSTARTUP_PATH / "src" / "agent_foundation" / "resources" / "prompt_templates"
+)
 
 
 def _instantiate_topology_with_mocks(monkeypatch, tmp_path):
     """Load topology YAML and instantiate with mock inferencers.
-    
+
     Each mock inferencer records which prompts it would send, then returns
     a canned response. This lets us verify that all prompt templates render
     without actually calling Claude/RovoDevCLI.
     """
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import load_config, instantiate
+    from rich_python_utils.config_utils import instantiate, load_config
 
     base_overrides = {
         "_target_path": str(OPENSTARTUP_PATH),
@@ -43,19 +54,17 @@ def _instantiate_topology_with_mocks(monkeypatch, tmp_path):
         "_params.workspace_root": str(tmp_path / "ws"),
     }
     cfg = load_config(str(YAML_PATH), overrides=base_overrides)
-    
+
     # Replace all leaf inferencers with mocks BEFORE instantiation
     def _mock_factory(name):
         """Create a mock inferencer that records render calls."""
         mock = MagicMock(name=name)
         # Return a canned dict response for async inference
-        mock.infer = MagicMock(
-            return_value={"output": f"[mock response from {name}]"}
-        )
+        mock.infer = MagicMock(return_value={"output": f"[mock response from {name}]"})
         # Record any call to render or format_prompt
         mock.render_prompt = MagicMock(return_value="[rendered prompt]")
         return mock
-    
+
     # Recursively replace all _target_ entries pointing to real inferencers
     def _replace_targets(obj):
         if isinstance(obj, dict):
@@ -70,15 +79,17 @@ def _instantiate_topology_with_mocks(monkeypatch, tmp_path):
         elif isinstance(obj, list):
             for item in obj:
                 _replace_targets(item)
-    
+
     _replace_targets(cfg)
-    
+
     # Instantiate: any MagicMock targets will be created as mocks
     root = instantiate(cfg)
     return root
 
 
-@pytest.mark.skip(reason="TIER 2: requires topology YAML; integrate after Hydra setup verified")
+@pytest.mark.skip(
+    reason="TIER 2: requires topology YAML; integrate after Hydra setup verified"
+)
 def test_topology_instantiates_with_mocks(tmp_path, monkeypatch):
     """Verify topology loads and instantiates without errors."""
     root = _instantiate_topology_with_mocks(monkeypatch, tmp_path)
@@ -86,31 +97,35 @@ def test_topology_instantiates_with_mocks(tmp_path, monkeypatch):
     assert hasattr(root, "base_inferencer") or hasattr(root, "fixer_inferencer")
 
 
-@pytest.mark.skip(reason="TIER 2: requires topology YAML; integrate after Hydra setup verified")
+@pytest.mark.skip(
+    reason="TIER 2: requires topology YAML; integrate after Hydra setup verified"
+)
 def test_all_leaf_inferencers_exist_when_expected(tmp_path, monkeypatch):
     """Verify fixer_inferencer exists when fixer_match_winner=true in config."""
     root = _instantiate_topology_with_mocks(monkeypatch, tmp_path)
-    
+
     # Check structural assumptions from test_hyperparams_default_inferencer.py
     assert hasattr(root, "base_inferencer"), "root missing base_inferencer"
     assert hasattr(root, "review_inferencer"), "root missing review_inferencer"
-    
+
     # fixer_inferencer should exist and be non-None (not stubbed out)
     assert hasattr(root, "fixer_inferencer"), "root missing fixer_inferencer attribute"
     assert root.fixer_inferencer is not None, "fixer_inferencer is None"
 
 
-@pytest.mark.skip(reason="TIER 2: requires topology YAML; integrate after Hydra setup verified")
+@pytest.mark.skip(
+    reason="TIER 2: requires topology YAML; integrate after Hydra setup verified"
+)
 def test_mock_render_calls_capture_prompts(tmp_path, monkeypatch):
     """Verify that calling infer() on mocks renders prompts without crashing."""
     root = _instantiate_topology_with_mocks(monkeypatch, tmp_path)
-    
+
     # Simulate a minimal task input
     mock_task = {
         "task": "Test task",
         "context": {},
     }
-    
+
     # Call base_inferencer.infer() with mock task; should not raise
     # (Real infer() would format prompt templates; mocks return canned response)
     try:

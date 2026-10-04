@@ -1,5 +1,3 @@
-
-
 """Tool input collector — handles __human_input__ sentinel detection and collection.
 
 When the LLM invokes a tool with __human_input__ as a parameter value,
@@ -13,16 +11,15 @@ import logging
 import uuid
 from typing import Any, Optional
 
+from agent_foundation.resources.tools.models import ParameterDef, ToolDefinition
 from agent_foundation.ui.input_modes import (
+    ChoiceOption,
     InputMode,
     InputModeConfig,
-    ChoiceOption,
     single_choice,
 )
-from agent_foundation.ui.interactive_base import (
-    InteractionFlags,
-    InteractiveBase,
-)
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+
 # TODO: widget_protocol module does not exist at agent_foundation.ui — needs separate migration
 from agent_foundation.ui.widget_protocol import (
     WIDGET_DROPDOWN,
@@ -32,7 +29,6 @@ from agent_foundation.ui.widget_protocol import (
     WidgetMessage,
     WidgetResponse,
 )
-from agent_foundation.resources.tools.models import ParameterDef, ToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +38,7 @@ HUMAN_INPUT_SENTINEL = "__human_input__"
 def has_human_input_sentinel(arguments: dict[str, Any]) -> bool:
     """Check if any argument value is the __human_input__ sentinel."""
     return any(
-        isinstance(v, str) and v == HUMAN_INPUT_SENTINEL
-        for v in arguments.values()
+        isinstance(v, str) and v == HUMAN_INPUT_SENTINEL for v in arguments.values()
     )
 
 
@@ -108,7 +103,9 @@ async def collect_human_inputs(
         widget_msg = WidgetMessage(
             widget_id=f"tool-input-{uuid.uuid4().hex[:8]}",
             widget_type=WIDGET_TOOL_ARGUMENT_FORM,
-            title=f"Input required for {tool_def.name}" if tool_def else "Input required",
+            title=f"Input required for {tool_def.name}"
+            if tool_def
+            else "Input required",
             description=tool_def.description if tool_def else "",
             fields=widget_fields,
         )
@@ -124,9 +121,7 @@ async def collect_human_inputs(
         if supports_widgets and param_def and param_def.enable_widget:
             value = await _collect_via_widget(param_name, param_def, interactive)
         else:
-            value = await _collect_via_conversation(
-                param_name, param_def, interactive
-            )
+            value = await _collect_via_conversation(param_name, param_def, interactive)
         result[param_name] = value
 
     return result

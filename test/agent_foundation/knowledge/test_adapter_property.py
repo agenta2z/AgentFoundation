@@ -11,6 +11,7 @@ Uses Hypothesis to verify universal correctness properties of the
 KeyValueMetadataStore adapter backed by MemoryKeyValueService and
 RetrievalKnowledgePieceStore adapter backed by MemoryRetrievalService.
 """
+
 import sys
 from pathlib import Path
 
@@ -29,13 +30,11 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-from hypothesis import given, settings, HealthCheck, assume
-from hypothesis import strategies as st
-
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
+from hypothesis import assume, given, HealthCheck, settings, strategies as st
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
 )
@@ -300,20 +299,24 @@ def knowledge_piece_for_adapter(draw):
     embedding_text = draw(st.one_of(st.none(), _content_strategy))
     created_at = draw(_fixed_timestamp)
     updated_at = draw(_fixed_timestamp)
-    domain = draw(st.text(
-        alphabet=st.characters(whitelist_categories=("L",)),
-        min_size=1,
-        max_size=15,
-    ).map(str.lower))
-    secondary_domains = draw(st.lists(
+    domain = draw(
         st.text(
             alphabet=st.characters(whitelist_categories=("L",)),
             min_size=1,
             max_size=15,
-        ).map(str.lower),
-        min_size=0,
-        max_size=3,
-    ))
+        ).map(str.lower)
+    )
+    secondary_domains = draw(
+        st.lists(
+            st.text(
+                alphabet=st.characters(whitelist_categories=("L",)),
+                min_size=1,
+                max_size=15,
+            ).map(str.lower),
+            min_size=0,
+            max_size=3,
+        )
+    )
     custom_tags = draw(st.lists(_tag_strategy_piece, min_size=0, max_size=3))
 
     return KnowledgePiece(
@@ -481,8 +484,7 @@ class TestPieceAdapterSearchFilterDelegation:
 
         # Verify all matching pieces are returned (that have non-zero search score)
         expected_type_ids = {
-            pid for pid, p in unique_pieces.items()
-            if p.knowledge_type == filter_type
+            pid for pid, p in unique_pieces.items() if p.knowledge_type == filter_type
         }
         returned_type_ids = {p.piece_id for p, _ in results_by_type}
         # returned_type_ids should be a subset of expected (search may miss some
@@ -509,7 +511,8 @@ class TestPieceAdapterSearchFilterDelegation:
 
         # Verify returned pieces are a subset of those that actually match
         expected_tag_ids = {
-            pid for pid, p in unique_pieces.items()
+            pid
+            for pid, p in unique_pieces.items()
             if all(t in p.tags for t in filter_tags)
         }
         returned_tag_ids = {p.piece_id for p, _ in results_by_tags}
@@ -545,17 +548,17 @@ class TestPieceAdapterSearchFilterDelegation:
         )
 
 
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 # ── Additional imports for graph adapter tests ───────────────────────────────
 
 from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
     GraphEdge,
+    GraphNode,
 )
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (
     MemoryGraphService,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
 )
 
 # Import strategies from conftest (pytest conftest is not directly importable,
@@ -721,7 +724,8 @@ class TestGraphAdapterEdgeRoundTrip:
 
         # Find the matching edge
         matching = [
-            r for r in relations
+            r
+            for r in relations
             if r.source_id == edge.source_id
             and r.target_id == edge.target_id
             and r.edge_type == edge.edge_type
@@ -799,7 +803,7 @@ class TestGraphAdapterGetNeighborsPreservesDepth:
         for i in range(chain_length - 1):
             edge = GraphEdge(
                 source_id=f"n{i}",
-                target_id=f"n{i+1}",
+                target_id=f"n{i + 1}",
                 edge_type=edge_type,
             )
             store.add_relation(edge)
@@ -820,8 +824,7 @@ class TestGraphAdapterGetNeighborsPreservesDepth:
             expected_depth = i
             node_id = f"n{i}"
             assert node_id in neighbor_depths, (
-                f"Node {node_id!r} not found in neighbors. "
-                f"Got: {neighbor_depths!r}"
+                f"Node {node_id!r} not found in neighbors. Got: {neighbor_depths!r}"
             )
             assert neighbor_depths[node_id] == expected_depth, (
                 f"Depth mismatch for {node_id!r}: "
@@ -861,24 +864,26 @@ class TestGraphAdapterGetNeighborsPreservesDepth:
 
         # Create a 4-node chain: n0 -> n1 -> n2 -> n3
         for i in range(4):
-            store.add_node(GraphNode(
-                node_id=f"n{i}",
-                node_type="test_node",
-                label=f"Node {i}",
-            ))
+            store.add_node(
+                GraphNode(
+                    node_id=f"n{i}",
+                    node_type="test_node",
+                    label=f"Node {i}",
+                )
+            )
         for i in range(3):
-            store.add_relation(GraphEdge(
-                source_id=f"n{i}",
-                target_id=f"n{i+1}",
-                edge_type=edge_type,
-            ))
+            store.add_relation(
+                GraphEdge(
+                    source_id=f"n{i}",
+                    target_id=f"n{i + 1}",
+                    edge_type=edge_type,
+                )
+            )
 
         # Test depth=1: should only return n1
         neighbors_d1 = store.get_neighbors("n0", relation_type=edge_type, depth=1)
         d1_ids = {n.node_id for n, _ in neighbors_d1}
-        assert d1_ids == {"n1"}, (
-            f"depth=1 should return only n1, got {d1_ids}"
-        )
+        assert d1_ids == {"n1"}, f"depth=1 should return only n1, got {d1_ids}"
         for node, depth in neighbors_d1:
             assert depth == 1, f"All depth=1 neighbors should have depth 1, got {depth}"
 

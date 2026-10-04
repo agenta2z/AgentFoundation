@@ -1,0 +1,41 @@
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+oncall("ml_oncall")
+
+# Metamate needs the Buck-only msl GraphQL client, so this spike runs through
+# Buck (the other spikes run with the plain interpreter).
+python_binary(
+    # @autodeps-skip
+    name = "s16_metamate_internal_prompt",
+    srcs = ["s16_metamate_internal_prompt.py"],
+    main_function = ".s16_metamate_internal_prompt.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/cli:metamate_graphql",
+    ],
+)
+
+python_binary(
+    # @autodeps-skip
+    name = "s16b_metamate_inline_agent",
+    srcs = ["s16b_metamate_inline_agent.py"],
+    main_function = ".s16b_metamate_inline_agent.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/sdk:metamate_sdk",
+    ],
+)
+
+python_binary(
+    # @autodeps-skip
+    name = "s16c_metamate_native",
+    srcs = ["s16c_metamate_native.py"],
+    main_function = ".s16c_metamate_native.main",
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        # The native Metamate backend (carries //msl/metamate/sdk).
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/conversational_native/session/metamate:metamate",
+    ],
+)

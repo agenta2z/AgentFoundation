@@ -56,7 +56,9 @@ def lint_sop(sop: SOP, source: str = "") -> LintResult:
         return result
 
     # Check for [__initial__] phase
-    initial_phases = [p for p in sop.phases if "initial" in getattr(p, "directives", [])]
+    initial_phases = [
+        p for p in sop.phases if "initial" in getattr(p, "directives", [])
+    ]
     if not initial_phases:
         result.error(
             "No [__initial__] phase declared. "

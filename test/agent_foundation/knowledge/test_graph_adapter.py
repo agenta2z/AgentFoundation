@@ -8,6 +8,7 @@ with depth, error handling, and close delegation.
 
 Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
 """
+
 import sys
 from pathlib import Path
 
@@ -26,14 +27,13 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphEdge,
-    GraphNode,
-)
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
 from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
     GraphServiceEntityGraphStore,
+)
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
 )
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (
     MemoryGraphService,
@@ -242,12 +242,10 @@ class TestAddAndGetRelations:
         store.add_node(node_b)
         store.add_node(node_c)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="c", edge_type="WORKS_WITH"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
+        store.add_relation(
+            GraphEdge(source_id="a", target_id="c", edge_type="WORKS_WITH")
+        )
 
         knows_rels = store.get_relations("a", relation_type="KNOWS")
         assert len(knows_rels) == 1
@@ -261,9 +259,7 @@ class TestAddAndGetRelations:
         store.add_node(node_a)
         store.add_node(node_b)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
 
         incoming = store.get_relations("b", direction="incoming")
         assert len(incoming) == 1
@@ -278,12 +274,8 @@ class TestAddAndGetRelations:
         store.add_node(node_b)
         store.add_node(node_c)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
-        store.add_relation(GraphEdge(
-            source_id="c", target_id="b", edge_type="FOLLOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
+        store.add_relation(GraphEdge(source_id="c", target_id="b", edge_type="FOLLOWS"))
 
         both = store.get_relations("b", direction="both")
         assert len(both) == 2
@@ -355,9 +347,7 @@ class TestRemoveRelation:
         store.add_node(node_a)
         store.add_node(node_b)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
 
         assert store.remove_relation("a", "b", "KNOWS") is True
 
@@ -372,9 +362,7 @@ class TestRemoveRelation:
         store.add_node(node_a)
         store.add_node(node_b)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
         store.remove_relation("a", "b", "KNOWS")
 
         assert store.get_relations("a") == []
@@ -392,12 +380,8 @@ class TestGetNeighbors:
         store.add_node(node_b)
         store.add_node(node_c)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="c", edge_type="KNOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
+        store.add_relation(GraphEdge(source_id="a", target_id="c", edge_type="KNOWS"))
 
         neighbors = store.get_neighbors("a", depth=1)
         assert len(neighbors) == 2
@@ -419,12 +403,8 @@ class TestGetNeighbors:
         store.add_node(node_b)
         store.add_node(node_c)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
-        store.add_relation(GraphEdge(
-            source_id="b", target_id="c", edge_type="KNOWS"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
+        store.add_relation(GraphEdge(source_id="b", target_id="c", edge_type="KNOWS"))
 
         neighbors = store.get_neighbors("a", depth=2)
         assert len(neighbors) == 2
@@ -442,12 +422,10 @@ class TestGetNeighbors:
         store.add_node(node_b)
         store.add_node(node_c)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="KNOWS"
-        ))
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="c", edge_type="WORKS_WITH"
-        ))
+        store.add_relation(GraphEdge(source_id="a", target_id="b", edge_type="KNOWS"))
+        store.add_relation(
+            GraphEdge(source_id="a", target_id="c", edge_type="WORKS_WITH")
+        )
 
         knows_neighbors = store.get_neighbors("a", relation_type="KNOWS")
         assert len(knows_neighbors) == 1
@@ -478,9 +456,9 @@ class TestGetNeighbors:
         store.add_node(node_a)
         store.add_node(node_b)
 
-        store.add_relation(GraphEdge(
-            source_id="a", target_id="b", edge_type="SHOPS_AT"
-        ))
+        store.add_relation(
+            GraphEdge(source_id="a", target_id="b", edge_type="SHOPS_AT")
+        )
 
         neighbors = store.get_neighbors("a")
         assert len(neighbors) == 1

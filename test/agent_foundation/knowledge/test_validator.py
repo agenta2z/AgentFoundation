@@ -4,7 +4,6 @@ import json
 from typing import List
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.validator import (
     KnowledgeValidator,
     ValidationConfig,
@@ -16,13 +15,18 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import Knowledg
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_piece(content: str, **kwargs) -> KnowledgePiece:
     """Create a KnowledgePiece with the given content."""
     return KnowledgePiece(content=content, **kwargs)
 
 
-def _make_llm_fn(passed: List[str] = None, failed: List[str] = None,
-                 issues: List[str] = None, suggestions: List[str] = None):
+def _make_llm_fn(
+    passed: List[str] = None,
+    failed: List[str] = None,
+    issues: List[str] = None,
+    suggestions: List[str] = None,
+):
     """Return a fake LLM function that returns a canned JSON response."""
     result = {
         "passed": passed or [],
@@ -36,6 +40,7 @@ def _make_llm_fn(passed: List[str] = None, failed: List[str] = None,
 # ---------------------------------------------------------------------------
 # ValidationConfig tests
 # ---------------------------------------------------------------------------
+
 
 class TestValidationConfig:
     def test_defaults(self):
@@ -64,38 +69,49 @@ class TestValidationConfig:
 # Security pattern detection
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityPatterns:
     def test_api_key_detected(self):
         piece = _make_piece("config: api_key=abc123secret")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"security"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"security"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "security" in result.checks_failed
 
     def test_password_detected(self):
         piece = _make_piece("password=hunter2")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"security"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"security"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "security" in result.checks_failed
 
     def test_bearer_token_detected(self):
         piece = _make_piece("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"security"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"security"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "security" in result.checks_failed
 
     def test_secret_key_detected(self):
         piece = _make_piece("aws secret=AKIAIOSFODNN7EXAMPLE")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"security"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"security"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "security" in result.checks_failed
 
     def test_clean_content_passes_security(self):
         piece = _make_piece("This is a normal document about Python programming.")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"security"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"security"})
+        )
         result = validator.validate(piece)
         assert result.is_valid
         assert "security" in result.checks_passed
@@ -105,31 +121,40 @@ class TestSecurityPatterns:
 # Privacy pattern detection
 # ---------------------------------------------------------------------------
 
+
 class TestPrivacyPatterns:
     def test_email_detected(self):
         piece = _make_piece("Contact us at user@example.com for details.")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"privacy"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"privacy"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "privacy" in result.checks_failed
 
     def test_phone_number_detected(self):
         piece = _make_piece("Call 555-123-4567 for support.")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"privacy"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"privacy"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "privacy" in result.checks_failed
 
     def test_phone_number_no_dashes_detected(self):
         piece = _make_piece("Phone: 5551234567")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"privacy"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"privacy"})
+        )
         result = validator.validate(piece)
         assert not result.is_valid
         assert "privacy" in result.checks_failed
 
     def test_clean_content_passes_privacy(self):
         piece = _make_piece("This document has no personal information.")
-        validator = KnowledgeValidator(config=ValidationConfig(checks_enabled={"privacy"}))
+        validator = KnowledgeValidator(
+            config=ValidationConfig(checks_enabled={"privacy"})
+        )
         result = validator.validate(piece)
         assert result.is_valid
         assert "privacy" in result.checks_passed
@@ -138,6 +163,7 @@ class TestPrivacyPatterns:
 # ---------------------------------------------------------------------------
 # LLM-based validation
 # ---------------------------------------------------------------------------
+
 
 class TestLLMValidation:
     def test_llm_checks_passed(self):
@@ -172,6 +198,7 @@ class TestLLMValidation:
 
     def test_llm_failure_treats_checks_as_passed(self):
         """Requirement 14.4: LLM failure => all LLM checks treated as passed."""
+
         def failing_llm(_prompt):
             raise RuntimeError("LLM service unavailable")
 
@@ -213,6 +240,7 @@ class TestLLMValidation:
 # Combined regex + LLM checks
 # ---------------------------------------------------------------------------
 
+
 class TestCombinedValidation:
     def test_security_fail_with_llm_pass(self):
         """Security regex fails but LLM checks pass => overall invalid."""
@@ -230,8 +258,14 @@ class TestCombinedValidation:
     def test_all_checks_pass(self):
         """All regex and LLM checks pass => valid with full confidence."""
         llm_fn = _make_llm_fn(
-            passed=["correctness", "authenticity", "consistency",
-                     "completeness", "staleness", "policy_compliance"]
+            passed=[
+                "correctness",
+                "authenticity",
+                "consistency",
+                "completeness",
+                "staleness",
+                "policy_compliance",
+            ]
         )
         validator = KnowledgeValidator(llm_fn=llm_fn)
         piece = _make_piece("Clean, valid knowledge content.")
@@ -260,6 +294,7 @@ class TestCombinedValidation:
 # Disabled validation
 # ---------------------------------------------------------------------------
 
+
 class TestDisabledValidation:
     def test_disabled_returns_valid(self):
         validator = KnowledgeValidator(
@@ -274,6 +309,7 @@ class TestDisabledValidation:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     def test_empty_content(self):

@@ -9,7 +9,10 @@ implementations, enabling dependency injection and testing.
 import abc
 from typing import Any, AsyncIterator
 
-from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import MetamateConfig, ToolResponse
+from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import (
+    MetamateConfig,
+    ToolResponse,
+)
 
 
 class MetamateClientInterface(abc.ABC):

@@ -11,12 +11,16 @@ import shutil
 import tempfile
 import unittest
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.inferencer_workspace import (
+    indexed_child_name,
+    InferencerWorkspace,
+)
+from agent_foundation.common.inferencers.run_context import open_invocation
+from attr import attrib, attrs
 
 
 @attrs
@@ -25,6 +29,13 @@ class _MockInferencer(InferencerBase):
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         return self._response
+
+
+def _build_spec(bta, sub_queries):
+    """``_build_subgraph_spec`` runs inside an attempt of its owner's invocation."""
+    with open_invocation(bta):
+        bta._open_attempt("q", use_async=False)
+        return bta._build_subgraph_spec(sub_queries)
 
 
 class TestWorkerNodeResume(unittest.TestCase):
@@ -64,9 +75,9 @@ class TestWorkerNodeResume(unittest.TestCase):
     def test_worker_nodes_have_get_result_path(self):
         """Worker nodes must have _get_result_path assigned."""
         bta = self._make_bta()
-        bta._cached_sub_queries = ["q1", "q2", "q3"]
+        sub_queries = ["q1", "q2", "q3"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         self.assertEqual(len(worker_nodes), 3)
@@ -79,9 +90,9 @@ class TestWorkerNodeResume(unittest.TestCase):
         """Worker nodes must NOT have worker_manages_resume=True so WorkGraph
         checkpoint save/load is not short-circuited."""
         bta = self._make_bta()
-        bta._cached_sub_queries = ["q1", "q2"]
+        sub_queries = ["q1", "q2"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for node in worker_nodes:
@@ -93,15 +104,15 @@ class TestWorkerNodeResume(unittest.TestCase):
     def test_worker_checkpoint_path_points_to_child_workspace(self):
         """Checkpoint path should be under children/<worker_name>/checkpoints/."""
         bta = self._make_bta(num_queries=2)
-        bta._cached_sub_queries = ["q1", "q2"]
+        sub_queries = ["q1", "q2"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for i, node in enumerate(worker_nodes):
             path = node._get_result_path(node.name)
             expected_dir = os.path.join(
-                self.tmpdir, "children", f"worker_{i}", "checkpoints"
+                self.tmpdir, "children", indexed_child_name("worker", i), "checkpoints"
             )
             self.assertTrue(
                 path.startswith(expected_dir),
@@ -111,9 +122,9 @@ class TestWorkerNodeResume(unittest.TestCase):
     def test_aggregator_node_has_get_result_path(self):
         """Aggregator node should also have _get_result_path (existing behavior)."""
         bta = self._make_bta()
-        bta._cached_sub_queries = ["q1"]
+        sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         agg_nodes = [n for n in spec.nodes if "aggregator" in n.name]
         self.assertEqual(len(agg_nodes), 1)
@@ -124,9 +135,9 @@ class TestWorkerNodeResume(unittest.TestCase):
         """With _get_result_path set and worker_manages_resume=False,
         _should_save_result() should return True."""
         bta = self._make_bta()
-        bta._cached_sub_queries = ["q1"]
+        sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for node in worker_nodes:
@@ -138,9 +149,9 @@ class TestWorkerNodeResume(unittest.TestCase):
     def test_load_result_attempts_checkpoint(self):
         """load_result() should try to load from checkpoint, not short-circuit."""
         bta = self._make_bta()
-        bta._cached_sub_queries = ["q1"]
+        sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(bta._cached_sub_queries)
+        spec = _build_spec(bta, sub_queries)
         node = [n for n in spec.nodes if "worker" in n.name][0]
 
         loaded, result = node.load_result()

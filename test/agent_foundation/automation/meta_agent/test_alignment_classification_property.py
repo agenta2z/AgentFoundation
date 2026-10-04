@@ -22,13 +22,9 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.aligner import TraceAligner
-from agent_foundation.automation.meta_agent.models import (
-    AlignmentType,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import AlignmentType, TraceStep
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +63,7 @@ def deterministic_steps_st() -> st.SearchStrategy[Dict[str, Optional[TraceStep]]
             ),
         ).map(
             lambda tup, count=n: {
-                tid: _make_step(tup[0], tup[1], tup[2])
-                for tid in _trace_ids(count)
+                tid: _make_step(tup[0], tup[1], tup[2]) for tid in _trace_ids(count)
             }
         )
     )
@@ -120,10 +115,12 @@ def variable_steps_no_gaps_st() -> st.SearchStrategy[Dict[str, Optional[TraceSte
             st.sampled_from(ACTION_TYPES),
             st.sampled_from(TARGETS),
             st.sampled_from(TARGETS),
-        ).filter(
+        )
+        .filter(
             # Ensure at least one dimension differs
             lambda tup: tup[0] != tup[1] or tup[2] != tup[3]
-        ).map(
+        )
+        .map(
             lambda tup, count=n: {
                 tid: _make_step(
                     tup[0] if i == 0 else tup[1],
@@ -154,7 +151,9 @@ def optional_steps_st() -> st.SearchStrategy[Dict[str, Optional[TraceStep]]]:
             # Boolean mask: True = present, False = gap
             # At least one True and at least one False
             st.lists(
-                st.booleans(), min_size=n, max_size=n,
+                st.booleans(),
+                min_size=n,
+                max_size=n,
             ).filter(lambda bools: any(bools) and not all(bools)),
         ).map(
             lambda tup, count=n: {
@@ -179,11 +178,9 @@ def variable_steps_with_gaps_st() -> st.SearchStrategy[Dict[str, Optional[TraceS
             st.sampled_from(ACTION_TYPES),
             st.sampled_from(TARGETS),
             st.sampled_from(TARGETS),
-        ).filter(
-            lambda tup: tup[0] != tup[1] or tup[2] != tup[3]
-        ).map(
-            lambda tup, count=n: _build_variable_with_gaps(tup, count)
         )
+        .filter(lambda tup: tup[0] != tup[1] or tup[2] != tup[3])
+        .map(lambda tup, count=n: _build_variable_with_gaps(tup, count))
     )
 
 
@@ -206,7 +203,9 @@ def _build_variable_with_gaps(tup, count: int) -> Dict[str, Optional[TraceStep]]
 
 # Strategy: gaps + non-None steps that have same type/target but different args
 # → VARIABLE (gaps + different args)
-def variable_steps_gaps_diff_args_st() -> st.SearchStrategy[Dict[str, Optional[TraceStep]]]:
+def variable_steps_gaps_diff_args_st() -> st.SearchStrategy[
+    Dict[str, Optional[TraceStep]]
+]:
     """Generate a steps dict with gaps and differing args → VARIABLE.
 
     At least one gap, all non-None steps have same type/target but
@@ -226,9 +225,7 @@ def variable_steps_gaps_diff_args_st() -> st.SearchStrategy[Dict[str, Optional[T
                 max_size=n - 1,
                 unique=True,
             ),
-        ).map(
-            lambda tup, count=n: _build_gaps_diff_args(tup, count)
-        )
+        ).map(lambda tup, count=n: _build_gaps_diff_args(tup, count))
     )
 
 

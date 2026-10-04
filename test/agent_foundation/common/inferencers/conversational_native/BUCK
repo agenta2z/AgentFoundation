@@ -1,0 +1,85 @@
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
+
+oncall("ml_oncall")
+
+# Native conversational orchestrator suite. One self-contained target so the
+# shared fakes/helpers and the fixture SOPs (resources) sit in the same package
+# as the flat test modules (base_module="", absolute sibling imports). Backends
+# scripted FakeBackend (no network); the Claude SDK backend target below is
+# option/mapping/hook-shape only (no `claude` subprocess). Real-vendor coverage
+# lives in scripts/native_spikes/ (opt-in, spawns the real vendor CLIs).
+python_unittest(
+    name = "conversational_native",
+    srcs = [
+        "fakes.py",
+        "helpers.py",
+        "test_backend_capabilities.py",
+        "test_bridge_handlers.py",
+        "test_bridge_schemas.py",
+        "test_claude_cli_backend.py",
+        "test_claude_sdk_backend.py",
+        "test_cli_runner.py",
+        "test_codex_cli_backend.py",
+        "test_composer.py",
+        "test_devmate_dm_backend.py",
+        "test_host_protocol.py",
+        "test_native_config.py",
+        "test_native_lifecycle.py",
+        "test_native_mirror.py",
+        "test_native_rounds.py",
+        "test_native_submission.py",
+        "test_native_widgets.py",
+        "test_private_files.py",
+        "test_record_store.py",
+        "test_runtime_manager.py",
+        "test_text_units.py",
+    ],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    resources = glob(["fixtures/**"]),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/claude-agent-sdk:claude-agent-sdk",
+        "fbsource//third-party/pypi/jsonschema:jsonschema",
+        "fbsource//third-party/pypi/mcp:mcp",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        "//later:lib",
+    ],
+)
+
+# The Metamate backend is its own target (it depends on the Buck-only Metamate
+# SDK, which the core library and the suite above leave out); its tests use a
+# fake SDK client and the suite's shared helpers and fixture SOPs.
+python_unittest(
+    name = "test_metamate_backend",
+    srcs = ["test_metamate_backend.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        ":conversational_native-library",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/conversational_native/session/metamate:metamate",
+        "//later:lib",
+    ],
+)
+
+# The localhost MCP server binds and connects to real loopback sockets, which a
+# network-isolated test namespace does not provide (its loopback starts down).
+python_unittest(
+    name = "test_mcp_http",
+    srcs = ["test_mcp_http.py"],
+    base_module = "",
+    network_access = network_access_utils.all(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/httpx:httpx",
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)

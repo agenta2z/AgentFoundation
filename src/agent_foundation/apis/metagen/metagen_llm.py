@@ -5,6 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+from agent_foundation.apis.common import _resolve_llm_timeout
 from metagen import (
     CompletionResponse,
     Dialog,
@@ -18,9 +19,6 @@ from metagen import (
     MetaGenPlatform,
     thrift_platform_factory,
 )
-
-from agent_foundation.apis.common import _resolve_llm_timeout
-
 from rich_python_utils.common_utils import get_
 from rich_python_utils.console_utils import hprint_message
 

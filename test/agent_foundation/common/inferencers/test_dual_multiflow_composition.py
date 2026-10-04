@@ -27,8 +27,6 @@ import shutil
 import tempfile
 import unittest
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     DualInferencerResponse,
@@ -40,6 +38,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
 
 
 # Inline Jinja fixture for the aggregator-prompt code path. The renderer just
@@ -137,12 +136,12 @@ def _review_reject(issue_desc: str = "needs work") -> str:
 
 def _parse_decision_tag(s: str):
     m = re.search(r"<Decision>([\s\S]*?)</Decision>", s)
-    return (m.group(1).strip() if m else None)
+    return m.group(1).strip() if m else None
 
 
 def _parse_finalplan_tag(s: str) -> str:
     m = re.search(r"<FinalPlan>([\s\S]*?)</FinalPlan>", s)
-    return (m.group(1).strip() if m else s)
+    return m.group(1).strip() if m else s
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +152,7 @@ def _parse_finalplan_tag(s: str) -> str:
 def _build_multi_flow(
     *,
     n_flows: int,
-    flow_outputs,    # list of lists: flow_outputs[i] = [step0, step1, ...]
+    flow_outputs,  # list of lists: flow_outputs[i] = [step0, step1, ...]
     aggregator_output: str,
     workspace_dir: str,
     visible_flows: str = "all",
@@ -330,16 +329,15 @@ class TestT2HappyPathN2(unittest.TestCase):
         reviewer = _ScriptedInferencer(
             script=[_review_reject(), _review_reject(), _review_reject()]
         )
-        fixer = _ScriptedInferencer(
-            script=["fix_v1", "fix_v2", "fix_v3"]
-        )
+        fixer = _ScriptedInferencer(script=["fix_v1", "fix_v2", "fix_v3"])
 
         dual = DualInferencer(
             base_inferencer=multi_flow,
             review_inferencer=reviewer,
             fixer_inferencer=fixer,
             consensus_config=ConsensusConfig(
-                max_iterations=2, max_consensus_attempts=1,
+                max_iterations=2,
+                max_consensus_attempts=1,
             ),
         )
         result = dual.infer("master")

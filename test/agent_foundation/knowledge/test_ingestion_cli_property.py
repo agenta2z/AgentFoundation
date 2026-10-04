@@ -11,6 +11,7 @@ method of KnowledgeIngestionCLI should raise a ValueError.
 
 **Validates: Requirements 8.2**
 """
+
 import json
 import sys
 from pathlib import Path
@@ -28,10 +29,8 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-from hypothesis import given, settings, assume
-from hypothesis import strategies as st
-
 from agent_foundation.knowledge.retrieval.ingestion_cli import KnowledgeIngestionCLI
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────
@@ -63,9 +62,7 @@ def missing_field_pieces(draw):
     required_fields = ["piece_id", "content", "knowledge_type", "info_type"]
     # Choose which fields to include (at least one must be missing)
     included = draw(
-        st.lists(
-            st.sampled_from(required_fields), min_size=0, max_size=3, unique=True
-        )
+        st.lists(st.sampled_from(required_fields), min_size=0, max_size=3, unique=True)
     )
     assume(set(included) != set(required_fields))  # At least one missing
 

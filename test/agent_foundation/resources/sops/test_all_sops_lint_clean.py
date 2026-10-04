@@ -3,13 +3,14 @@
 There is no standalone SOP "linter" binary; "lint clean" here means: each SOP
 under ``resources/sops`` parses to a non-empty phase graph and computes a
 ``tool_to_phase_map`` without error. A dedicated check locks in that
-``model_optimization`` Phase 3b/4 are wired to ``proposal_selection`` + ``task``.
+``model_optimization`` wires ``proposal_selection`` + ``task`` to its
+review/implementation phases (currently Phase 2b / Phase 3).
 """
+
 from pathlib import Path
 
-import pytest
-
 import agent_foundation
+import pytest
 from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
     SOPManager,
 )
@@ -25,9 +26,7 @@ def test_sops_exist():
     assert _all_sop_files(), f"no SOP.md files found under {_SOPS_DIR}"
 
 
-@pytest.mark.parametrize(
-    "sop_path", _all_sop_files(), ids=lambda p: p.parent.name
-)
+@pytest.mark.parametrize("sop_path", _all_sop_files(), ids=lambda p: p.parent.name)
 def test_sop_parses_and_maps_tools(sop_path):
     sop = SOPManager.load(sop_path)
     assert sop.phases, f"{sop_path} parsed to no phases"
@@ -42,20 +41,20 @@ def test_sop_parses_and_maps_tools(sop_path):
         )
 
 
-def test_model_optimization_phase3b_and_4_wiring():
+def test_model_optimization_proposal_selection_and_task_wiring():
     sop = SOPManager.load(_SOPS_DIR / "model_optimization" / "SOP.md")
     mapping = sop.tool_to_phase_map
 
-    # Phase 3b now uses proposal_selection (reverted from the confirmation workaround).
+    # Proposal review/selection (currently Phase 2b) is wired to proposal_selection.
     assert "proposal_selection" in mapping, (
         f"proposal_selection not wired; tool_to_phase_map={mapping}"
     )
-    # Phase 4 invokes the task tool with --use-proposal / --proposal-ids.
+    # Implementation (currently Phase 3) invokes the task tool.
     assert "task" in mapping, mapping
 
     # The proposal_selection phase declares the user-input gate.
     ps_phase = sop.get_phase(mapping["proposal_selection"])
     assert ps_phase is not None
     assert ps_phase.requires_user_input, (
-        "Phase 3b must keep [__requires user input__]"
+        "the proposal_selection phase must keep [__requires user input__]"
     )

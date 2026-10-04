@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Streaming Inferencer Base.
@@ -30,22 +29,32 @@ import enum
 import hashlib
 import logging
 import os
-import queue
-import threading
+import time
 import uuid
 from abc import abstractmethod
+from contextlib import aclosing
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, AsyncIterator, Callable, Iterator, Optional
 
-from attr import attrib, attrs
-import contextvars
-
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-    _current_fallback_state,
-)
 from agent_foundation.common.inferencers.constants.paths import DEFAULT_RECOVERY_DIR
+from agent_foundation.common.inferencers.inferencer_base import (
+    _current_fallback_state,
+    InferencerBase,
+)
 from agent_foundation.common.inferencers.recovery import render_recovery_prompt
+from agent_foundation.common.inferencers.run_context import (
+    active_run_context,
+    enter_run,
+    exit_run,
+    frame_for,
+    framed_agen,
+    framed_gen,
+    invocation_of,
+    RuntimeKey,
+)
+from attr import attrib, attrs
+from rich_python_utils.common_utils.async_utils import iterate_async_in_thread
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -69,20 +78,34 @@ class EmptyLineMode(enum.Enum):
 
 
 class FallbackInferMode(enum.StrEnum):
-    """How recovery uses cached partial output from a failed streaming attempt.
+    """How recovery re-runs a failed streaming attempt (Option C taxonomy).
 
     This is distinct from FallbackMode (in rich_python_utils.common_utils.function_helper),
     which controls WHEN the fallback fires. The two enums are orthogonal:
     FallbackMode picks the trigger; FallbackInferMode picks the recovery strategy.
 
+    Two canonical strategies:
+      RETRY  — a plain re-run of the original input (for garbage: empty / off-topic /
+               narration-only output). It has NO template (recovery/retry.jinja2 was
+               retired); re-feeding garbage as a negative example only risks anchoring.
+      UPDATE — edit/complete the prior output in place, preserving the good work
+               (real-but-incomplete / truncated / format issues; subsumes old CONTINUE).
+
+    UPDATE has a ``recovery/update.jinja2`` handler template; RETRY renders nothing
+    (``_render_recovery_prompt`` returns ``None`` for it → plain re-run). The legacy
+    names below are kept as backward-compat aliases (same values) so the shared
+    streaming-resume path and external callers keep resolving to a valid strategy.
+
     See also: FallbackMode in rich_python_utils.common_utils.function_helper
     """
 
-    CONTINUE = "continue"                      # Feed partial back, ask model to continue. Return partial + continuation.
-    RETRY_WITH_REFERENCE = "retry_with_reference"  # Show partial as context, request fresh response. Return only new response.
-    REFERENCE = "retry_with_reference"         # Backward-compatible alias.
-    RESTART = "restart"                        # Ignore partial entirely. Equivalent to plain retry.
-
+    RETRY = "retry"  # Plain re-run of the original input; no template (retired).
+    UPDATE = "update"  # Edit/complete the prior output in place, preserving prior work.
+    # --- Backward-compat aliases (old names → new values) ---
+    RESTART = "retry"  # was a plain re-run → now RETRY.
+    RETRY_WITH_REFERENCE = "retry"  # → RETRY.
+    REFERENCE = "retry"  # legacy default alias → RETRY.
+    CONTINUE = "update"  # old continue-from-cutoff → now UPDATE (edit in place).
 
 
 def _read_partial_from_cache(cache_path: str) -> Optional[str]:
@@ -99,21 +122,45 @@ def _read_partial_from_cache(cache_path: str) -> Optional[str]:
         return None
 
 
-class _BackingHandleView:
-    """Adapts an instance's legacy ``_<name>_backing`` attrs to the ``LiveHandles``
-    ``get``/``set`` API so a leaf teardown treats the no-context backing uniformly
-    with the connection-scoped branches (see ``_iter_live_handle_sets``)."""
+class _SessionSlot(enum.Enum):
+    """``RESET`` marks a branch whose session was explicitly cleared under a host
+    ctx, so reads must not fall back to the shared instance backing."""
 
-    __slots__ = ("_owner",)
+    RESET = "reset"
 
-    def __init__(self, owner: Any) -> None:
-        self._owner = owner
 
-    def get(self, name: str, default: Any = None) -> Any:
-        return self._owner.__dict__.get(f"_{name}_backing", default)
+class LiveHandleField:
+    """A property whose value is session-scoped live state (plan §5.5).
 
-    def set(self, name: str, value: Any) -> None:
-        self._owner.__dict__[f"_{name}_backing"] = value
+    Reads and writes follow the session policy of
+    :meth:`StreamingInferencerBase._session_scoped_get` /
+    :meth:`~StreamingInferencerBase._session_scoped_set`: this branch's slot under a
+    host ctx, the instance's ``backing`` entry in ``__dict__`` otherwise (it may be
+    the field's own name). For a session id and the conversation ids that resume
+    with it (``active_session_id``, metamate's and rovochat's conversation ids);
+    other private handle state uses ``_tier3_get`` / ``_tier3_set``.
+    """
+
+    def __init__(self, name: str, backing: str) -> None:
+        self.name = name
+        self.backing = backing
+
+    def __get__(self, inst: Any, owner: Any = None) -> Any:
+        if inst is None:
+            return self
+        return inst._session_scoped_get(self.name, backing=self.backing)
+
+    def __set__(self, inst: Any, value: Any) -> None:
+        inst._session_scoped_set(self.name, value, backing=self.backing)
+
+
+@attrs(slots=True)
+class StreamStats:
+    """What one call's stream counted, for its ``_ainfer`` (B28)."""
+
+    tokens: int = attrib(default=0)
+    tool_uses: int = attrib(default=0)
+    usage: Any = attrib(default=None)
 
 
 @attrs
@@ -127,7 +174,7 @@ class StreamingInferencerBase(InferencerBase):
 
     Provides:
     - ``ainfer_streaming()`` — async streaming with per-chunk idle timeout + cache
-    - ``infer_streaming()`` — sync bridge via thread + queue
+    - ``infer_streaming()`` — sync bridge via an owned loop in a worker thread
     - ``_ainfer()`` — accumulates from ``ainfer_streaming()``
     - Session management: ``new_session``, ``anew_session``, ``resume_session``, ``aresume_session``
     - Cache persistence: optional ``cache_folder`` for writing intermediate output
@@ -169,6 +216,19 @@ class StreamingInferencerBase(InferencerBase):
             infer calls. Default: True.
     """
 
+    _HOST_PURE_CERTIFIED = True
+
+    # Left out of a resume identity: the stream cache, the live observer and the
+    # idle timeouts.
+    _RESUME_IDENTITY_EXCLUDE = frozenset(
+        {
+            "cache_folder",
+            "stream_observer",
+            "idle_timeout_seconds",
+            "tool_use_idle_timeout_seconds",
+        }
+    )
+
     # Streaming configuration
     cache_folder: Optional[str] = attrib(default=None)
     idle_timeout_seconds: int = attrib(default=600)
@@ -177,9 +237,11 @@ class StreamingInferencerBase(InferencerBase):
 
     # Session management
     auto_resume: bool = attrib(default=True)
+    _FANOUT_DROPPED_ARGS = ("new_session",)
+    _FANOUT_SINGLE_CALL_ARGS = ("session_id", "resume")
 
     # Fallback recovery configuration
-    fallback_infer_mode: FallbackInferMode = attrib(default=FallbackInferMode.REFERENCE)
+    fallback_infer_mode: FallbackInferMode = attrib(default=FallbackInferMode.RETRY)
     use_default_prompt_templates: bool = attrib(default=True)
 
     # Recovery template key root (overridable by subclasses to use custom templates)
@@ -197,6 +259,29 @@ class StreamingInferencerBase(InferencerBase):
     # Can be sync or async — async coroutines are awaited automatically.
     # Wrapped in try/except — visualization-only, never aborts inference.
     stream_observer: Optional[Callable] = attrib(default=None, repr=False, kw_only=True)
+
+    # A parent hands this call's observer as the ``stream_observer=`` call keyword
+    # (``_effective("stream_observer")``); the configured field is the fallback.
+    _INVOCATION_KEYWORDS = MappingProxyType(
+        {"stream_observer": RuntimeKey("StreamingInferencerBase.stream_observer")}
+    )
+    # The current attempt's stream counters (tokens, tool uses, usage).
+    _STREAM_STATS = RuntimeKey(
+        "StreamingInferencerBase.stream_stats", factory=StreamStats
+    )
+
+    def _reset_stream_stats(self) -> StreamStats:
+        """Start this attempt's counters at zero and return them."""
+        stats = StreamStats()
+        invocation_of(self).put(self._STREAM_STATS, stats)
+        return stats
+
+    def _stream_stats(self) -> StreamStats:
+        """This invocation's counters; outside one, a throwaway nothing reads."""
+        frame = frame_for(self)
+        if frame is None:
+            return StreamStats()
+        return frame.get_or_create(self._STREAM_STATS)
 
     def get_final_output(self) -> Optional[str]:
         """Return clean final output if it differs from concatenated stream.
@@ -218,9 +303,9 @@ class StreamingInferencerBase(InferencerBase):
         """Read clean output for cache overwrite while source is still accessible.
 
         Called synchronously from the base class _ainfer_streaming() finally block,
-        BEFORE the subclass's own finally block (where contextvar cleanup and file
+        BEFORE the subclass's own finally block (where per-call cleanup and file
         deletion happen). This timing guarantee means:
-        - _current_output_file contextvar is still set (in RovoDevCliInferencer)
+        - the call's output-file component is still set (in RovoDevCliInferencer)
         - --output-file still exists on disk (not yet deleted)
 
         Subclasses that have a clean output source (e.g., --output-file) override
@@ -262,23 +347,109 @@ class StreamingInferencerBase(InferencerBase):
         """Render a recovery prompt for the given fallback mode.
 
         Returns ``None`` if no template system is available (caller should
-        fall through to RESTART).
+        fall through to a plain re-run).
         """
+        # RETRY is a plain re-run of the original input — it has NO template
+        # (recovery/retry.jinja2 was retired). Return None so the dispatch and the
+        # resume hooks (both null-check the result) fall through to the plain re-run.
+        # NOTE: this governs the BASE seam; a subclass that overrides this 3-arg
+        # method bypasses the guard (its own responsibility; degrades gracefully).
+        if mode == FallbackInferMode.RETRY:
+            return None
         key = f"{self.fallback_recovery_template_key}/{mode.value}"
+        # Thread has_local_access so update.jinja2 can pick the edit-in-place (local)
+        # vs re-emit-inline (no-local) branch, and the judge's <reason> (from the
+        # per-call fallback state) so UPDATE is a guided fix. The recovery re-run
+        # sends this rendered string straight to the backend, bypassing the feed
+        # builder, so both must be injected here (not via the feed).
+        hla = bool(getattr(self, "has_local_access", False))
+        _fs = _current_fallback_state.get(None)
+        reason = _fs.get("guardrail_reason") if _fs else None
         tm = getattr(self, "template_manager", None)
         if tm is not None:
+            # Recovery templates use agent_prompt/agent_response (see
+            # resources/prompt_templates/recovery/*.jinja2).
             return tm(
                 key,
                 active_template_type="",
-                prompt=prompt,
-                partial_output=partial_output,
+                agent_prompt=prompt,
+                agent_response=partial_output,
+                has_local_access=hla,
+                reason=reason,
             )
         elif self.use_default_prompt_templates:
             return render_recovery_prompt(
-                key, prompt=prompt, partial_output=partial_output
+                key,
+                prompt=prompt,
+                partial_output=partial_output,
+                has_local_access=hla,
+                reason=reason,
             )
         else:
             return None
+
+    def _output_file_ready(self) -> bool:
+        """True iff ``resolve_output_path()`` points at an existing, non-empty file.
+
+        Same predicate as ``InferencerBase._finalize_output`` /
+        ``_guardrail_output_text``. Pure (no I/O side effects); safe at recovery time.
+        """
+        try:
+            resolved = self.resolve_output_path()
+        except Exception:
+            return False
+        return bool(
+            resolved
+            and os.path.isabs(resolved)
+            and os.path.isfile(resolved)
+            and os.path.getsize(resolved) > 0
+        )
+
+    def _update_mode_viable(self, raw_partial: Optional[str]) -> bool:
+        """Whether an UPDATE recovery has something to build on.
+
+        UPDATE (preserve + complete prior work) needs either a non-empty prior
+        partial to show inline, or — for a local agent — a non-empty on-disk
+        deliverable to edit. With neither, the caller degrades UPDATE to RETRY.
+        """
+        if raw_partial and raw_partial.strip():
+            return True
+        return bool(self.has_local_access and self._output_file_ready())
+
+    def _effective_cache_folder(self) -> Optional[str]:
+        """Resolve ``cache_folder`` at call time — explicit value first,
+        otherwise derive from the ctx-aware workspace.
+
+        v5 Fix #3 — the modern M7 ctx-dispatch path delivers the active
+        workspace via ``ctx.handles["workspace_override"]``, which
+        deliberately bypasses the ``_workspace`` setter — so
+        ``_configure_for_workspace`` (which is the only thing that
+        mutates ``self.cache_folder`` today) never fires on ctx-
+        dispatched leaves. Result without this resolver: ``cache_folder``
+        stays ``None`` and the streaming-cache gate at
+        ``_ainfer_streaming_pipeline`` is always False, so no
+        ``stream_*.txt`` files are written for any flow leaf (verified
+        empirically: ``find <task_root> -name 'stream_*.txt'`` returned
+        zero hits across all rounds).
+
+        Write-pure (no instance mutation) because the SAME streaming
+        leaf instance is reused across concurrent gathered branches on
+        the modern path (verified: round01 and round02 share
+        ``CodexCliInferencer-6efaf963``). A set-once mutation would
+        route round02's cache under round01's per-branch workspace.
+        ``self._workspace`` is the ctx-aware getter (returns the
+        per-call workspace_override when published) so this resolver
+        inherits its per-branch safety.
+
+        Returns ``None`` (today's behavior) for leaves with no workspace
+        and no explicit ``cache_folder``.
+        """
+        if self.cache_folder:
+            return self.cache_folder
+        ws = self._workspace  # ctx-aware getter (per-branch under M7)
+        if ws is None:
+            return None
+        return os.path.join(str(ws.root), "_runtime", "inferencer_cache")
 
     # === Resumable protocol overrides ===
 
@@ -287,8 +458,9 @@ class StreamingInferencerBase(InferencerBase):
         try:
             return super()._get_result_path(result_id, *args, **kwargs)
         except NotImplementedError:
-            if self.cache_folder:
-                return os.path.join(self.cache_folder, f"{result_id}.pkl")
+            cf = self._effective_cache_folder()
+            if cf:
+                return os.path.join(cf, f"{result_id}.pkl")
             raise
 
     def _find_latest_cache(self, prompt: str) -> Optional[str]:
@@ -302,16 +474,18 @@ class StreamingInferencerBase(InferencerBase):
         restarts, so the ``{id}_{timestamp}`` directory is wildcarded with
         ``*``.  Only ``ClassName`` and ``prompt_hash`` are deterministic anchors.
         """
-        if not self.cache_folder:
+        cf = self._effective_cache_folder()
+        if not cf:
             return None
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         pattern = os.path.join(
-            self.cache_folder,
+            cf,
             self.__class__.__name__,
             "*",  # {id}_{timestamp} directories — wildcarded (id has random UUID)
             f"stream_*_{prompt_hash}.txt",
         )
         import glob as _glob
+
         matches = _glob.glob(pattern)
         if not matches:
             return None
@@ -330,7 +504,7 @@ class StreamingInferencerBase(InferencerBase):
         ``_load_result`` (which must return raw results for the Workflow
         engine contract).
         """
-        if not self.cache_folder or not self.resume_with_saved_results:
+        if not self._effective_cache_folder() or not self.resume_with_saved_results:
             return None
         prompt = self._extract_prompt(inference_input)
         cache_path = self._find_latest_cache(prompt)
@@ -341,13 +515,13 @@ class StreamingInferencerBase(InferencerBase):
             return None
         if "--- STREAM COMPLETED SUCCESSFULLY ---" in content:
             idx = content.find("\n--- STREAM COMPLETED SUCCESSFULLY ---")
-            return ('completed', content[:idx].rstrip() if idx >= 0 else content)
+            return ("completed", content[:idx].rstrip() if idx >= 0 else content)
         if "--- STREAM FAILED:" in content:
             partial = self._sanitize_partial(content, self.fallback_infer_mode)
-            return ('partial', partial) if partial else None
+            return ("partial", partial) if partial else None
         # No marker — crash before finalize (treat as partial)
         stripped = content.rstrip()
-        return ('partial', stripped) if stripped else None
+        return ("partial", stripped) if stripped else None
 
     def _try_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
         """Sync resume hook — used by ``_infer_single``.
@@ -355,15 +529,19 @@ class StreamingInferencerBase(InferencerBase):
         For completed caches, returns the cached result directly.
         For partial caches, calls ``self._infer()`` (sync) with augmented prompt.
         """
-        cached = self._load_cached_or_resume(inference_input, inference_config, **kwargs)
+        cached = self._load_cached_or_resume(
+            inference_input, inference_config, **kwargs
+        )
         if cached is None:
             return None
         status, content = cached
-        if status == 'completed':
+        if status == "completed":
             logger.info("Resume: previous run completed, returning cached result")
             return content
-        elif status == 'partial' and content:
-            logger.info("Resume: previous run failed, triggering sync recovery from partial cache")
+        elif status == "partial" and content:
+            logger.info(
+                "Resume: previous run failed, triggering sync recovery from partial cache"
+            )
             augmented = self._render_recovery_prompt(
                 self.fallback_infer_mode, self._extract_prompt(inference_input), content
             )
@@ -371,7 +549,9 @@ class StreamingInferencerBase(InferencerBase):
                 return self._infer(augmented, inference_config, **kwargs)
         return None
 
-    async def _atry_resume_from_cache(self, inference_input, inference_config=None, **kwargs):
+    async def _atry_resume_from_cache(
+        self, inference_input, inference_config=None, **kwargs
+    ):
         """Async resume hook — used by ``_ainfer_single``.
 
         For completed caches, returns the cached result directly.
@@ -380,15 +560,19 @@ class StreamingInferencerBase(InferencerBase):
         No recursion risk: ``_ainfer()`` goes to ``ainfer_streaming()`` →
         ``_ainfer_streaming()``, never re-entering ``_ainfer_single``.
         """
-        cached = self._load_cached_or_resume(inference_input, inference_config, **kwargs)
+        cached = self._load_cached_or_resume(
+            inference_input, inference_config, **kwargs
+        )
         if cached is None:
             return None
         status, content = cached
-        if status == 'completed':
+        if status == "completed":
             logger.info("Resume: previous run completed, returning cached result")
             return content
-        elif status == 'partial' and content:
-            logger.info("Resume: previous run failed, triggering async recovery from partial cache")
+        elif status == "partial" and content:
+            logger.info(
+                "Resume: previous run failed, triggering async recovery from partial cache"
+            )
             augmented = self._render_recovery_prompt(
                 self.fallback_infer_mode, self._extract_prompt(inference_input), content
             )
@@ -398,142 +582,79 @@ class StreamingInferencerBase(InferencerBase):
 
     # === Properties ===
 
-    def _get_live_handle_store(self):
-        """M6/§2.0 Note B: the CONNECTION-scoped, path-keyed live-handle store —
-        owned by THIS instance (the connection holder), so it persists across turns
-        (V7 continuity) independently of the per-turn RunContext tree, and isolates
-        concurrent branches by ``ctx.path`` (V8). Created lazily; never serialized.
+    def _session_scoped_get(
+        self, name: str, default: Any = None, *, backing: Optional[str] = None
+    ) -> Any:
+        """Read session-scoped live state ``name`` under the session policy.
+
+        Under a host ctx: this branch's slot in the connection-scoped store, keyed by
+        ``(handle scope, path)`` (V8 isolation, V7 continuity across turns of one
+        root, B32 isolation of independent roots), so a sibling branch's cold read is
+        its own slot, never another branch's value; a slot reset under a host ctx
+        reads as ``default``, never as the backing; an unset slot falls back to the
+        instance's ``backing`` entry in ``__dict__`` (default ``_<name>``: a value set at setup).
+
+        With no ctx or under a legacy-mint root (a read between calls, by an
+        external caller, or inside a bare call): the backing when set; otherwise
+        the one live value the branches hold, so a standalone leaf's state written
+        under a call's ctx stays visible after the call (only when unambiguous:
+        concurrent branches are always read under their own ctx); else
+        ``default``.
         """
-        store = self.__dict__.get("_live_handle_store")
-        if store is None:
-            from agent_foundation.common.inferencers.run_context import (
-                LiveHandleStore,
-            )
-
-            store = LiveHandleStore()
-            self.__dict__["_live_handle_store"] = store
-        return store
-
-    def _tier3_get(self, name: str, default: Any = None) -> Any:
-        """M6 Tier-3 read: the per-branch handle from THIS instance's connection-
-        scoped store at the active ``ctx.path`` (V8 isolation + V7 continuity);
-        else the instance backing — which holds a legacy/no-ctx connection or one
-        established at setup BEFORE any context (a shared base, NOT another branch's
-        handle, since branch writes never touch the backing). Byte-identical with
-        no active context.
-        """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
-
-        ctx = active_run_context()
-        if ctx is not None:
-            branch = self._get_live_handle_store().peek(ctx.path)
-            if branch is not None:
-                val = branch.get(name, None)
-                if val is not None:
-                    return val
-        return self.__dict__.get(f"_{name}_backing", default)
-
-    def _tier3_set(self, name: str, value: Any) -> None:
-        """M6 Tier-3 write: under a context, write ONLY the branch's handle in this
-        instance's connection-scoped store (keyed by ``ctx.path``) — NOT the instance
-        backing — so a branch never pollutes the shared base that other branches'
-        COLD reads fall back to (the V8 cold-read isolation fix). With no context,
-        write the instance backing (legacy, byte-identical)."""
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
-
-        ctx = active_run_context()
-        if ctx is not None:
-            self._get_live_handle_store().get_or_create(ctx.path).set(name, value)
-        else:
-            self.__dict__[f"_{name}_backing"] = value
-
-    def _iter_live_handle_sets(self):
-        """M6 teardown: yield a ``.get(name)``/``.set(name, value)`` view over EVERY
-        live-handle set this instance holds — each connection-scoped branch (keyed by
-        the ``ctx.path`` it was established under during ``_ainfer``) AND the legacy
-        no-context backing.
-
-        A leaf ``adisconnect`` runs at a lifecycle boundary (``__aexit__`` / host
-        cleanup) where ``active_run_context()`` is ``None`` (verified), so reading
-        only the active branch — as the per-call Tier-3 property shims do — would
-        strand every branch a context established during ``_ainfer`` (the V7/V8
-        handle leak: SDK clients / subprocesses never reclaimed). Draining by stored
-        path instead of by active context is the only teardown that reaches them."""
-        store = self.__dict__.get("_live_handle_store")
-        if store is not None:
-            # snapshot: the leaf clears entries as it tears each down
-            yield from list(store._by_path.values())
-        yield _BackingHandleView(self)
-
-    @property
-    def active_session_id(self) -> Optional[str]:
-        """Get the current active session ID for resumption.
-
-        M6 (Tier-3): the live session is a per-connection-branch handle. Under a
-        context it lives in THIS instance's connection-scoped store keyed by
-        ``ctx.path`` (V8 isolation + V7 continuity across turns); a sibling branch's
-        cold read therefore resolves to None (its own slot), never another branch's
-        session. Falls back to the instance ``_session_id`` (legacy/no-ctx, or a
-        session set at setup) — **byte-identical** with no active context.
-        """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
-
+        attr = backing or f"_{name}"
         ctx = active_run_context()
         if ctx is not None and not ctx.legacy_mint:
-            branch = self._get_live_handle_store().peek(ctx.path)
-            if branch is not None and branch.get("live_session_id") is not None:
-                return branch.get("live_session_id")
-            return self._session_id
-        # No active context: a read BETWEEN calls / by an external caller (e.g. the
-        # host, after ``ainfer`` returned and the bridge exited). Prefer an explicit
-        # instance/legacy session if one is set; otherwise surface the live connection's
-        # session from the connection-scoped store — else the public session id is
-        # invisible once the run context is gone (breaking V7 across-call continuity for
-        # a standalone leaf, whose session was written under the call's ctx path). Only
-        # when UNAMBIGUOUS (a single live connection); concurrent fan-out branches keep
-        # their own slots and are always read under their own ctx, never here.
-        if self._session_id is not None:
-            return self._session_id
+            branch = self._get_live_handle_store().peek(ctx.live_branch_key)
+            live = None if branch is None else branch.get(name)
+            if live is _SessionSlot.RESET:
+                return default
+            if live is not None:
+                return live
+            fallback = self.__dict__.get(attr)
+            return default if fallback is None else fallback
+        value = self.__dict__.get(attr)
+        if value is not None:
+            return value
         store = self.__dict__.get("_live_handle_store")
         if store is not None:
             live = {
-                sid
-                for sid in (
-                    h.get("live_session_id") for h in list(store._by_path.values())
-                )
-                if sid is not None
+                v
+                for v in (h.get(name) for h in list(store._by_path.values()))
+                if v is not None and v is not _SessionSlot.RESET
             }
             if len(live) == 1:
                 return next(iter(live))
-        return self._session_id
+        return default
 
-    @active_session_id.setter
-    def active_session_id(self, value: Optional[str]) -> None:
-        # M6: under a context, write ONLY the branch's slot in this instance's
-        # connection-scoped store (keyed by ctx.path) — NOT the instance backing —
-        # so a branch never pollutes the shared base other branches cold-read (V8).
-        # With no context, write the instance backing (legacy, byte-identical).
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
+    def _session_scoped_set(
+        self, name: str, value: Any, *, backing: Optional[str] = None
+    ) -> None:
+        """Write session-scoped live state ``name`` under the session policy.
 
+        Under a host ctx: only this branch's slot (``None`` stores a reset marker),
+        never the backing other branches' cold reads fall back to. With no ctx or
+        under a legacy-mint root (whose handle store is discarded on bridge exit):
+        the instance's ``backing`` entry (default ``_<name>``), so the post-call
+        getter still sees it. A reset there (``None``) also clears ``name`` in every
+        branch the no-ctx read would surface, so it really resets (B6(b)).
+        """
+        attr = backing or f"_{name}"
         ctx = active_run_context()
         if ctx is not None and not ctx.legacy_mint:
-            self._get_live_handle_store().get_or_create(ctx.path).set(
-                "live_session_id", value
+            self._get_live_handle_store().get_or_create(ctx.live_branch_key).set(
+                name, _SessionSlot.RESET if value is None else value
             )
-        else:
-            # No context, OR a legacy-mint root (a bare call's throwaway root,
-            # whose connection-scoped handle store is discarded on bridge exit):
-            # write the instance backing so the post-call getter still sees it
-            # (mint_root's documented "mirror to the backing" intent) — byte-identical.
-            self._session_id = value
+            return
+        self.__dict__[attr] = value
+        store = self.__dict__.get("_live_handle_store")
+        if value is None and store is not None:
+            for branch in list(store._by_path.values()):
+                if branch.get(name) is not None:
+                    branch.set(name, None)
+
+    # The current active session ID for resumption: a per-connection-branch live
+    # handle under a host ctx, the instance ``_session_id`` otherwise.
+    active_session_id = LiveHandleField("live_session_id", "_session_id")
 
     # === Abstract Method ===
 
@@ -644,7 +765,7 @@ class StreamingInferencerBase(InferencerBase):
             yield line
         # End of stream: buffered empties are dropped (BUFFER mode)
 
-    async def ainfer_streaming(
+    def ainfer_streaming(
         self,
         inference_input: Any,
         inference_config: Any = None,
@@ -652,27 +773,64 @@ class StreamingInferencerBase(InferencerBase):
         run_context=None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Public async streaming entrypoint (M2/E2): installs the RunContext
-        bridge, then delegates to the streaming pipeline. ``_active_ctx`` stays
-        set across all yields (the generator runs in the consumer's task), so the
-        streaming primitive + ``active_session_id`` resolve to the right context.
-        ``run_context=None`` legacy-mints -> byte-identical.
+        """Public async streaming entrypoint (M2/E2): returns a stream that
+        installs the RunContext bridge, then yields the chunks of
+        ``_ainfer_streaming_pipeline``. ``run_context=None`` legacy-mints ->
+        byte-identical.
+
+        When ``bta_inferencer`` fans this call out, the stream yields the
+        fan-out's response for ``inference_input`` (sent verbatim, like the
+        backend) as one chunk.
+
+        Subclasses customize streaming by overriding the pipeline; an override
+        of this entry only validates or adapts arguments, then calls ``super()``.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
+        return self._ainfer_streaming_entry(
+            inference_input, inference_config, run_context, kwargs
         )
 
-        _rc_token = enter_run(
-            run_context, default_workspace=getattr(self, "_workspace", None)
+    def _ainfer_streaming_entry(
+        self,
+        inference_input: Any,
+        inference_config: Any,
+        run_context: Any,
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[str]:
+        """The stream's invocation (``framed_agen``): the ctx and frame are bound
+        only while the pipeline runs, never across a yield to the consumer.
+        ``_init_call_state`` and the fan-out decision run inside the frame, at the
+        first resumption."""
+
+        def start() -> AsyncIterator[str]:
+            self._pop_invocation_keywords(frame_for(self), kwargs)
+            self._init_call_state(inference_input)
+            return self._astreaming_source(inference_input, inference_config, kwargs)
+
+        return framed_agen(
+            self,
+            "ainfer_streaming",
+            run_context,
+            start,
+            default_workspace=getattr(self, "_workspace", None),
         )
-        try:
-            async for _chunk in self._ainfer_streaming_pipeline(
-                inference_input, inference_config, **kwargs
-            ):
-                yield _chunk
-        finally:
-            exit_run(_rc_token)
+
+    def _astreaming_source(
+        self, inference_input: Any, inference_config: Any, kwargs: dict[str, Any]
+    ) -> AsyncIterator[str]:
+        """The fan-out's one-chunk stream, or the streaming pipeline; decided
+        under the entry's context."""
+        if self._delegates_execution:
+            return self._afanout_stream(inference_input, inference_config, kwargs)
+        return self._ainfer_streaming_pipeline(
+            inference_input, inference_config, **kwargs
+        )
+
+    async def _afanout_stream(
+        self, inference_input: Any, inference_config: Any, kwargs: dict[str, Any]
+    ) -> AsyncIterator[str]:
+        self._ensure_ctx_workspace_logger()
+        text, _ = await self._arun_fanout(inference_input, inference_config, kwargs)
+        yield text
 
     async def _ainfer_streaming_pipeline(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
@@ -696,10 +854,15 @@ class StreamingInferencerBase(InferencerBase):
         """
         prompt = self._extract_prompt(inference_input)
 
-        # Open cache file if configured
+        # Open cache file if configured. v5 Fix #3 — resolve at call time
+        # so ctx-dispatched leaves (whose workspace arrives via
+        # ctx.handles["workspace_override"]) get a streaming cache without
+        # mutating self.cache_folder. Pass the resolved value into
+        # _open_cache_file so the gate and the open agree.
         cache_file = None
-        if self.cache_folder:
-            cache_file = self._open_cache_file(prompt)
+        _cache_folder = self._effective_cache_folder()
+        if _cache_folder:
+            cache_file = self._open_cache_file(prompt, _cache_folder)
             # Publish cache path to _fallback_state (if set by _ainfer_single)
             fs = _current_fallback_state.get(None)
             if fs is not None:
@@ -783,6 +946,27 @@ class StreamingInferencerBase(InferencerBase):
                                     f"{tool_use_timeout}s",
                                     "DualTimer",
                                 )
+                                # v5 Phase 1.5 — structured ToolUsePhase
+                                # marker. Makes the long input→response gap
+                                # in the JSONL self-explanatory (post-scan
+                                # can sum elapsed tool-use phase time vs
+                                # idle time per invocation). Env-gated.
+                                from agent_foundation.common.inferencers.inferencer_base import (
+                                    _is_verbose_correlation,
+                                )
+
+                                if _is_verbose_correlation():
+                                    _tool_use_start_ts = time.monotonic()
+                                    self.log_info(
+                                        {
+                                            "phase": "start",
+                                            "timeout_s": tool_use_timeout,
+                                            "ts": _tool_use_start_ts,
+                                        },
+                                        "ToolUsePhase",
+                                    )
+                                else:
+                                    _tool_use_start_ts = None
                             # Do NOT yield, cache, or accumulate sentinels.
                             continue
 
@@ -794,21 +978,41 @@ class StreamingInferencerBase(InferencerBase):
                                 f"Switching back to idle_timeout={idle_timeout}s",
                                 "DualTimer",
                             )
+                            # v5 Phase 1.5 — structured ToolUsePhase end
+                            # marker with elapsed duration.
+                            from agent_foundation.common.inferencers.inferencer_base import (
+                                _is_verbose_correlation,
+                            )
+
+                            if _is_verbose_correlation():
+                                _elapsed = (
+                                    time.monotonic() - _tool_use_start_ts
+                                    if _tool_use_start_ts is not None
+                                    else None
+                                )
+                                self.log_info(
+                                    {"phase": "end", "elapsed_s": _elapsed},
+                                    "ToolUsePhase",
+                                )
 
                         self._append_to_cache(cache_file, chunk)
                         yield chunk
 
                     success = True
                 finally:
-                    # Generator cleanup with optional timeout guard.
-                    # Subprocess-based inferencers set
-                    # _generator_cleanup_timeout to prevent secondary hangs
-                    # when aclose() triggers process.wait() on a running
-                    # subprocess after idle timeout.
-                    if self._generator_cleanup_timeout is not None:
+                    # Close the transport by ownership, so an early close or a
+                    # failure runs its cleanup now, under this call's binding,
+                    # rather than whenever its generator is garbage-collected.
+                    # A configured _generator_cleanup_timeout bounds a transport
+                    # whose aclose() could block (e.g. process.wait() on a
+                    # still-running subprocess after an idle timeout).
+                    aclose = getattr(aiter, "aclose", None)
+                    if aclose is not None and self._generator_cleanup_timeout is None:
+                        await aclose()
+                    elif aclose is not None:
                         try:
                             await asyncio.wait_for(
-                                aiter.aclose(),
+                                aclose(),
                                 timeout=self._generator_cleanup_timeout,
                             )
                         except (asyncio.TimeoutError, Exception):
@@ -818,8 +1022,12 @@ class StreamingInferencerBase(InferencerBase):
                             )
 
             # Phase 2: Filter + empty-line handling
-            async for filtered_chunk in self._yield_filter(_cached_stream(), **kwargs):
-                yield filtered_chunk
+            async with (
+                aclosing(_cached_stream()) as cached,
+                aclosing(self._yield_filter(cached, **kwargs)) as filtered,
+            ):
+                async for filtered_chunk in filtered:
+                    yield filtered_chunk
 
         except asyncio.TimeoutError as e:
             error = e
@@ -845,21 +1053,22 @@ class StreamingInferencerBase(InferencerBase):
                 final = self._get_clean_output_for_cache()
                 if final:
                     try:
-                        cache_path = getattr(cache_file, 'name', None)
+                        cache_path = getattr(cache_file, "name", None)
                         if cache_path:
                             # Close the original handle FIRST to avoid stale-handle
                             # writes after truncation by the new 'w' open below.
                             # _finalize_cache() safely no-ops when cache_file is None.
                             cache_file.close()
                             cache_file = None
-                            with open(cache_path, 'w', encoding='utf-8') as _cf:
+                            with open(cache_path, "w", encoding="utf-8") as _cf:
                                 _cf.write(final)
                                 _cf.write("\n--- STREAM COMPLETED SUCCESSFULLY ---\n")
                             success = True  # marker written; _finalize_cache skips it
                     except OSError as _e:
                         logger.warning(
                             "[%s] Failed to replace cache with clean output: %s",
-                            self.__class__.__name__, _e,
+                            self.__class__.__name__,
+                            _e,
                         )
             self._finalize_cache(cache_file, success, error)
 
@@ -875,16 +1084,16 @@ class StreamingInferencerBase(InferencerBase):
         Args:
             inference_input: Input for inference.
             inference_config: Optional configuration.
-            **kwargs: Passed through to ``ainfer_streaming()``.
+            **kwargs: Passed through to ``_ainfer_streaming_pipeline()``.
 
         Returns:
             Concatenated response text.
         """
         content_parts: list[str] = []
         # Hoist asyncio.iscoroutine out of the per-chunk loop for performance.
-        _observer = self.stream_observer
+        _observer = self._effective("stream_observer")
         _iscoroutine = asyncio.iscoroutine
-        async for chunk in self.ainfer_streaming(
+        async for chunk in self._ainfer_streaming_pipeline(
             inference_input, inference_config, **kwargs
         ):
             content_parts.append(chunk)
@@ -905,59 +1114,90 @@ class StreamingInferencerBase(InferencerBase):
         return "".join(content_parts)
 
     def infer_streaming(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Public sync streaming entrypoint, the twin of ``ainfer_streaming``:
+        returns a stream that installs the RunContext bridge, then yields the
+        chunks of ``_infer_streaming_pipeline``, or the fan-out's response as
+        one chunk. ``run_context=None`` legacy-mints.
+
+        Subclasses customize sync streaming by overriding that pipeline; an
+        override of this entry only validates or adapts arguments, then calls
+        ``super()``.
+        """
+        return self._infer_streaming_entry(
+            inference_input, inference_config, run_context, kwargs
+        )
+
+    def _infer_streaming_entry(
+        self,
+        inference_input: Any,
+        inference_config: Any,
+        run_context: Any,
+        kwargs: dict[str, Any],
+    ) -> Iterator[str]:
+        """Sync twin of ``_ainfer_streaming_entry`` (``framed_gen``)."""
+
+        def start() -> Iterator[str]:
+            self._pop_invocation_keywords(frame_for(self), kwargs)
+            self._init_call_state(inference_input)
+            return self._streaming_source(inference_input, inference_config, kwargs)
+
+        return framed_gen(
+            self,
+            "infer_streaming",
+            run_context,
+            start,
+            default_workspace=getattr(self, "_workspace", None),
+        )
+
+    def _streaming_source(
+        self, inference_input: Any, inference_config: Any, kwargs: dict[str, Any]
+    ) -> Iterator[str]:
+        """Sync twin of ``_astreaming_source``."""
+        if self._delegates_execution:
+            return self._fanout_stream(inference_input, inference_config, kwargs)
+        return self._infer_streaming_pipeline(
+            inference_input, inference_config, **kwargs
+        )
+
+    def _fanout_stream(
+        self, inference_input: Any, inference_config: Any, kwargs: dict[str, Any]
+    ) -> Iterator[str]:
+        self._ensure_ctx_workspace_logger()
+        text, _ = self._run_fanout(inference_input, inference_config, kwargs)
+        yield text
+
+    def _infer_streaming_pipeline(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Iterator[str]:
-        """Sync streaming inference via thread + queue bridge.
+        """Sync streaming pipeline: ``_ainfer_streaming_pipeline()`` driven by an
+        owned event loop in a worker thread (``iterate_async_in_thread``).
 
-        Runs ``ainfer_streaming()`` in a background thread and yields chunks
-        as they arrive.
+        The thread starts at the first ``next()`` under a copy of the caller's
+        context, so the pipeline sees the stream's ctx and frame for the whole
+        call. Closing the stream early cancels the pipeline's task and joins the
+        thread. Leaves with a native sync transport override this.
 
         Args:
             inference_input: Input for inference.
             inference_config: Optional configuration.
-            **kwargs: Passed through to ``ainfer_streaming()``.
+            **kwargs: Passed through to ``_ainfer_streaming_pipeline()``.
 
-        Yields:
-            Text chunks as they arrive from the backend.
+        Returns:
+            An iterator of text chunks as they arrive from the backend.
         """
-        chunk_queue: queue.Queue[str | None] = queue.Queue()
-        error_container: list[Exception] = []
-
-        async def _run_async_streaming() -> None:
-            try:
-                async for chunk in self.ainfer_streaming(
-                    inference_input, inference_config, **kwargs
-                ):
-                    chunk_queue.put(chunk)
-            except Exception as e:
-                error_container.append(e)
-            finally:
-                chunk_queue.put(None)
-
-        # Copy the current context so ContextVars (e.g. _current_fallback_state)
-        # propagate from the calling thread into the daemon thread.
-        ctx = contextvars.copy_context()
-
-        def _run_in_thread() -> None:
-            try:
-                ctx.run(asyncio.run, _run_async_streaming())
-            except Exception as e:
-                error_container.append(e)
-                chunk_queue.put(None)
-
-        thread = threading.Thread(target=_run_in_thread, daemon=True)
-        thread.start()
-
-        while True:
-            chunk = chunk_queue.get()
-            if chunk is None:
-                break
-            yield chunk
-
-        thread.join(timeout=5.0)
-
-        if error_container:
-            raise error_container[0]
+        return iterate_async_in_thread(
+            lambda: self._ainfer_streaming_pipeline(
+                inference_input, inference_config, **kwargs
+            ),
+            owner=type(self).__name__,
+        )
 
     # === Session Management Methods ===
 
@@ -977,6 +1217,28 @@ class StreamingInferencerBase(InferencerBase):
         # cleared (not just the instance) — byte-identical without a context.
         self.active_session_id = None
 
+    async def areset_conversation(self, *, run_context=None) -> None:
+        """Start a fresh vendor conversation on one run-context branch (the
+        contract of :meth:`InferencerBase.areset_conversation`): runs
+        :meth:`_areset_branch_conversation` under that branch's context."""
+        token = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
+        try:
+            await self._areset_branch_conversation()
+        finally:
+            exit_run(token)
+
+    async def _areset_branch_conversation(self) -> None:
+        """End the active branch's vendor conversation. Here: forget its session
+        (:meth:`reset_session`), which a session-keeping leaf would resume on its
+        next call. Leaves whose branch also holds a live conversation (a connected
+        client, a server-side chat, a persistent default session) extend this.
+
+        Under a host context only the branch's session is cleared; under a legacy
+        root, the instance's ctx-less session, which every bare call shares."""
+        self.reset_session()
+
     async def _pre_retry(self, attempt: int, exception: BaseException) -> None:
         """When this inferencer (or its parent's recursion) is retried,
         reset in-memory session state so the next attempt does not resume
@@ -984,9 +1246,9 @@ class StreamingInferencerBase(InferencerBase):
 
         Note on lifetimes: the reset takes effect on **subsequent**
         ``ainfer()`` calls. Within ONE ``ainfer()`` call, kwargs
-        (``session_id``, ``resume``) are typically locked at the top of
-        ``ainfer`` (see ``ClaudeCodeCliInferencer.ainfer`` and similar
-        paths) before ``_ainfer_single`` is entered, so inner retry
+        (``session_id``, ``resume``) are typically locked by the leaf's
+        ``_prepare_call`` (see ``ClaudeCodeCliInferencer`` and similar
+        leaves) before the retry loop starts, so inner retry
         attempts use those locked kwargs regardless of what
         ``active_session_id`` is set to here. This hook is load-bearing
         for **cross-layer recursive propagation** — when a parent
@@ -1009,22 +1271,23 @@ class StreamingInferencerBase(InferencerBase):
         Returns:
             Inference result.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
         # N-Major2: install the bridge FIRST so the session reset lands on the
         # intended branch's ctx.handles (not stale instance/parent state); the inner
         # infer() reuses this active ctx. Byte-identical without a context.
-        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _tok = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         try:
             self.active_session_id = None
             return self.infer(prompt, new_session=True, **kwargs)
         finally:
             exit_run(_tok)
 
-    async def anew_session(self, prompt: str, *, run_context=None, **kwargs: Any) -> Any:
+    async def anew_session(
+        self, prompt: str, *, run_context=None, **kwargs: Any
+    ) -> Any:
         """Async: start a new session, clearing any previous session.
 
         Args:
@@ -1035,14 +1298,13 @@ class StreamingInferencerBase(InferencerBase):
         Returns:
             Inference result.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
         # N-Major2: bridge FIRST so adisconnect + session reset target the branch's
         # ctx.handles; the inner ainfer() reuses this active ctx.
-        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _tok = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         try:
             await self.adisconnect()
             self.active_session_id = None
@@ -1051,7 +1313,12 @@ class StreamingInferencerBase(InferencerBase):
             exit_run(_tok)
 
     def resume_session(
-        self, prompt: str, session_id: Optional[str] = None, *, run_context=None, **kwargs: Any
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
     ) -> Any:
         """Resume a previous session.
 
@@ -1067,14 +1334,13 @@ class StreamingInferencerBase(InferencerBase):
         Raises:
             ValueError: If no session_id provided and no active session.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
         # N-Major2: bridge FIRST so active_session_id resolves the branch's live
         # session (ctx.handles), not stale instance state; inner infer() reuses it.
-        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _tok = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         try:
             target = session_id or self.active_session_id
             if not target:
@@ -1087,7 +1353,12 @@ class StreamingInferencerBase(InferencerBase):
             exit_run(_tok)
 
     async def aresume_session(
-        self, prompt: str, session_id: Optional[str] = None, *, run_context=None, **kwargs: Any
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
     ) -> Any:
         """Async: resume a previous session.
 
@@ -1106,14 +1377,13 @@ class StreamingInferencerBase(InferencerBase):
         Raises:
             ValueError: If no session_id provided and no active session.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            enter_run,
-            exit_run,
-        )
+        from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
         # N-Major2: bridge FIRST so active_session_id + adisconnect target the
         # branch's live session (ctx.handles); inner ainfer() reuses this ctx.
-        _tok = enter_run(run_context, default_workspace=getattr(self, "_workspace", None))
+        _tok = enter_run(
+            run_context, default_workspace=getattr(self, "_workspace", None)
+        )
         try:
             target = session_id or self.active_session_id
             if not target:
@@ -1132,10 +1402,10 @@ class StreamingInferencerBase(InferencerBase):
     def _sanitize_partial(
         self, partial: Optional[str], mode: FallbackInferMode
     ) -> Optional[str]:
-        """Strip the failure marker and (for CONTINUE) truncate to the last newline.
+        """Strip the failure marker and (for UPDATE) truncate to the last newline.
 
         Always removes the trailing ``--- STREAM FAILED: ... ---`` marker
-        written by ``_finalize_cache``.  In CONTINUE mode, additionally
+        written by ``_finalize_cache``.  In UPDATE mode, additionally
         truncates to the last newline boundary so the model does not
         receive a half-word.
 
@@ -1148,8 +1418,8 @@ class StreamingInferencerBase(InferencerBase):
         marker_idx = text.find("\n--- STREAM FAILED:")
         if marker_idx >= 0:
             text = text[:marker_idx]
-        # CONTINUE mode: truncate to last newline so we don't hand the model a half-word
-        if mode == FallbackInferMode.CONTINUE:
+        # UPDATE mode: truncate to last newline so we don't hand the model a half-word
+        if mode == FallbackInferMode.UPDATE:
             last_nl = text.rfind("\n")
             if last_nl > 0:
                 text = text[:last_nl]
@@ -1167,8 +1437,10 @@ class StreamingInferencerBase(InferencerBase):
 
         Recovery strategy precedence:
         1. Session-based resumption (if ``_session_id`` is set)
-        2. Cache-based replay (CONTINUE or REFERENCE mode)
-        3. RESTART (delegate to ``_ainfer`` with original prompt)
+        2. Recovery re-run via the mode's handler template — RETRY (fresh, prior
+           attempt shown only as a negative-example reference) or UPDATE
+           (edit/complete the prior output in place, preserving prior work)
+        3. Plain re-run with the original prompt (no template system available)
 
         Supports ``fallback_infer_mode`` as a runtime override via kwargs.
         """
@@ -1197,38 +1469,44 @@ class StreamingInferencerBase(InferencerBase):
             try:
                 await self.adisconnect()
                 return await self._ainfer(
-                    inference_input, inference_config,
-                    session_id=_recover_sid, **kwargs
+                    inference_input, inference_config, session_id=_recover_sid, **kwargs
                 )
             except Exception as e:
                 logger.warning("Session resume failed: %s. Falling through.", e)
-                self._session_id = None
+                self.active_session_id = None
 
-        # 2. Cache-based recovery
-        cache_path = None
+        # 2. Recovery re-run. UPDATE renders recovery/update.jinja2 and re-runs ONCE:
+        #    the agent edits/completes its prior output in place — a local agent
+        #    revises the preserved on-disk deliverable, a no-local agent re-emits it
+        #    inline; the cached partial (if any) is the base to build on, and the
+        #    judge's <reason> guides the fix. RETRY has NO template (recovery/retry
+        #    was retired) — it is a plain re-run of the original input (step 3).
+        # Capability gate: UPDATE (edit/complete prior work) is only viable with
+        # something to build on — a non-empty partial, or (local agents) a non-empty
+        # on-disk deliverable. With neither, degrade to RETRY (which, with no partial,
+        # is a plain re-run — see the gate below).
         fs = _current_fallback_state.get(None)
-        if fs is not None:
-            cache_path = fs.get("cache_path")
+        cache_path = fs.get("cache_path") if fs is not None else None
+        raw_partial = _read_partial_from_cache(cache_path) if cache_path else None
+        if mode == FallbackInferMode.UPDATE and not self._update_mode_viable(
+            raw_partial
+        ):
+            mode = FallbackInferMode.RETRY
+        partial = self._sanitize_partial(raw_partial, mode) or ""
 
-        if cache_path and mode != FallbackInferMode.RESTART:
-            partial = _read_partial_from_cache(cache_path)
-            partial = self._sanitize_partial(partial, mode)
+        # Only UPDATE renders a template (edit/complete the prior work in place, or
+        # re-emit inline for a no-local agent). RETRY has no template — it is a plain
+        # re-run of the original input (step 3 below).
+        if mode == FallbackInferMode.UPDATE:
+            augmented = self._render_recovery_prompt(
+                mode, self._extract_prompt(inference_input), partial
+            )
+            if augmented is not None:
+                logger.info("Recovery via %s", mode.value)
+                return await self._ainfer(augmented, inference_config, **kwargs)
 
-            if partial:
-                augmented = self._render_recovery_prompt(
-                    mode, self._extract_prompt(inference_input), partial
-                )
-                if augmented is not None:
-                    if mode == FallbackInferMode.CONTINUE:
-                        logger.info("Recovery via cache replay (mode=CONTINUE)")
-                        continuation = await self._ainfer(augmented, inference_config, **kwargs)
-                        return partial + str(continuation)
-                    elif mode == FallbackInferMode.REFERENCE:
-                        logger.info("Recovery via cache replay (mode=REFERENCE)")
-                        return await self._ainfer(augmented, inference_config, **kwargs)
-
-        # 3. RESTART (fallback)
-        logger.info("Recovery via restart")
+        # 3. Fallback: plain re-run with the original prompt.
+        logger.info("Recovery via restart (plain re-run)")
         return await self._ainfer(inference_input, inference_config, **kwargs)
 
     def _infer_recovery(
@@ -1246,8 +1524,8 @@ class StreamingInferencerBase(InferencerBase):
         recovery works identically.
 
         Session-based resumption is NOT available on the sync path (session
-        management is async-only). Falls through directly to cache-based or
-        RESTART recovery.
+        management is async-only). Falls through directly to the recovery
+        re-run (RETRY/UPDATE) or a plain re-run.
         """
         mode = kwargs.pop("fallback_infer_mode", None)
         if mode is None and last_exception is not None:
@@ -1262,36 +1540,36 @@ class StreamingInferencerBase(InferencerBase):
         if isinstance(mode, str):
             mode = FallbackInferMode(mode)
 
-        # Cache-based recovery
-        cache_path = None
+        # Recovery re-run (RETRY or UPDATE) — mirrors _ainfer_recovery (sync path).
+        # Capability gate: UPDATE is only viable with prior work to build on (a
+        # non-empty partial, or a local agent's non-empty on-disk deliverable); else
+        # degrade to RETRY (a plain re-run when there is no partial).
         fs = _current_fallback_state.get(None)
-        if fs is not None:
-            cache_path = fs.get("cache_path")
+        cache_path = fs.get("cache_path") if fs is not None else None
+        raw_partial = _read_partial_from_cache(cache_path) if cache_path else None
+        if mode == FallbackInferMode.UPDATE and not self._update_mode_viable(
+            raw_partial
+        ):
+            mode = FallbackInferMode.RETRY
+        partial = self._sanitize_partial(raw_partial, mode) or ""
 
-        if cache_path and mode != FallbackInferMode.RESTART:
-            partial = _read_partial_from_cache(cache_path)
-            partial = self._sanitize_partial(partial, mode)
+        # Only UPDATE renders a template; RETRY has no template — it is a plain
+        # re-run of the original input (below).
+        if mode == FallbackInferMode.UPDATE:
+            augmented = self._render_recovery_prompt(
+                mode, self._extract_prompt(inference_input), partial
+            )
+            if augmented is not None:
+                logger.info("Sync recovery via %s", mode.value)
+                return self._infer(augmented, inference_config, **kwargs)
 
-            if partial:
-                augmented = self._render_recovery_prompt(
-                    mode, self._extract_prompt(inference_input), partial
-                )
-                if augmented is not None:
-                    if mode == FallbackInferMode.CONTINUE:
-                        logger.info("Sync recovery via cache replay (mode=CONTINUE)")
-                        continuation = self._infer(augmented, inference_config, **kwargs)
-                        return partial + str(continuation)
-                    elif mode == FallbackInferMode.REFERENCE:
-                        logger.info("Sync recovery via cache replay (mode=REFERENCE)")
-                        return self._infer(augmented, inference_config, **kwargs)
-
-        # RESTART (fallback)
-        logger.info("Sync recovery via restart")
+        # Fallback: plain re-run with the original prompt.
+        logger.info("Sync recovery via restart (plain re-run)")
         return self._infer(inference_input, inference_config, **kwargs)
 
     # === Cache Helper Methods ===
 
-    def _open_cache_file(self, prompt: str) -> Any:
+    def _open_cache_file(self, prompt: str, cache_folder: Optional[str] = None) -> Any:
         """Open a cache file for writing streaming output.
 
         Creates the directory structure:
@@ -1299,14 +1577,20 @@ class StreamingInferencerBase(InferencerBase):
 
         Args:
             prompt: The prompt string (hashed for filename).
-
-        Returns:
-            An open file handle (caller must close via ``_finalize_cache``).
+            cache_folder: Pre-resolved cache folder (Fix #3). When omitted
+                falls back to ``self._effective_cache_folder()`` so direct
+                callers (e.g. tests) keep working without threading the
+                resolved value through. The pipeline caller passes the
+                value computed at the gate site to keep both ends in
+                lock-step under M7 ctx-dispatch.
         """
+        if cache_folder is None:
+            cache_folder = self._effective_cache_folder()
+        assert cache_folder, "_open_cache_file requires a non-empty cache_folder"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         session_dir = os.path.join(
-            self.cache_folder,  # pyre-ignore[6]
+            cache_folder,
             self.__class__.__name__,
             f"{self.id}_{timestamp}",
         )

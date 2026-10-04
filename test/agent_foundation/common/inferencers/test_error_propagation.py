@@ -23,6 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 from test.agent_foundation.common.inferencers._helpers.mock_inferencer import (
     MockInferencer,
 )
@@ -57,9 +58,13 @@ class TestDualPropagatesProposeError(unittest.IsolatedAsyncioTestCase):
         # Dual catches and either re-raises or wraps; verify execution halts
         # with non-zero indication
         with self.assertRaises((RuntimeError, Exception)) as ctx:
-            await dual._ainfer("request")
+            async with aopen_invocation(dual):
+                await dual._ainfer("request")
         # Original failure context should be visible somewhere
-        self.assertIn("failed", str(ctx.exception).lower() + str(ctx.exception.__cause__ or "").lower())
+        self.assertIn(
+            "failed",
+            str(ctx.exception).lower() + str(ctx.exception.__cause__ or "").lower(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +117,8 @@ class TestBTAWorkerRaiseDoesNotBlock(unittest.TestCase):
             # Exception path: ensure it carries traceable context
             err_text = str(e) + str(e.__cause__ or "")
             self.assertTrue(
-                "failed" in err_text.lower() or "worker" in err_text.lower()
+                "failed" in err_text.lower()
+                or "worker" in err_text.lower()
                 or "exception" in err_text.lower(),
                 f"Exception should carry worker context, got: {e}",
             )
@@ -139,7 +145,8 @@ class TestPTIPlannerFailureBlocksExecutor(unittest.IsolatedAsyncioTestCase):
                 workspace=tmpdir,
             )
             with self.assertRaises(Exception):
-                await pti._ainfer("task")
+                async with aopen_invocation(pti):
+                    await pti._ainfer("task")
 
         # Executor should NOT have been called
         executor.ainfer.assert_not_called()

@@ -2,10 +2,9 @@
 
 import asyncio
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import MultiFlowState, RunContext
+from attr import attrib, attrs
 
 
 @attrs

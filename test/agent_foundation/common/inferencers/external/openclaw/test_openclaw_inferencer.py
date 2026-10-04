@@ -12,16 +12,15 @@ import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
-    OpenClawError,
-    OpenClawNotFoundError,
-    OpenClawRateLimitError,
-    OpenClawTimeoutError,
     check_docker_available,
     check_gateway_reachable,
     extract_json_from_output,
     is_rate_limit_error,
+    OpenClawError,
+    OpenClawNotFoundError,
+    OpenClawRateLimitError,
+    OpenClawTimeoutError,
     parse_cli_json_output,
     read_gateway_token_from_config,
     read_gateway_token_from_pod,
@@ -34,45 +33,85 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.o
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-SAMPLE_CLI_JSON = json.dumps({
-    "runId": "main",
-    "status": "ok",
-    "result": {
-        "payloads": [{"text": "Hello from OpenClaw!"}],
-        "sessionId": "main",
-        "provider": "atlassian-ai-gateway-proxy",
-        "model": "claude-haiku-4-5",
-        "usage": {"inputTokens": 100, "outputTokens": 10},
-        "stopReason": "end_turn",
+SAMPLE_CLI_JSON = json.dumps(
+    {
+        "runId": "main",
+        "status": "ok",
+        "result": {
+            "payloads": [{"text": "Hello from OpenClaw!"}],
+            "sessionId": "main",
+            "provider": "atlassian-ai-gateway-proxy",
+            "model": "claude-haiku-4-5",
+            "usage": {"inputTokens": 100, "outputTokens": 10},
+            "stopReason": "end_turn",
+        },
     }
-})
+)
 
-GATEWAY_CHALLENGE = json.dumps({"type": "event", "event": "connect.challenge", "payload": {"nonce": "abc-nonce-123"}})
-GATEWAY_HELLO_OK = json.dumps({"type": "res", "id": "CONNECT_ID", "ok": True, "payload": {"type": "hello-ok", "protocol": 3, "server": {"connId": "srv-001"}}})
-GATEWAY_AGENT_ACK = json.dumps({"type": "res", "id": "REQ_ID", "ok": True, "payload": {"runId": "run-abc"}})
+GATEWAY_CHALLENGE = json.dumps(
+    {
+        "type": "event",
+        "event": "connect.challenge",
+        "payload": {"nonce": "abc-nonce-123"},
+    }
+)
+GATEWAY_HELLO_OK = json.dumps(
+    {
+        "type": "res",
+        "id": "CONNECT_ID",
+        "ok": True,
+        "payload": {"type": "hello-ok", "protocol": 3, "server": {"connId": "srv-001"}},
+    }
+)
+GATEWAY_AGENT_ACK = json.dumps(
+    {"type": "res", "id": "REQ_ID", "ok": True, "payload": {"runId": "run-abc"}}
+)
+
 
 def make_delta(text: str, accumulated: str = "") -> str:
     """Build a gateway delta event frame with cumulative text."""
     full = accumulated + text
-    return json.dumps({
-        "type": "event", "event": "agent",
-        "payload": {"data": {"state": "delta", "message": {"content": [{"type": "text", "text": full}]}}}
-    })
+    return json.dumps(
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {
+                "data": {
+                    "state": "delta",
+                    "message": {"content": [{"type": "text", "text": full}]},
+                }
+            },
+        }
+    )
+
 
 def make_final(text: str) -> str:
-    return json.dumps({
-        "type": "event", "event": "agent",
-        "payload": {"data": {"state": "final", "message": {"content": [{"type": "text", "text": text}]}}}
-    })
+    return json.dumps(
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {
+                "data": {
+                    "state": "final",
+                    "message": {"content": [{"type": "text", "text": text}]},
+                }
+            },
+        }
+    )
+
 
 def make_error_event(msg: str) -> str:
-    return json.dumps({
-        "type": "event", "event": "agent",
-        "payload": {"data": {"state": "error", "errorMessage": msg}}
-    })
+    return json.dumps(
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {"data": {"state": "error", "errorMessage": msg}},
+        }
+    )
 
 
 # ─── TestCommon ───────────────────────────────────────────────────────────────
+
 
 class TestStripAnsiCodes:
     def test_strips_color_codes(self):
@@ -147,10 +186,15 @@ class TestParseCliJsonOutput:
         assert result["output"] == "Hello from OpenClaw!"
 
     def test_multi_payload(self):
-        data = {"status": "ok", "result": {
-            "payloads": [{"text": "Hello"}, {"text": " World"}],
-            "sessionId": "s1", "model": "haiku", "usage": {}
-        }}
+        data = {
+            "status": "ok",
+            "result": {
+                "payloads": [{"text": "Hello"}, {"text": " World"}],
+                "sessionId": "s1",
+                "model": "haiku",
+                "usage": {},
+            },
+        }
         result = parse_cli_json_output(json.dumps(data), "", 0)
         assert result["output"] == "Hello  World"
 
@@ -223,6 +267,7 @@ class TestCheckGatewayReachable:
 
 # ─── TestInit ─────────────────────────────────────────────────────────────────
 
+
 class TestInit:
     def test_default_gateway_mode(self):
         with patch(
@@ -271,6 +316,7 @@ class TestInit:
 
 # ─── TestCLIMode ─────────────────────────────────────────────────────────────
 
+
 class TestBuildCliCmd:
     def test_minimal_command(self):
         inf = OpenClawInferencer(mode="cli", auth_token=None)
@@ -309,7 +355,9 @@ class TestBuildCliCmd:
         assert "docker exec" in cmd
 
     def test_extra_cli_args(self):
-        inf = OpenClawInferencer(mode="cli", auth_token=None, extra_cli_args=["--verbose", "on"])
+        inf = OpenClawInferencer(
+            mode="cli", auth_token=None, extra_cli_args=["--verbose", "on"]
+        )
         cmd = inf._build_cli_cmd("prompt", "s1")
         assert "--verbose on" in cmd
 
@@ -317,41 +365,55 @@ class TestBuildCliCmd:
 class TestCliInfer:
     def test_successful_inference(self):
         inf = OpenClawInferencer(mode="cli", auth_token=None)
-        with patch.object(inf, "_build_cli_cmd", return_value="fake cmd"), \
-             patch(
-                 "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
-                 return_value=(SAMPLE_CLI_JSON, "", 0)
-             ):
+        with (
+            patch.object(inf, "_build_cli_cmd", return_value="fake cmd"),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
+                return_value=(SAMPLE_CLI_JSON, "", 0),
+            ),
+        ):
             result = inf._infer_cli("say hello", "main")
         assert result["output"] == "Hello from OpenClaw!"
         assert result["success"] is True
 
     def test_rate_limit_raises(self):
         inf = OpenClawInferencer(mode="cli", auth_token=None)
-        error_output = json.dumps({"status": "error", "result": {
-            "payloads": [{"text": "rate limit exceeded"}], "sessionId": "main",
-            "model": "haiku", "usage": {}
-        }})
-        with patch.object(inf, "_build_cli_cmd", return_value="cmd"), \
-             patch(
-                 "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
-                 return_value=(error_output, "", 0)
-             ):
+        error_output = json.dumps(
+            {
+                "status": "error",
+                "result": {
+                    "payloads": [{"text": "rate limit exceeded"}],
+                    "sessionId": "main",
+                    "model": "haiku",
+                    "usage": {},
+                },
+            }
+        )
+        with (
+            patch.object(inf, "_build_cli_cmd", return_value="cmd"),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
+                return_value=(error_output, "", 0),
+            ),
+        ):
             with pytest.raises(OpenClawRateLimitError):
                 inf._infer_cli("prompt", "s1")
 
     def test_subprocess_failure_raises(self):
         inf = OpenClawInferencer(mode="cli", auth_token=None)
-        with patch.object(inf, "_build_cli_cmd", return_value="cmd"), \
-             patch(
-                 "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
-                 return_value=("", "fatal error", 1)
-             ):
+        with (
+            patch.object(inf, "_build_cli_cmd", return_value="cmd"),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.run_subprocess",
+                return_value=("", "fatal error", 1),
+            ),
+        ):
             with pytest.raises(OpenClawError):
                 inf._infer_cli("prompt", "s1")
 
 
 # ─── TestGatewayMode ─────────────────────────────────────────────────────────
+
 
 def make_mock_ws(frames: list):
     """Create a mock WebSocket that yields frames from a list."""
@@ -398,8 +460,13 @@ class TestGatewayConnectFrame:
                     "mode": "ui",
                 },
                 "caps": [],
-                "scopes": ["operator.admin", "operator.read", "operator.write",
-                           "operator.approvals", "operator.pairing"],
+                "scopes": [
+                    "operator.admin",
+                    "operator.read",
+                    "operator.write",
+                    "operator.approvals",
+                    "operator.pairing",
+                ],
                 "role": "operator",
             },
         }
@@ -415,7 +482,9 @@ class TestGatewayConnectFrame:
         We patch _ws_connect itself to simulate what happens when the gateway
         rejects the token — the method should raise OpenClawAuthError.
         """
-        from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import OpenClawAuthError
+        from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
+            OpenClawAuthError,
+        )
 
         connect_id = "fail-id"
 
@@ -434,7 +503,9 @@ class TestGatewayConnectFrame:
                 pass
 
 
-def make_patched_inferencer_with_frames(frames: list, auth_token: str = "tok") -> OpenClawInferencer:
+def make_patched_inferencer_with_frames(
+    frames: list, auth_token: str = "tok"
+) -> OpenClawInferencer:
     """Create an inferencer that uses a mock _ws_connect returning pre-queued frames."""
     inf = OpenClawInferencer(auth_token=auth_token)
     ws = AsyncMock()
@@ -463,17 +534,22 @@ class TestGatewayStreamParsing:
         """Delta events are cumulative — only new chars should be yielded."""
         req_id = "rid"
         frames = [
-            json.dumps({"type": "res", "id": req_id, "ok": True, "payload": {"runId": "run1"}}),
-            make_delta("Hello"),            # accumulated="Hello", yield "Hello"
+            json.dumps(
+                {"type": "res", "id": req_id, "ok": True, "payload": {"runId": "run1"}}
+            ),
+            make_delta("Hello"),  # accumulated="Hello", yield "Hello"
             make_delta(" World", "Hello"),  # accumulated="Hello World", yield " World"
-            make_final("Hello World"),      # remainder="" (already yielded)
+            make_final("Hello World"),  # remainder="" (already yielded)
         ]
         inf, ws = make_patched_inferencer_with_frames(frames)
 
-        with patch("uuid.uuid4", side_effect=[
-            MagicMock(__str__=lambda s: req_id),
-            MagicMock(__str__=lambda s: "ikey"),
-        ]):
+        with patch(
+            "uuid.uuid4",
+            side_effect=[
+                MagicMock(__str__=lambda s: req_id),
+                MagicMock(__str__=lambda s: "ikey"),
+            ],
+        ):
             chunks = []
             async for chunk in inf._stream_gateway("say hello", "s1"):
                 chunks.append(chunk)
@@ -487,15 +563,20 @@ class TestGatewayStreamParsing:
         """Final event yields text not covered by last delta."""
         req_id = "rid2"
         frames = [
-            json.dumps({"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}),
+            json.dumps(
+                {"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}
+            ),
             make_delta("Hello"),
             make_final("Hello extra"),  # remainder=" extra"
         ]
         inf, ws = make_patched_inferencer_with_frames(frames)
-        with patch("uuid.uuid4", side_effect=[
-            MagicMock(__str__=lambda s: req_id),
-            MagicMock(__str__=lambda s: "ikey"),
-        ]):
+        with patch(
+            "uuid.uuid4",
+            side_effect=[
+                MagicMock(__str__=lambda s: req_id),
+                MagicMock(__str__=lambda s: "ikey"),
+            ],
+        ):
             chunks = []
             async for chunk in inf._stream_gateway("prompt", "s1"):
                 chunks.append(chunk)
@@ -505,14 +586,19 @@ class TestGatewayStreamParsing:
     async def test_error_event_raises(self):
         req_id = "rid3"
         frames = [
-            json.dumps({"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}),
+            json.dumps(
+                {"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}
+            ),
             make_error_event("Something went wrong"),
         ]
         inf, ws = make_patched_inferencer_with_frames(frames)
-        with patch("uuid.uuid4", side_effect=[
-            MagicMock(__str__=lambda s: req_id),
-            MagicMock(__str__=lambda s: "ikey"),
-        ]):
+        with patch(
+            "uuid.uuid4",
+            side_effect=[
+                MagicMock(__str__=lambda s: req_id),
+                MagicMock(__str__=lambda s: "ikey"),
+            ],
+        ):
             with pytest.raises(OpenClawError, match="Something went wrong"):
                 async for _ in inf._stream_gateway("prompt", "s1"):
                     pass
@@ -521,14 +607,19 @@ class TestGatewayStreamParsing:
     async def test_rate_limit_in_error_event_raises_rate_limit_error(self):
         req_id = "rid4"
         frames = [
-            json.dumps({"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}),
+            json.dumps(
+                {"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}
+            ),
             make_error_event("rate limit exceeded for this use case"),
         ]
         inf, ws = make_patched_inferencer_with_frames(frames)
-        with patch("uuid.uuid4", side_effect=[
-            MagicMock(__str__=lambda s: req_id),
-            MagicMock(__str__=lambda s: "ikey"),
-        ]):
+        with patch(
+            "uuid.uuid4",
+            side_effect=[
+                MagicMock(__str__=lambda s: req_id),
+                MagicMock(__str__=lambda s: "ikey"),
+            ],
+        ):
             with pytest.raises(OpenClawRateLimitError):
                 async for _ in inf._stream_gateway("prompt", "s1"):
                     pass
@@ -539,17 +630,22 @@ class TestGatewayStreamParsing:
         req_id = "rid5"
         tick = json.dumps({"type": "event", "event": "tick", "payload": {}})
         frames = [
-            json.dumps({"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}),
+            json.dumps(
+                {"type": "res", "id": req_id, "ok": True, "payload": {"runId": "r"}}
+            ),
             tick,
             tick,
             make_delta("OK"),
             make_final("OK"),
         ]
         inf, ws = make_patched_inferencer_with_frames(frames)
-        with patch("uuid.uuid4", side_effect=[
-            MagicMock(__str__=lambda s: req_id),
-            MagicMock(__str__=lambda s: "ikey"),
-        ]):
+        with patch(
+            "uuid.uuid4",
+            side_effect=[
+                MagicMock(__str__=lambda s: req_id),
+                MagicMock(__str__=lambda s: "ikey"),
+            ],
+        ):
             chunks = []
             async for chunk in inf._stream_gateway("prompt", "s1"):
                 chunks.append(chunk)
@@ -557,6 +653,7 @@ class TestGatewayStreamParsing:
 
 
 # ─── TestRetryLogic ──────────────────────────────────────────────────────────
+
 
 class TestRetryLogic:
     @pytest.mark.asyncio
@@ -589,8 +686,10 @@ class TestRetryLogic:
             return {"output": "ok", "session_id": session_id}
 
         inf = OpenClawInferencer(
-            auth_token="tok", max_retries=3, retry_delay=0.01,
-            retry_continuation_prompt="Continue: {original_prompt}"
+            auth_token="tok",
+            max_retries=3,
+            retry_delay=0.01,
+            retry_continuation_prompt="Continue: {original_prompt}",
         )
         with patch.object(inf, "_ainfer_gateway", side_effect=mock_ainfer):
             await inf._ainfer_with_retry("original prompt", "s1")
@@ -601,6 +700,7 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_raises_after_max_retries(self):
         """Should raise OpenClawRateLimitError after all retries."""
+
         async def always_fail(prompt, session_id):
             raise OpenClawRateLimitError("always rate limited")
 
@@ -611,6 +711,7 @@ class TestRetryLogic:
 
 
 # ─── TestSessionManagement ───────────────────────────────────────────────────
+
 
 class TestSessionManagement:
     @pytest.mark.asyncio
@@ -654,6 +755,7 @@ class TestSessionManagement:
 
 # ─── TestModeDispatch ────────────────────────────────────────────────────────
 
+
 class TestModeDispatch:
     @pytest.mark.asyncio
     async def test_gateway_mode_uses_stream_gateway(self):
@@ -674,8 +776,9 @@ class TestModeDispatch:
         inf = OpenClawInferencer(mode="cli", auth_token=None)
 
         with patch.object(
-            inf, "_infer_cli",
-            return_value={"output": "full response", "session_id": "main"}
+            inf,
+            "_infer_cli",
+            return_value={"output": "full response", "session_id": "main"},
         ):
             chunks = []
             async for chunk in inf.ainfer_streaming("hello"):
@@ -685,16 +788,23 @@ class TestModeDispatch:
     def test_infer_routes_to_cli(self):
         inf = OpenClawInferencer(mode="cli", auth_token=None)
 
-        with patch.object(
-            inf, "_infer_cli",
-            return_value={"output": "result", "session_id": "main", "success": True}
-        ), patch(
-            "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.OpenClawInferencer.ainfer",
-            new_callable=AsyncMock,
-            return_value="result",
-        ) as mock_ainfer:
+        with (
+            patch.object(
+                inf,
+                "_infer_cli",
+                return_value={
+                    "output": "result",
+                    "session_id": "main",
+                    "success": True,
+                },
+            ),
+            patch(
+                "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer.OpenClawInferencer.ainfer",
+                new_callable=AsyncMock,
+                return_value="result",
+            ) as mock_ainfer,
+        ):
             # The sync infer calls ainfer via _run_async
             # Just verify _infer_cli is accessible and callable
             result = inf._infer_cli("prompt", "main")
             assert result["output"] == "result"
-

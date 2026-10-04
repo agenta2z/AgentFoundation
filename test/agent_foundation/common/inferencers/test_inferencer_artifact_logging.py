@@ -17,10 +17,9 @@ import os
 import tempfile
 
 import pytest
-from attr import attrs, attrib
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from attr import attrib, attrs
 
 
 @attrs
@@ -53,7 +52,8 @@ def _list_subdirs(parts_dir):
     if parts_dir is None or not os.path.isdir(parts_dir):
         return []
     return [
-        name for name in os.listdir(parts_dir)
+        name
+        for name in os.listdir(parts_dir)
         if os.path.isdir(os.path.join(parts_dir, name))
     ]
 
@@ -226,23 +226,28 @@ class TestInferencerArtifactLogging:
 
         logs_dir = os.path.join(str(tmp_path / "workspace"), "logs")
         jsonl_files = [
-            f for f in _glob.glob(os.path.join(logs_dir, "**", "*.jsonl"), recursive=True)
-            if '.parts' not in f
+            f
+            for f in _glob.glob(os.path.join(logs_dir, "**", "*.jsonl"), recursive=True)
+            if ".parts" not in f
         ]
         assert len(jsonl_files) >= 1, "No session.jsonl file found"
 
         with open(jsonl_files[0]) as f:
             lines = [json.loads(line) for line in f if line.strip()]
 
-        has_parts_ref = lambda entry: '__parts_file__' in json.dumps(entry)
+        has_parts_ref = lambda entry: "__parts_file__" in json.dumps(entry)
 
-        args_entries = [e for e in lines if e.get('type') == 'InferenceArgs']
+        args_entries = [e for e in lines if e.get("type") == "InferenceArgs"]
         artifact_entries = [e for e in lines if has_parts_ref(e)]
         non_artifact_entries = [e for e in lines if not has_parts_ref(e)]
 
         assert len(args_entries) >= 1, "No InferenceArgs entry in session.jsonl"
-        assert len(artifact_entries) >= 1, "No artifact entries with __parts_file__ references"
-        assert len(non_artifact_entries) >= 1, "Expected at least one non-artifact inline entry"
+        assert len(artifact_entries) >= 1, (
+            "No artifact entries with __parts_file__ references"
+        )
+        assert len(non_artifact_entries) >= 1, (
+            "Expected at least one non-artifact inline entry"
+        )
 
         for entry in args_entries:
             assert not has_parts_ref(entry), (

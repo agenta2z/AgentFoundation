@@ -7,50 +7,20 @@ budget-aware knowledge provider, formatter, data loader, utilities, and
 ingestion CLI.
 """
 
-# ── Data Models ──────────────────────────────────────────────────────────
-from .models.knowledge_piece import KnowledgePiece, KnowledgeType
-from .models.entity_metadata import EntityMetadata
-from .models.enums import (
-    Space,
-    MergeStrategy,
-    MergeAction,
-    DedupAction,
-    MergeType,
-    ValidationStatus,
-    SuggestionStatus,
-    UpdateAction,
-    DeleteMode,
-    ConsolidationMode,
-)
-from .models.results import (
-    DedupResult,
-    MergeCandidate,
-    MergeResult,
-    ValidationResult,
-    ScoredPiece,
-    MergeJobResult,
-    OperationResult,
-)
-
-# ── Store ABCs ───────────────────────────────────────────────────────────
-from .stores.metadata.base import MetadataStore
-from .stores.pieces.base import KnowledgePieceStore
-from .stores.graph.base import EntityGraphStore
-
-# ── Adapter-Based Store Implementations ──────────────────────────────────
-from .stores.metadata.keyvalue_adapter import KeyValueMetadataStore
-from .stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
-from .stores.graph.graph_adapter import GraphServiceEntityGraphStore
-from .stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
-
-# ── Orchestrator ─────────────────────────────────────────────────────────
-from .knowledge_base import KnowledgeBase
-
 # ── Data Loading ─────────────────────────────────────────────────────────
 from .data_loader import KnowledgeDataLoader
 
-# ── Provider ─────────────────────────────────────────────────────────────
-from .provider import InfoType
+# ── Formatter ────────────────────────────────────────────────────────────
+from .formatter import KnowledgeFormatter, RetrievalResult
+
+# ── Hybrid Search ────────────────────────────────────────────────────────
+from .hybrid_search import HybridRetriever, HybridSearchConfig
+
+# ── Ingestion CLI (legacy) ──────────────────────────────────────────────
+from .ingestion_cli import KnowledgeIngestionCLI
+
+# ── Orchestrator ─────────────────────────────────────────────────────────
+from .knowledge_base import KnowledgeBase
 
 # ── Knowledge Consolidator ──────────────────────────────────────────────
 from .knowledge_consolidator import KnowledgeConsolidator
@@ -58,49 +28,76 @@ from .knowledge_consolidator import KnowledgeConsolidator
 # ── Budget-Aware Provider ────────────────────────────────────────────────
 from .knowledge_provider import BudgetAwareKnowledgeProvider
 
-# ── Hybrid Search ────────────────────────────────────────────────────────
-from .hybrid_search import HybridSearchConfig, HybridRetriever
-
 # ── MMR Re-ranking ───────────────────────────────────────────────────────
-from .mmr_reranking import MMRConfig, apply_mmr_reranking
+from .mmr_reranking import apply_mmr_reranking, MMRConfig
+from .models.entity_metadata import EntityMetadata
+from .models.enums import (
+    ConsolidationMode,
+    DedupAction,
+    DeleteMode,
+    MergeAction,
+    MergeStrategy,
+    MergeType,
+    Space,
+    SuggestionStatus,
+    UpdateAction,
+    ValidationStatus,
+)
 
-# ── Temporal Decay ───────────────────────────────────────────────────────
-from .temporal_decay import TemporalDecayConfig, apply_temporal_decay
+# ── Data Models ──────────────────────────────────────────────────────────
+from .models.knowledge_piece import KnowledgePiece, KnowledgeType
+from .models.results import (
+    DedupResult,
+    MergeCandidate,
+    MergeJobResult,
+    MergeResult,
+    OperationResult,
+    ScoredPiece,
+    ValidationResult,
+)
+from .post_processors import (
+    AggregatingPostProcessor,
+    BudgetAwarePostProcessor,
+    FlatStringPostProcessor,
+    GroupedDictPostProcessor,
+)
+
+# ── Provider ─────────────────────────────────────────────────────────────
+from .provider import InfoType
+# ── Retrieval Pipeline ──────────────────────────────────────────────────
 
 # ── Query Decomposition & Agentic Models ─────────────────────────────────
 from .retrieval_pipeline import (
-    SubQuery,
     AgenticRetrievalResult,
     create_domain_decomposer,
     create_llm_decomposer,
-)
-
-# ── Retrieval Pipeline ──────────────────────────────────────────────────
-from .retrieval_pipeline import (
-    RetrievalPipeline,
-    QueryExpander,
     PostProcessor,
+    QueryExpander,
+    RetrievalPipeline,
+    SubQuery,
 )
-from .post_processors import (
-    FlatStringPostProcessor,
-    GroupedDictPostProcessor,
-    AggregatingPostProcessor,
-    BudgetAwarePostProcessor,
-)
+from .stores.graph.base import EntityGraphStore
+from .stores.graph.graph_adapter import GraphServiceEntityGraphStore
 
-# ── Ingestion CLI (legacy) ──────────────────────────────────────────────
-from .ingestion_cli import KnowledgeIngestionCLI
+# ── Store ABCs ───────────────────────────────────────────────────────────
+from .stores.metadata.base import MetadataStore
 
-# ── Formatter ────────────────────────────────────────────────────────────
-from .formatter import KnowledgeFormatter, RetrievalResult
+# ── Adapter-Based Store Implementations ──────────────────────────────────
+from .stores.metadata.keyvalue_adapter import KeyValueMetadataStore
+from .stores.pieces.base import KnowledgePieceStore
+from .stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
+from .stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
+
+# ── Temporal Decay ───────────────────────────────────────────────────────
+from .temporal_decay import apply_temporal_decay, TemporalDecayConfig
 
 # ── Utilities ────────────────────────────────────────────────────────────
 from .utils import (
-    sanitize_id,
-    unsanitize_id,
-    parse_entity_type,
     cosine_similarity,
     count_tokens,
+    parse_entity_type,
+    sanitize_id,
+    unsanitize_id,
 )
 
 __all__ = [

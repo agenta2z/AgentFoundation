@@ -10,14 +10,13 @@ on missing (used post-cleanup when the registry is the sole dispatch path).
 
 from __future__ import annotations
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (
     ConversationToolType,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
     ConversationToolHandler,
 )
+from attr import attrib, attrs
 
 
 @attrs(slots=False)

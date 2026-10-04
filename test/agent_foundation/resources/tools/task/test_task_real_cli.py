@@ -63,21 +63,31 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _HERE = Path(__file__).resolve().parent
-_AF_ROOT = _HERE.parents[4]                      # .../CoreProjects/AgentFoundation
-_CP_ROOT = _AF_ROOT.parent                       # .../CoreProjects
+_AF_ROOT = _HERE.parents[4]  # .../CoreProjects/AgentFoundation
+_CP_ROOT = _AF_ROOT.parent  # .../CoreProjects
 _RPU_SRC = _CP_ROOT / "RichPythonUtils" / "src"
-_CONFIGS_DIR = _AF_ROOT / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs"
+_CONFIGS_DIR = (
+    _AF_ROOT / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs"
+)
 
 
 # ---------------------------------------------------------------------------
 # Skip gates
 # ---------------------------------------------------------------------------
 
+
 def _cli_available(command: str) -> bool:
     try:
-        return subprocess.run(
-            f"{command} --version", shell=True, capture_output=True, text=True, timeout=30
-        ).returncode == 0
+        return (
+            subprocess.run(
+                f"{command} --version",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).returncode
+            == 0
+        )
     except (subprocess.TimeoutExpired, OSError):
         return False
 
@@ -158,6 +168,7 @@ _TASK_REQUEST = (
 # levels deeper at children/planner_inferencer/children/propose).
 # ---------------------------------------------------------------------------
 
+
 def _read_text(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8", errors="replace")
@@ -181,8 +192,10 @@ def _aggregators_that_ran(workspace: Path) -> list:
     excludes construction-time skeleton dirs)."""
     out = []
     for a in workspace.rglob("aggregator"):
-        if a.is_dir() and (a / "outputs").is_dir() and any(
-            p.is_file() for p in (a / "outputs").rglob("*")
+        if (
+            a.is_dir()
+            and (a / "outputs").is_dir()
+            and any(p.is_file() for p in (a / "outputs").rglob("*"))
         ):
             out.append(a)
     return out
@@ -211,7 +224,9 @@ def _assert_three_fixes(workspace: Path) -> dict:
     layout, deterministic given the topology + the fixes), never LLM content."""
     # --- discover LWI flow dirs anywhere in the tree (plan OR full depth) ---
     flow_dirs = [d for d in workspace.rglob("flow_*") if _is_flow_dir(d)]
-    assert flow_dirs, f"no LWI flow dirs found under {workspace} (topology did not run flows)"
+    assert flow_dirs, (
+        f"no LWI flow dirs found under {workspace} (topology did not run flows)"
+    )
 
     # --- Fix 2: dynamic-step naming (initial / round{NN}, never step_N) ---
     naming_ok = 0
@@ -224,11 +239,14 @@ def _assert_three_fixes(workspace: Path) -> dict:
         )
         if "initial" in kids or any(c.startswith("round") for c in kids):
             naming_ok += 1
-    assert naming_ok > 0, f"no flow used initial/round{{NN}} naming; flows={[f.name for f in flow_dirs]}"
+    assert naming_ok > 0, (
+        f"no flow used initial/round{{NN}} naming; flows={[f.name for f in flow_dirs]}"
+    )
 
     # --- Fix 1: flow-deliverable surfacing (>=1 flow surfaced outputs/output.md) ---
     surfaced = sum(
-        1 for fd in flow_dirs
+        1
+        for fd in flow_dirs
         if (fd / "outputs" / "output.md").is_file()
         and (fd / "outputs" / "output.md").stat().st_size > 0
     )
@@ -242,10 +260,16 @@ def _assert_three_fixes(workspace: Path) -> dict:
     agg_inputs = []
     for a in workspace.rglob("aggregator"):
         if a.is_dir():
-            agg_inputs += list(a.glob("logs/session/*.jsonl.parts/InferenceInput/*.txt"))
+            agg_inputs += list(
+                a.glob("logs/session/*.jsonl.parts/InferenceInput/*.txt")
+            )
     marker_hits = sum(
-        1 for f in agg_inputs
-        if any(m in _read_text(f) for m in ("(See file:", "(See outputs folder:", "(See deliverables:"))
+        1
+        for f in agg_inputs
+        if any(
+            m in _read_text(f)
+            for m in ("(See file:", "(See outputs folder:", "(See deliverables:")
+        )
     )
     if agg_inputs:
         assert marker_hits > 0, (
@@ -255,10 +279,16 @@ def _assert_three_fixes(workspace: Path) -> dict:
 
     # --- Fix 3: deferred-logger — every aggregator that RAN has a session .jsonl ---
     ran_aggs = _aggregators_that_ran(workspace)
-    assert ran_aggs, f"no aggregator produced output under {workspace} (topology did not aggregate)"
+    assert ran_aggs, (
+        f"no aggregator produced output under {workspace} (topology did not aggregate)"
+    )
     missing = [
-        a for a in ran_aggs
-        if not ((a / "logs" / "session").is_dir() and any((a / "logs" / "session").glob("*.jsonl")))
+        a
+        for a in ran_aggs
+        if not (
+            (a / "logs" / "session").is_dir()
+            and any((a / "logs" / "session").glob("*.jsonl"))
+        )
     ]
     assert not missing, (
         f"{len(missing)}/{len(ran_aggs)} aggregator(s) ran but wrote NO session .jsonl "
@@ -266,7 +296,9 @@ def _assert_three_fixes(workspace: Path) -> dict:
         f"{[str(a.relative_to(workspace)) for a in missing[:3]]}"
     )
 
-    review_logs = list(workspace.rglob("review/logs/session/*.jsonl"))  # soft / reported
+    review_logs = list(
+        workspace.rglob("review/logs/session/*.jsonl")
+    )  # soft / reported
     return {
         "flows": len(flow_dirs),
         "naming_ok": naming_ok,
@@ -286,7 +318,11 @@ def _assert_full_completion(workspace: Path, profile: dict) -> dict:
     # (1) Implementation artifact (root, or the executor-Dual outputs/ where the PTI
     #     full run actually surfaces it — see _deliverable_candidates).
     candidates = _deliverable_candidates(workspace, "full")
-    sized = [c for c in candidates if c.is_file() and c.stat().st_size > profile["min_top_output_bytes"]]
+    sized = [
+        c
+        for c in candidates
+        if c.is_file() and c.stat().st_size > profile["min_top_output_bytes"]
+    ]
     assert sized, (
         f"no non-empty implementation artifact at "
         f"{[str(c.relative_to(workspace)) for c in candidates]} "
@@ -298,20 +334,28 @@ def _assert_full_completion(workspace: Path, profile: dict) -> dict:
 
     # (2) Executor stage actually ran (file count, not dir existence).
     exec_dir = workspace / "children" / "executor_inferencer"
-    assert exec_dir.is_dir(), f"executor stage dir missing: {exec_dir} (not a full PTI run?)"
+    assert exec_dir.is_dir(), (
+        f"executor stage dir missing: {exec_dir} (not a full PTI run?)"
+    )
     exec_files = [f for f in exec_dir.rglob("*") if f.is_file()]
     assert len(exec_files) > 1, (
         f"executor stage produced only {len(exec_files)} file(s) — looks like a construction-time "
         f"skeleton, executor never fired"
     )
     exec_propose = exec_dir / "children" / "propose" / "children"
-    exec_propose_has_files = exec_propose.is_dir() and any(f.is_file() for f in exec_propose.rglob("*"))
-    assert exec_propose_has_files, f"executor BTA workers produced no artifacts under {exec_propose}"
+    exec_propose_has_files = exec_propose.is_dir() and any(
+        f.is_file() for f in exec_propose.rglob("*")
+    )
+    assert exec_propose_has_files, (
+        f"executor BTA workers produced no artifacts under {exec_propose}"
+    )
 
     # (3) The executor BTA aggregator (2nd deferred top-aggregator) has a session log.
     exec_agg = exec_dir / "children" / "propose" / "children" / "aggregator"
     exec_agg_logs = 0
-    if (exec_agg / "outputs").is_dir() and any(p.is_file() for p in (exec_agg / "outputs").rglob("*")):
+    if (exec_agg / "outputs").is_dir() and any(
+        p.is_file() for p in (exec_agg / "outputs").rglob("*")
+    ):
         sess = exec_agg / "logs" / "session"
         exec_agg_logs = len(list(sess.glob("*.jsonl"))) if sess.is_dir() else 0
         assert exec_agg_logs > 0, (
@@ -332,28 +376,39 @@ def _assert_full_completion(workspace: Path, profile: dict) -> dict:
 # Per-mode CLI command construction
 # ---------------------------------------------------------------------------
 
+
 def _build_cmd(mode: str, profile: dict, tool_name: str, target_path: Path) -> list:
     """Construct the AF task-CLI argv for ``mode``. ``--config pti`` (→ default.yaml) is used
     for BOTH modes so plan is a literal subset of full: ``--plan`` swaps to the standalone
     planner, ``--full`` runs the whole PTI. ``--tool-name`` + the request are appended last."""
     mode_flag = "--plan" if mode == "plan" else "--full"
     cmd = [
-        sys.executable, "-m", "agent_foundation.resources.tools.task",
+        sys.executable,
+        "-m",
+        "agent_foundation.resources.tools.task",
         mode_flag,
-        "--config", "pti",
-        "--override", "_params.main_inferencer=ClaudeCodeCLI",
-        "--override", "_params.default_inferencer=ClaudeCodeCLI",
-        "--override", f"_params.plan_max_breakdown={profile['plan_max_breakdown']}",
-        "--override", f"_params.flow_max_dynamic_steps={profile['flow_max_dynamic_steps']}",
-        "--override", f"_params.consensus_max_iterations={profile['consensus_max_iterations']}",
+        "--config",
+        "pti",
+        "--override",
+        "_params.main_inferencer=ClaudeCodeCLI",
+        "--override",
+        "_params.default_inferencer=ClaudeCodeCLI",
+        "--override",
+        f"_params.plan_max_breakdown={profile['plan_max_breakdown']}",
+        "--override",
+        f"_params.flow_max_dynamic_steps={profile['flow_max_dynamic_steps']}",
+        "--override",
+        f"_params.consensus_max_iterations={profile['consensus_max_iterations']}",
     ]
     if mode == "full":
         # exec_max_breakdown is VALID only on the full PTI (referenced by default.yaml); it is
         # inert/stripped on the plan-swapped standalone planner, so it is omitted in plan mode.
         # _target_path sandboxes the implementation file-writes away from the AF repo.
         cmd += [
-            "--override", f"_params.exec_max_breakdown={profile['exec_max_breakdown']}",
-            "--override", f"_target_path={target_path}",
+            "--override",
+            f"_params.exec_max_breakdown={profile['exec_max_breakdown']}",
+            "--override",
+            f"_target_path={target_path}",
         ]
     cmd += ["--tool-name", tool_name, _TASK_REQUEST]
     return cmd
@@ -363,6 +418,7 @@ def _build_cmd(mode: str, profile: dict, tool_name: str, target_path: Path) -> l
 # No-LLM smoke test — validates both config shapes (alias / _import_ / _params / fixer)
 # ---------------------------------------------------------------------------
 
+
 @skip_no_omegaconf
 def test_configs_instantiate_smoke(tmp_path):
     """Instantiate both topologies (no LLM, ~5s) and assert their shape — catches
@@ -370,20 +426,19 @@ def test_configs_instantiate_smoke(tmp_path):
     before any paid run. Exercises the SAME load_config + override-merge + resolve path
     the subprocess test drives, at zero cost."""
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import instantiate, load_config
-
-    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
-        DualInferencer,
-    )
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
         BreakdownThenAggregateInferencer,
     )
-    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
-        PlanThenImplementInferencer,
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+        DualInferencer,
     )
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
     )
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
+        PlanThenImplementInferencer,
+    )
+    from rich_python_utils.config_utils import instantiate, load_config
 
     base_overrides = {
         "_params.workspace_root": str(tmp_path / "ws"),
@@ -398,20 +453,30 @@ def test_configs_instantiate_smoke(tmp_path):
         wi = bta.worker_inferencers
         factory = (
             (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
-            if isinstance(wi, dict) else wi
+            if isinstance(wi, dict)
+            else wi
         )
         return factory()  # LazyConfigFactory / partial / callable → no-arg call
 
     # ----- (A) standalone planner: Dual{ BTA(plan_bta){ MFDual }, leaf fixer } -----
-    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"), overrides=dict(base_overrides))
+    plan_cfg = load_config(
+        str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
+        overrides=dict(base_overrides),
+    )
     planner = instantiate(plan_cfg)
-    assert isinstance(planner, DualInferencer), f"standalone planner root must be Dual; got {type(planner).__name__}"
+    assert isinstance(planner, DualInferencer), (
+        f"standalone planner root must be Dual; got {type(planner).__name__}"
+    )
     assert isinstance(planner.base_inferencer, BreakdownThenAggregateInferencer)
     assert planner.base_inferencer.name == "plan_bta"
     mfdual = _worker_from(planner.base_inferencer)
-    assert isinstance(mfdual, MultiFlowDualInferencer), f"planner BTA worker must be MFDual; got {type(mfdual).__name__}"
+    assert isinstance(mfdual, MultiFlowDualInferencer), (
+        f"planner BTA worker must be MFDual; got {type(mfdual).__name__}"
+    )
     assert mfdual.propagate_runtime_input is True
-    assert len(mfdual.flow_configs) == 2, f"expected 2 flows; got {len(mfdual.flow_configs)}"
+    assert len(mfdual.flow_configs) == 2, (
+        f"expected 2 flows; got {len(mfdual.flow_configs)}"
+    )
     # lightweight-fixer design: the Dual fixer is a LEAF, not another BTA (guards the
     # costly-re-implementation regression).
     assert not isinstance(planner.fixer_inferencer, BreakdownThenAggregateInferencer), (
@@ -419,29 +484,44 @@ def test_configs_instantiate_smoke(tmp_path):
     )
 
     # ----- (B) full PTI: PTI{ planner=Dual{BTA{MFDual}}, executor=Dual{BTA(exec_bta){Dual}} } -----
-    full_cfg = load_config(str(_CONFIGS_DIR / "default.yaml"), overrides=dict(base_overrides))
+    full_cfg = load_config(
+        str(_CONFIGS_DIR / "default.yaml"), overrides=dict(base_overrides)
+    )
     pti = instantiate(full_cfg)
-    assert isinstance(pti, PlanThenImplementInferencer), f"full root must be PTI; got {type(pti).__name__}"
-    assert isinstance(pti.planner_inferencer, DualInferencer), "PTI.planner must be the imported Dual{BTA{MFDual}}"
+    assert isinstance(pti, PlanThenImplementInferencer), (
+        f"full root must be PTI; got {type(pti).__name__}"
+    )
+    assert isinstance(pti.planner_inferencer, DualInferencer), (
+        "PTI.planner must be the imported Dual{BTA{MFDual}}"
+    )
     plan_bta = pti.planner_inferencer.base_inferencer
-    assert isinstance(plan_bta, BreakdownThenAggregateInferencer) and plan_bta.name == "plan_bta"
+    assert (
+        isinstance(plan_bta, BreakdownThenAggregateInferencer)
+        and plan_bta.name == "plan_bta"
+    )
     assert isinstance(_worker_from(plan_bta), MultiFlowDualInferencer)
     exec_dual = pti.executor_inferencer
-    assert isinstance(exec_dual, DualInferencer), f"PTI.executor must be Dual; got {type(exec_dual).__name__}"
+    assert isinstance(exec_dual, DualInferencer), (
+        f"PTI.executor must be Dual; got {type(exec_dual).__name__}"
+    )
     exec_bta = exec_dual.base_inferencer
-    assert isinstance(exec_bta, BreakdownThenAggregateInferencer) and exec_bta.name == "exec_bta"
+    assert (
+        isinstance(exec_bta, BreakdownThenAggregateInferencer)
+        and exec_bta.name == "exec_bta"
+    )
     exec_worker = _worker_from(exec_bta)
     assert isinstance(exec_worker, DualInferencer), (
         f"exec BTA worker must be a Dual (write+review+fix), NOT MFDual; got {type(exec_worker).__name__}"
     )
-    assert not isinstance(exec_dual.fixer_inferencer, BreakdownThenAggregateInferencer), (
-        "executor Dual fixer must be a lightweight leaf, not a BTA"
-    )
+    assert not isinstance(
+        exec_dual.fixer_inferencer, BreakdownThenAggregateInferencer
+    ), "executor Dual fixer must be a lightweight leaf, not a BTA"
 
 
 # ---------------------------------------------------------------------------
 # Config params: reviewer_strategy, fixer_strategy, mode flags → topology + template
 # ---------------------------------------------------------------------------
+
 
 @skip_no_omegaconf
 def test_config_params_propagate_to_topology(tmp_path):
@@ -449,12 +529,11 @@ def test_config_params_propagate_to_topology(tmp_path):
     enable_elegant_mode resolve and propagate through both plan-only topologies to the
     instantiated inferencer attributes and template_extra_feed."""
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import instantiate, load_config
-
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
         ReviewerStrategy,
     )
+    from rich_python_utils.config_utils import instantiate, load_config
 
     base_overrides = {
         "_params.workspace_root": str(tmp_path / "ws"),
@@ -466,20 +545,24 @@ def test_config_params_propagate_to_topology(tmp_path):
         wi = bta.worker_inferencers
         factory = (
             (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
-            if isinstance(wi, dict) else wi
+            if isinstance(wi, dict)
+            else wi
         )
         return factory()
 
     # ---- (A) breakdown-multiflow-plan: params propagate to worker MFDual ----
-    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
-                           overrides=dict(base_overrides))
+    plan_cfg = load_config(
+        str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
+        overrides=dict(base_overrides),
+    )
     planner = instantiate(plan_cfg)
     mfdual = _worker_from(planner.base_inferencer)
     assert isinstance(mfdual, MultiFlowDualInferencer)
 
     # reviewer_strategy + fixer_strategy
     assert mfdual.reviewer_strategy is ReviewerStrategy.ALL_NON_WINNERS, (
-        f"expected all_non_winners; got {mfdual.reviewer_strategy}")
+        f"expected all_non_winners; got {mfdual.reviewer_strategy}"
+    )
     assert mfdual.fixer_strategy.value == "winner"
 
     # enable_deep_mode + enable_elegant_mode reach the flow leaf template_extra_feed
@@ -489,13 +572,16 @@ def test_config_params_propagate_to_topology(tmp_path):
             leaf = fc.get(key)
             tef = getattr(leaf, "template_extra_feed", {})
             assert tef.get("enable_deep_mode") is True, (
-                f"breakdown flow[{i}].{key} missing enable_deep_mode in template_extra_feed")
+                f"breakdown flow[{i}].{key} missing enable_deep_mode in template_extra_feed"
+            )
             assert tef.get("enable_elegant_mode") is True, (
-                f"breakdown flow[{i}].{key} missing enable_elegant_mode in template_extra_feed")
+                f"breakdown flow[{i}].{key} missing enable_elegant_mode in template_extra_feed"
+            )
 
     # ---- (B) multiflow-plan: same params at root MFDual ----
-    mf_cfg = load_config(str(_CONFIGS_DIR / "multiflow-plan.yaml"),
-                         overrides=dict(base_overrides))
+    mf_cfg = load_config(
+        str(_CONFIGS_DIR / "multiflow-plan.yaml"), overrides=dict(base_overrides)
+    )
     root_mfdual = instantiate(mf_cfg)
     assert isinstance(root_mfdual, MultiFlowDualInferencer)
     assert root_mfdual.reviewer_strategy is ReviewerStrategy.ALL_NON_WINNERS
@@ -507,21 +593,22 @@ def test_config_params_propagate_to_topology(tmp_path):
             leaf = fc.get(key)
             tef = getattr(leaf, "template_extra_feed", {})
             assert tef.get("enable_deep_mode") is True, (
-                f"multiflow flow[{i}].{key} missing enable_deep_mode")
+                f"multiflow flow[{i}].{key} missing enable_deep_mode"
+            )
             assert tef.get("enable_elegant_mode") is True, (
-                f"multiflow flow[{i}].{key} missing enable_elegant_mode")
+                f"multiflow flow[{i}].{key} missing enable_elegant_mode"
+            )
 
 
 @skip_no_omegaconf
 def test_config_params_overridable_per_run(tmp_path):
     """Verify that _params overrides actually change behavior (not just defaults)."""
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import instantiate, load_config
-
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
         ReviewerStrategy,
     )
+    from rich_python_utils.config_utils import instantiate, load_config
 
     overrides = {
         "_params.workspace_root": str(tmp_path / "ws"),
@@ -535,18 +622,21 @@ def test_config_params_overridable_per_run(tmp_path):
         wi = bta.worker_inferencers
         factory = (
             (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
-            if isinstance(wi, dict) else wi
+            if isinstance(wi, dict)
+            else wi
         )
         return factory()
 
-    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
-                           overrides=dict(overrides))
+    plan_cfg = load_config(
+        str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"), overrides=dict(overrides)
+    )
     planner = instantiate(plan_cfg)
     mfdual = _worker_from(planner.base_inferencer)
 
     # Overridden reviewer_strategy
     assert mfdual.reviewer_strategy is ReviewerStrategy.RUNNER_UP, (
-        f"override to runner_up failed; got {mfdual.reviewer_strategy}")
+        f"override to runner_up failed; got {mfdual.reviewer_strategy}"
+    )
 
     # Overridden mode flags reach the leaves as False
     mfi = mfdual.base_inferencer
@@ -554,31 +644,44 @@ def test_config_params_overridable_per_run(tmp_path):
         leaf = fc.get("initial_inferencer")
         tef = getattr(leaf, "template_extra_feed", {})
         assert tef.get("enable_deep_mode") is False, (
-            f"flow[{i}] enable_deep_mode override to False failed; got {tef}")
+            f"flow[{i}] enable_deep_mode override to False failed; got {tef}"
+        )
         assert tef.get("enable_elegant_mode") is False, (
-            f"flow[{i}] enable_elegant_mode override to False failed; got {tef}")
+            f"flow[{i}] enable_elegant_mode override to False failed; got {tef}"
+        )
 
 
 @skip_no_omegaconf
 def test_mode_flags_reach_rendered_prompt(tmp_path):
     """End-to-end: the config mode flags actually control what appears in the rendered
     plan/main/initial.jinja2 prompt — deep_mode text present when True, absent when False."""
-    from jinja2 import Environment, FileSystemLoader
-    from jinja2 import Undefined as _JinjaUndefined
+    from jinja2 import Environment, FileSystemLoader, Undefined as _JinjaUndefined
 
     class _ChainableUndefined(_JinjaUndefined):
         def __getattr__(self, _name):
             return _ChainableUndefined()
+
         def __str__(self):
             return ""
+
         def __iter__(self):
             return iter([])
+
         def __bool__(self):
             return False
 
-    templates_dir = str(_AF_ROOT / "src" / "agent_foundation" / "resources" / "prompt_templates"
-                        / "plan" / "main")
-    env = Environment(loader=FileSystemLoader(templates_dir), undefined=_ChainableUndefined)
+    templates_dir = str(
+        _AF_ROOT
+        / "src"
+        / "agent_foundation"
+        / "resources"
+        / "prompt_templates"
+        / "plan"
+        / "main"
+    )
+    env = Environment(
+        loader=FileSystemLoader(templates_dir), undefined=_ChainableUndefined
+    )
     tmpl = env.get_template("initial.jinja2")
 
     deep_marker = "Spawn as many agents as possible"
@@ -592,30 +695,56 @@ def test_mode_flags_reach_rendered_prompt(tmp_path):
     }
 
     # Both enabled (the config default)
-    rendered_on = tmpl.render(**base_feed, enable_deep_mode=True, enable_elegant_mode=True,
-                              instructions={"modes": {"deep_mode": deep_marker,
-                                                       "elegant_mode": elegant_marker}})
-    assert deep_marker in rendered_on, "deep_mode text missing when enable_deep_mode=True"
-    assert elegant_marker in rendered_on, "elegant_mode text missing when enable_elegant_mode=True"
+    rendered_on = tmpl.render(
+        **base_feed,
+        enable_deep_mode=True,
+        enable_elegant_mode=True,
+        instructions={
+            "modes": {"deep_mode": deep_marker, "elegant_mode": elegant_marker}
+        },
+    )
+    assert deep_marker in rendered_on, (
+        "deep_mode text missing when enable_deep_mode=True"
+    )
+    assert elegant_marker in rendered_on, (
+        "elegant_mode text missing when enable_elegant_mode=True"
+    )
 
     # Both disabled (per-run override)
-    rendered_off = tmpl.render(**base_feed, enable_deep_mode=False, enable_elegant_mode=False,
-                               instructions={"modes": {"deep_mode": deep_marker,
-                                                        "elegant_mode": elegant_marker}})
-    assert deep_marker not in rendered_off, "deep_mode text present when enable_deep_mode=False"
-    assert elegant_marker not in rendered_off, "elegant_mode text present when enable_elegant_mode=False"
+    rendered_off = tmpl.render(
+        **base_feed,
+        enable_deep_mode=False,
+        enable_elegant_mode=False,
+        instructions={
+            "modes": {"deep_mode": deep_marker, "elegant_mode": elegant_marker}
+        },
+    )
+    assert deep_marker not in rendered_off, (
+        "deep_mode text present when enable_deep_mode=False"
+    )
+    assert elegant_marker not in rendered_off, (
+        "elegant_mode text present when enable_elegant_mode=False"
+    )
 
     # Default (vars absent = true via Jinja | default(true))
-    rendered_default = tmpl.render(**base_feed,
-                                   instructions={"modes": {"deep_mode": deep_marker,
-                                                            "elegant_mode": elegant_marker}})
-    assert deep_marker in rendered_default, "deep_mode text missing when var is absent (should default true)"
-    assert elegant_marker in rendered_default, "elegant_mode text missing when var is absent (should default true)"
+    rendered_default = tmpl.render(
+        **base_feed,
+        instructions={
+            "modes": {"deep_mode": deep_marker, "elegant_mode": elegant_marker}
+        },
+    )
+    assert deep_marker in rendered_default, (
+        "deep_mode text missing when var is absent (should default true)"
+    )
+    assert elegant_marker in rendered_default, (
+        "elegant_mode text missing when var is absent (should default true)"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Object initialization integration test — topology + workspace + logger
 # ---------------------------------------------------------------------------
+
 
 @skip_no_omegaconf
 def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
@@ -629,11 +758,10 @@ def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
     the workspace propagation chain.
     """
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import instantiate, load_config
-
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
     )
+    from rich_python_utils.config_utils import instantiate, load_config
 
     ws_root = str(tmp_path / "ws")
     overrides = {
@@ -643,14 +771,16 @@ def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
         "_params.num_flows": 3,
     }
 
-    plan_cfg = load_config(str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"),
-                           overrides=dict(overrides))
+    plan_cfg = load_config(
+        str(_CONFIGS_DIR / "breakdown-multiflow-plan.yaml"), overrides=dict(overrides)
+    )
     planner = instantiate(plan_cfg)
     bta = planner.base_inferencer
     wi = bta.worker_inferencers
     factory = (
         (wi.get("__default__") or wi.get("_default") or next(iter(wi.values())))
-        if isinstance(wi, dict) else wi
+        if isinstance(wi, dict)
+        else wi
     )
     mfdual = factory()
     assert isinstance(mfdual, MultiFlowDualInferencer)
@@ -671,7 +801,9 @@ def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
     # then assigns workspace to the LWI. The LWI's _propagate_workspace_to_children
     # propagates to its default_initial_inferencer + default_followup_inferencer.
     # This is the path that must create the workspace logger on each leaf.
-    from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+    from agent_foundation.common.inferencers.inferencer_workspace import (
+        InferencerWorkspace,
+    )
 
     worker_factory = mfi._build_worker_factory()
     for i in range(len(mfi.flow_configs)):
@@ -718,6 +850,7 @@ def test_heterogeneous_3flow_init_and_logger_propagation(tmp_path):
 # Real-CLI subprocess integration test — parametrized over plan + full modes
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @skip_unless_e2e
 @skip_no_claude
@@ -736,7 +869,9 @@ def test_task_cli_subprocess(tmp_path, mode):
             [str(_AF_ROOT / "src"), str(_RPU_SRC), os.environ.get("PYTHONPATH", "")]
         ),
     }
-    env.pop("DEFAULT_MAIN_INFERENCER", None)  # claude-only is pinned via overrides; belt-and-suspenders
+    env.pop(
+        "DEFAULT_MAIN_INFERENCER", None
+    )  # claude-only is pinned via overrides; belt-and-suspenders
 
     target_path = tmp_path / "impl_target"
     target_path.mkdir()
@@ -748,7 +883,12 @@ def test_task_cli_subprocess(tmp_path, mode):
 
     subprocess_timeout = 60 * 55 if mode == "plan" else 60 * 115
     result = subprocess.run(
-        cmd, cwd=str(_AF_ROOT), env=env, capture_output=True, text=True, timeout=subprocess_timeout
+        cmd,
+        cwd=str(_AF_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=subprocess_timeout,
     )
 
     log_path = tmp_path / f"cli_{mode}.log"
@@ -765,20 +905,27 @@ def test_task_cli_subprocess(tmp_path, mode):
     # Regression markers from prior fixes (cheap, content-based).
     full_log = result.stdout + result.stderr
     assert "NameError" not in full_log, (
-        f"NameError in CLI output ({mode}); excerpt: {full_log[full_log.find('NameError'):][:400]!r}"
+        f"NameError in CLI output ({mode}); excerpt: {full_log[full_log.find('NameError') :][:400]!r}"
     )
     sharing = full_log.count("share inferencer") + full_log.count("shared inferencer")
-    assert sharing == 0, f"{sharing} inferencer-sharing warning(s) in CLI output ({mode})"
+    assert sharing == 0, (
+        f"{sharing} inferencer-sharing warning(s) in CLI output ({mode})"
+    )
 
     # Locate THIS run's workspace (unique tool_name → one run dir).
     run_root = _AF_ROOT / "_runtime" / "tasks" / tool_name
-    runs = sorted(run_root.glob(f"{tool_name}_*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    assert runs, f"no run workspace under {run_root}; stdout tail:\n{result.stdout[-2000:]}"
+    runs = sorted(
+        run_root.glob(f"{tool_name}_*"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    assert runs, (
+        f"no run workspace under {run_root}; stdout tail:\n{result.stdout[-2000:]}"
+    )
     workspace = runs[0]
     print(f"[task-e2e:{mode}] workspace={workspace}")
 
     deliverables = [
-        c for c in _deliverable_candidates(workspace, mode)
+        c
+        for c in _deliverable_candidates(workspace, mode)
         if c.is_file() and c.stat().st_size > profile["min_top_output_bytes"]
     ]
     assert deliverables, (
@@ -813,7 +960,9 @@ if __name__ == "__main__":
         print(f"[assert-only] workspace={ws}")
         print(f"[assert-only] three_fixes: {_assert_three_fixes(ws)}")
         if "--full" in _argv:
-            print(f"[assert-only] full_completion: {_assert_full_completion(ws, PROFILES[_PROFILE])}")
+            print(
+                f"[assert-only] full_completion: {_assert_full_completion(ws, PROFILES[_PROFILE])}"
+            )
     else:
         import tempfile
 

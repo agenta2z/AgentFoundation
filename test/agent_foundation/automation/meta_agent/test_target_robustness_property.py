@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
@@ -31,6 +29,7 @@ from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +67,12 @@ target_spec_st = st.builds(
 def target_with_fallback_st(draw) -> TargetSpecWithFallback:
     """Generate a TargetSpecWithFallback with 1-4 unique strategies."""
     specs = draw(
-        st.lists(target_spec_st, min_size=1, max_size=4, unique_by=lambda s: (s.strategy, s.value))
+        st.lists(
+            target_spec_st,
+            min_size=1,
+            max_size=4,
+            unique_by=lambda s: (s.strategy, s.value),
+        )
     )
     return TargetSpecWithFallback(strategies=specs)
 
@@ -133,7 +137,8 @@ class TestTargetRobustnessProperty:
     @given(aligned_set=deterministic_trace_set_st())
     @settings(max_examples=200)
     def test_consolidated_target_contains_all_unique_strategies(
-        self, aligned_set: AlignedTraceSet,
+        self,
+        aligned_set: AlignedTraceSet,
     ):
         """
         After extraction, each deterministic step's target is a
@@ -165,11 +170,10 @@ class TestTargetRobustnessProperty:
             # Pick any non-None step — _apply_best_target sets the same
             # target on all steps.
             sample_step = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
-            assert sample_step is not None, (
-                f"Position {pos.index}: no non-None steps"
-            )
+            assert sample_step is not None, f"Position {pos.index}: no non-None steps"
 
             consolidated = sample_step.target
             assert isinstance(consolidated, TargetSpecWithFallback), (
@@ -189,7 +193,8 @@ class TestTargetRobustnessProperty:
     @given(aligned_set=deterministic_trace_set_st())
     @settings(max_examples=200)
     def test_consolidated_target_ordered_by_strategy_priority(
-        self, aligned_set: AlignedTraceSet,
+        self,
+        aligned_set: AlignedTraceSet,
     ):
         """
         After extraction, each deterministic step's consolidated target
@@ -204,7 +209,8 @@ class TestTargetRobustnessProperty:
 
         for pos in patterns.deterministic_steps:
             sample_step = next(
-                (s for s in pos.steps.values() if s is not None), None,
+                (s for s in pos.steps.values() if s is not None),
+                None,
             )
             assert sample_step is not None
 

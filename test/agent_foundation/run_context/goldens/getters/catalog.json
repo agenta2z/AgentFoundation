@@ -1,0 +1,167 @@
+{
+  "catalog": {
+    "_proposer_task_instructions": {
+      "BreakdownThenAggregateInferencer": [
+        "_worker_task_instructions"
+      ],
+      "DualInferencer": [
+        "_state['prior_task_instructions'] (node.call | _pending_state_backing)",
+        "base_inferencer._proposer_task_instructions()"
+      ],
+      "InferencerBase": [],
+      "MultiFlowInferencer": [
+        "MultiFlowState.winner_idx",
+        "_last_winner_idx_backing",
+        "flow_configs[*].initial_inferencer._proposer_task_instructions()"
+      ],
+      "TemplatedInferencerBase": [
+        "_last_rendered_task_instructions"
+      ]
+    },
+    "active_session_id": {
+      "StreamingInferencerBase": [
+        "_session_id",
+        "_live_handle_store[ctx.path].live_session_id"
+      ]
+    },
+    "get_chosen_fixer_alias": {
+      "MultiFlowInferencer": [
+        "_last_fixer_alias_backing",
+        "MultiFlowState.fixer_alias"
+      ]
+    },
+    "get_chosen_reviewer_alias": {
+      "MultiFlowInferencer": [
+        "_last_reviewer_alias_backing",
+        "MultiFlowState.reviewer_alias"
+      ]
+    },
+    "get_final_output": {
+      "RovoDevCliInferencer": [
+        "_last_clean_output",
+        "_last_raw_stdout"
+      ],
+      "StreamingInferencerBase": []
+    },
+    "get_first_non_winner_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_messages": {
+      "ConversationalInferencer": [
+        "_messages"
+      ]
+    },
+    "get_non_winner_inferencers": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_ranking": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_runner_up_flow_idx": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_runner_up_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_streaming_result": {
+      "ClaudeCodeCliInferencer": [
+        "_last_streaming_output",
+        "_last_streaming_return_code",
+        "_last_streaming_stderr"
+      ],
+      "DevmateCliInferencer": [
+        "_last_streaming_output",
+        "_last_streaming_return_code"
+      ]
+    },
+    "get_winner_flow_idx": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_winner_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    }
+  },
+  "coverage": {
+    "driven_elsewhere": {
+      "active_session_id (devmate, rovodev, claude_code, openclaw leaves)": "test_golden_streaming_*.py, test_golden_openclaw.py",
+      "get_final_output.RovoDevCliInferencer": "test_golden_streaming_rovodev.py",
+      "get_streaming_result.ClaudeCodeCliInferencer (per entrypoint)": "test_golden_streaming_claude_code.py",
+      "get_streaming_result.DevmateCliInferencer": "test_golden_streaming_devmate.py"
+    },
+    "driven_here": {
+      "_proposer_task_instructions": [
+        "TemplatedInferencerBase",
+        "MultiFlowInferencer",
+        "BreakdownThenAggregateInferencer",
+        "DualInferencer"
+      ],
+      "active_session_id": [
+        "StreamingInferencerBase",
+        "ClaudeCodeCliInferencer"
+      ],
+      "get_chosen_fixer_alias": [
+        "MultiFlowInferencer"
+      ],
+      "get_chosen_reviewer_alias": [
+        "MultiFlowInferencer"
+      ],
+      "get_final_output": [
+        "StreamingInferencerBase"
+      ],
+      "get_first_non_winner_inferencer": [
+        "MultiFlowInferencer"
+      ],
+      "get_non_winner_inferencers": [
+        "MultiFlowInferencer"
+      ],
+      "get_ranking": [
+        "MultiFlowInferencer"
+      ],
+      "get_runner_up_flow_idx": [
+        "MultiFlowInferencer"
+      ],
+      "get_runner_up_inferencer": [
+        "MultiFlowInferencer"
+      ],
+      "get_streaming_result": [
+        "ClaudeCodeCliInferencer"
+      ],
+      "get_winner_flow_idx": [
+        "MultiFlowInferencer"
+      ],
+      "get_winner_inferencer": [
+        "MultiFlowInferencer"
+      ]
+    },
+    "fields_without_documented_getter": [
+      "SDK leaves _last_token_count / _last_tool_use_count / _last_usage",
+      "ToolAsInferencer._last_response",
+      "ClaudeCodeCliInferencer._last_stream_result"
+    ],
+    "not_driven": {
+      "get_messages.ConversationalInferencer": "reflects _messages, written only by the server run_agentic_loop; the public infer/ainfer path renders the real SOP registry",
+      "last_call (agentic_functions/decorator.py)": "a ContextVar trace on an agentic function, not an instance field"
+    }
+  }
+}

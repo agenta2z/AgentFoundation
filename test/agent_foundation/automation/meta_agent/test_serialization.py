@@ -18,7 +18,6 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     SynthesisReport,

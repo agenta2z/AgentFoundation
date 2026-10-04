@@ -7,7 +7,6 @@ the aggregator receives all results.
 import time
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -134,15 +133,27 @@ async def test_mfi_heterogeneous_flows_persona_detection(tmp_workspace):
 
     mfi = MultiFlowInferencer(
         flow_configs=[
-            {"input": same_input, "initial_inferencer": researcher,
-             "followup_inferencer": _make_claude(tmp_workspace),
-             "end_condition": end_after_first, "max_dynamic_steps": 5},
-            {"input": same_input, "initial_inferencer": designer,
-             "followup_inferencer": _make_claude(tmp_workspace),
-             "end_condition": end_after_first, "max_dynamic_steps": 5},
-            {"input": same_input, "initial_inferencer": implementer,
-             "followup_inferencer": _make_claude(tmp_workspace),
-             "end_condition": end_after_first, "max_dynamic_steps": 5},
+            {
+                "input": same_input,
+                "initial_inferencer": researcher,
+                "followup_inferencer": _make_claude(tmp_workspace),
+                "end_condition": end_after_first,
+                "max_dynamic_steps": 5,
+            },
+            {
+                "input": same_input,
+                "initial_inferencer": designer,
+                "followup_inferencer": _make_claude(tmp_workspace),
+                "end_condition": end_after_first,
+                "max_dynamic_steps": 5,
+            },
+            {
+                "input": same_input,
+                "initial_inferencer": implementer,
+                "followup_inferencer": _make_claude(tmp_workspace),
+                "end_condition": end_after_first,
+                "max_dynamic_steps": 5,
+            },
         ],
         aggregator_inferencer=aggregator,
         max_concurrency=3,

@@ -34,18 +34,29 @@ skip_no_backend = pytest.mark.skipif(
 @pytest.mark.timeout(0)
 def test_understand_codebase_real_cli(tmp_path):
     """Run understand_codebase on a small target via CLI subprocess."""
-    pythonpath = ":".join([
-        str(AF_ROOT / "src"),
-        str(RPU_ROOT / "src"),
-        str(OS_ROOT / "src"),
-    ])
+    pythonpath = ":".join(
+        [
+            str(AF_ROOT / "src"),
+            str(RPU_ROOT / "src"),
+            str(OS_ROOT / "src"),
+        ]
+    )
     env = {**os.environ, "PYTHONPATH": pythonpath}
 
     # Use a small target — the understand_codebase tool directory itself
-    target = str(AF_ROOT / "src" / "agent_foundation" / "resources" / "tools" / "understand_codebase")
+    target = str(
+        AF_ROOT
+        / "src"
+        / "agent_foundation"
+        / "resources"
+        / "tools"
+        / "understand_codebase"
+    )
 
     cmd = [
-        sys.executable, "-m", "agent_foundation.resources.tools.task",
+        sys.executable,
+        "-m",
+        "agent_foundation.resources.tools.task",
         f"Investigate codebase at {target}",
         "--full",
     ]
@@ -85,6 +96,7 @@ def test_understand_codebase_real_cli(tmp_path):
 def test_understand_codebase_executor_import():
     """Verify the executor imports without errors."""
     from agent_foundation.resources.tools.understand_codebase.executor import execute
+
     assert callable(execute)
 
 
@@ -95,6 +107,7 @@ def test_understand_codebase_slash_args_import():
         TASK_BOOL_FLAGS,
         TASK_MODE_ALIASES,
     )
+
     assert callable(parse_slash_args)
     assert "plan" in TASK_BOOL_FLAGS
     assert "task_plan" in TASK_MODE_ALIASES

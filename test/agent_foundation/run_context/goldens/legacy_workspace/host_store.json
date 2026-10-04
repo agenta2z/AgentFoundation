@@ -1,0 +1,196 @@
+{
+  "fresh_generation": {
+    "mfi": "<W>1</W><R>rev1</R><F>fix1</F><K>1,0</K>",
+    "reviewer": "rev([review|review] check task-a)",
+    "reviewer_instance_role": [
+      "initial",
+      "plan"
+    ]
+  },
+  "fresh_root_attempt": {
+    "judgments": [],
+    "latest_per_flow": {
+      "0": "fa([plan|initial] task-a)",
+      "1": "fb([plan|initial] task-a)"
+    },
+    "latest_per_flow.key_types": [
+      "int"
+    ],
+    "latest_per_flow_path": {
+      "0": null,
+      "1": null
+    },
+    "latest_per_flow_path.key_types": [
+      "int"
+    ],
+    "type": "MultiFlowAttemptState"
+  },
+  "fresh_save_equals_fixture": false,
+  "nodes": {
+    "/": {
+      "attempt": {
+        "judgments": [],
+        "latest_per_flow": {
+          "0": "fa([plan|initial] task-a)",
+          "1": "fb([plan|initial] task-a)"
+        },
+        "latest_per_flow.key_types": [
+          "str"
+        ],
+        "latest_per_flow_path": {
+          "0": null,
+          "1": null
+        },
+        "latest_per_flow_path.key_types": [
+          "str"
+        ],
+        "type": "MultiFlowAttemptState"
+      },
+      "call": {
+        "effective_sub_queries": [
+          "task-a",
+          "task-a"
+        ],
+        "fixer_alias": "fix1",
+        "flow_inputs": [
+          "task-a",
+          "task-a"
+        ],
+        "ranking": [
+          1,
+          0
+        ],
+        "reviewer_alias": "rev1",
+        "type": "MultiFlowState",
+        "winner_idx": 1
+      },
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": null
+    },
+    "/flow_00": {
+      "attempt": null,
+      "call": {
+        "type": "dict",
+        "value": {
+          "_prev_iteration": 1,
+          "dynamic_step_count": 1,
+          "dynamic_step_results": [
+            "fa([plan|initial] task-a)"
+          ],
+          "iteration": 1,
+          "iteration_records": [],
+          "original_input": "task-a"
+        }
+      },
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": null
+    },
+    "/flow_00/step_0": {
+      "attempt": null,
+      "call": null,
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": null
+    },
+    "/flow_01": {
+      "attempt": null,
+      "call": {
+        "type": "dict",
+        "value": {
+          "_prev_iteration": 1,
+          "dynamic_step_count": 1,
+          "dynamic_step_results": [
+            "fb([plan|initial] task-a)"
+          ],
+          "iteration": 1,
+          "iteration_records": [],
+          "original_input": "task-a"
+        }
+      },
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": null
+    },
+    "/flow_01/step_0": {
+      "attempt": null,
+      "call": null,
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": null
+    },
+    "/reviewer": {
+      "attempt": null,
+      "call": null,
+      "checkpoints": {},
+      "conversation": {},
+      "creator": null,
+      "provenance": [],
+      "role_state": {
+        "changes": {
+          "template_key": "review",
+          "template_root_space": "review"
+        },
+        "changes.key_types": [
+          "str"
+        ],
+        "modes": null,
+        "new_role": "reviewer",
+        "template_extra_feed": null,
+        "template_key": "review",
+        "template_master_version": null,
+        "template_root_space": "review",
+        "template_variables": null,
+        "template_version": null,
+        "type": "RoleState"
+      }
+    }
+  },
+  "resumed_reads": {
+    "mfi_no_ctx": {
+      "get_chosen_fixer_alias": null,
+      "get_chosen_reviewer_alias": null,
+      "get_ranking": null,
+      "get_runner_up_flow_idx": null,
+      "get_winner_flow_idx": null,
+      "get_winner_inferencer": null
+    },
+    "mfi_under_root": {
+      "get_chosen_fixer_alias": "fix1",
+      "get_chosen_reviewer_alias": "rev1",
+      "get_ranking": [
+        1,
+        0
+      ],
+      "get_runner_up_flow_idx": 0,
+      "get_winner_flow_idx": 1,
+      "get_winner_inferencer": "fb"
+    },
+    "reviewer_instance_role": [
+      "initial",
+      "plan"
+    ],
+    "reviewer_under_child": {
+      "_proposer_task_instructions": "",
+      "active_role_name": "reviewer",
+      "effective_role": [
+        "review",
+        "review",
+        null
+      ],
+      "infer": "rev([review|review] again)"
+    }
+  },
+  "roundtrip_equal": false
+}

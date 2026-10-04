@@ -5,8 +5,13 @@ from rich_python_utils.common_utils.function_helper import get_relevant_named_ar
 
 
 def _fake_generate_text(
-    inference_input, model=None, api_key=None, temperature=None,
-    max_new_tokens=None, top_p=None, stop=None,
+    inference_input,
+    model=None,
+    api_key=None,
+    temperature=None,
+    max_new_tokens=None,
+    top_p=None,
+    stop=None,
 ):
     return {"text": "ok", "model": model, "temperature": temperature}
 

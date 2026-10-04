@@ -25,6 +25,11 @@ if TYPE_CHECKING:
     )
 
 from agent_foundation.automation.meta_agent.models import ExecutionTrace
+from agent_foundation.common.inferencers.agentic_functions import (
+    agentic_function,
+    AgenticOutput,
+)
+from agent_foundation.common.inferencers.function_inferencer import FunctionInferencer
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +58,9 @@ class EvaluationRule:
     name: str
     description: str
     predicate: Callable[[ExecutionTrace], bool]
-    severity: str = "error"  # "error" (trace rejected) or "warning" (trace kept, flagged)
+    severity: str = (
+        "error"  # "error" (trace rejected) or "warning" (trace kept, flagged)
+    )
 
 
 @dataclass
@@ -124,9 +131,9 @@ class TraceEvaluator:
                 "RULE_BASED strategy requires at least one evaluation rule"
             )
         if strategy == EvaluationStrategy.LLM_JUDGE and self._inferencer is None:
-            raise ValueError(
-                "LLM_JUDGE strategy requires an InferencerBase instance"
-            )
+            raise ValueError("LLM_JUDGE strategy requires an InferencerBase instance")
+
+        self._judge: Callable[..., EvaluationResult] = self._make_llm_judge()
 
     # ------------------------------------------------------------------
     # Public API
@@ -209,8 +216,7 @@ class TraceEvaluator:
         prompt = self._build_llm_prompt(trace, task_description)
 
         try:
-            response = self._inferencer.infer(prompt)
-            score = self._parse_score(response)
+            return self._judge(prompt, trace_id=trace.trace_id)
         except Exception as exc:
             logger.warning(
                 "LLM judge failed for trace '%s': %s; marking as failed",
@@ -224,17 +230,43 @@ class TraceEvaluator:
                 metadata={"llm_error": str(exc)},
             )
 
-        passed = score >= self._min_score
-        return EvaluationResult(
-            trace_id=trace.trace_id,
-            passed=passed,
-            score=score,
-            metadata={"llm_response": str(response)},
-        )
-
     # ------------------------------------------------------------------
     # LLM helpers
     # ------------------------------------------------------------------
+
+    def _make_llm_judge(self) -> Callable[..., EvaluationResult]:
+        """Build the LLM judge as an ``@agentic_function`` over the inferencer.
+
+        ``FunctionInferencer`` adapts the plain ``prompt -> response`` inferencer
+        call so the decorator can drive it: the already-built evaluation prompt
+        passes through verbatim (``{{ prompt }}``) and the raw inference result
+        arrives in the body as ``response.raw`` — the exact object the former
+        inline call handed to ``_parse_score`` (a dict / number / string, not a
+        normalized string). Any inference or parse failure raises out to
+        ``_evaluate_llm_judge``'s fail-closed handler.
+        """
+
+        @agentic_function(
+            inferencer=FunctionInferencer(
+                func=lambda prompt: self._inferencer.infer(prompt)
+            ),
+            template_string="{{ prompt }}",
+        )
+        def judge(
+            prompt: str,
+            *,
+            trace_id: str,
+            response: AgenticOutput,
+        ) -> EvaluationResult:
+            score = self._parse_score(response.raw)
+            return EvaluationResult(
+                trace_id=trace_id,
+                passed=score >= self._min_score,
+                score=score,
+                metadata={"llm_response": str(response.raw)},
+            )
+
+        return judge
 
     def _build_llm_prompt(self, trace: ExecutionTrace, task_description: str) -> str:
         """Build a structured prompt for the LLM judge.

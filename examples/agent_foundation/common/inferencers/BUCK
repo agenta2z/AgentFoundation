@@ -1,0 +1,14 @@
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+oncall("ml_oncall")
+
+python_library(
+    name = "runcontext_examples",
+    srcs = glob(["example_runcontext_*.py"]),
+    typing = False,
+    visibility = ["//_tony_dev/CoreProjects/AgentFoundation/test/..."],
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)

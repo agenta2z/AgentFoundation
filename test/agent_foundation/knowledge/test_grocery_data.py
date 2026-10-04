@@ -10,6 +10,7 @@ Loads the grocery knowledge data JSON file and verifies:
 
 Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 """
+
 import json
 import sys
 from pathlib import Path
@@ -28,17 +29,19 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.data_loader import KnowledgeDataLoader
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
 )
 from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
     MemoryKeyValueService,
@@ -46,13 +49,12 @@ from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service im
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
 )
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
-)
 
 # ── Path to grocery data file ────────────────────────────────────────────────
 
-_workspace_root = Path(__file__).resolve().parents[4]  # Go up from test/agent_foundation/knowledge/ to workspace root
+_workspace_root = (
+    Path(__file__).resolve().parents[4]
+)  # Go up from test/agent_foundation/knowledge/ to workspace root
 GROCERY_DATA_FILE = str(
     _workspace_root
     / "WebAgent"
@@ -149,7 +151,14 @@ class TestGroceryMetadata:
     def test_user_metadata_has_required_properties(self, grocery_data):
         """User metadata has FirstName, LastName, Location, ZipCode, PhoneNumber, Family."""
         user_props = grocery_data["metadata"]["user:[name]"]["properties"]
-        required_fields = {"FirstName", "LastName", "Location", "ZipCode", "PhoneNumber", "Family"}
+        required_fields = {
+            "FirstName",
+            "LastName",
+            "Location",
+            "ZipCode",
+            "PhoneNumber",
+            "Family",
+        }
         assert required_fields.issubset(set(user_props.keys()))
 
     def test_store_metadata_has_required_properties(self, grocery_data):
@@ -178,9 +187,7 @@ class TestGroceryPieces:
     def test_membership_pieces_have_correct_types(self, grocery_data):
         """The 3 membership pieces have knowledge_type=fact, info_type=user_profile."""
         pieces = grocery_data["pieces"]
-        membership_pieces = [
-            p for p in pieces if p["piece_id"].endswith("-membership")
-        ]
+        membership_pieces = [p for p in pieces if p["piece_id"].endswith("-membership")]
         assert len(membership_pieces) == 3
 
         for piece in membership_pieces:
@@ -194,9 +201,7 @@ class TestGroceryPieces:
     def test_procedure_piece_has_correct_types(self, grocery_data):
         """The procedure piece has knowledge_type=procedure, info_type=instructions."""
         pieces = grocery_data["pieces"]
-        procedure_pieces = [
-            p for p in pieces if p["knowledge_type"] == "procedure"
-        ]
+        procedure_pieces = [p for p in pieces if p["knowledge_type"] == "procedure"]
         assert len(procedure_pieces) == 1
 
         procedure = procedure_pieces[0]
@@ -287,7 +292,11 @@ class TestGroceryDataLoaderIntegration:
         KnowledgeDataLoader.load(kb, GROCERY_DATA_FILE)
 
         # Verify membership pieces
-        for piece_id in ["safeway-membership", "qfc-membership", "wholefoods-membership"]:
+        for piece_id in [
+            "safeway-membership",
+            "qfc-membership",
+            "wholefoods-membership",
+        ]:
             piece = kb.piece_store.get_by_id(piece_id)
             assert piece is not None, f"Missing piece: {piece_id}"
             assert piece.knowledge_type.value == "fact"

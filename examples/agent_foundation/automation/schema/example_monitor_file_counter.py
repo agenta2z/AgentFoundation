@@ -21,26 +21,36 @@ Usage:
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import resolve_path  # noqa: F401 - Must be first import for path setup
 
-import time
-import threading
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tempfile
+import threading
+import time
 import uuid
 
+import resolve_path  # noqa: F401 - Must be first import for path setup
+from agent_foundation.automation.schema.monitor import (
+    MonitorNode,
+    MonitorResult,
+    MonitorStatus,
+)
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.common.worknode_base import (
+    NextNodesSelector,
+)
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
-from rich_python_utils.common_objects.workflow.common.worknode_base import NextNodesSelector
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
 from rich_python_utils.mp_utils.queued_executor import SimulatedMultiThreadExecutor
-from rich_python_utils.service_utils.queue_service.thread_queue_service import ThreadQueueService
-
-from agent_foundation.automation.schema.monitor import MonitorNode, MonitorResult, MonitorStatus
+from rich_python_utils.service_utils.queue_service.thread_queue_service import (
+    ThreadQueueService,
+)
 
 
 # =============================================================================
 # Counter Thread (Background task that increments a counter)
 # =============================================================================
+
 
 class CounterThread(threading.Thread):
     """Background thread that increments a counter in a file."""
@@ -69,6 +79,7 @@ class CounterThread(threading.Thread):
 # Monitor Iteration Function
 # =============================================================================
 
+
 def create_file_monitor_iteration(counter_file: Path, target_divisor: int = 20):
     """
     Create a monitor iteration that checks if file counter % target_divisor == 0.
@@ -93,36 +104,34 @@ def create_file_monitor_iteration(counter_file: Path, target_divisor: int = 20):
         # Check if condition is met
         if current_count > 0 and current_count % target_divisor == 0:
             # Condition met!
-            print(f"   [Monitor] Milestone reached: count={current_count} (divisible by {target_divisor})")
+            print(
+                f"   [Monitor] Milestone reached: count={current_count} (divisible by {target_divisor})"
+            )
 
             result = MonitorResult(
                 success=True,
                 status=MonitorStatus.CONDITION_MET,
                 matched_content=current_count,
-                check_count=check_count[0]
+                check_count=check_count[0],
             )
 
             # include_self=False: Stop looping
             # include_others=True: Run downstream actions
             return NextNodesSelector(
-                include_self=False,
-                include_others=True,
-                result=result
+                include_self=False, include_others=True, result=result
             )
         else:
             # Condition not met, continue polling
             result = MonitorResult(
                 success=False,
                 status=MonitorStatus.MAX_ITERATIONS,
-                check_count=check_count[0]
+                check_count=check_count[0],
             )
 
             # include_self=True: Continue looping via self-edge
             # include_others=False: Don't run downstream yet
             return NextNodesSelector(
-                include_self=True,
-                include_others=False,
-                result=result
+                include_self=True, include_others=False, result=result
             )
 
     return iteration
@@ -131,6 +140,7 @@ def create_file_monitor_iteration(counter_file: Path, target_divisor: int = 20):
 # =============================================================================
 # Action Node Function
 # =============================================================================
+
 
 def milestone_action(prev_result):
     """Action to run when milestone is reached."""
@@ -146,11 +156,7 @@ def milestone_action(prev_result):
     print(f"   [Action] Simulating work (notification, database update, etc.)...")
     time.sleep(0.5)
 
-    result = {
-        'action': 'milestone_processed',
-        'count': count,
-        'timestamp': time.time()
-    }
+    result = {"action": "milestone_processed", "count": count, "timestamp": time.time()}
     print(f"   [Action] Completed!")
     return result
 
@@ -159,10 +165,11 @@ def milestone_action(prev_result):
 # Helper Functions
 # =============================================================================
 
-def unique_queue_ids(prefix='monitor'):
+
+def unique_queue_ids(prefix="monitor"):
     """Generate unique queue IDs to avoid contamination."""
     unique = uuid.uuid4().hex[:8]
-    return f'{prefix}_in_{unique}', f'{prefix}_out_{unique}'
+    return f"{prefix}_in_{unique}", f"{prefix}_out_{unique}"
 
 
 def create_executor():
@@ -174,7 +181,7 @@ def create_executor():
         output_queue_service=service,
         input_queue_id=input_id,
         output_queue_id=output_id,
-        verbose=False
+        verbose=False,
     )
     return executor, service
 
@@ -182,6 +189,7 @@ def create_executor():
 # =============================================================================
 # Main Example
 # =============================================================================
+
 
 def main():
     print("""
@@ -253,7 +261,7 @@ This example demonstrates:
     counter_thread = CounterThread(
         counter_file=counter_file,
         interval=2.0,
-        max_count=25  # Will reach 20 milestone
+        max_count=25,  # Will reach 20 milestone
     )
     counter_thread.start()
     print("   [OK] Counter thread started (incrementing every 2 seconds)")
@@ -304,12 +312,14 @@ Key Takeaways:
 """)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print(f"\n[X] Error: {e}")
         import traceback
+
         traceback.print_exc()
         import sys
+
         sys.exit(1)

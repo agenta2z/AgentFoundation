@@ -36,10 +36,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.hand
     HandlerResult,
     InferencerEffect,
 )
-from agent_foundation.common.ui.input_modes import (
-    InputMode,
-    InputModeConfig,
-)
+from agent_foundation.common.ui.input_modes import InputMode, InputModeConfig
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -58,8 +55,13 @@ class ConfirmationHandler(ConversationToolHandler):
         }
         if tool.metadata:
             metadata.update(tool.metadata)
-        # `tool_params` is now baked into tool.metadata by enrich_before_send;
-        # the .update() above already pulls it in. No separate overlay needed.
+        # Legacy `_tool_params` dynamic-attribute overlay (mirrors inline
+        # `_build_input_mode`). Newer flows have `tool_params` baked into
+        # tool.metadata by enrich_before_send; both routes co-exist for the
+        # migration window.
+        tool_params = getattr(tool, "_tool_params", None)
+        if tool_params:
+            metadata["tool_params"] = tool_params
         return InputModeConfig(
             mode=InputMode.FREE_TEXT,
             prompt=tool.prompt,
@@ -95,14 +97,6 @@ class ConfirmationHandler(ConversationToolHandler):
                 tool.metadata["tool_params"] = tool_params
 
         # 2. View path resolution — validate LLM-provided view, else fallback.
-        # Snapshot whether the LLM supplied `view` BEFORE tier-1 deletion so we
-        # can distinguish "LLM omitted view" (no fallback should fire) from
-        # "LLM provided invalid view" (rescue chain should attempt to recover).
-        # Without this gate, fallbacks fire on every confirmation widget — even
-        # pre-action gates where the LLM intentionally omitted view because no
-        # artifact exists yet — producing a phantom "View" button that links
-        # nowhere or to a stale prior-phase artifact (cross-phase pollution).
-        llm_supplied_view = "view" in tool.metadata
         llm_view = tool.metadata.get("view")
         if llm_view and not Path(llm_view).is_file():
             logger.info(
@@ -111,11 +105,12 @@ class ConfirmationHandler(ConversationToolHandler):
             )
             del tool.metadata["view"]
 
-        # Fallback chain only runs when the LLM tried to supply a view but it
-        # was invalid (tier-1 deleted it). If the LLM never supplied view at
-        # all, leave metadata empty — the React widget will render without a
-        # View button, matching the LLM's intent.
-        run_view_fallback = llm_supplied_view and "view" not in tool.metadata
+        # Fallback chain runs whenever view is not set. The artifact checks
+        # themselves are sufficient guards — pre-action confirmations won't
+        # find artifacts (no docs generated yet), so no phantom button appears.
+        # LLMs unreliably set metadata.view even when instructed to, so we
+        # cannot gate on "LLM tried to supply view" alone.
+        run_view_fallback = "view" not in tool.metadata
 
         # 2a. phase_outputs viewable_artifact_path
         if run_view_fallback:
@@ -140,13 +135,28 @@ class ConfirmationHandler(ConversationToolHandler):
                 target_dir = Path(workflow_target_path)
                 if target_dir.is_file():
                     target_dir = target_dir.parent
-                docs_index = target_dir / "docs" / "_build" / "html" / "index.html"
-                if docs_index.exists():
-                    tool.metadata["view"] = str(docs_index)
-                    logger.info(
-                        "CONFIRMATION: view set from fallback: %s",
-                        str(docs_index),
-                    )
+                for docs_subpath in (
+                    Path("docs") / "_build" / "html" / "index.html",
+                    Path(".ai-employee") / "docs",
+                ):
+                    if docs_subpath == Path(".ai-employee") / "docs":
+                        ai_docs = target_dir / docs_subpath
+                        if ai_docs.is_dir():
+                            for sub in sorted(ai_docs.iterdir()):
+                                idx = sub / "_build" / "html" / "index.html"
+                                if idx.is_file():
+                                    tool.metadata["view"] = str(idx)
+                                    break
+                    else:
+                        docs_index = target_dir / docs_subpath
+                        if docs_index.is_file():
+                            tool.metadata["view"] = str(docs_index)
+                    if "view" in tool.metadata:
+                        logger.info(
+                            "CONFIRMATION: view set from fallback: %s",
+                            tool.metadata["view"],
+                        )
+                        break
 
         # 3. view_label resolution from tool registry via tool_phase_map.
         if "view" in tool.metadata and "view_label" not in tool.metadata:
@@ -225,7 +235,9 @@ class ConfirmationHandler(ConversationToolHandler):
                 if variables and isinstance(variables, dict):
                     effects.append(SetTurnVariables(variables))
             else:
-                choice_value = response.get("content") or response.get("custom_text") or ""
+                choice_value = (
+                    response.get("content") or response.get("custom_text") or ""
+                )
 
         # Set gate flag on confirm-yes (string-keyed bridge to SOP rendering).
         if choice_value.lower() in ("yes", "proceed"):

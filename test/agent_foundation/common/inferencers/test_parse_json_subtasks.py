@@ -6,10 +6,10 @@ Covers the two fixes:
 
 Uses realistic mocked responses based on actual RovoDevCLI output.
 """
+
 import textwrap
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
 )
@@ -18,12 +18,9 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
 @pytest.fixture
 def bta():
     """Minimal BTA instance with required attrs for parsing tests."""
-    obj = BreakdownThenAggregateInferencer.__new__(
-        BreakdownThenAggregateInferencer
-    )
+    obj = BreakdownThenAggregateInferencer.__new__(BreakdownThenAggregateInferencer)
     obj.worker_query_fields = ("description", "todos")
     obj.expand_todos_to_workers = False
-    obj._last_aggregation_guidance = None
     return obj
 
 
@@ -202,9 +199,9 @@ class TestJsonRepair:
         # Construct JSON where description has `{"key": "val"}` with raw unescaped quotes
         # This is what the actual v7 run produced
         subtask_json = (
-            '{\n'
+            "{\n"
             '  "subtasks": [\n'
-            '    {\n'
+            "    {\n"
             '      "subtask_id": 1,\n'
             '      "description": "Use `{\\"reasoning\\": ..., \\"category\\": ...}` schema",\n'
             '      "todos": ["step1"],\n'
@@ -214,8 +211,8 @@ class TestJsonRepair:
             '      "priority_score": "3.5",\n'
             '      "args": {},\n'
             '      "subtask_dependencies": []\n'
-            '    },\n'
-            '    {\n'
+            "    },\n"
+            "    {\n"
             '      "subtask_id": 2,\n'
             '      "description": "Normal subtask without special chars",\n'
             '      "todos": ["step2"],\n'
@@ -225,15 +222,17 @@ class TestJsonRepair:
             '      "priority_score": "2.5",\n'
             '      "args": {},\n'
             '      "subtask_dependencies": [1]\n'
-            '    }\n'
-            '  ],\n'
+            "    }\n"
+            "  ],\n"
             '  "reasoning": "two subtasks",\n'
             '  "coverage_complete": true,\n'
             '  "gaps": "none",\n'
             '  "aggregation_guidance": "synthesize"\n'
-            '}'
+            "}"
         )
-        raw = f"<Response>\n```json decomposed_subtasks\n{subtask_json}\n```\n</Response>"
+        raw = (
+            f"<Response>\n```json decomposed_subtasks\n{subtask_json}\n```\n</Response>"
+        )
         result = bta._parse_json_subtasks(raw)
         assert len(result) == 2
         assert result[1].get("query") is not None
@@ -318,10 +317,10 @@ class TestMultipleSubtasks:
 
             </Response>
         """)
-        result = bta._parse_json_subtasks(raw)
+        result, guidance = bta._parse_json_breakdown(raw)
         assert len(result) == 5
-        assert bta._last_aggregation_guidance is not None
-        assert "synthesize" in bta._last_aggregation_guidance.lower()
+        assert guidance is not None
+        assert "synthesize" in guidance.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -448,10 +447,9 @@ class TestEdgeCases:
             ```
             </Response>
         """)
-        bta._last_aggregation_guidance = None
-        result = bta._parse_json_subtasks(raw)
+        result, guidance = bta._parse_json_breakdown(raw)
         assert len(result) == 1
-        assert bta._last_aggregation_guidance == "Read all worker outputs and build a compatibility matrix"
+        assert guidance == "Read all worker outputs and build a compatibility matrix"
 
     def test_subtask_fields_mapped_to_query(self, bta):
         """Subtask description/todos/scope are composed into query string."""
@@ -484,3 +482,21 @@ class TestEdgeCases:
         assert len(result) == 1
         query = result[0]["query"]
         assert "Analyze performance metrics" in query
+
+
+# ---------------------------------------------------------------------------
+# Purity: the breakdown records the guidance on its attempt, never the parser
+# ---------------------------------------------------------------------------
+
+
+class TestPurity:
+    RAW = '```json\n{"subtasks": [{"description": "A"}], "aggregation_guidance": "g"}\n```'
+
+    def test_the_parsers_write_nothing_on_the_instance(self, bta):
+        before = dict(vars(bta))
+        assert bta._parse_json_breakdown(self.RAW)[1] == "g"
+        assert len(bta._parse_json_subtasks(self.RAW)) == 1
+        assert vars(bta) == before
+
+    def test_a_fallback_without_json_carries_no_guidance(self, bta):
+        assert bta._parse_json_breakdown("1. first\n2. second")[1] is None

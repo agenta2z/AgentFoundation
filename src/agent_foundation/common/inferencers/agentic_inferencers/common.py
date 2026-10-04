@@ -242,7 +242,7 @@ def severity_at_most(severity, threshold, severity_levels=None) -> bool:
     return sev_idx <= thr_idx
 
 
-_DEFAULT_SEVERITY_LEVELS = ('NONE', 'COSMETIC', 'MINOR', 'MAJOR', 'CRITICAL')
+_DEFAULT_SEVERITY_LEVELS = ("NONE", "COSMETIC", "MINOR", "MAJOR", "CRITICAL")
 
 
 @attrs
@@ -263,7 +263,7 @@ class ConsensusConfig:
     max_iterations: int = attrib(default=5)
     max_consensus_attempts: int = attrib(default=1)
     severity_levels: tuple = attrib(default=_DEFAULT_SEVERITY_LEVELS)
-    consensus_threshold = attrib(default='COSMETIC')
+    consensus_threshold = attrib(default="COSMETIC")
     enable_counter_feedback: bool = attrib(default=True)
 
     def __attrs_post_init__(self):
@@ -459,6 +459,7 @@ def extract_response_text(result):
         from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
             AgenticResult,
         )
+
         if isinstance(result, AgenticResult):
             return result.text
     except ImportError:

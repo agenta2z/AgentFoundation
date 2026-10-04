@@ -7,35 +7,34 @@ from os import environ, path
 from typing import AsyncIterator, Dict, List, Sequence, Tuple, Union
 
 import httpx
-from ai_gateway.client import AIGatewayClient
-from ai_gateway.constants import AIGatewayHeaders
-from ai_gateway.models.common import HttpHeaders, HttpMethod
-from ai_gateway.models.wrapper import RequestWrapper
-
 from agent_foundation.apis.ag.gateway_mode import (
+    bedrock_model_to_anthropic,
+    build_direct_headers,
     DEFAULT_AI_GATEWAY_BASE_URL,
     DEFAULT_CLOUD_ID,
     DEFAULT_PROXIMITY_PORT,
     DEFAULT_SLAUTH_GROUPS,
     DEFAULT_SLAUTH_SERVER_URL,
     DEFAULT_USE_CASE_ID,
-    GatewayMode,
-    bedrock_model_to_anthropic,
-    build_direct_headers,
     detect_available_mode,
+    GatewayMode,
     get_direct_slauth_token,
 )
 from agent_foundation.apis.common import _resolve_llm_timeout
+from ai_gateway.client import AIGatewayClient
+from ai_gateway.constants import AIGatewayHeaders
+from ai_gateway.models.common import HttpHeaders, HttpMethod
+from ai_gateway.models.wrapper import RequestWrapper
 from rich_python_utils.console_utils import hprint_message
 
 logger = logging.getLogger(__name__)
 
 # Environment variable names
-ENV_NAME_AI_GATEWAY_USER_ID = 'AI_GATEWAY_USER_ID'
-ENV_NAME_AI_GATEWAY_CLOUD_ID = 'AI_GATEWAY_CLOUD_ID'
-ENV_NAME_AI_GATEWAY_USE_CASE_ID = 'AI_GATEWAY_USE_CASE_ID'
-ENV_NAME_AI_GATEWAY_BASE_URL = 'AI_GATEWAY_BASE_URL'
-ENV_NAME_SLAUTH_SERVER_URL = 'SLAUTH_SERVER_URL'
+ENV_NAME_AI_GATEWAY_USER_ID = "AI_GATEWAY_USER_ID"
+ENV_NAME_AI_GATEWAY_CLOUD_ID = "AI_GATEWAY_CLOUD_ID"
+ENV_NAME_AI_GATEWAY_USE_CASE_ID = "AI_GATEWAY_USE_CASE_ID"
+ENV_NAME_AI_GATEWAY_BASE_URL = "AI_GATEWAY_BASE_URL"
+ENV_NAME_SLAUTH_SERVER_URL = "SLAUTH_SERVER_URL"
 
 
 class AIGatewayClaudeModels(StrEnum):
@@ -43,40 +42,41 @@ class AIGatewayClaudeModels(StrEnum):
     Enumeration for supported Claude models via AI Gateway.
     These correspond to Bedrock model IDs routed through AI Gateway.
     """
+
     # Claude Sonnet 4.5 (newest)
-    CLAUDE_45_SONNET = 'anthropic.claude-sonnet-4-5-20250929-v1:0'
+    CLAUDE_45_SONNET = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # Claude Sonnet 4.0
-    CLAUDE_40_SONNET = 'anthropic.claude-sonnet-4-20250514-v1:0'
+    CLAUDE_40_SONNET = "anthropic.claude-sonnet-4-20250514-v1:0"
 
     # Claude Opus 4.6, 4.1 and 4.0
-    CLAUDE_46_OPUS = 'anthropic.claude-opus-4-6-v1'
-    CLAUDE_41_OPUS = 'anthropic.claude-opus-4-1-20250805-v1:0'
-    CLAUDE_40_OPUS = 'anthropic.claude-opus-4-20250514-v1:0'
+    CLAUDE_46_OPUS = "anthropic.claude-opus-4-6-v1"
+    CLAUDE_41_OPUS = "anthropic.claude-opus-4-1-20250805-v1:0"
+    CLAUDE_40_OPUS = "anthropic.claude-opus-4-20250514-v1:0"
 
     # Claude Sonnet 3.7
-    CLAUDE_37_SONNET = 'anthropic.claude-3-7-sonnet-20250219-v1:0'
+    CLAUDE_37_SONNET = "anthropic.claude-3-7-sonnet-20250219-v1:0"
 
     # Claude Sonnet 3.5 (v2 and v1)
-    CLAUDE_35_SONNET_V2 = 'anthropic.claude-3-5-sonnet-20241022-v2:0'
-    CLAUDE_35_SONNET_V1 = 'anthropic.claude-3-5-sonnet-20240620-v1:0'
+    CLAUDE_35_SONNET_V2 = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    CLAUDE_35_SONNET_V1 = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     # Claude Haiku 4.5 and 3.5
-    CLAUDE_45_HAIKU = 'anthropic.claude-haiku-4-5-20251001-v1:0'
-    CLAUDE_35_HAIKU = 'anthropic.claude-3-5-haiku-20241022-v1:0'
+    CLAUDE_45_HAIKU = "anthropic.claude-haiku-4-5-20251001-v1:0"
+    CLAUDE_35_HAIKU = "anthropic.claude-3-5-haiku-20241022-v1:0"
 
 
 DEFAULT_MAX_TOKENS = {
-    f'{AIGatewayClaudeModels.CLAUDE_45_SONNET}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_40_SONNET}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_46_OPUS}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_41_OPUS}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_40_OPUS}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_37_SONNET}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_35_SONNET_V2}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_35_SONNET_V1}': 4096,
-    f'{AIGatewayClaudeModels.CLAUDE_45_HAIKU}': 8192,
-    f'{AIGatewayClaudeModels.CLAUDE_35_HAIKU}': 4096,
+    f"{AIGatewayClaudeModels.CLAUDE_45_SONNET}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_40_SONNET}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_46_OPUS}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_41_OPUS}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_40_OPUS}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_37_SONNET}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_35_SONNET_V2}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_35_SONNET_V1}": 4096,
+    f"{AIGatewayClaudeModels.CLAUDE_45_HAIKU}": 8192,
+    f"{AIGatewayClaudeModels.CLAUDE_35_HAIKU}": 4096,
 }
 
 # Cascade order for auto mode fallback
@@ -107,22 +107,30 @@ def _create_ai_gateway_client(
     Raises:
         Exception: If user_id is not provided and not found in environment.
     """
-    base_url = base_url or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL)
+    base_url = base_url or environ.get(
+        ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL
+    )
     cloud_id = cloud_id or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID)
-    use_case_id = use_case_id or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID)
-    slauth_server_url = slauth_server_url or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL)
+    use_case_id = use_case_id or environ.get(
+        ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID
+    )
+    slauth_server_url = slauth_server_url or environ.get(
+        ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL
+    )
 
-    user_id = user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get('USER')
+    user_id = user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get("USER")
     if not user_id:
         raise ValueError(
             f"user_id is required. Set it via parameter, {ENV_NAME_AI_GATEWAY_USER_ID} environment variable, or ensure $USER is set."
         )
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: user_id,
-        AIGatewayHeaders.CLOUD_ID: cloud_id,
-        AIGatewayHeaders.USE_CASE_ID: use_case_id
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: user_id,
+            AIGatewayHeaders.CLOUD_ID: cloud_id,
+            AIGatewayHeaders.USE_CASE_ID: use_case_id,
+        }
+    )
 
     groups = groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS)
     group_set = {g.strip() for g in groups.split(",") if g.strip()}
@@ -146,9 +154,7 @@ def _create_ai_gateway_client(
         )
 
     return AIGatewayClient.sync(
-        base_url=base_url,
-        default_headers=default_headers,
-        filters=[slauth_filter]
+        base_url=base_url, default_headers=default_headers, filters=[slauth_filter]
     )
 
 
@@ -159,13 +165,10 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
     """
     if isinstance(prompt_or_messages, str):
         if path.exists(prompt_or_messages):
-            with open(prompt_or_messages, 'r', encoding='utf-8') as f:
+            with open(prompt_or_messages, "r", encoding="utf-8") as f:
                 prompt_or_messages = f.read()
         return [
-            {
-                'role': 'user',
-                'content': [{'type': 'text', 'text': prompt_or_messages}]
-            }
+            {"role": "user", "content": [{"type": "text", "text": prompt_or_messages}]}
         ]
     elif isinstance(prompt_or_messages, Dict):
         return [prompt_or_messages]
@@ -176,19 +179,23 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
                 messages.extend(
                     (
                         {
-                            'role': 'user',
-                            'content': [{'type': 'text', 'text': prompt_or_messages[i]}]
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt_or_messages[i]}
+                            ],
                         },
                         {
-                            'role': 'assistant',
-                            'content': [{'type': 'text', 'text': prompt_or_messages[i + 1]}]
-                        }
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": prompt_or_messages[i + 1]}
+                            ],
+                        },
                     )
                 )
             messages.append(
                 {
-                    'role': 'user',
-                    'content': [{'type': 'text', 'text': prompt_or_messages[-1]}]
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt_or_messages[-1]}],
                 }
             )
             return messages
@@ -198,8 +205,8 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
             normalized = []
             for msg in prompt_or_messages:
                 msg = dict(msg)  # shallow copy
-                if isinstance(msg.get('content'), str):
-                    msg['content'] = [{'type': 'text', 'text': msg['content']}]
+                if isinstance(msg.get("content"), str):
+                    msg["content"] = [{"type": "text", "text": msg["content"]}]
                 normalized.append(msg)
             return normalized
     raise ValueError(
@@ -217,16 +224,25 @@ def _resolve_config(
 ) -> dict:
     """Resolve configuration from parameters, env vars, and defaults."""
     return {
-        "base_url": base_url or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
-        "cloud_id": cloud_id or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
-        "use_case_id": use_case_id or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
-        "slauth_server_url": slauth_server_url or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
-        "user_id": user_id or environ.get(ENV_NAME_AI_GATEWAY_USER_ID) or environ.get('USER', ''),
-        "groups": groups or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
+        "base_url": base_url
+        or environ.get(ENV_NAME_AI_GATEWAY_BASE_URL, DEFAULT_AI_GATEWAY_BASE_URL),
+        "cloud_id": cloud_id
+        or environ.get(ENV_NAME_AI_GATEWAY_CLOUD_ID, DEFAULT_CLOUD_ID),
+        "use_case_id": use_case_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USE_CASE_ID, DEFAULT_USE_CASE_ID),
+        "slauth_server_url": slauth_server_url
+        or environ.get(ENV_NAME_SLAUTH_SERVER_URL, DEFAULT_SLAUTH_SERVER_URL),
+        "user_id": user_id
+        or environ.get(ENV_NAME_AI_GATEWAY_USER_ID)
+        or environ.get("USER", ""),
+        "groups": groups
+        or environ.get("AI_GATEWAY_SLAUTH_GROUPS", DEFAULT_SLAUTH_GROUPS),
     }
 
 
-def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_direct(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send request directly to AI Gateway using atlas CLI for SLAuth token.
 
     Args:
@@ -251,12 +267,19 @@ def _send_via_direct(model_str: str, request_payload: dict, config: dict, timeou
     resp = httpx.post(url, json=request_payload, headers=headers, timeout=timeout)
 
     if not (200 <= resp.status_code < 300):
-        raise Exception(f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}")
+        raise Exception(
+            f"Direct mode: AI Gateway returned status {resp.status_code}: {resp.text}"
+        )
 
     return resp.json()
 
 
-def _send_via_proximity(model_str: str, request_payload: dict, port: int = DEFAULT_PROXIMITY_PORT, timeout: float = 120) -> dict:
+def _send_via_proximity(
+    model_str: str,
+    request_payload: dict,
+    port: int = DEFAULT_PROXIMITY_PORT,
+    timeout: float = 120,
+) -> dict:
     """Send request via the proximity AI gateway proxy.
 
     The proximity proxy expects Anthropic-native format on the Vertex path.
@@ -286,18 +309,28 @@ def _send_via_proximity(model_str: str, request_payload: dict, port: int = DEFAU
         body["system"] = request_payload["system"]
     # Forward any extra params (top_k, metadata, etc.) but skip anthropic_version
     for key in request_payload:
-        if key not in ("anthropic_version", "messages", "max_tokens", "temperature", "system"):
+        if key not in (
+            "anthropic_version",
+            "messages",
+            "max_tokens",
+            "temperature",
+            "system",
+        ):
             body[key] = request_payload[key]
 
     resp = httpx.post(url, json=body, timeout=timeout)
 
     if not (200 <= resp.status_code < 300):
-        raise Exception(f"Proximity mode: proxy returned status {resp.status_code}: {resp.text}")
+        raise Exception(
+            f"Proximity mode: proxy returned status {resp.status_code}: {resp.text}"
+        )
 
     return resp.json()
 
 
-def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_slauth_server(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send request using the AI Gateway SDK with SlauthServerAuthFilter.
 
     This is the original/existing approach.
@@ -321,27 +354,29 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
     )
 
     request = RequestWrapper(
-        body=json.dumps(request_payload).encode('utf-8'),
-        headers=HttpHeaders({'Content-Type': 'application/json'})
+        body=json.dumps(request_payload).encode("utf-8"),
+        headers=HttpHeaders({"Content-Type": "application/json"}),
     )
 
     response = client.raw.http(
         method=HttpMethod.POST,
-        uri=f'/v1/bedrock/model/{model_str}/invoke',
-        request=request
+        uri=f"/v1/bedrock/model/{model_str}/invoke",
+        request=request,
     )
 
     if not (200 <= response.http_status.code < 300):
         error_msg = f"SLAuth server mode: AI Gateway returned status {response.http_status.code}"
         # SDK uses raw_body for error responses (body is None on non-2xx)
-        raw_body = getattr(response, 'raw_body', None) or response.body
+        raw_body = getattr(response, "raw_body", None) or response.body
         if raw_body:
             try:
-                raw_str = raw_body if isinstance(raw_body, str) else raw_body.decode('utf-8')
+                raw_str = (
+                    raw_body if isinstance(raw_body, str) else raw_body.decode("utf-8")
+                )
                 error_data = json.loads(raw_str)
-                if 'message' in error_data:
+                if "message" in error_data:
                     error_msg += f"\nError: {error_data['message']}"
-                elif 'upstream' in error_data and 'content' in error_data['upstream']:
+                elif "upstream" in error_data and "content" in error_data["upstream"]:
                     error_msg += f"\nUpstream error: {json.dumps(error_data['upstream']['content'], indent=2)}"
                 else:
                     error_msg += f"\nResponse: {raw_str}"
@@ -349,10 +384,12 @@ def _send_via_slauth_server(model_str: str, request_payload: dict, config: dict,
                 error_msg += f"\nResponse: {raw_body}"
         raise Exception(error_msg)
 
-    return json.loads(response.body.decode('utf-8'))
+    return json.loads(response.body.decode("utf-8"))
 
 
-def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: float = 120) -> dict:
+def _send_via_sdk(
+    model_str: str, request_payload: dict, config: dict, timeout: float = 120
+) -> dict:
     """Send request using the AI Gateway SDK's typed Bedrock client.
 
     This is the most idiomatic SDK path: it uses ``client.bedrock.invoke_claude``
@@ -390,18 +427,22 @@ def _send_via_sdk(model_str: str, request_payload: dict, config: dict, timeout: 
                 raise ValueError("pre-minted SLAuth token is empty")
             self._token = t
 
-        def filter(self, request: ClientRequest, chain: SyncFilterChain) -> ClientResponse:
+        def filter(
+            self, request: ClientRequest, chain: SyncFilterChain
+        ) -> ClientResponse:
             tok = self._token
             if not tok.lower().startswith(("slauth ", "bearer ")):
                 tok = f"SLAUTH {tok}"
             request.headers["Authorization"] = tok
             return chain.next(request)
 
-    default_headers = HttpHeaders({
-        AIGatewayHeaders.USER_ID: config["user_id"],
-        AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
-        AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
-    })
+    default_headers = HttpHeaders(
+        {
+            AIGatewayHeaders.USER_ID: config["user_id"],
+            AIGatewayHeaders.CLOUD_ID: config["cloud_id"],
+            AIGatewayHeaders.USE_CASE_ID: config["use_case_id"],
+        }
+    )
 
     client = AIGatewayClient.sync(
         base_url=config["base_url"],
@@ -447,12 +488,12 @@ def _parse_response_data(response_data: dict, stop: List[str] = None) -> str:
     Returns:
         Generated text string.
     """
-    if 'content' in response_data:
-        content_blocks = response_data['content']
+    if "content" in response_data:
+        content_blocks = response_data["content"]
         if isinstance(content_blocks, list) and len(content_blocks) > 0:
             first_block = content_blocks[0]
-            if isinstance(first_block, dict) and 'text' in first_block:
-                generated_text = first_block['text'].strip()
+            if isinstance(first_block, dict) and "text" in first_block:
+                generated_text = first_block["text"].strip()
             else:
                 generated_text = str(first_block)
         else:
@@ -494,40 +535,40 @@ def _build_request_payload(
         max_new_tokens = DEFAULT_MAX_TOKENS.get(model_str, 8192)
 
     payload = {
-        'anthropic_version': 'bedrock-2023-05-31',
-        'max_tokens': max_new_tokens,
-        'messages': messages,
-        'temperature': temperature,
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_new_tokens,
+        "messages": messages,
+        "temperature": temperature,
     }
 
     if system:
-        payload['system'] = system
+        payload["system"] = system
 
     payload.update(kwargs)
     return payload
 
 
 def generate_text(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, List[str], Dict]:
     """
     Generate text using Claude via AI Gateway.
@@ -563,7 +604,7 @@ def generate_text(
         Generated text, or raw API response if return_raw_results=True.
     """
     if "api_key" in kwargs:
-        kwargs.pop('api_key')
+        kwargs.pop("api_key")
     messages = _get_messages(prompt_or_messages)
 
     # Resolve configuration
@@ -591,7 +632,7 @@ def generate_text(
             resolved_mode = GatewayMode.DIRECT
 
     # Build request payload
-    model_str = f'{model}'
+    model_str = f"{model}"
     request_payload = _build_request_payload(
         messages=messages,
         model_str=model_str,
@@ -605,30 +646,36 @@ def generate_text(
     timeout_value = _resolve_llm_timeout(
         timeout=timeout,
         connect_timeout=connect_timeout,
-        response_timeout=response_timeout
+        response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 120
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 120
+    )
 
     if verbose:
         hprint_message(
             {
-                'model': model_str,
-                'gateway_mode': str(resolved_mode),
-                'base_url': config["base_url"],
-                'max_tokens': max_new_tokens,
-                'temperature': temperature,
-                'system': system,
-                'timeout': timeout_value,
-                'return_raw_results': return_raw_results,
-                **kwargs
+                "model": model_str,
+                "gateway_mode": str(resolved_mode),
+                "base_url": config["base_url"],
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+                "system": system,
+                "timeout": timeout_value,
+                "return_raw_results": return_raw_results,
+                **kwargs,
             },
-            title='AI Gateway Claude API Parameters'
+            title="AI Gateway Claude API Parameters",
         )
 
     # Build mode execution order
     if is_auto:
         # Try resolved mode first, then fallback through remaining modes
-        modes_to_try = [resolved_mode] + [m for m in _FALLBACK_MODES if m != resolved_mode]
+        modes_to_try = [resolved_mode] + [
+            m for m in _FALLBACK_MODES if m != resolved_mode
+        ]
     else:
         modes_to_try = [resolved_mode]
 
@@ -637,13 +684,24 @@ def generate_text(
     for mode in modes_to_try:
         try:
             if mode == GatewayMode.DIRECT:
-                response_data = _send_via_direct(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_direct(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.PROXIMITY:
-                response_data = _send_via_proximity(model_str, request_payload, port=proximity_port, timeout=request_timeout)
+                response_data = _send_via_proximity(
+                    model_str,
+                    request_payload,
+                    port=proximity_port,
+                    timeout=request_timeout,
+                )
             elif mode == GatewayMode.SDK:
-                response_data = _send_via_sdk(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_sdk(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             elif mode == GatewayMode.SLAUTH_SERVER:
-                response_data = _send_via_slauth_server(model_str, request_payload, config, timeout=request_timeout)
+                response_data = _send_via_slauth_server(
+                    model_str, request_payload, config, timeout=request_timeout
+                )
             else:
                 raise ValueError(f"Unknown gateway mode: {mode}")
 
@@ -664,7 +722,9 @@ def generate_text(
                     f"Gateway mode '{mode}' failed: {e}. Falling back to '{next_mode}'...",
                     stacklevel=2,
                 )
-                logger.warning(f"Gateway mode '{mode}' failed: {e}. Trying '{next_mode}'...")
+                logger.warning(
+                    f"Gateway mode '{mode}' failed: {e}. Trying '{next_mode}'..."
+                )
                 continue
             raise
 
@@ -703,7 +763,13 @@ async def _send_via_proximity_streaming(
     if "system" in request_payload:
         body["system"] = request_payload["system"]
     for key in request_payload:
-        if key not in ("anthropic_version", "messages", "max_tokens", "temperature", "system"):
+        if key not in (
+            "anthropic_version",
+            "messages",
+            "max_tokens",
+            "temperature",
+            "system",
+        ):
             body[key] = request_payload[key]
 
     # Use aiohttp instead of httpx for proximity streaming because the
@@ -766,13 +832,17 @@ async def _send_via_direct_streaming(
         cloud_id=config["cloud_id"],
         use_case_id=config["use_case_id"],
     )
-    url = f"{config['base_url']}/v1/bedrock/model/{model_str}/invoke-with-response-stream"
+    url = (
+        f"{config['base_url']}/v1/bedrock/model/{model_str}/invoke-with-response-stream"
+    )
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10)) as client:
-        async with client.stream("POST", url, json=request_payload, headers=headers) as response:
+        async with client.stream(
+            "POST", url, json=request_payload, headers=headers
+        ) as response:
             if not (200 <= response.status_code < 300):
                 body_text = await response.aread()
-                error_text = body_text.decode('utf-8', errors='replace')
+                error_text = body_text.decode("utf-8", errors="replace")
                 if response.status_code == 404:
                     raise Exception(
                         f"Direct streaming: endpoint not found (404). "
@@ -800,25 +870,25 @@ async def _send_via_direct_streaming(
 
 
 async def generate_text_streaming(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> AsyncIterator[str]:
     """Stream text from Claude via AI Gateway, yielding chunks as they arrive.
 
@@ -850,7 +920,7 @@ async def generate_text_streaming(
         Text chunks as they arrive from the model.
     """
     if "api_key" in kwargs:
-        kwargs.pop('api_key')
+        kwargs.pop("api_key")
     messages = _get_messages(prompt_or_messages)
 
     config = _resolve_config(
@@ -874,7 +944,7 @@ async def generate_text_streaming(
         except RuntimeError:
             resolved_mode = GatewayMode.DIRECT
 
-    model_str = f'{model}'
+    model_str = f"{model}"
     request_payload = _build_request_payload(
         messages=messages,
         model_str=model_str,
@@ -888,24 +958,30 @@ async def generate_text_streaming(
     timeout_value = _resolve_llm_timeout(
         timeout=timeout,
         connect_timeout=connect_timeout,
-        response_timeout=response_timeout
+        response_timeout=response_timeout,
     )
-    request_timeout = timeout_value if isinstance(timeout_value, (int, float)) and timeout_value else 300
+    request_timeout = (
+        timeout_value
+        if isinstance(timeout_value, (int, float)) and timeout_value
+        else 300
+    )
 
     if verbose:
         hprint_message(
             {
-                'model': model_str,
-                'gateway_mode': str(resolved_mode),
-                'streaming': True,
-                'timeout': request_timeout,
+                "model": model_str,
+                "gateway_mode": str(resolved_mode),
+                "streaming": True,
+                "timeout": request_timeout,
             },
-            title='AI Gateway Claude Streaming Parameters'
+            title="AI Gateway Claude Streaming Parameters",
         )
 
     # Build mode execution order (streaming-capable modes first)
     if is_auto:
-        modes_to_try = [resolved_mode] + [m for m in _FALLBACK_MODES if m != resolved_mode]
+        modes_to_try = [resolved_mode] + [
+            m for m in _FALLBACK_MODES if m != resolved_mode
+        ]
     else:
         modes_to_try = [resolved_mode]
 
@@ -914,7 +990,10 @@ async def generate_text_streaming(
         try:
             if mode == GatewayMode.PROXIMITY:
                 async for chunk in _send_via_proximity_streaming(
-                    model_str, request_payload, port=proximity_port, timeout=request_timeout
+                    model_str,
+                    request_payload,
+                    port=proximity_port,
+                    timeout=request_timeout,
                 ):
                     yield chunk
                 return
@@ -970,26 +1049,26 @@ async def generate_text_streaming(
 
 
 async def generate_text_async(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        stop: List[str] = None,
-        system: str = None,
-        user_id: str = None,
-        cloud_id: str = None,
-        use_case_id: str = None,
-        base_url: str = None,
-        slauth_server_url: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        gateway_mode: str = "auto",
-        proximity_port: int = DEFAULT_PROXIMITY_PORT,
-        groups: str = None,
-        **kwargs
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: AIGatewayClaudeModels = AIGatewayClaudeModels.CLAUDE_45_SONNET,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    stop: List[str] = None,
+    system: str = None,
+    user_id: str = None,
+    cloud_id: str = None,
+    use_case_id: str = None,
+    base_url: str = None,
+    slauth_server_url: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    gateway_mode: str = "auto",
+    proximity_port: int = DEFAULT_PROXIMITY_PORT,
+    groups: str = None,
+    **kwargs,
 ) -> Union[str, Dict]:
     """Async generate text using Claude via AI Gateway.
 
@@ -1026,18 +1105,18 @@ async def generate_text_async(
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from rich_python_utils.common_utils.arg_utils.arg_parse import get_parsed_args
 
     args = get_parsed_args(
         default_prompt="Hello! What's the capital of France?",
-        default_model='anthropic.claude-sonnet-4-5-20250929-v1:0',
+        default_model="anthropic.claude-sonnet-4-5-20250929-v1:0",
         default_max_new_tokens=1024,
-        default_stop='[]',
+        default_stop="[]",
         default_temperature=0.7,
         default_return_raw_results=False,
         default_user_id=None,
-        default_system=None
+        default_system=None,
     )
 
     _prompt_or_messages = args.prompt
@@ -1050,21 +1129,21 @@ if __name__ == '__main__':
     _system = args.system
 
     call_kwargs = {
-        'prompt_or_messages': _prompt_or_messages,
-        'model': _model,
-        'max_new_tokens': _max_new_tokens,
-        'stop': _stop,
-        'temperature': _temperature,
-        'return_raw_results': _return_raw_results,
-        'verbose': True
+        "prompt_or_messages": _prompt_or_messages,
+        "model": _model,
+        "max_new_tokens": _max_new_tokens,
+        "stop": _stop,
+        "temperature": _temperature,
+        "return_raw_results": _return_raw_results,
+        "verbose": True,
     }
 
     if _user_id:
-        call_kwargs['user_id'] = _user_id
+        call_kwargs["user_id"] = _user_id
 
     if _system:
-        call_kwargs['system'] = _system
+        call_kwargs["system"] = _system
 
     _generated_text = generate_text(**call_kwargs)
 
-    hprint_message({'response': _generated_text}, title=f'AI Gateway - {_model}')
+    hprint_message({"response": _generated_text}, title=f"AI Gateway - {_model}")

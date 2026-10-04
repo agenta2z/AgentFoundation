@@ -1,5 +1,3 @@
-
-
 """REST endpoints for reading session data from the server's file store.
 
 These endpoints are read-only — the server is the sole writer.

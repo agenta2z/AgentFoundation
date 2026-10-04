@@ -10,7 +10,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
@@ -20,12 +19,12 @@ from agent_foundation.automation.meta_agent.models import (
     TraceStep,
 )
 from agent_foundation.automation.meta_agent.prompt_templates import (
-    DEFAULT_PROMPT_TEMPLATES,
-    EVALUATION_TEMPLATE_KEY,
-    SYNTHESIS_TEMPLATE_KEY,
     build_evaluation_feed,
     build_synthesis_feed,
     create_prompt_formatter,
+    DEFAULT_PROMPT_TEMPLATES,
+    EVALUATION_TEMPLATE_KEY,
+    SYNTHESIS_TEMPLATE_KEY,
 )
 
 
@@ -59,7 +58,10 @@ def _pos(
     confidence: float = 1.0,
 ) -> AlignedPosition:
     return AlignedPosition(
-        index=index, alignment_type=atype, steps=steps, confidence=confidence,
+        index=index,
+        alignment_type=atype,
+        steps=steps,
+        confidence=confidence,
     )
 
 
@@ -100,7 +102,11 @@ class TestFeedBuilders:
         trace = _trace(
             steps=[
                 _step("click", target="btn", result=TraceActionResult(success=True)),
-                _step("input_text", target="field", result=TraceActionResult(success=False)),
+                _step(
+                    "input_text",
+                    target="field",
+                    result=TraceActionResult(success=False),
+                ),
             ],
         )
         feed = build_evaluation_feed(trace, "task")
@@ -111,9 +117,13 @@ class TestFeedBuilders:
 
     def test_synthesis_feed_returns_correct_keys(self):
         """build_synthesis_feed returns all expected keys."""
-        pos = _pos(3, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target="btn-submit"),
-        })
+        pos = _pos(
+            3,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target="btn-submit"),
+            },
+        )
         context = {
             "pattern_type": "deterministic",
             "task_description": "login flow",
@@ -129,9 +139,13 @@ class TestFeedBuilders:
 
     def test_synthesis_feed_includes_param_section(self):
         """build_synthesis_feed includes param_section when param_info present."""
-        pos = _pos(0, AlignmentType.PARAMETERIZABLE, {
-            "t1": _step("input_text", target="field", args={"text": "hello"}),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.PARAMETERIZABLE,
+            {
+                "t1": _step("input_text", target="field", args={"text": "hello"}),
+            },
+        )
         info = ParameterizableInfo(
             variable_args={"text": "search_query"},
             constant_args={"delay": 100},
@@ -148,10 +162,14 @@ class TestFeedBuilders:
 
     def test_synthesis_feed_absent_step(self):
         """build_synthesis_feed handles None steps (absent in some traces)."""
-        pos = _pos(0, AlignmentType.OPTIONAL, {
-            "t1": _step("click", target="popup"),
-            "t2": None,
-        })
+        pos = _pos(
+            0,
+            AlignmentType.OPTIONAL,
+            {
+                "t1": _step("click", target="popup"),
+                "t2": None,
+            },
+        )
         context = {"pattern_type": "optional", "task_description": ""}
         feed = build_synthesis_feed(pos, context)
 
@@ -189,9 +207,13 @@ class TestTemplateRendering:
 
     def test_synthesis_template_renders_with_feed(self):
         """Synthesis template renders with all feed variables filled in."""
-        pos = _pos(0, AlignmentType.DETERMINISTIC, {
-            "t1": _step("click", target="btn-submit"),
-        })
+        pos = _pos(
+            0,
+            AlignmentType.DETERMINISTIC,
+            {
+                "t1": _step("click", target="btn-submit"),
+            },
+        )
         context = {
             "pattern_type": "deterministic",
             "task_description": "login flow",
@@ -214,7 +236,9 @@ class TestTemplateRendering:
             trace_id="trace-abc",
             success=False,
             steps=[
-                _step("click", target="login-btn", result=TraceActionResult(success=True)),
+                _step(
+                    "click", target="login-btn", result=TraceActionResult(success=True)
+                ),
                 _step("input_text", target="email-field"),
             ],
         )
@@ -298,7 +322,9 @@ class TestCreatePromptFormatter:
         assert len(eval_result) > 0
 
         pos = _pos(0, AlignmentType.DETERMINISTIC, {"t1": _step("click")})
-        synth_feed = build_synthesis_feed(pos, {"pattern_type": "det", "task_description": ""})
+        synth_feed = build_synthesis_feed(
+            pos, {"pattern_type": "det", "task_description": ""}
+        )
         synth_result = formatter(SYNTHESIS_TEMPLATE_KEY, **synth_feed)
         assert isinstance(synth_result, str)
         assert len(synth_result) > 0
@@ -336,7 +362,9 @@ class TestPipelineIntegration:
 
         trace = _trace(
             trace_id="t1",
-            steps=[_step("click", target="btn", result=TraceActionResult(success=True))],
+            steps=[
+                _step("click", target="btn", result=TraceActionResult(success=True))
+            ],
         )
         # Call the internal method directly to test prompt_formatter usage
         prompt = evaluator._build_llm_prompt(trace, "test task")
@@ -378,12 +406,16 @@ class TestPipelineIntegration:
         assert rb._prompt_formatter is formatter
 
         llm = LLMSynthesizer(
-            action_executor=executor, inferencer=inferencer, prompt_formatter=formatter,
+            action_executor=executor,
+            inferencer=inferencer,
+            prompt_formatter=formatter,
         )
         assert llm._prompt_formatter is formatter
 
         hybrid = HybridSynthesizer(
-            action_executor=executor, inferencer=inferencer, prompt_formatter=formatter,
+            action_executor=executor,
+            inferencer=inferencer,
+            prompt_formatter=formatter,
         )
         assert hybrid._prompt_formatter is formatter
 
@@ -398,7 +430,9 @@ class TestPipelineIntegration:
             trace_id="eval-test",
             success=True,
             steps=[
-                _step("click", target="submit-btn", result=TraceActionResult(success=True)),
+                _step(
+                    "click", target="submit-btn", result=TraceActionResult(success=True)
+                ),
                 _step("wait"),
             ],
         )

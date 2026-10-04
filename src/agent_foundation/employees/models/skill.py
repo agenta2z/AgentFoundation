@@ -12,6 +12,7 @@ from agent_foundation.employees.models.enums import AutonomyLevel
 # Skill & Tool
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SkillConfig:
     """A single skill produced by /role-setup (Phase 2).
@@ -19,11 +20,12 @@ class SkillConfig:
     Each skill has a SKILL.md file (injected into LLM prompts) and an
     optional skill.yaml metadata file.
     """
-    id: str                           # e.g. "project_tracking"
-    display_name: str                 # e.g. "Project Tracking"
-    skill_md_path: Path               # path to SKILL.md (relative to role dir)
-    metadata_path: Path | None = None # path to skill.yaml (optional)
-    description: str = ""             # short description (from skill.yaml or SKILL.md header)
+
+    id: str  # e.g. "project_tracking"
+    display_name: str  # e.g. "Project Tracking"
+    skill_md_path: Path  # path to SKILL.md (relative to role dir)
+    metadata_path: Path | None = None  # path to skill.yaml (optional)
+    description: str = ""  # short description (from skill.yaml or SKILL.md header)
 
     @classmethod
     def from_dict(cls, data: dict, base_path: Path | None = None) -> "SkillConfig":
@@ -59,8 +61,11 @@ class SkillConfig:
 @dataclass
 class ToolConfig:
     """Tool access configuration for a role or employee."""
-    enabled: list[str] = field(default_factory=list)   # tool names enabled for this role
-    disabled: list[str] = field(default_factory=list)  # explicit overrides (for employee)
+
+    enabled: list[str] = field(default_factory=list)  # tool names enabled for this role
+    disabled: list[str] = field(
+        default_factory=list
+    )  # explicit overrides (for employee)
 
     @property
     def effective_tools(self) -> list[str]:
@@ -82,6 +87,7 @@ class ToolConfig:
 # UI-aligned models (maps to role_configs.json consumed by RoleControlPopover.js)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MindsetDirective:
     """Toggleable directive shaping how the agent approaches work.
@@ -89,6 +95,7 @@ class MindsetDirective:
     Maps directly to role_configs.json mindsets[] format.
     Runtime-toggled via RoleControlPopover.js.
     """
+
     text: str
     default_enabled: bool = True
 
@@ -107,6 +114,7 @@ class SOPDefinition:
     Maps directly to role_configs.json sops[] format.
     Optional file ref for detailed Jinja2 SOP template.
     """
+
     title: str
     trigger: str = ""
     steps: list[str] = field(default_factory=list)
@@ -138,6 +146,7 @@ class CommunicationPolicy:
 
     Maps directly to role_configs.json communication format.
     """
+
     allow_all: bool = True
     allowed_roles: list[str] = field(default_factory=list)
     blocked_roles: list[str] = field(default_factory=list)
@@ -165,16 +174,21 @@ class GuardrailConfig:
     Merged from role_configs.json guardrails + agent_states.json autonomy sections.
     Also supports SOP-driven tool confirmation gates and free-text rules.
     """
+
     # From role_configs.json guardrails
     max_autonomy_level: AutonomyLevel = AutonomyLevel.medium
     max_concurrent_tasks: int = 3
-    escalation_threshold: str = "2h"        # e.g. "2h", "30m"
-    max_token_budget: str = "100K"          # cost control
-    output_review: str = "on_errors"        # always | on_errors | never
-    approval_required: list[str] = field(default_factory=list)   # always needs human approval
+    escalation_threshold: str = "2h"  # e.g. "2h", "30m"
+    max_token_budget: str = "100K"  # cost control
+    output_review: str = "on_errors"  # always | on_errors | never
+    approval_required: list[str] = field(
+        default_factory=list
+    )  # always needs human approval
 
     # From agent_states.json autonomy
-    can_auto_approve: list[str] = field(default_factory=list)    # no human approval needed
+    can_auto_approve: list[str] = field(
+        default_factory=list
+    )  # no human approval needed
     max_hours_without_checkin: int = 8
 
     # SOP-driven tool confirmation gates
@@ -185,7 +199,9 @@ class GuardrailConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "GuardrailConfig":
-        autonomy_raw = data.get("max_autonomy_level", data.get("max_autonomy", "medium"))
+        autonomy_raw = data.get(
+            "max_autonomy_level", data.get("max_autonomy", "medium")
+        )
         try:
             autonomy = AutonomyLevel(autonomy_raw)
         except ValueError:

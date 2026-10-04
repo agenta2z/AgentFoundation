@@ -25,12 +25,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (  # noqa: E501
-    ConversationalInferencer as CI,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversation_tools import (  # noqa: E501
     ConversationToolType,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (  # noqa: E501
+    ConversationalInferencer as CI,
 )
 from agent_foundation.resources.tools.sop.executor import build_sop_state
 
@@ -43,19 +42,46 @@ def _fresh_state():
 
 
 def _fake_ci(state):
-    """Minimal stand-in exposing exactly what the two methods under test use."""
+    """Minimal stand-in exposing exactly what the two methods under test use.
+
+    Post-Phase K: CI's SOP methods delegate to `self.sop_controller`. The fake
+    now includes a real SOPController with the state pre-populated so the
+    delegated methods run their real logic against it.
+    """
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.sop_controller import (
+        SOPController,
+    )
+
+    prior_context: dict = {}
+    ctrl = SOPController(
+        prior_context_reader=lambda: prior_context,
+        request_shutdown=lambda: None,
+    )
+    ctrl.sop_state = state
+
     f = SimpleNamespace(
         sop_state=state,
+        sop_controller=ctrl,
+        prior_context=prior_context,
         _auto_shutdown_on_sop_complete=False,
         request_shutdown=lambda: None,
         _is_affirmative_response=CI._is_affirmative_response,
     )
+    # Keep `f.sop_state` and `ctrl.sop_state` in sync — the delegator reads
+    # from `sop_controller`, but the test assertions read from `f.sop_state`.
+    # Since both point to the same state object, in-place mutations are
+    # observed identically. Replacements (rare) don't happen in these tests.
 
     def _update_prior_context(**kw):
+        prior_context.update(kw)
         if "sop_state" in kw:
-            f.sop_state = kw.pop("sop_state")
+            f.sop_state = kw["sop_state"]
+            ctrl.sop_state = kw["sop_state"]
 
     f.update_prior_context = _update_prior_context
+    f._record_answered_required_conv_tools = (
+        lambda tools: CI._record_answered_required_conv_tools(f, tools)
+    )
     return f
 
 
@@ -103,9 +129,14 @@ def test_full_interactive_chain_reaches_phase_1():
         f,
         [
             _tool(ConversationToolType.CLARIFICATION, "workflow_target_path"),
-            _tool(ConversationToolType.SINGLE_CHOICE, "workflow_modeling_artifacts_mode"),
+            _tool(
+                ConversationToolType.SINGLE_CHOICE, "workflow_modeling_artifacts_mode"
+            ),
         ],
-        {"workflow_target_path": "/repo", "workflow_modeling_artifacts_mode": "auto_discover"},
+        {
+            "workflow_target_path": "/repo",
+            "workflow_modeling_artifacts_mode": "auto_discover",
+        },
     )
     CI._check_phase_completion(f)
     assert f.sop_state.current_phase == "0b"
@@ -155,3 +186,72 @@ def test_compound_with_declined_confirmation_withholds_gate():
     ]
     CI._open_user_input_gate_if_satisfied(f, tools, {"path": "/repo", "ok": "no"})
     assert f.sop_state.user_input_gate_passed is False
+
+
+# ── Fix C: record required conversation tools (Defect C) ──────────────────────
+
+
+def test_fix_c_records_both_required_conv_tools_for_0a():
+    """Phase 0a requires BOTH clarification AND single_choice. single_choice is
+    also required by 0b (so tool_phase_map maps it to 0b, not 0a) — the recorder
+    must key off the phase's required SET, recording both for 0a."""
+    f = _fake_ci(_fresh_state())
+    assert f.sop_state.current_phase == "0a"
+    CI._open_user_input_gate_if_satisfied(
+        f,
+        [
+            _tool(ConversationToolType.CLARIFICATION, "workflow_target_path"),
+            _tool(
+                ConversationToolType.SINGLE_CHOICE, "workflow_modeling_artifacts_mode"
+            ),
+        ],
+        {
+            "workflow_target_path": "/repo",
+            "workflow_modeling_artifacts_mode": "auto_discover",
+        },
+    )
+    assert f.sop_state.phase_executed_tools.get("0a") == {
+        "clarification",
+        "single_choice",
+    }
+
+
+def test_proposal_selection_completes_2b_to_3():
+    """Answering the proposal_selection widget completes Phase 2b -> Phase 3
+    (2b's required conversation tool is proposal_selection)."""
+    f = _fake_ci(_fresh_state())
+    f.sop_state.current_phase = "2b"
+    f.sop_state.completed_phases = ["0a", "0b", "1", "1b", "2"]
+    CI._open_user_input_gate_if_satisfied(
+        f,
+        [_tool(ConversationToolType.PROPOSAL_SELECTION, "selected_proposals_ids")],
+        {"selected_proposals_ids": "H1,H3"},
+    )
+    assert "proposal_selection" in f.sop_state.phase_executed_tools.get("2b", set())
+    CI._check_phase_completion(f)
+    assert f.sop_state.current_phase == "3"
+    assert "2b" in _completed_ids(f.sop_state)
+
+
+# ── Guard A (Fix 4): required action tool must run before phase completes ──────
+
+
+def test_guard_a_phase2_waits_for_research_propose():
+    """Phase 2 is [requires user input] + requires research_propose (an ACTION
+    tool). Answering the goal widget opens the gate but must NOT complete Phase 2
+    before research_propose runs; it completes only once the action tool runs."""
+    f = _fake_ci(_fresh_state())
+    f.sop_state.current_phase = "2"
+    f.sop_state.completed_phases = ["0a", "0b", "1", "1b"]
+    # The goal is a single_choice widget; single_choice is NOT in phase 2's
+    # required set ({research_propose}), so nothing is recorded for phase 2.
+    CI._open_user_input_gate_if_satisfied(
+        f,
+        [_tool(ConversationToolType.SINGLE_CHOICE, "goal")],
+        {"goal": "use the proposed goal"},
+    )
+    CI._check_phase_completion(f)
+    assert f.sop_state.current_phase == "2", "must not complete before research_propose"
+    # research_propose completes (Strategy 1 records it) -> Phase 2 advances.
+    CI._check_phase_completion(f, tool_name="research_propose")
+    assert f.sop_state.current_phase == "2b"

@@ -1,5 +1,3 @@
-
-
 """Manual E2E integration test for /understand-codebase workflow.
 
 Exercises the full DualInferencerBridge flow with template_version="understand_codebase",

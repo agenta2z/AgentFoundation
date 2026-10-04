@@ -2,11 +2,16 @@
 workspace to ctx and does NOT mutate the child instance; reads resolve from ctx.
 Byte-identical (instance mutation) without a context."""
 
-from attr import attrs
+import os
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
-from agent_foundation.common.inferencers.run_context import RunContext, enter_run, exit_run
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
+from attr import attrs
 
 
 @attrs
@@ -53,10 +58,45 @@ def test_two_workers_get_isolated_workspaces_under_context():
     root = RunContext.root(workspace=InferencerWorkspace(root="/tmp/run"))
     tok = enter_run(root)
     try:
-        e0 = _orchestrate_like_dual(orch, w0, "worker_0", InferencerWorkspace(root="/tmp/run/w0"))
-        e1 = _orchestrate_like_dual(orch, w1, "worker_1", InferencerWorkspace(root="/tmp/run/w1"))
+        e0 = _orchestrate_like_dual(
+            orch, w0, "worker_0", InferencerWorkspace(root="/tmp/run/w0")
+        )
+        e1 = _orchestrate_like_dual(
+            orch, w1, "worker_1", InferencerWorkspace(root="/tmp/run/w1")
+        )
         assert e0.root == "/tmp/run/w0" and e1.root == "/tmp/run/w1"
         assert w0.__dict__.get("_InferencerBase__workspace") is None  # neither mutated
         assert w1.__dict__.get("_InferencerBase__workspace") is None
+    finally:
+        exit_run(tok)
+
+
+def test_read_ignores_the_orchestrators_own_published_workspace():
+    # The orchestrator's own node carries a workspace its parent published (a
+    # fan-out BTA under its host); the child's getter evaluated under THAT node
+    # would return the orchestrator's workspace, not the child's.
+    orch, child = _Inf(), _Inf()
+    child._workspace = InferencerWorkspace(root="/tmp/run/host/bta/breakdown")
+    host_ctx = RunContext.root(workspace=InferencerWorkspace(root="/tmp/run")).child(
+        "bta"
+    )
+    host_ctx.handles.set(
+        "workspace_override", InferencerWorkspace(root="/tmp/run/host/bta")
+    )
+    tok = enter_run(host_ctx)
+    try:
+        eff = orch._read_child_workspace(child, "breakdown")
+        assert eff.root == "/tmp/run/host/bta/breakdown"
+    finally:
+        exit_run(tok)
+
+
+def test_read_falls_back_to_the_child_contexts_workspace():
+    orch, child = _Inf(), _Inf()
+    root = RunContext.root(workspace=InferencerWorkspace(root="/tmp/run"))
+    tok = enter_run(root)
+    try:
+        eff = orch._read_child_workspace(child, "review")
+        assert eff.root == os.path.join("/tmp/run", "children", "review")
     finally:
         exit_run(tok)

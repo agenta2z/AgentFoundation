@@ -9,13 +9,9 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
-from rich_python_utils.config_utils import instantiate, load_config
-
 # Importing configs triggers alias registration (ClaudeCodeCLI, Dual, ConsensusConfig, etc.)
 import agent_foundation.common.configs  # noqa: F401
-
+import pytest
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -25,9 +21,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.kiro.kiro_
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from rich_python_utils.config_utils import instantiate, load_config
 
 from .conftest import DEFAULT_TIMEOUT, skip_both, skip_claude
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 # ---------------------------------------------------------------------------
 # Path to YAML templates
@@ -57,9 +54,7 @@ def _load_yaml_with_placeholders(yaml_name: str, replacements: dict):
         safe_value = value.replace("\\", "/")
         raw = raw.replace(f"{{{key}}}", safe_value)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
 
@@ -151,9 +146,7 @@ review_inferencer:
   target_path: "{ws}"
   permission_mode: bypassPermissions
 """
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(nested_yaml)
         tmp_path = tmp.name
 

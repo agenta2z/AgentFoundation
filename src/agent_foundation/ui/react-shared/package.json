@@ -20,6 +20,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "postbuild": "node scripts/postbuild.js",
     "test": "vitest run",
     "sync": "python scripts/sync_widget_types.py",
     "sync:check": "python scripts/sync_widget_types.py --check"

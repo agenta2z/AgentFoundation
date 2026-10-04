@@ -20,21 +20,23 @@ import time
 from enum import Enum
 from typing import Any, Callable, Optional, Union
 
-from attr import attrs, attrib
-
+from attr import attrib, attrs
+from rich_python_utils.common_objects.workflow.common.worknode_base import (
+    NextNodesSelector,
+)
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode
-from rich_python_utils.common_objects.workflow.common.worknode_base import NextNodesSelector
 
 
 class MonitorStatus(str, Enum):
     """Status of monitor execution completion.
-    
+
     Indicates how the monitor loop terminated:
     - CONDITION_MET: The monitored condition was satisfied
     - MAX_ITERATIONS: Maximum iteration count reached without condition met
     - TIMEOUT: Time limit exceeded (for future use)
     - ERROR: An error occurred during monitoring
     """
+
     CONDITION_MET = "condition_met"
     MAX_ITERATIONS = "max_iterations"
     TIMEOUT = "timeout"
@@ -45,11 +47,11 @@ class MonitorStatus(str, Enum):
 class MonitorResult:
     """
     Result of monitor execution - executor agnostic.
-    
+
     This dataclass captures the outcome of a monitor operation, including
     whether the condition was met, how many checks were performed, and
     any matched content or error information.
-    
+
     Attributes:
         success: True if the monitored condition was met
         status: MonitorStatus indicating how monitoring completed
@@ -57,7 +59,7 @@ class MonitorResult:
         check_count: Number of condition checks performed
         error_message: Error description if status is ERROR
         metadata: Optional dict for executor-specific data (e.g., tab_handle)
-    
+
     Example:
         >>> result = MonitorResult(
         ...     success=True,
@@ -68,6 +70,7 @@ class MonitorResult:
         >>> result.success
         True
     """
+
     success: bool = attrib()
     status: MonitorStatus = attrib()
     matched_content: Optional[Any] = attrib(default=None)
@@ -165,9 +168,10 @@ class MonitorNode(WorkGraphNode):
         >>> iteration = create_monitor(webdriver, TargetSpec(strategy="xpath", value="//div"), condition)
         >>> monitor = MonitorNode(name="element_monitor", iteration=iteration, max_repeat=60)
     """
+
     # The callable that performs one monitoring iteration
     # Must return NextNodesSelector wrapping MonitorResult
-    iteration: Callable[..., 'NextNodesSelector'] = attrib(default=None, kw_only=True)
+    iteration: Callable[..., "NextNodesSelector"] = attrib(default=None, kw_only=True)
 
     # Auto setup: run before each iteration (e.g., switch to monitored tab)
     setup_action: Optional[Callable[[], None]] = attrib(default=None, kw_only=True)
@@ -195,7 +199,9 @@ class MonitorNode(WorkGraphNode):
         """Return node display string for inherited str_all_descendants()."""
         return f"[{self.name}] (monitor)"
 
-    def _execute_iteration(self, prev_result=None, **kwargs) -> Union['MonitorResult', 'NextNodesSelector']:
+    def _execute_iteration(
+        self, prev_result=None, **kwargs
+    ) -> Union["MonitorResult", "NextNodesSelector"]:
         """Execute one monitor iteration.
 
         Execution order:
@@ -213,29 +219,36 @@ class MonitorNode(WorkGraphNode):
             NextNodesSelector wrapping MonitorResult (controls downstream execution)
         """
         import logging
+
         _logger = logging.getLogger(__name__)
 
         # Track and log loop execution
         self._loop_counter += 1
-        is_self_loop = kwargs.get('_is_self_loop', False)
-        _logger.debug(f"[MonitorNode._execute_iteration] ===== LOOP #{self._loop_counter} START (is_self_loop={is_self_loop}) =====")
+        is_self_loop = kwargs.get("_is_self_loop", False)
+        _logger.debug(
+            f"[MonitorNode._execute_iteration] ===== LOOP #{self._loop_counter} START (is_self_loop={is_self_loop}) ====="
+        )
 
         if self.iteration is None:
             return MonitorResult(
                 success=False,
                 status=MonitorStatus.ERROR,
-                error_message="No iteration configured"
+                error_message="No iteration configured",
             )
 
         # Step 1: Verify context is valid (e.g., are we on the correct tab?)
         if self.enable_verify_setup and self.verify_setup is not None:
             verify_result = self.verify_setup()
-            _logger.debug(f"[MonitorNode._execute_iteration] verify_setup() returned: {verify_result}")
+            _logger.debug(
+                f"[MonitorNode._execute_iteration] verify_setup() returned: {verify_result}"
+            )
             if not verify_result:
                 # Context not valid - can we auto-fix it?
                 if self.enable_auto_setup and self.setup_action is not None:
                     # Run setup to fix the context (e.g., switch to monitored tab)
-                    _logger.debug(f"[MonitorNode._execute_iteration] Running setup_action to fix context")
+                    _logger.debug(
+                        f"[MonitorNode._execute_iteration] Running setup_action to fix context"
+                    )
                     self.setup_action()
                     # Proceed to iteration (assume setup fixed the context)
                 else:
@@ -243,7 +256,9 @@ class MonitorNode(WorkGraphNode):
                     # IMPORTANT: Must wrap in NextNodesSelector to prevent downstream from running
                     # include_self=True: keep polling via self-edge
                     # include_others=False: DON'T run downstream actions
-                    _logger.debug(f"[MonitorNode._execute_iteration] Cannot auto-fix, returning 'not met' with include_others=False")
+                    _logger.debug(
+                        f"[MonitorNode._execute_iteration] Cannot auto-fix, returning 'not met' with include_others=False"
+                    )
 
                     # Apply poll interval delay before returning
                     time.sleep(self.poll_interval)
@@ -251,12 +266,10 @@ class MonitorNode(WorkGraphNode):
                     result = MonitorResult(
                         success=False,
                         status=MonitorStatus.MAX_ITERATIONS,  # Continues polling
-                        error_message="verify_setup returned False - context not valid"
+                        error_message="verify_setup returned False - context not valid",
                     )
                     return NextNodesSelector(
-                        include_self=True,
-                        include_others=False,
-                        result=result
+                        include_self=True, include_others=False, result=result
                     )
 
         # Step 2: Run the actual iteration

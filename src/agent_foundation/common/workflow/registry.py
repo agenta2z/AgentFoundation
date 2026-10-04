@@ -10,11 +10,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from agent_foundation.common.workflow.definition import WorkflowDefinition
 from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
     SOPManager,
 )
-
-from agent_foundation.common.workflow.definition import WorkflowDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,9 @@ class WorkflowRegistry:
         lines = raw_markdown.split("\n")
         desc_lines = []
         for line in lines:
-            if line.strip().startswith("## Phase") or line.strip().startswith("### Phase"):
+            if line.strip().startswith("## Phase") or line.strip().startswith(
+                "### Phase"
+            ):
                 break
             if line.strip().startswith("# "):
                 name = line.strip().lstrip("# ").strip()
@@ -76,7 +77,11 @@ class WorkflowRegistry:
             desc_lines.append(line)
         description = "\n".join(desc_lines).strip()
 
-        available_tools = list(sop.tool_to_phase_map.keys()) if hasattr(sop, "tool_to_phase_map") else []
+        available_tools = (
+            list(sop.tool_to_phase_map.keys())
+            if hasattr(sop, "tool_to_phase_map")
+            else []
+        )
 
         return WorkflowDefinition(
             workflow_id=workflow_id,
@@ -93,11 +98,7 @@ class WorkflowRegistry:
         paths = []
 
         # Primary: new resources/sops/ layout (PR-1 migration)
-        af_sops = (
-            Path(__file__).resolve().parent.parent.parent
-            / "resources"
-            / "sops"
-        )
+        af_sops = Path(__file__).resolve().parent.parent.parent / "resources" / "sops"
         if af_sops.is_dir():
             for child in sorted(af_sops.iterdir()):
                 sop_md = child / "SOP.md"

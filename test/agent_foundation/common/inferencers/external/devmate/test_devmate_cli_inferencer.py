@@ -1,5 +1,7 @@
 """Tests for DevmateCliInferencer."""
 
+import asyncio
+import inspect
 import os
 import tempfile
 import unittest
@@ -7,6 +9,9 @@ from unittest.mock import patch
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer import (
     DevmateCliInferencer,
+)
+from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    StreamingInferencerBase,
 )
 
 
@@ -102,14 +107,16 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as ext:  # plain dir, not a repo
             inferencer = DevmateCliInferencer(target_path=ext)
             if inferencer._resolve_devmate_repo_root() is None:
-                self.skipTest("no Sapling repo (e.g. ~/fbsource) available to reroot to")
+                self.skipTest(
+                    "no Sapling repo (e.g. ~/fbsource) available to reroot to"
+                )
             root, mode = inferencer._devmate_effective_root()
             self.assertEqual(mode, "rerooted")
             self.assertEqual(inferencer._resolve_subprocess_cwd(), root)
             command = inferencer.construct_command("Document it")
-            self.assertIn("ABSOLUTE path", command)   # absolute-path anchor preamble
-            self.assertIn(ext, command)               # target conveyed by absolute path
-            self.assertIn("Document it", command)     # user input still present
+            self.assertIn("ABSOLUTE path", command)  # absolute-path anchor preamble
+            self.assertIn(ext, command)  # target conveyed by absolute path
+            self.assertIn("Document it", command)  # user input still present
 
     def test_construct_command_with_headless(self):
         """Test that --headless flag is added when headless=True."""
@@ -142,6 +149,20 @@ class DevmateCliInferencerConstructCommandTest(unittest.TestCase):
         # Cleanup
         if inferencer._output_file and os.path.exists(inferencer._output_file):
             os.remove(inferencer._output_file)
+
+    def test_construct_command_dump_output_kwarg_overrides_field(self):
+        """A per-call dump_output wins over the definition field."""
+        inferencer = DevmateCliInferencer(
+            target_path="/test/repo",
+            dump_output=True,
+            cli_mode="run",
+        )
+
+        command = inferencer.construct_command("Test prompt", dump_output=False)
+
+        self.assertNotIn("--dump-final-structs-to-file", command)
+        self.assertIsNone(inferencer._output_file)
+        self.assertTrue(inferencer.dump_output)
 
     def test_construct_command_with_session_resume(self):
         """Test command construction with session resume."""
@@ -336,11 +357,15 @@ Finished session abc123-def456
 
             # NOTE: session_id must be a hex UUID-style string to match the
             # _extract_session_id regex r"Session ID:\s*([a-f0-9-]+)".
-            stdout = "Session ID: abc12345-def6-7890-abcd-ef0123456789\nFallback response"
+            stdout = (
+                "Session ID: abc12345-def6-7890-abcd-ef0123456789\nFallback response"
+            )
             result = inferencer.parse_output(stdout, "", 0)
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["session_id"], "abc12345-def6-7890-abcd-ef0123456789")
+            self.assertEqual(
+                result["session_id"], "abc12345-def6-7890-abcd-ef0123456789"
+            )
             self.assertIn("Fallback response", result["output"])
             self.assertNotIn("dump_data", result)
 
@@ -392,25 +417,69 @@ class DevmateCliInferencerStreamingTest(unittest.TestCase):
     """Test streaming methods."""
 
     def test_streaming_disables_dump_output(self):
-        """Test that dump_output is disabled during streaming."""
+        """The stream builds its command without the dump flag, while a call
+        made mid-stream on the same instance still gets it."""
         inferencer = DevmateCliInferencer(
             target_path="/test/repo",
             dump_output=True,
+            cli_mode="run",
         )
+        streamed_commands = []
 
-        # Mock the parent's _infer_streaming to avoid actual execution
-        with patch.object(inferencer, "_infer_streaming") as mock_streaming:
-            mock_streaming.return_value = iter(["line1\n", "line2\n"])
+        def fake_stream(
+            inference_input, stream_callback=None, output_stream=None, **kwargs
+        ):
+            streamed_commands.append(
+                inferencer.construct_command(inference_input, **kwargs)
+            )
+            yield "line1\n"
+            yield "line2\n"
 
-            # Consume the generator
-            list(inferencer.infer_streaming("test prompt"))
+        with patch.object(inferencer, "_infer_streaming", side_effect=fake_stream):
+            stream = inferencer.infer_streaming("test prompt")
+            next(stream)
+            concurrent_command = inferencer.construct_command("other prompt")
+            inferencer._cleanup_output_file()
+            list(stream)
 
-            # dump_output should be temporarily disabled during streaming
-            # and restored after
-            self.assertTrue(inferencer.dump_output)
+        self.assertNotIn("--dump-final-structs-to-file", streamed_commands[0])
+        self.assertIn("--dump-final-structs-to-file", concurrent_command)
+        self.assertTrue(inferencer.dump_output)
 
-    def test_streaming_restores_dump_output_on_error(self):
-        """Test that dump_output is restored even if streaming raises."""
+    def test_async_streaming_disables_dump_output(self):
+        """Async twin of ``test_streaming_disables_dump_output``."""
+        inferencer = DevmateCliInferencer(
+            target_path="/test/repo",
+            dump_output=True,
+            cli_mode="run",
+        )
+        streamed_commands = []
+
+        async def fake_stream(inference_input, **kwargs):
+            streamed_commands.append(
+                inferencer.construct_command(inference_input, **kwargs)
+            )
+            yield "line1\n"
+            yield "line2\n"
+
+        async def consume():
+            stream = inferencer.ainfer_streaming("test prompt")
+            await stream.__anext__()
+            command = inferencer.construct_command("other prompt")
+            inferencer._cleanup_output_file()
+            async for _ in stream:
+                pass
+            return command
+
+        with patch.object(inferencer, "_ainfer_streaming", side_effect=fake_stream):
+            concurrent_command = asyncio.run(consume())
+
+        self.assertNotIn("--dump-final-structs-to-file", streamed_commands[0])
+        self.assertIn("--dump-final-structs-to-file", concurrent_command)
+        self.assertTrue(inferencer.dump_output)
+
+    def test_streaming_error_leaves_dump_output_unchanged(self):
+        """dump_output is unchanged even if streaming raises."""
         inferencer = DevmateCliInferencer(
             target_path="/test/repo",
             dump_output=True,
@@ -419,11 +488,58 @@ class DevmateCliInferencerStreamingTest(unittest.TestCase):
         with patch.object(inferencer, "_infer_streaming") as mock_streaming:
             mock_streaming.side_effect = RuntimeError("Test error")
 
-            # The error should propagate but dump_output should be restored
             with self.assertRaises(RuntimeError):
                 list(inferencer.infer_streaming("test prompt"))
 
             self.assertTrue(inferencer.dump_output)
+
+
+class DevmateCliInferencerFilterBindingTest(unittest.TestCase):
+    """B27: ``inference_config`` never binds to ``filter_session_info``."""
+
+    _LINES = ("Session ID: abc123\n", "answer\n", "Finished session abc123\n")
+
+    def _inferencer(self):
+        inferencer = DevmateCliInferencer(target_path="/test/repo")
+
+        async def fake_stream(inference_input, **kwargs):
+            for line in self._LINES:
+                yield line
+
+        patcher = patch.object(inferencer, "_ainfer_streaming", fake_stream)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return inferencer
+
+    def test_accumulated_stream_ignores_truthy_inference_config(self):
+        """The ``_ainfer`` accumulation passes ``inference_config``
+        positionally; a truthy value must not switch the filter on."""
+        inferencer = self._inferencer()
+        for config in (None, {"k": 1}):
+            with self.subTest(config=config):
+                output = asyncio.run(
+                    StreamingInferencerBase._ainfer(inferencer, "q", config)
+                )
+                self.assertEqual(output, "".join(self._LINES))
+
+    def test_direct_streaming_filters_by_default(self):
+        inferencer = self._inferencer()
+
+        async def drain():
+            return [c async for c in inferencer.ainfer_streaming("q")]
+
+        self.assertEqual(asyncio.run(drain()), ["answer\n"])
+
+    def test_filter_defaults(self):
+        pipeline = inspect.signature(
+            DevmateCliInferencer._ainfer_streaming_pipeline
+        ).parameters["filter_session_info"]
+        public = inspect.signature(DevmateCliInferencer.ainfer_streaming).parameters[
+            "filter_session_info"
+        ]
+        self.assertIs(pipeline.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(pipeline.default, False)
+        self.assertIs(public.default, True)
 
 
 class DevmateCliInferencerSessionTest(unittest.TestCase):

@@ -10,9 +10,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, List, Optional, Union
 
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 from attr import attrib, attrs
-
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
 
 
 @attrs(slots=False, kw_only=True)
@@ -40,7 +39,9 @@ class ScriptedInteractive(InteractiveBase):
         # No-op for scripted interactive
         return None
 
-    def _send_response(self, response: Any, flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def _send_response(
+        self, response: Any, flag: InteractionFlags = InteractionFlags.TurnCompleted
+    ) -> None:
         self.sent_responses.append((response, flag))
 
     # Async surface (called from run_agentic_loop / _handle_conversation_tools)

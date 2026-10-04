@@ -10,6 +10,7 @@ with support for CRUD operations, search, and filtering.
 
 Requirements: 2.1
 """
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 
@@ -194,5 +195,3 @@ class KnowledgePieceStore(ABC):
         to release resources.
         """
         pass
-
-

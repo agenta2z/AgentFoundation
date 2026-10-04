@@ -76,7 +76,7 @@ redirect (e.g. "actually start from this related page first").
 
 Once confirmed, fetch the runbook content and perform structured extraction.
 
-**Fetch tool**[__must__] choose ONE based on URL type:
+**Fetch tool**[__required__] choose ONE based on URL type:
 - Confluence page → `mcp__atlassian__get_confluence_page` (saves HTML to a local file
   so you can grep/expand without re-fetching)
 - Local markdown → `open_files`
@@ -215,7 +215,7 @@ canonical structure:
 - <related code / scripts>
 
 ## Prerequisites
-[__must__]:
+[__required__]:
 - <hard-required accesses, CLIs, MCPs>
 
 ## Verified Reference  (from Phase 4)

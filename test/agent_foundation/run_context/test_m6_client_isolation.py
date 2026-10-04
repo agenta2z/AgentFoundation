@@ -5,16 +5,15 @@ live handle per-branch when run under distinct child contexts — the V8 collisi
 fix — while remaining byte-identical (instance backing) with no active context.
 """
 
-from attr import attrs
-
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
-from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    enter_run,
-    exit_run,
-)
+from attr import attrs
 
 
 @attrs
@@ -47,7 +46,10 @@ def test_one_instance_two_branches_isolate_their_handles():
     """V8: same instance, two child branches -> independent clients (no collision)."""
     leaf = _Leaf()
     root = RunContext.root(workspace=None)
-    for ctx, val in ((root.child("worker_0"), "client-A"), (root.child("worker_1"), "client-B")):
+    for ctx, val in (
+        (root.child("worker_0"), "client-A"),
+        (root.child("worker_1"), "client-B"),
+    ):
         tok = enter_run(ctx)
         try:
             leaf.client = val
@@ -55,7 +57,10 @@ def test_one_instance_two_branches_isolate_their_handles():
         finally:
             exit_run(tok)
     # Each branch retained its own handle (connection-scoped, per path).
-    for ctx, expected in ((root.child("worker_0"), "client-A"), (root.child("worker_1"), "client-B")):
+    for ctx, expected in (
+        (root.child("worker_0"), "client-A"),
+        (root.child("worker_1"), "client-B"),
+    ):
         tok = enter_run(ctx)
         try:
             assert leaf.client == expected

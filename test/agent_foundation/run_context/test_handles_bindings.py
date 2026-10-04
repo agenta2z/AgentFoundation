@@ -1,5 +1,6 @@
 """Tier-3 LiveHandleStore lifetime + Tier-2 RuntimeBindings (M1 / §2.0 Note B / P-#6)."""
 
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.run_context import (
     LiveHandles,
     LiveHandleStore,
@@ -7,7 +8,6 @@ from agent_foundation.common.inferencers.run_context import (
     RunStateStore,
     RuntimeBindings,
 )
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 def test_handle_store_get_or_create_reuse():
@@ -47,14 +47,16 @@ def test_tier3_outlives_per_turn_tier1_store_discard():
     runtime = RuntimeBindings()
 
     # Turn 1: fresh Tier-1 store, shared connection-scoped handle store.
-    turn1 = RunContext.root(workspace=ws, runtime=runtime,
-                            store=RunStateStore(), handle_store=handle_store)
+    turn1 = RunContext.root(
+        workspace=ws, runtime=runtime, store=RunStateStore(), handle_store=handle_store
+    )
     leaf1 = turn1.child("leaf")
     leaf1.handles.live_session_id = "sess-123"
 
     # Turn 2: Tier-1 store DISCARDED + replaced; same connection-scoped handle store.
-    turn2 = RunContext.root(workspace=ws, runtime=runtime,
-                            store=RunStateStore(), handle_store=handle_store)
+    turn2 = RunContext.root(
+        workspace=ws, runtime=runtime, store=RunStateStore(), handle_store=handle_store
+    )
     leaf2 = turn2.child("leaf")
     # Continuity preserved — no relaunch, session_id survives the per-turn discard.
     assert leaf2.handles.live_session_id == "sess-123"

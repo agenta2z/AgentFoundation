@@ -1,5 +1,3 @@
-
-
 """Analysis prompt templates for PlanThenImplementInferencer test script.
 
 These templates are used by the analysis phase of the multi-iteration

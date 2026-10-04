@@ -1,5 +1,3 @@
-
-
 """Unit tests for analysis mode support in PlanThenImplementInferencer.
 
 Tests the three analysis modes (last_round_only, last_with_cross_ref, all_rounds)
@@ -22,15 +20,16 @@ def _has_server_factories() -> bool:
         return True
     except ImportError:
         return False
+
+
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     ANALYSIS_MODE_CLI_MAP,
     ANALYSIS_MODE_FILE_MAP,
     PlanThenImplementInferencer,
     VALID_ANALYSIS_MODES,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 @attrs
@@ -52,7 +51,9 @@ def _create_file(path: str, content: str = "") -> None:
         f.write(content)
 
 
-def _make_pti(templates_dir: str | None = None, **kwargs) -> PlanThenImplementInferencer:
+def _make_pti(
+    templates_dir: str | None = None, **kwargs
+) -> PlanThenImplementInferencer:
     """Create a minimal PTI with analysis enabled for testing."""
     with tempfile.TemporaryDirectory() as ws:
         defaults = dict(
@@ -85,12 +86,18 @@ class AnalysisModeConstantsTest(unittest.TestCase):
     def test_cli_map_covers_all_modes(self):
         """Every CLI short name maps to a valid internal mode."""
         for cli_name, internal_name in ANALYSIS_MODE_CLI_MAP.items():
-            self.assertIn(internal_name, VALID_ANALYSIS_MODES, f"CLI name '{cli_name}' maps to unknown mode '{internal_name}'")
+            self.assertIn(
+                internal_name,
+                VALID_ANALYSIS_MODES,
+                f"CLI name '{cli_name}' maps to unknown mode '{internal_name}'",
+            )
 
     def test_file_map_covers_all_modes(self):
         """Every valid mode has a corresponding file map entry."""
         for mode in VALID_ANALYSIS_MODES:
-            self.assertIn(mode, ANALYSIS_MODE_FILE_MAP, f"Mode '{mode}' has no file map entry")
+            self.assertIn(
+                mode, ANALYSIS_MODE_FILE_MAP, f"Mode '{mode}' has no file map entry"
+            )
 
     def test_default_mode_is_valid(self):
         """Default analysis_mode is a valid mode."""
@@ -220,9 +227,7 @@ class HasResultsTest(unittest.TestCase):
     def test_nested_round_dirs(self):
         """Returns True when results are in roundN/ subdirectories."""
         with tempfile.TemporaryDirectory() as d:
-            _create_file(
-                os.path.join(d, "benchmarks", "round0", "results.json"), "{}"
-            )
+            _create_file(os.path.join(d, "benchmarks", "round0", "results.json"), "{}")
             self.assertTrue(self.pti._has_results(d))
 
 
@@ -272,7 +277,9 @@ class LoadAnalysisRequestTemplateTest(unittest.TestCase):
             var_dir = os.path.join(
                 templates_dir, "analysis", "main", "_variables", "analysis_request"
             )
-            _create_file(os.path.join(var_dir, "all_rounds.jinja2"), "All rounds content")
+            _create_file(
+                os.path.join(var_dir, "all_rounds.jinja2"), "All rounds content"
+            )
             pti = _make_pti(
                 templates_dir=templates_dir,
                 analysis_mode="all_rounds",
@@ -325,7 +332,9 @@ class BuildAnalysisConfigVarsTest(unittest.TestCase):
             self.assertIn("round1", vars_["result_path_latest"])
             self.assertEqual(vars_["result_path"], vars_["result_path_latest"])
             self.assertEqual(vars_["meta_iteration"], 1)
-            self.assertIn("round1_implementation.md", vars_["implementation_output_path"])
+            self.assertIn(
+                "round1_implementation.md", vars_["implementation_output_path"]
+            )
             self.assertIsInstance(vars_["analysis_request"], str)
             self.assertTrue(len(vars_["analysis_request"]) > 0)
             # First iteration has no prior history
@@ -334,9 +343,7 @@ class BuildAnalysisConfigVarsTest(unittest.TestCase):
     def test_flat_results_no_rounds(self):
         """Handles flat file structure (no roundN/ dirs)."""
         with tempfile.TemporaryDirectory() as outputs_dir:
-            _create_file(
-                os.path.join(outputs_dir, "benchmarks", "results.json"), "{}"
-            )
+            _create_file(os.path.join(outputs_dir, "benchmarks", "results.json"), "{}")
             pti = _make_pti(analysis_mode="last_round_only")
             vars_ = pti._build_analysis_config_vars(outputs_dir, iteration=1)
 
@@ -375,33 +382,27 @@ class BuildAnalysisConfigVarsTest(unittest.TestCase):
     def test_no_implementation_files_fallback(self):
         """Uses descriptive fallback when no implementation output files exist."""
         with tempfile.TemporaryDirectory() as outputs_dir:
-            _create_file(
-                os.path.join(outputs_dir, "benchmarks", "results.json"), "{}"
-            )
+            _create_file(os.path.join(outputs_dir, "benchmarks", "results.json"), "{}")
             pti = _make_pti(analysis_mode="last_round_only")
             vars_ = pti._build_analysis_config_vars(outputs_dir, iteration=1)
 
-            self.assertIn("no implementation report", vars_["implementation_output_path"])
+            self.assertIn(
+                "no implementation report", vars_["implementation_output_path"]
+            )
 
     def test_multiple_implementation_files_picks_latest(self):
         """Picks the highest-round implementation file."""
         with tempfile.TemporaryDirectory() as outputs_dir:
-            _create_file(
-                os.path.join(outputs_dir, "benchmarks", "data.json"), "{}"
-            )
-            _create_file(
-                os.path.join(outputs_dir, "round0_implementation.md"), "v0"
-            )
-            _create_file(
-                os.path.join(outputs_dir, "round1_implementation.md"), "v1"
-            )
-            _create_file(
-                os.path.join(outputs_dir, "round2_implementation.md"), "v2"
-            )
+            _create_file(os.path.join(outputs_dir, "benchmarks", "data.json"), "{}")
+            _create_file(os.path.join(outputs_dir, "round0_implementation.md"), "v0")
+            _create_file(os.path.join(outputs_dir, "round1_implementation.md"), "v1")
+            _create_file(os.path.join(outputs_dir, "round2_implementation.md"), "v2")
             pti = _make_pti()
             vars_ = pti._build_analysis_config_vars(outputs_dir, iteration=1)
 
-            self.assertIn("round2_implementation.md", vars_["implementation_output_path"])
+            self.assertIn(
+                "round2_implementation.md", vars_["implementation_output_path"]
+            )
 
     def test_analysis_request_uses_correct_mode(self):
         """analysis_request content differs by mode (when templates exist)."""
@@ -411,27 +412,25 @@ class BuildAnalysisConfigVarsTest(unittest.TestCase):
             )
             _create_file(os.path.join(var_dir, "last.jinja2"), "LAST_MODE_MARKER")
             _create_file(os.path.join(var_dir, "cross_ref.jinja2"), "CROSS_REF_MARKER")
-            _create_file(os.path.join(var_dir, "all_rounds.jinja2"), "ALL_ROUNDS_MARKER")
+            _create_file(
+                os.path.join(var_dir, "all_rounds.jinja2"), "ALL_ROUNDS_MARKER"
+            )
 
             with tempfile.TemporaryDirectory() as outputs_dir:
-                _create_file(
-                    os.path.join(outputs_dir, "benchmarks", "data.json"), "{}"
-                )
+                _create_file(os.path.join(outputs_dir, "benchmarks", "data.json"), "{}")
 
                 for mode, marker in [
                     ("last_round_only", "LAST_MODE_MARKER"),
                     ("last_with_cross_ref", "CROSS_REF_MARKER"),
                     ("all_rounds", "ALL_ROUNDS_MARKER"),
                 ]:
-                    pti = _make_pti(
-                        templates_dir=templates_dir, analysis_mode=mode
-                    )
+                    pti = _make_pti(templates_dir=templates_dir, analysis_mode=mode)
                     vars_ = pti._build_analysis_config_vars(outputs_dir, iteration=1)
                     self.assertIn(
                         marker,
                         vars_["analysis_request"],
                         f"Mode '{mode}' should use template with '{marker}'",
-                      )
+                    )
 
 
 # =============================================================================
@@ -507,9 +506,7 @@ class BuildPreviousIterationPathsTest(unittest.TestCase):
     def test_config_vars_includes_previous_iteration_paths(self):
         """_build_analysis_config_vars includes previous_iteration_paths key."""
         with tempfile.TemporaryDirectory() as outputs_dir:
-            _create_file(
-                os.path.join(outputs_dir, "benchmarks", "data.json"), "{}"
-            )
+            _create_file(os.path.join(outputs_dir, "benchmarks", "data.json"), "{}")
             pti = _make_pti(analysis_mode="last_with_cross_ref")
             vars_ = pti._build_analysis_config_vars(outputs_dir, iteration=1)
 
@@ -600,9 +597,7 @@ class ParseTaskOptionsAnalysisModeTest(unittest.TestCase):
         """--analysis-only explicitly sets enable_planning=False and enable_implementation=False."""
         from agent_foundation.server.factories import parse_task_options
 
-        request, _, _, _, pti_flags = parse_task_options(
-            "--analysis-only /path/to/ws"
-        )
+        request, _, _, _, pti_flags = parse_task_options("--analysis-only /path/to/ws")
         self.assertFalse(pti_flags["enable_planning"])
         self.assertFalse(pti_flags["enable_implementation"])
         self.assertTrue(pti_flags["enable_analysis"])
@@ -630,9 +625,7 @@ class ParseTaskOptionsInitialPlanTest(unittest.TestCase):
         """--initial-plan <path> with no request works."""
         from agent_foundation.server.factories import parse_task_options
 
-        request, _, _, _, pti_flags = parse_task_options(
-            "--initial-plan /tmp/plan.md"
-        )
+        request, _, _, _, pti_flags = parse_task_options("--initial-plan /tmp/plan.md")
         self.assertEqual(pti_flags["initial_plan_file"], "/tmp/plan.md")
         self.assertEqual(request, "")
 
@@ -646,6 +639,7 @@ class ParseTaskOptionsInitialPlanTest(unittest.TestCase):
         self.assertEqual(pti_flags["initial_plan_file"], "/tmp/plan.md")
         self.assertEqual(request, "Review and refine")
         from agent_foundation.server.task_types import TaskMode
+
         self.assertEqual(task_mode, TaskMode.PLAN_ONLY)
 
     def test_initial_plan_combined_with_other_flags(self):
@@ -673,8 +667,13 @@ class TemplateFileIntegrationTest(unittest.TestCase):
         """Locate the shared prompt_templates directory."""
         candidate = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "..", "..", "..",
-            "src", "prompt_templates",
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "prompt_templates",
         )
         candidate = os.path.normpath(candidate)
         if os.path.isdir(candidate):
@@ -682,8 +681,14 @@ class TemplateFileIntegrationTest(unittest.TestCase):
         # Try alternative path (deeper nesting)
         alt = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "..", "..", "..", "..",
-            "src", "prompt_templates",
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "prompt_templates",
         )
         alt = os.path.normpath(alt)
         return alt if os.path.isdir(alt) else None
@@ -695,8 +700,12 @@ class TemplateFileIntegrationTest(unittest.TestCase):
             self.skipTest("Cannot locate src/prompt_templates directory")
         for filename in ("last.jinja2", "cross_ref.jinja2", "all_rounds.jinja2"):
             path = os.path.join(
-                templates_dir, "analysis", "main",
-                "_variables", "analysis_request", filename,
+                templates_dir,
+                "analysis",
+                "main",
+                "_variables",
+                "analysis_request",
+                filename,
             )
             self.assertTrue(
                 os.path.isfile(path),
@@ -715,11 +724,13 @@ class TemplateFileIntegrationTest(unittest.TestCase):
             with open(os.path.join(var_dir, filename)) as f:
                 content = f.read()
             self.assertIn(
-                "{{ result_type }}", content,
+                "{{ result_type }}",
+                content,
                 f"{filename} should reference {{{{ result_type }}}}",
             )
             self.assertIn(
-                "{{ implementation_output_path }}", content,
+                "{{ implementation_output_path }}",
+                content,
                 f"{filename} should reference {{{{ implementation_output_path }}}}",
             )
 
@@ -729,8 +740,12 @@ class TemplateFileIntegrationTest(unittest.TestCase):
         if templates_dir is None:
             self.skipTest("Cannot locate src/prompt_templates directory")
         path = os.path.join(
-            templates_dir, "analysis", "main",
-            "_variables", "analysis_request", "cross_ref.jinja2",
+            templates_dir,
+            "analysis",
+            "main",
+            "_variables",
+            "analysis_request",
+            "cross_ref.jinja2",
         )
         with open(path) as f:
             content = f.read()
@@ -743,8 +758,12 @@ class TemplateFileIntegrationTest(unittest.TestCase):
         if templates_dir is None:
             self.skipTest("Cannot locate src/prompt_templates directory")
         path = os.path.join(
-            templates_dir, "analysis", "main",
-            "_variables", "analysis_request", "all_rounds.jinja2",
+            templates_dir,
+            "analysis",
+            "main",
+            "_variables",
+            "analysis_request",
+            "all_rounds.jinja2",
         )
         with open(path) as f:
             content = f.read()
@@ -766,10 +785,10 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             captured_config.update(inference_config or {})
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "done", '
                 '"next_iteration_request": ""}\n'
-                '```</Response>'
+                "```</Response>"
             )
 
         with tempfile.TemporaryDirectory() as ws:
@@ -798,7 +817,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_with_cross_ref",
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
 
             # Verify key template variables were passed
             self.assertEqual(captured_config.get("result_type"), "benchmarks")
@@ -842,7 +862,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="all_rounds",
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
             analyzer._ainfer.assert_not_called()
 
     async def test_analysis_mode_last_only_templates_dir_provided(self):
@@ -852,13 +873,16 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             captured_config.update(inference_config or {})
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "done", '
                 '"next_iteration_request": ""}\n'
-                '```</Response>'
+                "```</Response>"
             )
 
-        with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as templates_dir:
+        with (
+            tempfile.TemporaryDirectory() as ws,
+            tempfile.TemporaryDirectory() as templates_dir,
+        ):
             # Set up workspace
             _create_file(os.path.join(ws, "request.txt"), "original request")
             _create_file(os.path.join(ws, "outputs", "round0_plan.md"), "plan")
@@ -895,7 +919,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_templates_dir=templates_dir,
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
 
             # The analysis_request should come from our custom template
             analysis_req = captured_config.get("analysis_request", "")
@@ -910,10 +935,10 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         async def mock_analyzer_ainfer(inp, inference_config=None, **kw):
             captured_config.update(inference_config or {})
             return (
-                '<Response>```json\n'
+                "<Response>```json\n"
                 '{"should_continue": false, "summary": "done", '
                 '"next_iteration_request": ""}\n'
-                '```</Response>'
+                "```</Response>"
             )
 
         with tempfile.TemporaryDirectory() as ws:
@@ -946,7 +971,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_with_cross_ref",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             # Core assertions: planner and executor NEVER called
             planner._ainfer.assert_not_called()
@@ -989,7 +1015,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="all_rounds",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             planner._ainfer.assert_not_called()
             executor._ainfer.assert_not_called()
@@ -1024,7 +1051,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_round_only",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             planner._ainfer.assert_not_called()
             executor._ainfer.assert_not_called()

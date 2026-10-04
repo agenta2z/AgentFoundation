@@ -1,0 +1,7 @@
+# Claude Code through `claude -p` (one process per turn): AF tools on the local
+# HTTP MCP server, command hooks relayed to AgentFoundation (L2, turn stop,
+# subagent deny).
+kind: claude_cli
+model: opus[1m]
+permission_mode: bypassPermissions
+environment: inherit

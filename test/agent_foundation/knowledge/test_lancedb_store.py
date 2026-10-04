@@ -7,21 +7,21 @@ override using SQL WHERE clause.
 
 Requirements: 23.3, 23.4, 23.5
 """
+
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+    _build_where_clause,
+    _escape_sql_like,
+    _GLOBAL_ENTITY_SENTINEL,
     _piece_to_record,
     _record_to_piece,
-    _GLOBAL_ENTITY_SENTINEL,
-    _escape_sql_like,
-    _build_where_clause,
 )
 
 
@@ -63,11 +63,17 @@ class TestPieceToRecord:
         record = _piece_to_record(piece, [0.1])
 
         assert isinstance(record["secondary_domains"], str)
-        assert json.loads(record["secondary_domains"]) == ["data_engineering", "testing"]
+        assert json.loads(record["secondary_domains"]) == [
+            "data_engineering",
+            "testing",
+        ]
         assert isinstance(record["custom_tags"], str)
         assert json.loads(record["custom_tags"]) == ["gpu", "optimization"]
         assert isinstance(record["validation_issues"], str)
-        assert json.loads(record["validation_issues"]) == ["stale content", "missing source"]
+        assert json.loads(record["validation_issues"]) == [
+            "stale content",
+            "missing source",
+        ]
 
     def test_defaults_for_none_optional_fields(self):
         piece = KnowledgePiece(content="test")
@@ -253,11 +259,17 @@ class TestFindByContentHash:
 
     def test_returns_none_when_table_is_none(self):
         """find_by_content_hash returns None when no table exists."""
-        with patch("agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store.lancedb", create=True):
+        with patch(
+            "agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store.lancedb",
+            create=True,
+        ):
             store = MagicMock()
             store._table = None
             # Call the unbound method logic directly
-            from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
+            from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+                LanceDBKnowledgePieceStore,
+            )
+
             result = LanceDBKnowledgePieceStore.find_by_content_hash(store, "abc123")
             assert result is None
 
@@ -265,7 +277,10 @@ class TestFindByContentHash:
         """find_by_content_hash returns None for empty content_hash."""
         store = MagicMock()
         store._table = MagicMock()
-        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
+        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+            LanceDBKnowledgePieceStore,
+        )
+
         result = LanceDBKnowledgePieceStore.find_by_content_hash(store, "")
         assert result is None
 
@@ -296,12 +311,17 @@ class TestFindByContentHash:
         }
 
         mock_table = MagicMock()
-        mock_table.search.return_value.where.return_value.limit.return_value.to_list.return_value = [mock_record]
+        mock_table.search.return_value.where.return_value.limit.return_value.to_list.return_value = [
+            mock_record
+        ]
 
         store = MagicMock()
         store._table = mock_table
 
-        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
+        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+            LanceDBKnowledgePieceStore,
+        )
+
         result = LanceDBKnowledgePieceStore.find_by_content_hash(store, "abc123")
 
         assert result is not None
@@ -344,8 +364,13 @@ class TestFindByContentHash:
         store = MagicMock()
         store._table = mock_table
 
-        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import LanceDBKnowledgePieceStore
-        result = LanceDBKnowledgePieceStore.find_by_content_hash(store, "def456", entity_id="user-1")
+        from agent_foundation.knowledge.retrieval.stores.pieces.lancedb_store import (
+            LanceDBKnowledgePieceStore,
+        )
+
+        result = LanceDBKnowledgePieceStore.find_by_content_hash(
+            store, "def456", entity_id="user-1"
+        )
 
         assert result is not None
         assert result.content == "entity piece"

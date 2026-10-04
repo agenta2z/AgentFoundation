@@ -8,6 +8,9 @@ Provides:
 - ``get_assistant_message_status()`` — extract terminal status
 - ``needs_continuation()`` — detect clarification questions
 - ``resolve_conversation_fbid()`` — multi-turn FBID lookup
+- ``summarize_tool_activity()`` / ``http_error_details()`` — the diagnostics a
+  stream call records when it ends (``MetamateConversationSummary``)
+- ``tool_call_budget_directive()`` — the per-turn work budget appended to a task
 
 Uses ``getattr()`` duck-typing throughout, consistent with
 ``query_metamate.py`` and avoiding direct ``sdk_types`` imports.
@@ -77,8 +80,15 @@ def resolve_metamate_client_cls(use_standalone: Optional[bool] = None) -> Type[A
 
         mod = import_module(module_path)
     except ImportError as e:
+        # U2d: raise a TYPED dependency error (not a generic RuntimeError) so the
+        # retry runner classifies it non-retryable. Call-time import avoids any
+        # module-load cycle (inferencer_base is always loaded by this point).
+        from agent_foundation.common.inferencers.inferencer_base import (
+            MissingDependencyError,
+        )
+
         flavor = "standalone" if use_standalone else "upstream"
-        raise RuntimeError(
+        raise MissingDependencyError(
             f"MetaMate {flavor} client not available: {e}. "
             f"Ensure the binary's Buck deps include "
             f"{'//metamate_standalone:metamate_standalone' if use_standalone else '//msl/metamate/cli:metamate_graphql'}."
@@ -304,6 +314,132 @@ def needs_continuation(text: str) -> bool:
     if len(stripped) < 800 and stripped.endswith("?"):
         return True
     return False
+
+
+DEFAULT_TOOL_CALL_BUDGET: int = 6
+
+
+def tool_call_budget_directive(budget: int) -> str:
+    """The work budget appended to a task: at most ``budget`` tool calls, then an
+    answer from what was verified.
+
+    MetaMate runs a whole agent turn inside one web request, which the server cuts
+    at 120 s, and a turn also stops at its per-request memory budget; both are
+    spent on tool calls. A wall-clock instruction is not actionable (the agent sees
+    no clock), a count of tool calls is. On the 24 shards of the scoped fan-out
+    gate this text (with 6) turned 8/24 substantive worker answers, 10 memory
+    give-ups and 6 killed requests into 23/24, 1 and 0; on flow_03's full
+    12.7 KB task, 0/8 substantive answers into 5/8, where the remaining kills come
+    from answers so long that writing them nears 120 s
+    (``scripts/metamate_prompt_ab.py``, variant B).
+    """
+    return (
+        "\n\n## Working budget (strict)\n"
+        "MetaMate cuts off any single turn after about two minutes, and anything "
+        "unfinished is lost. Plan for that:\n"
+        f"- Use at most {budget} tool calls in total (searches and file reads), then "
+        "stop using tools.\n"
+        "- Prefer one targeted search over several broad ones; read only the line "
+        "ranges you need.\n"
+        "- Then write your answer from what you verified, and list anything you "
+        'could not check under "Not verified".\n'
+        f"A complete answer built on {budget} tool calls is better than an "
+        "unfinished one."
+    )
+
+
+def answer_format_directive(max_findings: int) -> str:
+    """The answer-format cap appended after the work budget: at most
+    ``max_findings`` findings of a few bullets each.
+
+    Writing the answer counts against the same 120 s as the tool calls. MetaMate
+    ignores a word count (asked for under 2,000 words, it wrote 3.4–4.5 K) but
+    keeps to a structure. On the 24 shards of the scoped fan-out gate, after the
+    6-call budget, this text (with 8) gave 24/24 substantive worker answers
+    against 19/24, at a median 40 s against 70 s and with more citations; on
+    flow_03's full task it turned killed requests into early give-ups instead
+    (``scripts/metamate_prompt_ab.py``, variant E).
+    """
+    return (
+        "\nAnswer format limit, since writing the answer counts against the same "
+        f"two minutes: at most {max_findings} findings, each a one-line heading plus "
+        "at most 4 short bullets; no tables, no code blocks, and cite each source "
+        "once."
+    )
+
+
+_DIAGNOSTIC_TEXT_CHARS: int = 300
+_HTTP_BODY_CHARS: int = 2000
+_DIAGNOSTIC_HEADERS: frozenset[str] = frozenset(
+    {"content-type", "content-length", "retry-after"}
+)
+
+
+def _clip(value: Any, limit: int = _DIAGNOSTIC_TEXT_CHARS) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def summarize_tool_activity(bridge_outputs: Any, recent: int = 8) -> dict[str, Any]:
+    """The agent's tool calls in a polled conversation, read from its
+    thinking-panel entries: how many blocks the conversation has, a count per
+    tool, and the most recent entries with their status, summary and warning."""
+    counts: dict[str, int] = {}
+    entries: List[dict[str, Any]] = []
+    blocks = 0
+    for output in bridge_outputs or ():
+        block = getattr(output, "block", None)
+        if block is None:
+            continue
+        blocks += 1
+        content = getattr(block, "content", None)
+        entry = getattr(content, "thinking_panel_entry", None)
+        if entry is None:
+            continue
+        name = getattr(entry, "tool_call_display_name", None) or "<unnamed>"
+        counts[name] = counts.get(name, 0) + 1
+        entries.append(
+            {
+                "tool": name,
+                "status": str(getattr(entry, "status", "")).split(".")[-1],
+                "summary": _clip(getattr(entry, "summary", None)),
+                "warning": _clip(getattr(entry, "warning", None)),
+            }
+        )
+    return {
+        "blocks": blocks,
+        "tool_calls": counts,
+        "recent_tool_calls": entries[-recent:],
+    }
+
+
+def http_error_details(exc: BaseException) -> Optional[dict[str, Any]]:
+    """What an HTTP error's response says (status, the ``x-fb-*`` debug headers,
+    the body), or ``None`` for an error without a response. The URL drops its
+    query string."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    headers = getattr(response, "headers", None) or {}
+    elapsed = getattr(response, "elapsed", None)
+    return {
+        "status_code": getattr(response, "status_code", None),
+        "reason": getattr(response, "reason", None),
+        "url": str(getattr(response, "url", "") or "").split("?", 1)[0],
+        "headers": {
+            key: value
+            for key, value in headers.items()
+            if key.lower().startswith("x-fb") or key.lower() in _DIAGNOSTIC_HEADERS
+        },
+        "body": _clip(getattr(response, "text", None), _HTTP_BODY_CHARS),
+        "elapsed_s": (
+            round(elapsed.total_seconds(), 3)
+            if hasattr(elapsed, "total_seconds")
+            else None
+        ),
+    }
 
 
 def resolve_conversation_fbid(client: Any, conversation_uuid: str) -> Optional[str]:

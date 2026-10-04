@@ -9,22 +9,23 @@ from typing import Any
 
 from agent_foundation.agents.agent import (
     Agent,
-    ReasonerProtocol,
-    ReasonerInput,
     ReasonerInferenceConfig,
+    ReasonerInput,
+    ReasonerProtocol,
     ReasonerResponse,
-)
-from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import (
-    ClaudeApiInferencer,
 )
 from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
     AgClaudeApiInferencer,
+)
+from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import (
+    ClaudeApiInferencer,
 )
 
 
 # ============================================================================
 # Example 1: Runtime isinstance() Check
 # ============================================================================
+
 
 def example_runtime_check():
     """Demonstrate runtime protocol conformance checking."""
@@ -37,12 +38,14 @@ def example_runtime_check():
 
     # Runtime protocol conformance check
     # This works because ReasonerProtocol is decorated with @runtime_checkable
-    assert isinstance(claude_inferencer, ReasonerProtocol), \
+    assert isinstance(claude_inferencer, ReasonerProtocol), (
         "ClaudeApiInferencer should conform to ReasonerProtocol"
+    )
     print("✅ ClaudeApiInferencer conforms to ReasonerProtocol")
 
-    assert isinstance(ag_inferencer, ReasonerProtocol), \
+    assert isinstance(ag_inferencer, ReasonerProtocol), (
         "AgClaudeApiInferencer should conform to ReasonerProtocol"
+    )
     print("✅ AgClaudeApiInferencer conforms to ReasonerProtocol")
 
     print()
@@ -51,6 +54,7 @@ def example_runtime_check():
 # ============================================================================
 # Example 2: Type-Annotated Reasoner Variables
 # ============================================================================
+
 
 def example_type_annotations():
     """Demonstrate using type annotations for reasoners."""
@@ -77,10 +81,11 @@ def example_type_annotations():
 # Example 3: Factory Function Pattern
 # ============================================================================
 
+
 def create_claude_reasoner(
     model_id: str = "claude-3-5-sonnet-20241022",
     use_ai_gateway: bool = False,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> ReasonerProtocol:
     """
     Factory function to create Claude-based reasoners that conform to ReasonerProtocol.
@@ -124,6 +129,7 @@ def example_factory_pattern():
 # Example 4: Custom Reasoner Implementation
 # ============================================================================
 
+
 class SimpleRuleBasedReasoner:
     """
     Simple rule-based reasoner that implements ReasonerProtocol.
@@ -151,7 +157,7 @@ class SimpleRuleBasedReasoner:
         self,
         reasoner_input: ReasonerInput,
         reasoner_inference_config: ReasonerInferenceConfig = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ReasonerResponse:
         """
         Process input and generate a rule-based response.
@@ -185,8 +191,9 @@ def example_custom_reasoner():
     custom_reasoner = SimpleRuleBasedReasoner()
 
     # Verify protocol conformance
-    assert isinstance(custom_reasoner, ReasonerProtocol), \
+    assert isinstance(custom_reasoner, ReasonerProtocol), (
         "Custom reasoner should conform to ReasonerProtocol"
+    )
     print("✅ SimpleRuleBasedReasoner conforms to ReasonerProtocol")
 
     # Test the reasoner
@@ -201,6 +208,7 @@ def example_custom_reasoner():
 # ============================================================================
 # Example 5: Using with Agent
 # ============================================================================
+
 
 def example_agent_usage():
     """Demonstrate using conforming reasoners with Agent (conceptual)."""
@@ -235,6 +243,7 @@ def example_agent_usage():
 # Example 6: Verifying Method Signature
 # ============================================================================
 
+
 def example_signature_verification():
     """Demonstrate manual signature verification."""
     print("Example 6: Method Signature Verification")
@@ -246,13 +255,13 @@ def example_signature_verification():
     claude_inferencer = ClaudeApiInferencer(model_id="claude-3-5-sonnet-20241022")
 
     # Check that __call__ method exists
-    assert hasattr(claude_inferencer, '__call__'), \
+    assert hasattr(claude_inferencer, "__call__"), (
         "Inferencer must have __call__ method"
+    )
     print("✅ Has __call__ method")
 
     # Verify callable
-    assert callable(claude_inferencer), \
-        "Inferencer must be callable"
+    assert callable(claude_inferencer), "Inferencer must be callable"
     print("✅ Is callable")
 
     # Inspect signature
@@ -265,8 +274,9 @@ def example_signature_verification():
 
     # Verify it accepts the required parameters
     # Note: 'self' is included in bound methods
-    assert 'inference_input' in params or len(params) >= 1, \
+    assert "inference_input" in params or len(params) >= 1, (
         "Must accept inference_input parameter"
+    )
     print("✅ Accepts required parameters")
 
     print()
@@ -298,4 +308,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()

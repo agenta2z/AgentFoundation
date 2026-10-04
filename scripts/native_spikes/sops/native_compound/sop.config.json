@@ -1,0 +1,12 @@
+{
+  "name": "native_compound",
+  "display_name": "Native Compound Setup",
+  "version": "1.0.0",
+  "description": "Collect a target path and an artifacts mode together (two questions in one step), then write a brief.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["clarification", "single_choice", "write_brief"],
+  "labels": ["test"],
+  "linear_only": true,
+  "max_goto_iterations": 2,
+  "max_total_nodes": 20
+}

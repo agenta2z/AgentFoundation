@@ -17,11 +17,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from agent_foundation.resources.tools.task.executor import (
     _CONFIG_ALIASES,
-    _CONFIGS_DIR,
     _config_supports_implementation,
+    _CONFIGS_DIR,
     _disable_aggregation,
     _extract_result_text,
     _resolve_agent_config,
@@ -34,6 +33,7 @@ pytestmark = pytest.mark.preflight
 # Files exist
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("name", ["breakdown", "multiflow-plan"])
 def test_new_preset_file_exists(name):
     assert (_CONFIGS_DIR / f"{name}.yaml").is_file(), (
@@ -45,16 +45,17 @@ def test_new_preset_file_exists(name):
 # Resolution (pure)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "spec,expected_filename",
     [
         ("breakdown", "breakdown.yaml"),
         ("multiflow-plan", "multiflow-plan.yaml"),
-        ("multiflow", "multiflow-plan.yaml"),              # alias
+        ("multiflow", "multiflow-plan.yaml"),  # alias
         ("full-plan", "breakdown-multiflow-plan.yaml"),  # alias
         ("breakdown-multiflow-plan", "breakdown-multiflow-plan.yaml"),  # back-compat
         ("default", "default.yaml"),
-        ("pti", "default.yaml"),                      # alias
+        ("pti", "default.yaml"),  # alias
     ],
 )
 def test_resolution(spec, expected_filename):
@@ -82,6 +83,7 @@ def test_unknown_config_raises():
 # `--plan` no-op detection
 # ---------------------------------------------------------------------------
 
+
 def test_plan_only_presets_do_not_support_implementation():
     for name in ("breakdown", "multiflow-plan", "breakdown-multiflow-plan"):
         src = ("file", _CONFIGS_DIR / f"{name}.yaml")
@@ -100,6 +102,7 @@ def test_default_supports_implementation():
 # ---------------------------------------------------------------------------
 # Structural YAML shape (pure parse — no instantiation)
 # ---------------------------------------------------------------------------
+
 
 def _load_yaml(name):
     return yaml.safe_load((_CONFIGS_DIR / f"{name}.yaml").read_text())
@@ -170,6 +173,7 @@ def test_breakdown_num_flows_matches_flow_inferencers():
 # deps are unavailable in the test environment.
 # ---------------------------------------------------------------------------
 
+
 def _instantiate(name, tmp_path):
     import agent_foundation.common.configs.registered_targets  # noqa: F401
     import agent_foundation.resources as _af_res
@@ -189,12 +193,13 @@ def _instantiate(name, tmp_path):
 
 def test_breakdown_instantiates(tmp_path):
     try:
-        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
-            DualInferencer,
-        )
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+            DualInferencer,
+        )
+
         root = _instantiate("breakdown", tmp_path)
     except ImportError as exc:  # pragma: no cover - env dependent
         pytest.skip(f"backend deps unavailable: {exc}")
@@ -213,6 +218,7 @@ def test_multiple_instantiates_as_root_mfdual(tmp_path):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
             MultiFlowDualInferencer,
         )
+
         root = _instantiate("multiflow-plan", tmp_path)
     except ImportError as exc:  # pragma: no cover - env dependent
         pytest.skip(f"backend deps unavailable: {exc}")
@@ -226,6 +232,7 @@ def test_multiple_instantiates_as_root_mfdual(tmp_path):
 # ---------------------------------------------------------------------------
 # No-aggregate helpers (pure)
 # ---------------------------------------------------------------------------
+
 
 def test_extract_result_text_keeps_all_multi_outputs():
     """Multi-element tuples must be serialized in full, NOT dropped to [0]."""

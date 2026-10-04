@@ -97,12 +97,16 @@ def main():
         # Create a temp git repo (required for session workspace matching)
         target_path = tempfile.mkdtemp(prefix="rovodev_session_")
         subprocess.run(
-            ["git", "init", "-q"], cwd=target_path, check=True,
+            ["git", "init", "-q"],
+            cwd=target_path,
+            check=True,
             capture_output=True,
         )
         subprocess.run(
             ["git", "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=target_path, check=True, capture_output=True,
+            cwd=target_path,
+            check=True,
+            capture_output=True,
         )
 
     # Verify acli is installed
@@ -133,8 +137,7 @@ def main():
         inferencer_a = create_inferencer(target_path, out_file)
         print("  Creating Session A...")
         result_a = inferencer_a.new_session(
-            "My favorite color is BLUE. "
-            "Confirm: your favorite color is BLUE."
+            "My favorite color is BLUE. Confirm: your favorite color is BLUE."
         )
         print(f"  Rovo Dev: {result_a.output[:80]}")
         session_a_id = inferencer_a.active_session_id
@@ -149,8 +152,7 @@ def main():
         inferencer_b = create_inferencer(target_path, out_file)
         print("  Creating Session B...")
         result_b = inferencer_b.new_session(
-            "My favorite color is GREEN. "
-            "Confirm: your favorite color is GREEN."
+            "My favorite color is GREEN. Confirm: your favorite color is GREEN."
         )
         print(f"  Rovo Dev: {result_b.output[:80]}")
         session_b_id = inferencer_b.active_session_id
@@ -164,7 +166,9 @@ def main():
         assert session_a_id != session_b_id, (
             f"Sessions should have different IDs! A={session_a_id}, B={session_b_id}"
         )
-        print(f"  Sessions are distinct: A={session_a_id[:12]}... B={session_b_id[:12]}...")
+        print(
+            f"  Sessions are distinct: A={session_a_id[:12]}... B={session_b_id[:12]}..."
+        )
         print()
 
         # =================================================================
@@ -177,8 +181,7 @@ def main():
         print()
 
         recall_prompt = (
-            "What is my favorite color? "
-            "Reply with ONLY the color, nothing else."
+            "What is my favorite color? Reply with ONLY the color, nothing else."
         )
 
         # --- Resume Session A ---

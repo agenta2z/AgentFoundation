@@ -8,18 +8,16 @@ See: _docs/_plans/inferencer_axes_INTEGRATED_v5_plan.md
 """
 
 import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import attr
-from attr import attrib, attrs
-
+import pytest
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TemplatedInferencerBase,
-)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
+)
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     TerminalInferencerBase,
@@ -29,6 +27,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
     TerminalSessionInferencerBase,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 
 # === Minimal test stubs ===
@@ -236,6 +235,7 @@ class TestThreePathModelPromotion:
         inf = _StubTerminalInferencer(target_path="/a")
         assert inf.effective_cwd == "/a"
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             inf = _StubTerminalInferencer(workspace=InferencerWorkspace(root=tmpdir))
             assert inf.effective_cwd == tmpdir
@@ -265,6 +265,7 @@ class TestThreePathModelPromotion:
         ):
             try:
                 import importlib
+
                 mod = importlib.import_module(module_path)
                 cls = getattr(mod, cls_name)
             except ImportError:
@@ -311,11 +312,19 @@ class TestNoOrphanPathAttribs:
             ),
         ]
         orphan_names = (
-            "repo_path", "root_folder", "working_dir", "cwd",
-            "repo", "root_path", "target_dir", "repo_dir",
-            "repository_path", "workdir",
+            "repo_path",
+            "root_folder",
+            "working_dir",
+            "cwd",
+            "repo",
+            "root_path",
+            "target_dir",
+            "repo_dir",
+            "repository_path",
+            "workdir",
         )
         import importlib
+
         for module_path, cls_name in modules_and_classes:
             try:
                 mod = importlib.import_module(module_path)
@@ -435,6 +444,7 @@ class TestHasLocalAccessLeakFixed:
             ),
         ]
         import importlib
+
         for module_path, cls_name in cases:
             try:
                 mod = importlib.import_module(module_path)
@@ -461,6 +471,7 @@ class TestLegacyClaudeCodeInferencerDeleted:
     def test_legacy_class_import_fails(self):
         with pytest.raises(ImportError):
             import importlib
+
             importlib.import_module(
                 "agent_foundation.common.inferencers.agentic_inferencers."
                 "external.claude_code.claude_code_inferencer"
@@ -523,4 +534,3 @@ class TestDevmateCliCleanups:
                 "should be deleted — framework subprocess cwd is already "
                 "effective_cwd"
             )
-

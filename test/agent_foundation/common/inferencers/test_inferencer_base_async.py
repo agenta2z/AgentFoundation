@@ -5,11 +5,8 @@ import unittest
 from typing import Any, Iterator
 from unittest.mock import MagicMock, patch
 
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from attr import attrib, attrs
-
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
-)
 
 
 @attrs

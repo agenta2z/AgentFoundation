@@ -24,6 +24,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from enum import auto, Flag
+from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
@@ -38,6 +39,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.li
     WorkflowStepConfig,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import invocation_of, RuntimeKey
 from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
@@ -246,6 +248,24 @@ _CHILD_DEFAULTS = {
 _CHILD_NAME_MAP = {k: v[0] for k, v in _CHILD_DEFAULTS.items()}
 
 
+@attrs(slots=True)
+class _PtiCall:
+    """The context PTI's step methods share within one invocation."""
+
+    base_workspace: Optional[str] = attrib(default=None)
+    iteration_workspace: Optional[str] = attrib(default=None)
+    inference_config: Optional[dict] = attrib(default=None)
+    inference_args: Optional[dict] = attrib(default=None)
+
+
+def _call_field(name: str) -> property:
+    """A property over one field of the invocation's ``_PtiCall``."""
+    return property(
+        lambda self: getattr(self._pti_call(), name),
+        lambda self, value: setattr(self._pti_call(), name, value),
+    )
+
+
 @artifact_type(Workflow, type="json", group="workflows")
 @attrs(slots=False)
 class PlanThenImplementInferencer(LinearWorkflowInferencer):
@@ -329,6 +349,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
     # Human approval gate
     interactive: Optional[InteractiveBase] = attrib(default=None)
+    # A parent hands this call's interactive handler as the ``interactive=`` call
+    # keyword (``_effective("interactive")``); the configured field is the fallback.
+    _INVOCATION_KEYWORDS = MappingProxyType(
+        {"interactive": RuntimeKey("PlanThenImplementInferencer.interactive")}
+    )
 
     # Phase labels
     planner_phase: str = attrib(default="plan")
@@ -350,12 +375,12 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     enable_analysis: bool = attrib(default=False)
     enable_multiple_iterations: bool = attrib(default=False)
 
-    # === v1.7 Deliverable Boundary Semantics (Phase 4) ===
-    # PTI is a boundary by default. The boundary mechanism only ACTIVATES
-    # when use_final_deliverables_folder=True; existing callers without that
-    # flag get a no-op (backward compatible).
-    is_deliverable_boundary: bool = attrib(default=True, kw_only=True)
-    publishes_response_as_deliverable: bool = attrib(default=True, kw_only=True)
+    # === Deliverable Boundary Semantics (two-axis model) ===
+    # PTI is a boundary by role: it always promotes its selected role children's
+    # deliverables up to its own ``outputs/``. Child SELECTION is role-based via
+    # the explicit ``boundary_filter`` passed to
+    # ``collect_child_boundary_deliverables`` (planner/executor/analyzer only) —
+    # bookkeeping/guardrail children are excluded there.
     # PTI uses by_role namespacing for its planner/executor/analyzer children.
     # The workspace child dirs use SHORT names from _CHILD_DEFAULTS:
     # planner, executor, analyzer (NOT *_inferencer). PTI does NOT have a
@@ -409,15 +434,18 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
     enable_checkpoint_analysis_review: bool = attrib(default=False)
     enable_checkpoint_iteration_handoff: bool = attrib(default=False)
 
-    # Internal state (not user-facing)
-    _next_iteration_input: Optional[str] = attrib(default=None, init=False)
-    _partial_iteration_history: Optional[List[MetaIterationRecord]] = attrib(
-        default=None, init=False
-    )
-    _current_base_workspace: Optional[str] = attrib(default=None, init=False)
-    _current_iteration_workspace: Optional[str] = attrib(default=None, init=False)
-    _current_inference_config: Optional[dict] = attrib(default=None, init=False)
-    _current_inference_args: Optional[dict] = attrib(default=None, init=False)
+    # Per-call context the step methods share, held in the invocation frame.
+    _PTI_CALL = RuntimeKey("PlanThenImplementInferencer.call", factory=_PtiCall)
+    # The call context, workspace and checkpoint policy live in the frame, and
+    # child workflows get their settings per call; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+    _current_base_workspace = _call_field("base_workspace")
+    _current_iteration_workspace = _call_field("iteration_workspace")
+    _current_inference_config = _call_field("inference_config")
+    _current_inference_args = _call_field("inference_args")
+
+    def _pti_call(self) -> _PtiCall:
+        return invocation_of(self).get_or_create(self._PTI_CALL)
 
     def __attrs_post_init__(self):
         # --- Domain-specific validation FIRST (before calling super) ---
@@ -498,7 +526,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             )
         )
         self.reset_sessions_per_iteration = self.reset_sessions_per_meta_iteration
-        self.iteration_record_builder = self._build_iteration_record
 
         # --- Call super().__attrs_post_init__() LAST ---
         super(PlanThenImplementInferencer, self).__attrs_post_init__()
@@ -1266,16 +1293,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     plan_file = candidate
                     break
             if plan_file is None:
-                deliv = os.path.join(
-                    ws.children_dir,
-                    planner_child,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
-                if os.path.isfile(deliv):
-                    plan_file = deliv
-            if plan_file is None:
                 child_art_dir = os.path.join(
                     ws.children_dir, planner_child, "artifacts"
                 )
@@ -1313,16 +1330,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 if os.path.isfile(candidate):
                     impl_file = candidate
                     break
-            if impl_file is None:
-                deliv = os.path.join(
-                    ws.children_dir,
-                    executor_child,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
-                if os.path.isfile(deliv):
-                    impl_file = deliv
             if impl_file is None:
                 child_art_dir = os.path.join(
                     ws.children_dir, executor_child, "artifacts"
@@ -1525,7 +1532,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         """Override to provide per-iteration child workflow directories.
 
         Workspace-mode children (``_workspace`` set by
-        ``_setup_iteration_children``) manage their own checkpoint paths,
+        ``_propagate_workspace_to_children``) manage their own checkpoint paths,
         so ``_result_root_override`` is set to ``None`` (the child's
         ``_get_result_path`` returns full absolute paths).
 
@@ -1561,7 +1568,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             if child_has_workspace:
                 # Full composition: child manages own checkpoint paths.
                 # _resolve_result_path with None returns as-is.
-                child._result_root_override = None
+                child_dir = None
             else:
                 # Legacy: manual path for checkpoint isolation
                 ws = InferencerWorkspace(root=base)
@@ -1571,11 +1578,14 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     attr_name,
                 )
                 os.makedirs(child_dir, exist_ok=True)
-                child._result_root_override = child_dir
 
-            child.enable_result_save = self.enable_result_save
-            child.resume_with_saved_results = self.resume_with_saved_results
-            child.checkpoint_mode = self.checkpoint_mode
+            self._configure_child_workflow(
+                child,
+                _result_root_override=child_dir,
+                enable_result_save=self.enable_result_save,
+                resume_with_saved_results=self.resume_with_saved_results,
+                checkpoint_mode=self.checkpoint_mode,
+            )
 
     # region Workflow Method Overrides
 
@@ -1978,8 +1988,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             await self._reset_sub_inferencers_for_meta_iteration()
 
         # --use-plan: place the plan where the planner would have written it
-        # (children/planner_inferencer/outputs/final_deliverables/output.md),
-        # write the .plan_completed marker, and return. PTI's resume detection
+        # (children/planner_inferencer/outputs/output.md), write the
+        # .plan_completed marker, and return. PTI's resume detection
         # (_detect_workspace_state) sees the planner output + marker → treats
         # planning as done → proceeds directly to implementation.
         if self.initial_plan_file and iteration == 1:
@@ -1995,16 +2005,11 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 )
 
                 pti_ws = InferencerWorkspace(root=ws)
-                # Write to the planner's deliverables — same location as if
+                # Write to the planner's outputs/ — same location as if
                 # the planner Dual had run and finalized its output.
                 planner_ws = pti_ws.child("planner_inferencer")
                 planner_ws.ensure_dirs()
-                plan_output = os.path.join(
-                    planner_ws.root,
-                    "outputs",
-                    "final_deliverables",
-                    "output.md",
-                )
+                plan_output = planner_ws.output_path("output.md")
                 os.makedirs(os.path.dirname(plan_output), exist_ok=True)
                 with open(plan_output, "w") as f:
                     f.write(plan_text)
@@ -2073,11 +2078,10 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         """Approval step: optionally pause for human approval of the plan."""
         plan_str = state.get(FIELD_PLAN_TEXT, "")
 
-        if self.interactive is None:
+        interactive = self._effective("interactive")
+        if interactive is None:
             state["plan_approved"] = True
             return plan_str
-
-        interactive = self.interactive
 
         # Use enhanced checkpoint if enabled
         if self.enable_checkpoint_plan_review:
@@ -2343,25 +2347,10 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
     # region Iteration Record Builder
 
-    def _build_iteration_record(self, state):
-        """Build a PTI-specific iteration record from state.
-
-        Used as ``iteration_record_builder`` for LWI's ``_record_iteration``.
-        Returns a dict representation of a MetaIterationRecord.
-        """
-        from rich_python_utils.common_utils.map_helper import dict__
-
-        record = MetaIterationRecord(
-            iteration=state.get("iteration", 1),
-            workspace_path=state.get("_current_iteration_workspace"),
-            plan_output=state.get(FIELD_PLAN_TEXT, ""),
-            executor_output=state.get("executor_output_text", ""),
-            plan_file_path=state.get(FIELD_PLAN_PATH),
-            plan_approved=state.get("plan_approved"),
-            analysis_output=state.get("_analysis_result_text"),
-            should_continue=state.get("should_continue", False),
-        )
-        return dict__(record, recursive=True)
+    def _record_iteration(self, state):
+        """No-op: the analysis step records each meta-iteration itself, in every
+        branch, so the workflow's record at an iteration change would add a second,
+        mislabelled one (the new iteration number with the previous outputs)."""
 
     # endregion
 
@@ -2433,40 +2422,13 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
 
     # region Workspace Composition Helpers
 
-    def _setup_iteration_children(self, state):
-        """Set up child workspaces for the current iteration.
-
-        Called once per iteration before any step runs.  Uses
-        ``_CHILD_DEFAULTS`` to map attr names to short workspace names
-        and default output_path values.
-        """
-        from agent_foundation.common.inferencers.inferencer_workspace import (
-            InferencerWorkspace,
-        )
-
-        if self._workspace is None:
-            return
-        iter_ws_path = self._get_iteration_workspace(
-            self._current_base_workspace, state["iteration"]
-        )
-        iter_ws = InferencerWorkspace(root=iter_ws_path)
-
-        for attr_name, (short_name, default_output) in _CHILD_DEFAULTS.items():
-            child = getattr(self, attr_name, None)
-            if child is None or not isinstance(child, InferencerBase):
-                continue
-            child_ws = iter_ws.child(short_name)
-            child_ws.ensure_dirs()
-            child._workspace = child_ws
-            if not child.output_path:
-                child.output_path = default_output
-
     def _finalize_output(self, response):
         """PTI override: symlink per-flag child outputs as own.
 
         Iterates ``_OUTPUT_MODE_MAP`` and symlinks each relevant child's
-        output based on ``output_mode`` (Flag enum — supports composites
-        like ``PLAN_AND_IMPLEMENTATION`` and ``ALL``).
+        ``outputs/`` file up to this PTI's ``outputs/`` based on ``output_mode``
+        (Flag enum — supports composites like ``PLAN_AND_IMPLEMENTATION`` and
+        ``ALL``).
         """
         if self._workspace is None:
             return super()._finalize_output(response)
@@ -2478,39 +2440,16 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         )
 
         iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
-        iter_ws = InferencerWorkspace(
-            root=iter_ws_path,
-            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
-        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
 
         for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
             if flag in self.output_mode:
                 child_ws = iter_ws.child(child_name)
-                # Symlink output file
-                child_deliv = child_ws.deliverable_path(filename)
-                child_out = (
-                    child_ws.output_path(filename)
-                    if hasattr(child_ws, "output_path")
-                    else None
-                )
-                src = (
-                    child_deliv
-                    if (child_deliv and os.path.isfile(child_deliv))
-                    else child_out
-                )
-                if src and os.path.isfile(src):
+                # Surface the child's outputs/ file up to this PTI's outputs/.
+                src = child_ws.output_path(filename)
+                if os.path.isfile(src):
                     dst = self._workspace.output_path(filename)
                     self._symlink_or_copy(src, dst)
-                # Symlink deliverable file
-                if (
-                    self._workspace.deliverables_dir
-                    and child_deliv
-                    and os.path.isfile(child_deliv)
-                ):
-                    dst = self._workspace.deliverable_path(filename)
-                    if dst:
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)
-                        self._symlink_or_copy(child_deliv, dst)
 
         resolved = self.resolve_output_path()
         if resolved and os.path.isfile(resolved):
@@ -2533,12 +2472,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         )
 
         iter_ws_path = self._get_iteration_workspace(self._workspace.root, last_iter)
-        # v1.7 Phase 4: propagate use_final_deliverables_folder so child
-        # workspaces returned by iter_ws.child(role) have their deliverables_dir set.
-        iter_ws = InferencerWorkspace(
-            root=iter_ws_path,
-            use_final_deliverables_folder=self._workspace.use_final_deliverables_folder,
-        )
+        iter_ws = InferencerWorkspace(root=iter_ws_path)
 
         os.makedirs(self._workspace.outputs_dir, exist_ok=True)
         for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
@@ -2548,14 +2482,14 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                 if os.path.isfile(src):
                     shutil.copy2(src, dst)
 
-        # === v1.7 Deliverable Boundary EXTENSION (Phase 4) ===
-        # Surface planner/executor/analyzer child boundaries to this PTI's
-        # final_deliverables/ with by_role namespacing.
-        if (
-            self.is_deliverable_boundary
-            and self._workspace is not None
-            and self._workspace.deliverables_dir is not None
-        ):
+        # === Deliverable Boundary EXTENSION (two-axis model) ===
+        # Surface planner/executor/analyzer child deliverables (outputs/) up
+        # to this PTI's outputs/ with by_role namespacing. PTI is a boundary
+        # by role, so this always runs; child SELECTION is role-based via the
+        # explicit boundary_filter below (bookkeeping/guardrail child dirs are
+        # excluded so the "any child with has_deliverables" default does not
+        # over-collect).
+        if self._workspace is not None:
             from agent_foundation.common.inferencers.deliverable_boundary import (
                 aggregate_into_self_deliverables,
                 collect_child_boundary_deliverables,
@@ -2564,7 +2498,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             # PTI's child workspaces use SHORT names from _CHILD_DEFAULTS
             # (planner, executor, analyzer). They live under the iter_ws,
             # which is itself a child of self._workspace. Walk the iter_ws's
-            # children to collect the role boundaries.
+            # children to collect the role deliverables.
             children = collect_child_boundary_deliverables(
                 iter_ws,
                 boundary_filter=lambda name, ws: name
@@ -2584,23 +2518,8 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
                     _pti_logger.info(
                         "PTI boundary surfaced %d role deliverable(s) → %s",
                         len(report.copied),
-                        self._workspace.deliverables_dir,
+                        self._workspace.outputs_dir,
                     )
-
-            # Publish PTI's own response (the implementation file) into
-            # final_deliverables/ when configured.
-            if self.publishes_response_as_deliverable:
-                for flag, (child_name, filename) in _OUTPUT_MODE_MAP.items():
-                    if flag in self.output_mode:
-                        src = self._workspace.output_path(filename)
-                        dst = self._workspace.deliverable_path(filename)
-                        if (
-                            dst is not None
-                            and os.path.isfile(src)
-                            and not os.path.exists(dst)
-                        ):
-                            os.makedirs(os.path.dirname(dst), exist_ok=True)
-                            shutil.copy2(src, dst)
 
     def resolve_output_path(self, runtime_override=None):
         """PTI override: resolve based on output_mode."""
@@ -2642,8 +2561,6 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
             inference_config = {}
         elif not isinstance(inference_config, dict):
             raise ValueError("'inference_config' must be a dict")
-
-        self._partial_iteration_history = None
 
         # Resolve workspace from two sources in priority order:
         #   1. ``resume_workspace`` — explicit resume target wins (preserves
@@ -2712,15 +2629,7 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         self._current_inference_config = inference_config
         self._current_inference_args = _inference_args
 
-        # Workspace reconstruction
-        if base_workspace:
-            from agent_foundation.common.inferencers.inferencer_workspace import (
-                InferencerWorkspace,
-            )
-
-            self._workspace = InferencerWorkspace(root=base_workspace)
-        else:
-            self._workspace = None
+        self._root_call_workspace(base_workspace)
 
         # CRITICAL: set before _arun so _setup_child_workflows gets valid paths
         self._current_iteration_workspace = (
@@ -2745,8 +2654,10 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         if self._result_root_override is not None:
             pass  # Parent already configured
         elif base_workspace:
-            self.enable_result_save = StepResultSaveOptions.Always
-            self.resume_with_saved_results = True
+            self._set_call_policy(
+                enable_result_save=StepResultSaveOptions.Always,
+                resume_with_saved_results=True,
+            )
 
         # Part 2: emit the PTI root graph (one node per enabled phase) so the UI
         # renders the split view; each phase's nested Dual/BTA sub-graph nests
@@ -2773,6 +2684,19 @@ class PlanThenImplementInferencer(LinearWorkflowInferencer):
         self._finalize_outputs()
 
         return result
+
+    def _root_call_workspace(self, base_workspace: Optional[str]) -> None:
+        """Root this call at ``base_workspace``. Under a host ctx only the current
+        invocation is re-rooted (B7); without one the backing is set, as before."""
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            InferencerWorkspace,
+        )
+
+        workspace = InferencerWorkspace(root=base_workspace) if base_workspace else None
+        if invocation_of(self).mode == "host":
+            self._set_call_workspace(workspace)
+        else:
+            self._workspace = workspace
 
     # === Graph visualization (Part 2): root phase topology + per-phase status ===
     # PTI is Workflow-based (not a WorkGraph) so it builds GraphTopologyEvent

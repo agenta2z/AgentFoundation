@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.common import (
     _detect_fbsource_root_for,
     generate_config_with_allowed_commands,
@@ -24,6 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types 
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,14 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         auto_resume: If True, automatically resume previous session (default True).
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    _FANOUT_SINGLE_CALL_ARGS = StreamingInferencerBase._FANOUT_SINGLE_CALL_ARGS + (
+        "return_sdk_response",
+    )
+
     # DevmateSDK launches the Devmate SDK subprocess with file-edit / write
     # tools, so it HAS local file access. Override ``InferencerBase``'s
     # False default (inferencer_base.py:117) so the template feed exposes
@@ -113,7 +121,6 @@ class DevmateSDKInferencer(StreamingInferencerBase):
 
     # Internal state
     _client: Any = attrib(default=None, init=False, repr=False)
-    _last_token_count: int = attrib(default=0, init=False, repr=False)
 
     def __attrs_post_init__(self):
         """Translate model_id, then super() runs source_path auto-detect, then wire shell-allowlist config."""
@@ -151,13 +158,17 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             )
         elif self.allowed_shell_commands and self.enable_shell:
             # Sync base config first (before we mutate self.config_file_path).
-            sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
+            sync_config_to_target(
+                self.config_file_path, self.source_path, config_sync_target
+            )
             self.config_file_path = generate_config_with_allowed_commands(
                 self.config_file_path, self.allowed_shell_commands, self.source_path
             )
 
         # Sync the (possibly updated) config to the target repo if they differ.
-        sync_config_to_target(self.config_file_path, self.source_path, config_sync_target)
+        sync_config_to_target(
+            self.config_file_path, self.source_path, config_sync_target
+        )
 
     @classmethod
     def _detect_source_root(cls) -> "Optional[str]":
@@ -203,6 +214,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
         Yields:
             Text deltas as they arrive from Devmate.
         """
+        stats = self._stream_stats()
         # Try canonical namespace first (``//devai/devmate_sdk/python:devmate_python_sdk``),
         # then fall back to the OSS-portable standalone namespace
         # (``//devmate_standalone/devai/devmate_sdk/python:devmate_python_sdk``).
@@ -293,7 +305,11 @@ class DevmateSDKInferencer(StreamingInferencerBase):
             output = getattr(action, "output", None)
 
             # Log all available fields on the action for debugging
-            action_attrs = {a: type(getattr(action, a, None)).__name__ for a in dir(action) if not a.startswith("_")}
+            action_attrs = {
+                a: type(getattr(action, a, None)).__name__
+                for a in dir(action)
+                if not a.startswith("_")
+            }
             self.log_info(
                 f"action_id={action_id}, output_type={type(output).__name__}, "
                 f"output_attrs={[a for a in dir(output) if not a.startswith('_')] if output else None}, "
@@ -324,7 +340,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
                         delta = current_text
                     if delta:
                         await chunk_queue.put(delta)
-                        self._last_token_count += 1
+                        stats.tokens += 1
                     last_accumulated_text = current_text
 
         async def on_step(step: Any) -> None:
@@ -392,7 +408,7 @@ class DevmateSDKInferencer(StreamingInferencerBase):
                     pass
                 session_task.cancel()
 
-            self._session_id = local_session_id
+            self.active_session_id = local_session_id
 
             if error_holder:
                 raise error_holder[0]
@@ -433,25 +449,24 @@ class DevmateSDKInferencer(StreamingInferencerBase):
                 "Resuming explicit session: %s",
                 explicit_session_id[:8] if explicit_session_id else None,
             )
-        elif self.auto_resume and self._session_id:
-            kwargs["previous_session_id"] = self._session_id
+        elif self.auto_resume and self.active_session_id:
+            kwargs["previous_session_id"] = self.active_session_id
             logger.debug(
-                "Auto-resuming previous session: %s",
-                self._session_id[:8] if self._session_id else None,
+                "Auto-resuming previous session: %s", self.active_session_id[:8]
             )
         else:
             kwargs["previous_session_id"] = None
             logger.debug("Starting fresh session (no previous session)")
 
-        self._last_token_count = 0
+        stats = self._reset_stream_stats()
         response_text = await super()._ainfer(
             inference_input, inference_config, **kwargs
         )
         if kwargs.get("return_sdk_response", False):
             return SDKInferencerResponse(
                 content=response_text,
-                session_id=self._session_id,
-                tokens_received=self._last_token_count,
+                session_id=self.active_session_id,
+                tokens_received=stats.tokens,
             )
         return response_text
 

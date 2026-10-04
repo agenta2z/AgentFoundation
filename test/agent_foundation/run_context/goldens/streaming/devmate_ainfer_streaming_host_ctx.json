@@ -1,0 +1,108 @@
+{
+  "body": {
+    "calls": [
+      {
+        "active_session_id": null,
+        "active_session_id_under_ctx": null,
+        "cli": [
+          {
+            "TMPDIR": "/tmp/devmate-<UID>",
+            "argv": [
+              "-p",
+              "--agent-harness",
+              "native",
+              "--auto-run-mode",
+              "autoRunAll",
+              "-m",
+              "claude-opus-4.7-long",
+              "host question"
+            ],
+            "cwd": "<TMP>/repo",
+            "stdin": ""
+          }
+        ],
+        "consecutive_error_count": 0,
+        "construct_command": [
+          {
+            "active_ctx": {
+              "legacy_mint": false,
+              "path": "/devmate"
+            },
+            "dump_output": true,
+            "input": {
+              "prompt": "host question"
+            },
+            "kwargs": {
+              "dump_output": false,
+              "resume": false,
+              "session_id": null
+            }
+          }
+        ],
+        "dump_output_after": true,
+        "observed": [],
+        "output": [
+          "● ANSWER(host question)\n",
+          "  continuation line\n"
+        ],
+        "raised": null
+      },
+      {
+        "active_session_id": null,
+        "active_session_id_under_ctx": null,
+        "cli": [
+          {
+            "TMPDIR": "/tmp/devmate-<UID>",
+            "argv": [
+              "-p",
+              "--agent-harness",
+              "native",
+              "--auto-run-mode",
+              "autoRunAll",
+              "-m",
+              "claude-opus-4.7-long",
+              "bare follow-up"
+            ],
+            "cwd": "<TMP>/repo",
+            "stdin": ""
+          }
+        ],
+        "consecutive_error_count": 0,
+        "construct_command": [
+          {
+            "active_ctx": {
+              "legacy_mint": true,
+              "path": "/"
+            },
+            "dump_output": true,
+            "input": {
+              "prompt": "bare follow-up"
+            },
+            "kwargs": {
+              "dump_output": false,
+              "resume": false,
+              "session_id": null
+            }
+          }
+        ],
+        "dump_output_after": true,
+        "observed": [],
+        "output": [
+          "● ANSWER(bare follow-up)\n",
+          "  continuation line\n"
+        ],
+        "raised": null
+      }
+    ],
+    "host_ctx": {
+      "legacy_mint": false,
+      "path": "/devmate"
+    }
+  },
+  "session_logs": {},
+  "tree": {
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_8cdbd3b5.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ host question\n\n● ANSWER(host question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_e0d90441.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ bare follow-up\n\n● ANSWER(bare follow-up)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID2>.log\nResume with: dm --resume <UUID2>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cli/fake_dm.py": "<present>"
+  }
+}

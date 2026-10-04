@@ -7,6 +7,7 @@ Creates a DualInferencer with mock base/review/fixer inferencers and verifies:
 
 Requirements: 21.1, 21.3, 21.5
 """
+
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 def _make_mock_inferencer(response=None, side_effect=None):
@@ -79,7 +81,8 @@ class TestDualConsensusPostExpansion(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -103,7 +106,8 @@ class TestDualConsensusPostExpansion(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -124,7 +128,8 @@ class TestDualConsensusPostExpansion(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertFalse(result.consensus_achieved)
@@ -141,7 +146,8 @@ class TestDualConsensusPostExpansion(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertIsNotNone(result.base_response)
@@ -171,7 +177,8 @@ class TestDualCheckpointPostExpansion(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -195,7 +202,8 @@ class TestDualCheckpointPostExpansion(unittest.IsolatedAsyncioTestCase):
             checkpoint_dir=self.tmpdir,
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
         self.assertTrue(result.consensus_achieved)
 
         # Verify any checkpoint files are valid JSON
@@ -233,7 +241,8 @@ class TestDualMultiAttemptPostExpansion(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         # Should have achieved consensus on second attempt

@@ -25,7 +25,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jinja2
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
     DualInferencerResponse,
@@ -34,6 +33,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 # =====================================================================
@@ -44,40 +44,32 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 class _FakeWorkspace:
     """Minimal workspace stub matching the API the helper uses.
 
-    Mirrors the surface of inferencer_workspace.InferencerWorkspace just
-    enough for _resolve_prior_proposer_output_path() to traverse it.
+    Mirrors the surface of the Part 2 (two-axis) InferencerWorkspace just enough
+    for _resolve_prior_proposer_output_path() to traverse it. Part 2 retired the
+    ``final_deliverables/`` subfolder: deliverables live directly in ``outputs/``,
+    so ``has_deliverables`` == outputs/ non-empty and
+    ``deliverable_path``/``deliverable_paths`` operate on ``outputs/`` (identical
+    to ``output_path``). The ``deliverables_dir`` property is gone.
     """
 
-    def __init__(
-        self,
-        root: str,
-        deliverables_subdir: str | None = "final_deliverables",
-    ):
+    def __init__(self, root: str):
         self.root = root
         self.outputs_dir = os.path.join(root, "outputs")
-        self.deliverables_dir = (
-            os.path.join(self.outputs_dir, deliverables_subdir)
-            if deliverables_subdir
-            else None
-        )
         os.makedirs(self.outputs_dir, exist_ok=True)
-        if self.deliverables_dir:
-            os.makedirs(self.deliverables_dir, exist_ok=True)
 
     @property
     def has_deliverables(self) -> bool:
-        d = self.deliverables_dir
+        d = self.outputs_dir
         return bool(d and os.path.isdir(d) and os.listdir(d))
 
-    def deliverable_path(self, relative: str) -> str | None:
-        if not self.deliverables_dir:
-            return None
-        return os.path.join(self.deliverables_dir, relative)
+    def deliverable_path(self, relative: str) -> str:
+        # Part 2: deliverable_path == output_path (outputs/ IS the deliverable set).
+        return os.path.join(self.outputs_dir, relative)
 
     def deliverable_paths(self) -> list[str]:
-        if not self.deliverables_dir or not os.path.isdir(self.deliverables_dir):
+        if not os.path.isdir(self.outputs_dir):
             return []
-        return sorted(os.listdir(self.deliverables_dir))
+        return sorted(os.listdir(self.outputs_dir))
 
     def output_path(self, relative: str) -> str:
         return os.path.join(self.outputs_dir, relative)
@@ -172,11 +164,11 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    # -- Tier 1: deliverable file --
+    # -- Tier 1: deliverable file (Part 2: deliverables live in outputs/) --
 
     def test_T1_returns_deliverable_when_output_md_present(self):
         ws = _FakeWorkspace(self.tmp)
-        deliv = os.path.join(ws.deliverables_dir, "output.md")
+        deliv = ws.deliverable_path("output.md")  # == outputs/output.md
         with open(deliv, "w") as f:
             f.write("# plan content")
         dual = _make_dual_with_proposers(_mock_proposer(workspace=ws))
@@ -185,33 +177,33 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
     def test_T1_prefers_output_path_basename_over_alphabetical(self):
         ws = _FakeWorkspace(self.tmp)
         for fn in ("a_first.md", "output.md", "z_last.md"):
-            with open(os.path.join(ws.deliverables_dir, fn), "w") as f:
+            with open(ws.deliverable_path(fn), "w") as f:
                 f.write("x")
         dual = _make_dual_with_proposers(_mock_proposer(workspace=ws))
         self.assertEqual(
             dual._resolve_prior_proposer_output_path(),
-            os.path.join(ws.deliverables_dir, "output.md"),
+            ws.deliverable_path("output.md"),
         )
 
-    def test_T1_skips_dotfile_falls_through_to_T2(self):
+    def test_T1_skips_dotfile_finds_output_md(self):
         ws = _FakeWorkspace(self.tmp)
-        # Only the dotfile marker; no real deliverable.
-        with open(os.path.join(ws.deliverables_dir, ".self_promoted"), "w") as f:
+        # A dotfile marker alongside the real deliverable, both in outputs/.
+        with open(ws.output_path(".self_promoted"), "w") as f:
             f.write("")
-        # But there IS a Tier-2 fallback.
-        with open(os.path.join(ws.outputs_dir, "output.md"), "w") as f:
+        with open(ws.output_path("output.md"), "w") as f:
             f.write("x")
         dual = _make_dual_with_proposers(_mock_proposer(workspace=ws))
+        # The dotfile must not shadow the preferred output.md deliverable.
         self.assertEqual(
             dual._resolve_prior_proposer_output_path(),
-            os.path.join(ws.outputs_dir, "output.md"),
+            ws.output_path("output.md"),
         )
 
     def test_T1_alphabetical_fallback_when_preferred_absent(self):
         ws = _FakeWorkspace(self.tmp)
-        with open(os.path.join(ws.deliverables_dir, "report.md"), "w") as f:
+        with open(ws.deliverable_path("report.md"), "w") as f:
             f.write("x")
-        with open(os.path.join(ws.deliverables_dir, "summary.json"), "w") as f:
+        with open(ws.deliverable_path("summary.json"), "w") as f:
             f.write("{}")
         dual = _make_dual_with_proposers(
             _mock_proposer(workspace=ws, output_path="not_present.md")
@@ -219,22 +211,22 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
         # report.md is alphabetically first non-dotfile.
         self.assertEqual(
             dual._resolve_prior_proposer_output_path(),
-            os.path.join(ws.deliverables_dir, "report.md"),
+            ws.deliverable_path("report.md"),
         )
 
-    # -- Tier 2: outputs file --
+    # -- Tier 2: outputs file (canonical for leaf inferencers) --
 
     def test_T2_returns_outputs_md_when_no_deliverables(self):
-        ws = _FakeWorkspace(self.tmp, deliverables_subdir=None)
-        out = os.path.join(ws.outputs_dir, "output.md")
+        ws = _FakeWorkspace(self.tmp)
+        out = ws.output_path("output.md")
         with open(out, "w") as f:
             f.write("# plan")
         dual = _make_dual_with_proposers(_mock_proposer(workspace=ws))
         self.assertEqual(dual._resolve_prior_proposer_output_path(), out)
 
     def test_T2_uses_configured_output_path_basename(self):
-        ws = _FakeWorkspace(self.tmp, deliverables_subdir=None)
-        out = os.path.join(ws.outputs_dir, "my_report.md")
+        ws = _FakeWorkspace(self.tmp)
+        out = ws.output_path("my_report.md")
         with open(out, "w") as f:
             f.write("x")
         dual = _make_dual_with_proposers(
@@ -245,7 +237,7 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
     # -- Tier 3 / edge cases --
 
     def test_T3_returns_None_when_neither_exists(self):
-        ws = _FakeWorkspace(self.tmp, deliverables_subdir=None)
+        ws = _FakeWorkspace(self.tmp)  # outputs/ empty → has_deliverables False
         dual = _make_dual_with_proposers(_mock_proposer(workspace=ws))
         self.assertIsNone(dual._resolve_prior_proposer_output_path())
 
@@ -258,7 +250,7 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
         self.assertIsNone(dual._resolve_prior_proposer_output_path())
 
     def test_proposer_without_output_path_uses_default_basename(self):
-        ws = _FakeWorkspace(self.tmp, deliverables_subdir=None)
+        ws = _FakeWorkspace(self.tmp)
         out = os.path.join(ws.outputs_dir, "output.md")
         with open(out, "w") as f:
             f.write("x")
@@ -274,8 +266,8 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
     def test_after_fix_iteration_resolves_fixer_path(self):
         base_ws = _FakeWorkspace(os.path.join(self.tmp, "base"))
         fixer_ws = _FakeWorkspace(os.path.join(self.tmp, "fixer"))
-        base_deliv = os.path.join(base_ws.deliverables_dir, "output.md")
-        fixer_deliv = os.path.join(fixer_ws.deliverables_dir, "output.md")
+        base_deliv = base_ws.deliverable_path("output.md")
+        fixer_deliv = fixer_ws.deliverable_path("output.md")
         with open(base_deliv, "w") as f:
             f.write("base plan")
         with open(fixer_deliv, "w") as f:
@@ -292,7 +284,7 @@ class TestResolvePriorProposerOutputPath(unittest.TestCase):
     def test_two_agent_mode_fixer_None_resolves_base(self):
         """If fixer_inferencer is None, _active_proposer() falls back to base."""
         base_ws = _FakeWorkspace(self.tmp)
-        base_deliv = os.path.join(base_ws.deliverables_dir, "output.md")
+        base_deliv = base_ws.deliverable_path("output.md")
         with open(base_deliv, "w") as f:
             f.write("base")
         dual = _make_dual_with_proposers(
@@ -439,7 +431,8 @@ class TestFollowupTemplateRendersPathAware(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         # Set up a real on-disk deliverable to be discovered by the helper.
-        self.deliv_dir = os.path.join(self.tmp, "outputs", "final_deliverables")
+        # Part 2: deliverables live directly in outputs/ (final_deliverables/ retired).
+        self.deliv_dir = os.path.join(self.tmp, "outputs")
         os.makedirs(self.deliv_dir, exist_ok=True)
         self.prior_file = os.path.join(self.deliv_dir, "output.md")
         with open(self.prior_file, "w") as f:
@@ -630,7 +623,7 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
     async def test_fixer_input_contains_prior_path_when_workspace_present(self):
         # Base proposer: writes a real deliverable to its workspace.
         base_ws = self._make_workspace("base")
-        prior_file = os.path.join(base_ws.deliverables_dir, "output.md")
+        prior_file = base_ws.deliverable_path("output.md")
         with open(prior_file, "w") as f:
             f.write("# Plan\n\n## 1. Section\nContent.")
 
@@ -666,7 +659,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("test request")
         self.assertIsInstance(result, DualInferencerResponse)
 
         # The fixer must have been invoked exactly once.
@@ -709,7 +703,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            await dual._ainfer("test request")
         self.assertEqual(len(captured), 1)
         # Fallback wording should appear; no `cp ` line.
         self.assertNotIn("cp ", captured[0])
@@ -718,7 +713,7 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
     async def test_review_inferencer_input_contains_prior_path(self):
         """Symmetric assertion for the reviewer."""
         base_ws = self._make_workspace("base")
-        prior_file = os.path.join(base_ws.deliverables_dir, "output.md")
+        prior_file = base_ws.deliverable_path("output.md")
         with open(prior_file, "w") as f:
             f.write("plan content")
 
@@ -744,7 +739,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            await dual._ainfer("test request")
         self.assertGreaterEqual(len(captured_reviewer_inputs), 1)
         # Reviewer should also see the path (via review template path-aware block).
         self.assertIn(prior_file, captured_reviewer_inputs[0])

@@ -5,6 +5,7 @@ agent interactions.  **All heavy imports (Rich, prompt_toolkit) are
 deferred** so that ``import agent_foundation`` never triggers Rich
 loading.  Concrete classes are resolved lazily via ``__getattr__``.
 """
+
 from __future__ import annotations
 
 from importlib import import_module
@@ -12,7 +13,10 @@ from typing import TYPE_CHECKING
 
 # Mapping of public names -> (module_path, attribute_name)
 _LAZY_IMPORTS = {
-    "RichTerminalInteractive": ("agent_foundation.ui.cli.rich_terminal", "RichTerminalInteractive"),
+    "RichTerminalInteractive": (
+        "agent_foundation.ui.cli.rich_terminal",
+        "RichTerminalInteractive",
+    ),
     "StreamingPanel": ("agent_foundation.ui.cli.streaming", "StreamingPanel"),
     "ThemeManager": ("agent_foundation.ui.cli.theme", "ThemeManager"),
     "COLORS": ("agent_foundation.ui.cli.theme", "COLORS"),
@@ -33,9 +37,20 @@ def __getattr__(name: str):
 
 
 if TYPE_CHECKING:
-    from agent_foundation.ui.cli.rich_terminal import RichTerminalInteractive as RichTerminalInteractive  # noqa: F401
-    from agent_foundation.ui.cli.streaming import StreamingPanel as StreamingPanel  # noqa: F401
-    from agent_foundation.ui.cli.theme import ThemeManager as ThemeManager, COLORS as COLORS  # noqa: F401
-    from agent_foundation.ui.cli.prompts import ask_confirm as ask_confirm, ask_single_choice as ask_single_choice, ask_text as ask_text  # noqa: F401
+    from agent_foundation.ui.cli.prompts import (  # noqa: F401
+        ask_confirm as ask_confirm,
+        ask_single_choice as ask_single_choice,
+        ask_text as ask_text,
+    )
+    from agent_foundation.ui.cli.rich_terminal import (  # noqa: F401
+        RichTerminalInteractive as RichTerminalInteractive,
+    )
+    from agent_foundation.ui.cli.streaming import (  # noqa: F401
+        StreamingPanel as StreamingPanel,
+    )
+    from agent_foundation.ui.cli.theme import (  # noqa: F401
+        COLORS as COLORS,
+        ThemeManager as ThemeManager,
+    )
 
 __all__ = list(_LAZY_IMPORTS.keys())

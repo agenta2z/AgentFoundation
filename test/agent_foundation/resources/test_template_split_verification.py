@@ -47,11 +47,21 @@ class TestSharedVariableFile:
     and contain the expected NOTES content."""
 
     def test_file_exists(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "notes" / "local_search_efficiency.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "notes"
+            / "local_search_efficiency.jinja2"
+        )
         assert path.is_file(), f"Shared variable file missing: {path}"
 
     def test_file_has_content(self) -> None:
-        path = AF_TEMPLATES_ROOT / "_variables" / "notes" / "local_search_efficiency.jinja2"
+        path = (
+            AF_TEMPLATES_ROOT
+            / "_variables"
+            / "notes"
+            / "local_search_efficiency.jinja2"
+        )
         content = path.read_text(encoding="utf-8")
         assert len(content.strip()) > 0, "Shared variable file is empty"
         assert "search" in content.lower() or "NEVER" in content, (
@@ -205,7 +215,9 @@ class TestSharedVariableLoading:
         assert "Now start your decomposition" in rendered
         assert "UndefinedError" not in rendered
 
-    def test_task_breakdown_implementation_version_resolves_task_instructions(self) -> None:
+    def test_task_breakdown_implementation_version_resolves_task_instructions(
+        self,
+    ) -> None:
         """With per-variable version 'implementation', task_instructions resolves
         to task_breakdown/main/_variables/task_instructions/implementation/default.jinja2."""
         from rich_python_utils.string_utils.formatting.template_manager import (
@@ -234,7 +246,9 @@ class TestSharedVariableLoading:
             "Implementation task_instructions should instruct to reference plan sections"
         )
 
-    def test_task_breakdown_implementation_instructions_render_in_template(self) -> None:
+    def test_task_breakdown_implementation_instructions_render_in_template(
+        self,
+    ) -> None:
         """Full render: task_breakdown/main/initial.jinja2 with
         implementation-versioned task_instructions includes the
         implementation-specific content in the rendered output."""

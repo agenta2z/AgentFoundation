@@ -8,7 +8,7 @@ from agent_foundation.common.inferencers.run_context.lint import (
 
 # A synthetic "inferencer module": a threaded call, an un-threaded call, and an
 # exempt one — exactly the three cases the lint must distinguish.
-FIXTURE = '''
+FIXTURE = """
 class Orchestrator:
     async def _ainfer(self, x):
         # threaded: passes run_context -> OK
@@ -22,7 +22,7 @@ class Orchestrator:
     def helper(self):
         # exempt-example (documented): a nested-self child call we choose to exempt
         return self.iter_infer(x)
-'''
+"""
 
 
 def test_find_child_call_sites_detects_all_methods():
@@ -51,11 +51,11 @@ def test_lint_flags_unthreaded_and_respects_exempt_list():
 
 
 def test_fully_threaded_or_exempt_source_has_no_violations():
-    clean = '''
+    clean = """
 class C:
     async def _ainfer(self, x):
         return await self.k.ainfer(x, run_context=ctx.child("k"))
-'''
+"""
     assert lint_source(clean) == []
 
 

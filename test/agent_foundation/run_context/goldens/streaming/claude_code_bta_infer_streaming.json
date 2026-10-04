@@ -1,0 +1,25 @@
+{
+  "active_session_id": null,
+  "cli": [],
+  "construct_command": [],
+  "fanout": [
+    {
+      "args": {},
+      "contract": "turn 1",
+      "path": "_run_fanout"
+    }
+  ],
+  "get_streaming_result": {
+    "error": null,
+    "output": "",
+    "raw_output": "",
+    "return_code": 0,
+    "session_id": null,
+    "stderr": "",
+    "success": true,
+    "type": "TerminalInferencerResponse"
+  },
+  "live_store": null,
+  "output": "FANOUT_TEXT",
+  "session_backing": null
+}

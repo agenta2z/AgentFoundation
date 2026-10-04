@@ -1,0 +1,155 @@
+{
+  "catalog": {
+    "active_session_id": {
+      "StreamingInferencerBase": [
+        "_session_id",
+        "_live_handle_store[ctx.path].live_session_id"
+      ]
+    },
+    "get_final_output": {
+      "RovoDevCliInferencer": [
+        "_last_clean_output",
+        "_last_raw_stdout"
+      ],
+      "StreamingInferencerBase": []
+    }
+  },
+  "steps": {
+    "bare1": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_live_handle_store": null,
+        "_session_id": "sid<task-a>"
+      },
+      "getters": {
+        "active_session_id": "sid<task-a>",
+        "get_final_output": null
+      },
+      "result": "reply<task-a>"
+    },
+    "bare2": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_live_handle_store": null,
+        "_session_id": "sid<task-b>"
+      },
+      "getters": {
+        "active_session_id": "sid<task-b>",
+        "get_final_output": null
+      },
+      "result": "reply<task-b>"
+    },
+    "bare3_fail": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        },
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": null
+          }
+        },
+        "_session_id": null
+      },
+      "getters": {
+        "active_session_id": null,
+        "get_final_output": null
+      },
+      "result": {
+        "error": "RuntimeError"
+      }
+    },
+    "bare_sync_infer": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": null
+          }
+        },
+        "_session_id": "sid<task-l>"
+      },
+      "getters": {
+        "active_session_id": "sid<task-l>",
+        "get_final_output": null
+      },
+      "result": "sync<task-s>"
+    },
+    "host": {
+      "ctx_seen": [
+        {
+          "legacy_mint": false,
+          "path": "/"
+        }
+      ],
+      "fields_after": {
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": "sid<task-h>"
+          }
+        },
+        "_session_id": "sid<task-b>"
+      },
+      "fields_before": {
+        "_live_handle_store": null,
+        "_session_id": "sid<task-b>"
+      },
+      "getters_after": {
+        "active_session_id": "sid<task-b>",
+        "get_final_output": null
+      },
+      "getters_reentered": {
+        "active_session_id": "sid<task-h>",
+        "get_final_output": null
+      },
+      "result": "reply<task-h>",
+      "store_paths": [],
+      "touched": [
+        "_live_handle_store"
+      ]
+    },
+    "legacy_entered": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": null
+          }
+        },
+        "_session_id": "sid<task-l>"
+      },
+      "getters": {
+        "active_session_id": "sid<task-l>",
+        "get_final_output": null
+      },
+      "result": "reply<task-l>"
+    }
+  }
+}

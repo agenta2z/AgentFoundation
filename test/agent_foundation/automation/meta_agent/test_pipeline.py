@@ -16,10 +16,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from agent_foundation.automation.meta_agent.errors import (
-    InsufficientSuccessTracesError,
-)
+from agent_foundation.automation.meta_agent.errors import InsufficientSuccessTracesError
 from agent_foundation.automation.meta_agent.evaluator import (
     EvaluationResult,
     EvaluationRule,
@@ -31,14 +28,13 @@ from agent_foundation.automation.meta_agent.models import (
     TraceStep,
 )
 from agent_foundation.automation.meta_agent.pipeline import MetaAgentPipeline
-from agent_foundation.automation.meta_agent.synthesizer import (
-    SynthesisStrategy,
-)
+from agent_foundation.automation.meta_agent.synthesizer import SynthesisStrategy
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_trace(trace_id: str = "t1", success: bool = True) -> ExecutionTrace:
     return ExecutionTrace(
@@ -218,15 +214,16 @@ class TestPipelineRun:
             config=config,
         )
 
-        with patch(
-            "agent_foundation.automation.meta_agent.pipeline.TraceNormalizer"
-        ) as MockNorm, patch(
-            "agent_foundation.automation.meta_agent.pipeline.TraceAligner"
-        ), patch(
-            "agent_foundation.automation.meta_agent.pipeline.PatternExtractor"
-        ), patch(
-            "agent_foundation.automation.meta_agent.pipeline.RuleBasedSynthesizer"
-        ) as MockSynth:
+        with (
+            patch(
+                "agent_foundation.automation.meta_agent.pipeline.TraceNormalizer"
+            ) as MockNorm,
+            patch("agent_foundation.automation.meta_agent.pipeline.TraceAligner"),
+            patch("agent_foundation.automation.meta_agent.pipeline.PatternExtractor"),
+            patch(
+                "agent_foundation.automation.meta_agent.pipeline.RuleBasedSynthesizer"
+            ) as MockSynth,
+        ):
             MockNorm.return_value.normalize.return_value = [traces[0]]
             MockSynth.return_value.synthesize.return_value = MagicMock(
                 graph=MagicMock(), report=MagicMock(), python_script=None
@@ -249,7 +246,9 @@ class TestPipelineRun:
         MockEvaluator.return_value.evaluate.return_value = eval_results
 
         config = PipelineConfig(
-            run_count=1, min_success_traces=1, max_retry_rounds=0,
+            run_count=1,
+            min_success_traces=1,
+            max_retry_rounds=0,
         )
         pipeline = MetaAgentPipeline(
             agent=_make_agent(),
@@ -418,6 +417,7 @@ class TestSynthesizerSelection:
         from agent_foundation.automation.meta_agent.synthesizer import (
             RuleBasedSynthesizer,
         )
+
         assert isinstance(synth, RuleBasedSynthesizer)
 
     def test_llm_selected_when_configured(self):
@@ -429,9 +429,8 @@ class TestSynthesizerSelection:
             inferencer=MagicMock(name="inferencer"),
         )
         synth = pipeline._create_synthesizer()
-        from agent_foundation.automation.meta_agent.synthesizer import (
-            LLMSynthesizer,
-        )
+        from agent_foundation.automation.meta_agent.synthesizer import LLMSynthesizer
+
         assert isinstance(synth, LLMSynthesizer)
 
     def test_hybrid_selected_when_configured(self):
@@ -443,9 +442,8 @@ class TestSynthesizerSelection:
             inferencer=MagicMock(name="inferencer"),
         )
         synth = pipeline._create_synthesizer()
-        from agent_foundation.automation.meta_agent.synthesizer import (
-            HybridSynthesizer,
-        )
+        from agent_foundation.automation.meta_agent.synthesizer import HybridSynthesizer
+
         assert isinstance(synth, HybridSynthesizer)
 
 
@@ -486,6 +484,7 @@ class TestValidationStage:
         MockSynthesizer.return_value.synthesize.return_value = mock_synth_result
 
         from agent_foundation.automation.meta_agent.models import ValidationResults
+
         mock_val_results = MagicMock(spec=ValidationResults)
         MockValidator.return_value.validate.return_value = mock_val_results
 
@@ -532,7 +531,9 @@ class TestValidationStage:
         mock_synth_result.python_script = None
         MockSynthesizer.return_value.synthesize.return_value = mock_synth_result
 
-        MockValidator.return_value.validate.side_effect = RuntimeError("validation boom")
+        MockValidator.return_value.validate.side_effect = RuntimeError(
+            "validation boom"
+        )
 
         config = PipelineConfig(run_count=1, validate=True)
         pipeline = MetaAgentPipeline(
@@ -564,7 +565,13 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceCollector")
     @patch(f"{BASE}.RuleBasedSynthesizer")
     def test_succeeds_on_first_try_no_retries(
-        self, MockSynth, MockCollector, MockEval, MockNorm, MockAlign, MockExt,
+        self,
+        MockSynth,
+        MockCollector,
+        MockEval,
+        MockNorm,
+        MockAlign,
+        MockExt,
     ):
         """When all traces pass initially, no retries should occur."""
         traces = [_make_trace("t1"), _make_trace("t2")]
@@ -575,15 +582,21 @@ class TestIterativeCollection:
         ]
         MockNorm.return_value.normalize.return_value = traces
         mock_synth_result = MagicMock(
-            graph=MagicMock(), report=MagicMock(), python_script=None,
+            graph=MagicMock(),
+            report=MagicMock(),
+            python_script=None,
         )
         MockSynth.return_value.synthesize.return_value = mock_synth_result
 
         config = PipelineConfig(
-            run_count=2, validate=False, min_success_traces=2,
+            run_count=2,
+            validate=False,
+            min_success_traces=2,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
         result = pipeline.run("test task")
 
@@ -598,7 +611,13 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceCollector")
     @patch(f"{BASE}.RuleBasedSynthesizer")
     def test_collects_shortfall_on_retry(
-        self, MockSynth, MockCollector, MockEval, MockNorm, MockAlign, MockExt,
+        self,
+        MockSynth,
+        MockCollector,
+        MockEval,
+        MockNorm,
+        MockAlign,
+        MockExt,
     ):
         """When initial eval has insufficient passes, pipeline retries with
         shortfall count and evaluates only the new traces."""
@@ -607,7 +626,7 @@ class TestIterativeCollection:
 
         MockCollector.return_value.collect.side_effect = [
             initial_traces,  # initial collection: 3 traces
-            retry_trace,     # retry: 1 trace (shortfall)
+            retry_trace,  # retry: 1 trace (shortfall)
         ]
 
         # Initial eval: 2 of 3 pass; need 3
@@ -621,19 +640,27 @@ class TestIterativeCollection:
         MockEval.return_value.evaluate.side_effect = [initial_eval, retry_eval]
 
         MockNorm.return_value.normalize.return_value = [
-            _make_trace("t1"), _make_trace("t2"), _make_trace("t4"),
+            _make_trace("t1"),
+            _make_trace("t2"),
+            _make_trace("t4"),
         ]
         mock_synth_result = MagicMock(
-            graph=MagicMock(), report=MagicMock(), python_script=None,
+            graph=MagicMock(),
+            report=MagicMock(),
+            python_script=None,
         )
         MockSynth.return_value.synthesize.return_value = mock_synth_result
 
         config = PipelineConfig(
-            run_count=3, validate=False, min_success_traces=3,
+            run_count=3,
+            validate=False,
+            min_success_traces=3,
             max_retry_rounds=3,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
         result = pipeline.run("test task")
 
@@ -677,10 +704,14 @@ class TestIterativeCollection:
         ]
 
         config = PipelineConfig(
-            run_count=1, min_success_traces=1, max_retry_rounds=2,
+            run_count=1,
+            min_success_traces=1,
+            max_retry_rounds=2,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
 
         with pytest.raises(InsufficientSuccessTracesError) as exc_info:
@@ -696,7 +727,9 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceEvaluator")
     @patch(f"{BASE}.TraceCollector")
     def test_max_retry_rounds_zero_disables_retries(
-        self, MockCollector, MockEval,
+        self,
+        MockCollector,
+        MockEval,
     ):
         """With max_retry_rounds=0, pipeline fails immediately without retrying."""
         traces = [_make_trace("t1")]
@@ -706,10 +739,14 @@ class TestIterativeCollection:
         ]
 
         config = PipelineConfig(
-            run_count=1, min_success_traces=1, max_retry_rounds=0,
+            run_count=1,
+            min_success_traces=1,
+            max_retry_rounds=0,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
 
         with pytest.raises(InsufficientSuccessTracesError):
@@ -737,20 +774,28 @@ class TestIterativeCollection:
         ]
 
         config = PipelineConfig(
-            run_count=1, validate=False, min_success_traces=1,
+            run_count=1,
+            validate=False,
+            min_success_traces=1,
             max_retry_rounds=1,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
 
-        with patch(f"{BASE}.TraceNormalizer") as MockNorm, \
-             patch(f"{BASE}.TraceAligner"), \
-             patch(f"{BASE}.PatternExtractor"), \
-             patch(f"{BASE}.RuleBasedSynthesizer") as MockSynth:
+        with (
+            patch(f"{BASE}.TraceNormalizer") as MockNorm,
+            patch(f"{BASE}.TraceAligner"),
+            patch(f"{BASE}.PatternExtractor"),
+            patch(f"{BASE}.RuleBasedSynthesizer") as MockSynth,
+        ):
             MockNorm.return_value.normalize.return_value = [retry_trace[0]]
             MockSynth.return_value.synthesize.return_value = MagicMock(
-                graph=MagicMock(), report=MagicMock(), python_script=None,
+                graph=MagicMock(),
+                report=MagicMock(),
+                python_script=None,
             )
             pipeline.run("test task", input_data=[{"key": "val"}])
 
@@ -765,7 +810,9 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceEvaluator")
     @patch(f"{BASE}.TraceCollector")
     def test_evaluation_error_returns_failed_stage_evaluation(
-        self, MockCollector, MockEval,
+        self,
+        MockCollector,
+        MockEval,
     ):
         """When the evaluator raises, failed_stage should be 'evaluation',
         not 'collection'."""
@@ -775,7 +822,9 @@ class TestIterativeCollection:
 
         config = PipelineConfig(run_count=1, min_success_traces=1)
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
         result = pipeline.run("test task")
 
@@ -785,7 +834,9 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceEvaluator")
     @patch(f"{BASE}.TraceCollector")
     def test_retry_collection_error_returns_failed_stage_collection(
-        self, MockCollector, MockEval,
+        self,
+        MockCollector,
+        MockEval,
     ):
         """When collector raises during a retry round, failed_stage should
         be 'collection'."""
@@ -799,10 +850,14 @@ class TestIterativeCollection:
         ]
 
         config = PipelineConfig(
-            run_count=1, min_success_traces=1, max_retry_rounds=1,
+            run_count=1,
+            min_success_traces=1,
+            max_retry_rounds=1,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
         result = pipeline.run("test task")
 
@@ -812,7 +867,9 @@ class TestIterativeCollection:
     @patch(f"{BASE}.TraceEvaluator")
     @patch(f"{BASE}.TraceCollector")
     def test_partial_results_preserved_on_mid_retry_failure(
-        self, MockCollector, MockEval,
+        self,
+        MockCollector,
+        MockEval,
     ):
         """When collector fails during retry round 2, traces from initial
         + round 1 are preserved in the result."""
@@ -830,10 +887,14 @@ class TestIterativeCollection:
         ]
 
         config = PipelineConfig(
-            run_count=1, min_success_traces=1, max_retry_rounds=3,
+            run_count=1,
+            min_success_traces=1,
+            max_retry_rounds=3,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
         result = pipeline.run("test task")
 
@@ -855,7 +916,13 @@ class TestCollectionHooks:
     @patch(f"{BASE}.TraceCollector")
     @patch(f"{BASE}.RuleBasedSynthesizer")
     def test_collection_hook_fires_before_evaluation(
-        self, MockSynth, MockCollector, MockEval, MockNorm, MockAlign, MockExt,
+        self,
+        MockSynth,
+        MockCollector,
+        MockEval,
+        MockNorm,
+        MockAlign,
+        MockExt,
     ):
         """The collection hook should fire with the initial trace count,
         before evaluation begins."""
@@ -867,21 +934,23 @@ class TestCollectionHooks:
         ]
         MockNorm.return_value.normalize.return_value = traces
         MockSynth.return_value.synthesize.return_value = MagicMock(
-            graph=MagicMock(), report=MagicMock(), python_script=None,
+            graph=MagicMock(),
+            report=MagicMock(),
+            python_script=None,
         )
 
         hook = MagicMock()
         config = PipelineConfig(run_count=2, validate=False, min_success_traces=1)
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(),
-            config=config, stage_hook=hook,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
+            stage_hook=hook,
         )
         pipeline.run("test task")
 
         # Find the collection hook call
-        collection_calls = [
-            c for c in hook.call_args_list if c[0][0] == "collection"
-        ]
+        collection_calls = [c for c in hook.call_args_list if c[0][0] == "collection"]
         assert len(collection_calls) == 1
         data = collection_calls[0][0][1]
         assert data["trace_count"] == 2
@@ -893,7 +962,13 @@ class TestCollectionHooks:
     @patch(f"{BASE}.TraceCollector")
     @patch(f"{BASE}.RuleBasedSynthesizer")
     def test_evaluation_hook_fires_once_with_all_results(
-        self, MockSynth, MockCollector, MockEval, MockNorm, MockAlign, MockExt,
+        self,
+        MockSynth,
+        MockCollector,
+        MockEval,
+        MockNorm,
+        MockAlign,
+        MockExt,
     ):
         """Even with retries, the evaluation hook should fire once with
         all combined results."""
@@ -909,27 +984,32 @@ class TestCollectionHooks:
             [EvaluationResult(trace_id="t3", passed=True)],
         ]
         MockNorm.return_value.normalize.return_value = [
-            _make_trace("t1"), _make_trace("t3"),
+            _make_trace("t1"),
+            _make_trace("t3"),
         ]
         MockSynth.return_value.synthesize.return_value = MagicMock(
-            graph=MagicMock(), report=MagicMock(), python_script=None,
+            graph=MagicMock(),
+            report=MagicMock(),
+            python_script=None,
         )
 
         hook = MagicMock()
         config = PipelineConfig(
-            run_count=2, validate=False, min_success_traces=2,
+            run_count=2,
+            validate=False,
+            min_success_traces=2,
             max_retry_rounds=1,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(),
-            config=config, stage_hook=hook,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
+            stage_hook=hook,
         )
         pipeline.run("test task")
 
         # Evaluation hook should fire once
-        eval_calls = [
-            c for c in hook.call_args_list if c[0][0] == "evaluation"
-        ]
+        eval_calls = [c for c in hook.call_args_list if c[0][0] == "evaluation"]
         assert len(eval_calls) == 1
         data = eval_calls[0][0][1]
         assert data["passed_count"] == 2
@@ -946,7 +1026,13 @@ class TestRefineUpdated:
     @patch(f"{BASE}.TraceCollector")
     @patch(f"{BASE}.RuleBasedSynthesizer")
     def test_refine_fires_evaluation_hook(
-        self, MockSynth, MockCollector, MockEval, MockNorm, MockAlign, MockExt,
+        self,
+        MockSynth,
+        MockCollector,
+        MockEval,
+        MockNorm,
+        MockAlign,
+        MockExt,
     ):
         """refine() should fire the evaluation hook before synthesis."""
         existing = PipelineResult(
@@ -961,23 +1047,26 @@ class TestRefineUpdated:
             EvaluationResult(trace_id="t2", passed=True),
         ]
         MockNorm.return_value.normalize.return_value = [
-            _make_trace("t1"), _make_trace("t2"),
+            _make_trace("t1"),
+            _make_trace("t2"),
         ]
         MockSynth.return_value.synthesize.return_value = MagicMock(
-            graph=MagicMock(), report=MagicMock(), python_script=None,
+            graph=MagicMock(),
+            report=MagicMock(),
+            python_script=None,
         )
 
         hook = MagicMock()
         config = PipelineConfig(run_count=1, validate=False)
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(),
-            config=config, stage_hook=hook,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
+            stage_hook=hook,
         )
         pipeline.refine(existing, additional_run_count=1)
 
-        eval_calls = [
-            c for c in hook.call_args_list if c[0][0] == "evaluation"
-        ]
+        eval_calls = [c for c in hook.call_args_list if c[0][0] == "evaluation"]
         assert len(eval_calls) == 1
         data = eval_calls[0][0][1]
         assert data["passed_count"] == 2
@@ -986,13 +1075,17 @@ class TestRefineUpdated:
     @patch(f"{BASE}.TraceEvaluator")
     @patch(f"{BASE}.TraceCollector")
     def test_refine_handles_mismatched_traces_and_eval_results(
-        self, MockCollector, MockEval,
+        self,
+        MockCollector,
+        MockEval,
     ):
         """refine() should truncate mismatched traces/eval_results safely."""
         # 3 traces but only 2 eval results (simulating mid-eval crash)
         existing = PipelineResult(
             traces=[
-                _make_trace("t1"), _make_trace("t2"), _make_trace("t3"),
+                _make_trace("t1"),
+                _make_trace("t2"),
+                _make_trace("t3"),
             ],
             evaluation_results=[
                 EvaluationResult(trace_id="t1", passed=True),
@@ -1006,21 +1099,30 @@ class TestRefineUpdated:
         ]
 
         config = PipelineConfig(
-            run_count=1, validate=False, min_success_traces=2,
+            run_count=1,
+            validate=False,
+            min_success_traces=2,
         )
         pipeline = MetaAgentPipeline(
-            agent=_make_agent(), action_executor=_make_executor(), config=config,
+            agent=_make_agent(),
+            action_executor=_make_executor(),
+            config=config,
         )
 
-        with patch(f"{BASE}.TraceNormalizer") as MockNorm, \
-             patch(f"{BASE}.TraceAligner"), \
-             patch(f"{BASE}.PatternExtractor"), \
-             patch(f"{BASE}.RuleBasedSynthesizer") as MockSynth:
+        with (
+            patch(f"{BASE}.TraceNormalizer") as MockNorm,
+            patch(f"{BASE}.TraceAligner"),
+            patch(f"{BASE}.PatternExtractor"),
+            patch(f"{BASE}.RuleBasedSynthesizer") as MockSynth,
+        ):
             MockNorm.return_value.normalize.return_value = [
-                _make_trace("t1"), _make_trace("t4"),
+                _make_trace("t1"),
+                _make_trace("t4"),
             ]
             MockSynth.return_value.synthesize.return_value = MagicMock(
-                graph=MagicMock(), report=MagicMock(), python_script=None,
+                graph=MagicMock(),
+                report=MagicMock(),
+                python_script=None,
             )
             result = pipeline.refine(existing, additional_run_count=1)
 

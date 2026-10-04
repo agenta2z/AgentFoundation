@@ -14,13 +14,9 @@ from __future__ import annotations
 
 from typing import List
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.aligner import TraceAligner
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +56,9 @@ def execution_trace_st(trace_id: str) -> st.SearchStrategy[ExecutionTrace]:
 def traces_st() -> st.SearchStrategy[List[ExecutionTrace]]:
     """Generate a list of 1-6 traces with unique trace IDs."""
     return st.integers(min_value=1, max_value=6).flatmap(
-        lambda n: st.tuples(
-            *[execution_trace_st(f"trace_{i}") for i in range(n)]
-        ).map(list)
+        lambda n: st.tuples(*[execution_trace_st(f"trace_{i}") for i in range(n)]).map(
+            list
+        )
     )
 
 
@@ -113,8 +109,7 @@ class TestAlignmentCoverageProperty:
         for pos in result.positions:
             pos_keys = set(pos.steps.keys())
             assert pos_keys == input_ids, (
-                f"Position {pos.index}: expected keys {input_ids}, "
-                f"got {pos_keys}"
+                f"Position {pos.index}: expected keys {input_ids}, got {pos_keys}"
             )
 
     @given(traces=traces_st())
@@ -129,7 +124,8 @@ class TestAlignmentCoverageProperty:
 
         for trace in traces:
             non_none_count = sum(
-                1 for pos in result.positions
+                1
+                for pos in result.positions
                 if pos.steps.get(trace.trace_id) is not None
             )
             assert non_none_count == len(trace.steps), (

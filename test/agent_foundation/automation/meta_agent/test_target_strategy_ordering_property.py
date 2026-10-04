@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from hypothesis import given, settings, assume
-from hypothesis import strategies as st
-
-from agent_foundation.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
@@ -23,13 +19,16 @@ from agent_foundation.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
+from agent_foundation.automation.meta_agent.pattern_extractor import STRATEGY_PRIORITY
+from agent_foundation.automation.meta_agent.synthesizer import (
+    GraphSynthesizer,
+    RuleBasedSynthesizer,
+)
 from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    STRATEGY_PRIORITY,
-)
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +45,7 @@ ACTION_TYPES = ["click", "input_text", "scroll", "visit_url"]
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _priority_index(strategy_name: str) -> int:
     """Return the index of *strategy_name* in the priority list."""
@@ -66,6 +66,7 @@ def _make_fallback_target(strategy_names: list[str]) -> TargetSpecWithFallback:
 # Hypothesis strategies
 # ---------------------------------------------------------------------------
 
+
 @st.composite
 def ordered_strategy_subset(draw):
     """Draw a non-empty subset of strategy names, ordered by priority.
@@ -74,7 +75,11 @@ def ordered_strategy_subset(draw):
     respects the priority ordering — the kind the TargetStrategyConverter
     produces.
     """
-    flags = draw(st.lists(st.booleans(), min_size=len(ALL_STRATEGIES), max_size=len(ALL_STRATEGIES)))
+    flags = draw(
+        st.lists(
+            st.booleans(), min_size=len(ALL_STRATEGIES), max_size=len(ALL_STRATEGIES)
+        )
+    )
     selected = [s for s, flag in zip(ALL_STRATEGIES, flags) if flag]
     if not selected:
         # Ensure at least one strategy.
@@ -91,7 +96,11 @@ def shuffled_strategy_subset(draw):
     ordering was provided (since the synthesizer passes targets
     through as-is from the representative step).
     """
-    flags = draw(st.lists(st.booleans(), min_size=len(ALL_STRATEGIES), max_size=len(ALL_STRATEGIES)))
+    flags = draw(
+        st.lists(
+            st.booleans(), min_size=len(ALL_STRATEGIES), max_size=len(ALL_STRATEGIES)
+        )
+    )
     selected = [s for s, flag in zip(ALL_STRATEGIES, flags) if flag]
     if not selected:
         selected = [draw(st.sampled_from(ALL_STRATEGIES))]
@@ -115,7 +124,9 @@ def patterns_with_fallback_targets(draw):
     step_order: list[int] = []
 
     for i in range(n_steps):
-        category = draw(st.sampled_from(["deterministic", "optional", "parameterizable"]))
+        category = draw(
+            st.sampled_from(["deterministic", "optional", "parameterizable"])
+        )
         step_order.append(i)
 
         strategy_names = draw(ordered_strategy_subset())
@@ -131,8 +142,10 @@ def patterns_with_fallback_targets(draw):
         pos = AlignedPosition(
             index=i,
             alignment_type=(
-                AlignmentType.DETERMINISTIC if category == "deterministic"
-                else AlignmentType.OPTIONAL if category == "optional"
+                AlignmentType.DETERMINISTIC
+                if category == "deterministic"
+                else AlignmentType.OPTIONAL
+                if category == "optional"
                 else AlignmentType.PARAMETERIZABLE
             ),
             steps={"t1": step},
@@ -179,7 +192,9 @@ class TestTargetStrategyOrderingProperty:
 
     @given(patterns=patterns_with_fallback_targets())
     @settings(max_examples=200, deadline=None)
-    def test_synthesized_targets_preserve_priority_ordering(self, patterns: ExtractedPatterns):
+    def test_synthesized_targets_preserve_priority_ordering(
+        self, patterns: ExtractedPatterns
+    ):
         """
         When the synthesizer produces actions from patterns whose steps
         have TargetSpecWithFallback targets ordered by priority, the
@@ -253,7 +268,9 @@ class TestTargetStrategyOrderingProperty:
 
     @given(patterns=patterns_with_fallback_targets())
     @settings(max_examples=200, deadline=None)
-    def test_agent_strategy_always_last_in_synthesized_target(self, patterns: ExtractedPatterns):
+    def test_agent_strategy_always_last_in_synthesized_target(
+        self, patterns: ExtractedPatterns
+    ):
         """
         If the 'agent' strategy appears in a synthesized TargetSpecWithFallback,
         it is always the last entry — agent-based fallback is the least

@@ -33,9 +33,7 @@ class PostIngestionMergeJob:
     def __init__(
         self,
         piece_store: KnowledgePieceStore,
-        detect_candidates_fn: Callable[
-            [KnowledgePiece], List[Tuple[str, float, str]]
-        ],
+        detect_candidates_fn: Callable[[KnowledgePiece], List[Tuple[str, float, str]]],
         merge_fn: Optional[
             Callable[[KnowledgePiece, KnowledgePiece], KnowledgePiece]
         ] = None,
@@ -46,7 +44,9 @@ class PostIngestionMergeJob:
         self.merge_fn = merge_fn
         self.logger = logger or logging.getLogger(__name__)
 
-    def run(self, space: str = "main", spaces: Optional[List[str]] = None) -> MergeJobResult:
+    def run(
+        self, space: str = "main", spaces: Optional[List[str]] = None
+    ) -> MergeJobResult:
         """Process deferred merges for global pieces.
 
         Args:
@@ -92,9 +92,7 @@ class PostIngestionMergeJob:
 
             except Exception as e:
                 errors.append(f"{piece.piece_id}: {e}")
-                self.logger.error(
-                    "Failed to process piece %s: %s", piece.piece_id, e
-                )
+                self.logger.error("Failed to process piece %s: %s", piece.piece_id, e)
                 continue
 
         return MergeJobResult(
@@ -104,7 +102,6 @@ class PostIngestionMergeJob:
             errors=errors,
             duration_seconds=time.time() - start,
         )
-
 
     def _find_deferred_pieces(
         self,
@@ -127,7 +124,9 @@ class PostIngestionMergeJob:
         for piece in all_pieces:
             if not getattr(piece, "merge_processed", True):
                 strategy = getattr(piece, "merge_strategy", None)
-                piece_spaces = getattr(piece, "spaces", [getattr(piece, "space", "main")])
+                piece_spaces = getattr(
+                    piece, "spaces", [getattr(piece, "space", "main")]
+                )
 
                 if set(piece_spaces) & filter_spaces and strategy in (
                     MergeStrategy.POST_INGESTION_AUTO.value,

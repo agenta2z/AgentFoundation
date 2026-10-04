@@ -1,6 +1,7 @@
 # (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 # pyre-strict
-"""ApplyContextUpdates effect — write keys into inferencer.prior_context.
+"""ApplyContextUpdates effect — write keys into the target's prior_context
+through ``update_prior_context``.
 
 Used by handlers that publish context-bag entries (e.g. CONFIRMATION posts
 `_confirmation_gate_passed`). Subsequent handlers in the same bundle see
@@ -13,17 +14,17 @@ Callers (current + planned):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-        ConversationalInferencer,
-    )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
+    effect_target,
+    EffectTarget,
+)
 
 
 @dataclass
 class ApplyContextUpdates:
     updates: dict[str, Any]
 
-    async def apply(self, inferencer: ConversationalInferencer) -> None:
-        inferencer.prior_context.update(self.updates)
+    async def apply(self, inferencer: EffectTarget) -> None:
+        effect_target(inferencer).update_prior_context(**self.updates)

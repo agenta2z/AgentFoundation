@@ -7,14 +7,13 @@ validation, scoring, and other knowledge system processes.
 
 from typing import Any, Dict, List, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.knowledge.retrieval.models.enums import (
     DedupAction,
     MergeAction,
     MergeType,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from attr import attrib, attrs
 
 
 @attrs

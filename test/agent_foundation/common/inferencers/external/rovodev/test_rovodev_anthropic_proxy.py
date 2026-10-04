@@ -18,6 +18,7 @@ import pytest
 # Helpers: build a mock TerminalInferencerResponse
 # ---------------------------------------------------------------------------
 
+
 def _mock_response(text: str, success: bool = True):
     """Build a minimal mock of TerminalInferencerResponse."""
     r = MagicMock()
@@ -31,6 +32,7 @@ def _mock_response(text: str, success: bool = True):
 # Test _extract_prompt
 # ---------------------------------------------------------------------------
 
+
 class TestExtractPrompt:
     """Test the Anthropic → single-string prompt flattening."""
 
@@ -38,6 +40,7 @@ class TestExtractPrompt:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _extract_prompt,
         )
+
         return _extract_prompt(body)
 
     def test_simple_user_message(self):
@@ -115,11 +118,13 @@ class TestExtractPrompt:
 # Test SSE helpers
 # ---------------------------------------------------------------------------
 
+
 class TestSSEHelpers:
     def test_sse_event_format(self):
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _sse_event,
         )
+
         event = _sse_event("ping", {"type": "ping"})
         assert event.startswith("event: ping\n")
         assert "data: " in event
@@ -129,6 +134,7 @@ class TestSSEHelpers:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _build_streaming_response,
         )
+
         events = list(_build_streaming_response("Hello world", "claude-test"))
         event_types = []
         for e in events:
@@ -147,6 +153,7 @@ class TestSSEHelpers:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _build_streaming_response,
         )
+
         events = list(_build_streaming_response("The answer is 42", "claude-test"))
         all_text = "".join(events)
         assert "42" in all_text
@@ -156,11 +163,11 @@ class TestSSEHelpers:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _build_streaming_response,
         )
+
         long_text = "x" * 600  # More than one 200-char chunk
         events = list(_build_streaming_response(long_text, "claude-test"))
         delta_events = [
-            e for e in events
-            if "content_block_delta" in e and "text_delta" in e
+            e for e in events if "content_block_delta" in e and "text_delta" in e
         ]
         assert len(delta_events) >= 3  # At least 3 chunks for 600 chars
 
@@ -168,6 +175,7 @@ class TestSSEHelpers:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _build_sync_response,
         )
+
         resp = _build_sync_response("Hello!", "claude-test", input_tokens=10)
         assert resp["type"] == "message"
         assert resp["role"] == "assistant"
@@ -180,6 +188,7 @@ class TestSSEHelpers:
 # ---------------------------------------------------------------------------
 # Flask app tests (using Flask test client)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_and_mock():
@@ -194,6 +203,7 @@ def app_and_mock():
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             create_app,
         )
+
         flask_app = create_app(cwd="/tmp", base_path="/vertex/claude")
         flask_app.config["TESTING"] = True
         client = flask_app.test_client()
@@ -397,11 +407,13 @@ class TestMessagesEndpointStreaming:
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 
+
 class TestArgParsing:
     def test_defaults(self):
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _parse_args,
         )
+
         args = _parse_args([])
         assert args.port == 9800
         assert args.host == "127.0.0.1"
@@ -412,6 +424,7 @@ class TestArgParsing:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _parse_args,
         )
+
         args = _parse_args(["--port", "29576", "--host", "0.0.0.0"])
         assert args.port == 29576
         assert args.host == "0.0.0.0"
@@ -420,6 +433,7 @@ class TestArgParsing:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _parse_args,
         )
+
         args = _parse_args(["--no-yolo"])
         assert args.no_yolo is True
 
@@ -427,6 +441,7 @@ class TestArgParsing:
         from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_anthropic_proxy import (
             _parse_args,
         )
+
         args = _parse_args(["--base-path", "/anthropic"])
         assert args.base_path == "/anthropic"
 

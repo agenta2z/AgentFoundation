@@ -1,0 +1,139 @@
+{
+  "catalog": {
+    "_proposer_task_instructions": {
+      "BreakdownThenAggregateInferencer": [
+        "_worker_task_instructions"
+      ],
+      "DualInferencer": [
+        "_state['prior_task_instructions'] (node.call | _pending_state_backing)",
+        "base_inferencer._proposer_task_instructions()"
+      ],
+      "InferencerBase": [],
+      "MultiFlowInferencer": [
+        "MultiFlowState.winner_idx",
+        "_last_winner_idx_backing",
+        "flow_configs[*].initial_inferencer._proposer_task_instructions()"
+      ],
+      "TemplatedInferencerBase": [
+        "_last_rendered_task_instructions"
+      ]
+    }
+  },
+  "steps": {
+    "async": {
+      "bare1": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-a part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-a part1"
+        },
+        "result": "agg"
+      },
+      "bare2": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": "agg"
+      },
+      "bare3_fail": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": {
+          "error": "RuntimeError"
+        }
+      },
+      "host": {
+        "fields_after": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "fields_before": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters_after": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters_reentered": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": "agg",
+        "store_paths": [
+          "/",
+          "/worker_00",
+          "/worker_01"
+        ],
+        "touched": []
+      }
+    },
+    "bare_no_workspace": {
+      "fields": {
+        "_worker_task_instructions": ""
+      },
+      "getters": {
+        "_proposer_task_instructions": ""
+      },
+      "result": {
+        "error": "ExpansionConfigError"
+      }
+    },
+    "sync": {
+      "bare1": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-a part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-a part1"
+        },
+        "result": "agg"
+      },
+      "bare2": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": "agg"
+      },
+      "bare3_fail": {
+        "fields": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": {
+          "error": "RuntimeError"
+        }
+      },
+      "host": {
+        "fields_after": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "fields_before": {
+          "_worker_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters_after": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "getters_reentered": {
+          "_proposer_task_instructions": "Contract<impl> for task-b part1"
+        },
+        "result": "agg",
+        "store_paths": [
+          "/",
+          "/worker_00",
+          "/worker_01"
+        ],
+        "touched": []
+      }
+    }
+  }
+}

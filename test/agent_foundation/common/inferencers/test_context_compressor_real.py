@@ -1,5 +1,3 @@
-
-
 """Real E2E integration tests for InferencerContextCompressor.
 
 Uses real MetagenApiInferencer to compress action histories.

@@ -91,7 +91,6 @@ _template_root_space: plan
 workspace:
   _target_: InferencerWorkspace
   root: ${_params.workspace_root}
-  use_final_deliverables_folder: true
 templates_dir: "${oc.env:PROMPT_TEMPLATES_DIR,prompt_templates}"
 
 base_inferencer:
@@ -129,7 +128,6 @@ base_inferencer:
           _target_: ${_params.main_inferencer}
       aggregator_inferencer:
         _target_: ${_params.main_inferencer}
-        output_is_deliverable: true
     multiflow:
       # _target_ (not _factory_): the dict-of-factories config walker auto-wraps
       # each _target_ entry as a LazyConfigFactory → a fresh MFDual per subtask.
@@ -150,16 +148,13 @@ base_inferencer:
             _target_: ${_params.flow_inferencers}
       multi_flow_aggregator_inferencer:
         _target_: ${_params.main_inferencer}
-        output_is_deliverable: true
     _default: leaf                           # string alias → reuses the `leaf` factory
 
   aggregator_inferencer:
     _target_: ${_params.main_inferencer}
-    output_is_deliverable: true
 
 review_inferencer:
   _target_: ${_params.main_inferencer}
 
 fixer_inferencer:
   _target_: ${_params.main_inferencer}
-  output_is_deliverable: true

@@ -7,6 +7,7 @@ for callable and inline string specs.
 
 Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,19 +25,16 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
-from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
-    MemoryKeyValueService,
+from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
+    KnowledgePiece,
+    KnowledgeType,
 )
-from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
-    MemoryRetrievalService,
-)
-from rich_python_utils.service_utils.graph_service.memory_graph_service import (
-    MemoryGraphService,
-)
-from rich_python_utils.service_utils.graph_service.graph_node import (
-    GraphNode,
-    GraphEdge,
+from agent_foundation.knowledge.retrieval.provider import InfoType, KnowledgeProvider
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
 )
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
     KeyValueMetadataStore,
@@ -44,16 +42,18 @@ from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter impor
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
 )
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.provider import KnowledgeProvider, InfoType
-from agent_foundation.knowledge.retrieval.formatter import RetrievalResult
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
-    KnowledgePiece,
-    KnowledgeType,
+from rich_python_utils.service_utils.graph_service.memory_graph_service import (
+    MemoryGraphService,
+)
+from rich_python_utils.service_utils.keyvalue_service.memory_keyvalue_service import (
+    MemoryKeyValueService,
+)
+from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
+    MemoryRetrievalService,
 )
 
 
@@ -200,7 +200,10 @@ class TestCallReturnsExpectedKeys:
         result = provider("grocery shopping procedure checkout")
 
         assert "instructions" in result
-        assert "Procedure" in result["instructions"] or "procedure" in result["instructions"].lower()
+        assert (
+            "Procedure" in result["instructions"]
+            or "procedure" in result["instructions"].lower()
+        )
 
 
 # ── Test: _group_by_info_type routes metadata ────────────────────────────────
@@ -256,7 +259,10 @@ class TestGroupByInfoTypeMetadata:
         groups = provider._group_by_info_type(result)
 
         # Empty metadata should not create a group
-        assert "user_profile" not in groups or groups.get("user_profile", {}).get("metadata") is None
+        assert (
+            "user_profile" not in groups
+            or groups.get("user_profile", {}).get("metadata") is None
+        )
 
 
 # ── Test: _group_by_info_type routes pieces ──────────────────────────────────
@@ -282,7 +288,9 @@ class TestGroupByInfoTypePieces:
             knowledge_type=KnowledgeType.Instruction,
             info_type="instructions",
         )
-        result = RetrievalResult(pieces=[(piece_profile, 0.9), (piece_instructions, 0.8)])
+        result = RetrievalResult(
+            pieces=[(piece_profile, 0.9), (piece_instructions, 0.8)]
+        )
 
         groups = provider._group_by_info_type(result)
 
@@ -309,9 +317,7 @@ class TestGroupByInfoTypePieces:
 
     def test_piece_with_no_info_type_defaults_to_context(self, provider):
         """A piece with info_type=None defaults to 'context' group."""
-        piece = KnowledgePiece(
-            content="Some context info.", piece_id="ctx1"
-        )
+        piece = KnowledgePiece(content="Some context info.", piece_id="ctx1")
         piece.info_type = None
         result = RetrievalResult(pieces=[(piece, 0.5)])
 
@@ -434,7 +440,10 @@ class TestCustomInfoType:
         result = provider("safety goggles lab")
 
         assert "safety" in result
-        assert "safety goggles" in result["safety"].lower() or "goggles" in result["safety"]
+        assert (
+            "safety goggles" in result["safety"].lower()
+            or "goggles" in result["safety"]
+        )
 
     def test_custom_info_type_via_group_by(self):
         """_group_by_info_type routes a piece with custom info_type correctly."""
@@ -560,15 +569,14 @@ class TestProviderConsolidation:
     def test_provider_with_consolidator_adds_key(self):
         """With consolidator (ENABLED), consolidated_knowledge key is added."""
         from unittest.mock import MagicMock
+
         from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
             KnowledgeConsolidator,
         )
         from agent_foundation.knowledge.retrieval.models.enums import ConsolidationMode
 
         llm = MagicMock(return_value="Deduplicated result.")
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
 
         kb = _create_kb(active_entity_id="user:alice")
         # Add a piece so there's content to consolidate
@@ -596,6 +604,7 @@ class TestProviderConsolidation:
     def test_provider_consolidation_skip_no_extra_key(self):
         """When consolidator skips (DISABLED), no extra key is added."""
         from unittest.mock import MagicMock
+
         from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
             KnowledgeConsolidator,
         )

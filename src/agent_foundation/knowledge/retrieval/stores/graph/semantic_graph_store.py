@@ -16,20 +16,21 @@ Requirements: 3.1, 3.2, 3.3, 4.1–4.5, 5.1–5.5, 6.1–6.3, 8.1–8.3, 9.1–9
 import logging
 from typing import Callable, List, Optional, Tuple
 
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.node_text_builder import (
+    default_node_text_builder,
+    NodeTextBuilder,
+)
+from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
 from attr import attrib, attrs
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphEdge, GraphNode
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 from rich_python_utils.service_utils.retrieval_service.document import Document
 from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
     RetrievalServiceBase,
 )
-
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-from agent_foundation.knowledge.retrieval.stores.graph.node_text_builder import (
-    NodeTextBuilder,
-    default_node_text_builder,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,9 @@ class SemanticGraphStore(EntityGraphStore):
     graph_store: EntityGraphStore = attrib()
     retrieval_service: Optional[RetrievalServiceBase] = attrib(default=None)
     search_mode: SearchMode = attrib(default=SearchMode.SIDECAR)
-    node_text_builder: Callable[[GraphNode], str] = attrib(default=default_node_text_builder)
+    node_text_builder: Callable[[GraphNode], str] = attrib(
+        default=default_node_text_builder
+    )
     rrf_k: int = attrib(default=60)
     index_namespace: str = attrib(default="_graph_nodes")
 
@@ -161,8 +164,9 @@ class SemanticGraphStore(EntityGraphStore):
             except ValueError:
                 self.retrieval_service.update(doc, namespace=self.index_namespace)
         except Exception:
-            logger.warning(f"Failed to index node {node.node_id} in sidecar", exc_info=True)
-
+            logger.warning(
+                f"Failed to index node {node.node_id} in sidecar", exc_info=True
+            )
 
     def remove_node(self, node_id: str, **kwargs) -> bool:
         """Remove a node, syncing the sidecar index.
@@ -185,7 +189,9 @@ class SemanticGraphStore(EntityGraphStore):
         try:
             self.retrieval_service.remove(node_id, namespace=self.index_namespace)
         except Exception:
-            logger.warning(f"Failed to remove node {node_id} from sidecar", exc_info=True)
+            logger.warning(
+                f"Failed to remove node {node_id} from sidecar", exc_info=True
+            )
         return result
 
     # ── Pure delegation with **kwargs ────────────────────────────────────
@@ -211,7 +217,9 @@ class SemanticGraphStore(EntityGraphStore):
         """
         self.graph_store.add_relation(relation, **kwargs)
 
-    def get_relations(self, node_id: str, relation_type=None, direction="outgoing", **kwargs) -> List[GraphEdge]:
+    def get_relations(
+        self, node_id: str, relation_type=None, direction="outgoing", **kwargs
+    ) -> List[GraphEdge]:
         """Get edges for a node (pure delegation).
 
         Args:
@@ -223,9 +231,13 @@ class SemanticGraphStore(EntityGraphStore):
         Returns:
             A list of GraphEdge objects matching the filter criteria.
         """
-        return self.graph_store.get_relations(node_id, relation_type=relation_type, direction=direction, **kwargs)
+        return self.graph_store.get_relations(
+            node_id, relation_type=relation_type, direction=direction, **kwargs
+        )
 
-    def remove_relation(self, source_id: str, target_id: str, relation_type: str, **kwargs) -> bool:
+    def remove_relation(
+        self, source_id: str, target_id: str, relation_type: str, **kwargs
+    ) -> bool:
         """Remove a specific edge (pure delegation).
 
         Args:
@@ -237,9 +249,13 @@ class SemanticGraphStore(EntityGraphStore):
         Returns:
             True if the edge existed and was removed, False if not found.
         """
-        return self.graph_store.remove_relation(source_id, target_id, relation_type, **kwargs)
+        return self.graph_store.remove_relation(
+            source_id, target_id, relation_type, **kwargs
+        )
 
-    def get_neighbors(self, node_id: str, relation_type=None, depth=1, **kwargs) -> List[Tuple[GraphNode, int]]:
+    def get_neighbors(
+        self, node_id: str, relation_type=None, depth=1, **kwargs
+    ) -> List[Tuple[GraphNode, int]]:
         """Get neighboring nodes via traversal (pure delegation).
 
         Args:
@@ -251,9 +267,13 @@ class SemanticGraphStore(EntityGraphStore):
         Returns:
             A list of (GraphNode, depth) tuples.
         """
-        return self.graph_store.get_neighbors(node_id, relation_type=relation_type, depth=depth, **kwargs)
+        return self.graph_store.get_neighbors(
+            node_id, relation_type=relation_type, depth=depth, **kwargs
+        )
 
-    def list_nodes(self, node_type=None, include_inactive=False, **kwargs) -> List[GraphNode]:
+    def list_nodes(
+        self, node_type=None, include_inactive=False, **kwargs
+    ) -> List[GraphNode]:
         """List all nodes (pure delegation).
 
         Args:
@@ -264,7 +284,9 @@ class SemanticGraphStore(EntityGraphStore):
         Returns:
             A list of GraphNode objects matching the filter criteria.
         """
-        return self.graph_store.list_nodes(node_type=node_type, include_inactive=include_inactive, **kwargs)
+        return self.graph_store.list_nodes(
+            node_type=node_type, include_inactive=include_inactive, **kwargs
+        )
 
     # ── Search ─────────────────────────────────────────────────────────
 
@@ -325,7 +347,6 @@ class SemanticGraphStore(EntityGraphStore):
         else:
             return sidecar_results
 
-
     # ── RRF merge ──────────────────────────────────────────────────────
 
     def _rrf_merge(
@@ -355,7 +376,6 @@ class SemanticGraphStore(EntityGraphStore):
         sorted_ids = sorted(scores, key=lambda nid: -scores[nid])
         return [(node_map[nid], scores[nid]) for nid in sorted_ids[:top_k]]
 
-
     # ── Reindex ────────────────────────────────────────────────────────
 
     def reindex(self) -> int:
@@ -367,7 +387,9 @@ class SemanticGraphStore(EntityGraphStore):
             Number of nodes indexed.
         """
         if self.retrieval_service is None:
-            raise ValueError("Cannot reindex: no retrieval_service configured (search_mode=native)")
+            raise ValueError(
+                "Cannot reindex: no retrieval_service configured (search_mode=native)"
+            )
         self.retrieval_service.clear(namespace=self.index_namespace)
         nodes = self.graph_store.list_nodes(include_inactive=False)
         count = 0
@@ -377,9 +399,10 @@ class SemanticGraphStore(EntityGraphStore):
                 self.retrieval_service.add(doc, namespace=self.index_namespace)
                 count += 1
             except Exception:
-                logger.warning(f"Failed to index node {node.node_id} during reindex", exc_info=True)
+                logger.warning(
+                    f"Failed to index node {node.node_id} during reindex", exc_info=True
+                )
         return count
-
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 

@@ -1,0 +1,34 @@
+{% if sop_active %}
+{# Active SOP context. Gated on sop_active so Status/NextStepGuidance always
+   show while an SOP runs; the <SOPDescription> appears only if the SOP defines
+   one. (sop_active is the single source of truth, shared with the Decision
+   Procedure — no redundant double-gate on sop_description.) #}
+{% if not sop_progress_only %}## Active SOP Context
+
+{% if workflow_target_path is defined and workflow_target_path %}
+You operate on {{ workflow_target_path }} under repository `{{ session_root_path | default("(not set)") }}`.
+{% endif %}
+{% if sop_description is defined and sop_description %}
+<SOPDescription>
+{{ sop_description }}
+</SOPDescription>
+{% endif %}
+{% if sop_outline is defined and sop_outline %}
+<SOPPhases>
+{{ sop_outline }}
+</SOPPhases>
+{% endif %}
+{% else %}## Active SOP progress
+
+{% endif %}<SOPStatus>
+{{ sop_status | default("") }}
+</SOPStatus>
+
+<SOPNextStepGuidance>
+{{ sop_nextstep_guidance | default("No specific guidance — respond to the user's request directly.") }}
+</SOPNextStepGuidance>{% if sop_required_tools is defined and sop_required_tools %}
+
+<SOPRequiredTools>
+{{ sop_required_tools }}
+</SOPRequiredTools>{% endif %}
+{% endif %}

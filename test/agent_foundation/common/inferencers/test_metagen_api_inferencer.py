@@ -1,5 +1,3 @@
-
-
 """Unit tests for MetagenApiInferencer (mock-based, no API keys needed).
 
 Tests cover initialization, set_messages, sync/async inference, and streaming.

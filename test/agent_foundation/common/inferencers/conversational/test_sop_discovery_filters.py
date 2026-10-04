@@ -18,12 +18,11 @@ from __future__ import annotations
 
 import unittest
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 @attrs(slots=False)
@@ -89,7 +88,8 @@ class TestSopDiscoveryFilters(unittest.TestCase):
         rendered = ci_denied._render_prompt("hello")
         # Blacklisted name MUST be gone from the Available SOPs section.
         self.assertNotIn(
-            "(`code_optimization`)", rendered,
+            "(`code_optimization`)",
+            rendered,
             "Denylist must filter out the named SOP.",
         )
         # Non-blacklisted MUST still appear (targeted, not nuclear).
@@ -167,11 +167,13 @@ class TestSopDiscoveryFilters(unittest.TestCase):
             "sop_creation",
         ]
         missing = [
-            name for name in sops_that_must_remain_visible
+            name
+            for name in sops_that_must_remain_visible
             if f"(`{name}`)" not in rendered
         ]
         self.assertEqual(
-            missing, [],
+            missing,
+            [],
             f"REGRESSION: empty allowed_sops was interpreted as 'deny all' "
             f"and silently hid framework SOPs {missing}. The conventional "
             f"semantic is: empty allow-list = NO whitelist restriction "
@@ -190,7 +192,8 @@ class TestSopDiscoveryFilters(unittest.TestCase):
         # Same framework SOPs MUST all be visible.
         for name in ("code_optimization", "model_optimization"):
             self.assertIn(
-                f"(`{name}`)", rendered,
+                f"(`{name}`)",
+                rendered,
                 f"REGRESSION: empty disallowed_sops was interpreted as "
                 f"'drop everything' and silently hid {name}.",
             )

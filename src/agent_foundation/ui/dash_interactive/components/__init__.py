@@ -6,9 +6,7 @@ interactive dashboards with chat interfaces and log debugging.
 """
 
 from agent_foundation.ui.dash_interactive.components.base import BaseComponent
-from agent_foundation.ui.dash_interactive.components.chat_history import (
-    ChatHistoryList,
-)
+from agent_foundation.ui.dash_interactive.components.chat_history import ChatHistoryList
 from agent_foundation.ui.dash_interactive.components.chat_window import ChatWindow
 from agent_foundation.ui.dash_interactive.components.file_viewer import (
     create_view_file_button,

@@ -28,17 +28,6 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from attr import attrs, attrib
-
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
-    ResultPassDownMode,
-)
-from rich_python_utils.common_objects.workflow.common.exceptions import (
-    WorkflowAborted,
-)
-from rich_python_utils.common_objects.workflow.workflow import Workflow
-from rich_python_utils.datetime_utils.common import timestamp
-
 from agent_foundation.automation.meta_agent.aligner import TraceAligner
 from agent_foundation.automation.meta_agent.collector import TraceCollector
 from agent_foundation.automation.meta_agent.errors import (
@@ -66,10 +55,15 @@ from agent_foundation.automation.meta_agent.synthesizer import (
     RuleBasedSynthesizer,
     SynthesisStrategy,
 )
-from agent_foundation.automation.meta_agent.synthetic_data import (
-    SyntheticDataProvider,
-)
+from agent_foundation.automation.meta_agent.synthetic_data import SyntheticDataProvider
 from agent_foundation.automation.meta_agent.validator import GraphValidator
+from attr import attrib, attrs
+from rich_python_utils.common_objects.workflow.common.exceptions import WorkflowAborted
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.workflow import Workflow
+from rich_python_utils.datetime_utils.common import timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +80,14 @@ _SYNTH_STRATEGY_MAP = {s.value: s for s in SynthesisStrategy}
 # Step wrapper
 # ---------------------------------------------------------------------------
 
+
 class _StepWrapper:
     """Wraps a callable so arbitrary per-step attributes can be assigned."""
 
     def __init__(self, fn):
         self._fn = fn
-        self.__name__ = getattr(fn, '__name__', str(fn))
-        self.__module__ = getattr(fn, '__module__', None)
+        self.__name__ = getattr(fn, "__name__", str(fn))
+        self.__module__ = getattr(fn, "__module__", None)
 
     def __call__(self, *args, **kwargs):
         return self._fn(*args, **kwargs)
@@ -101,6 +96,7 @@ class _StepWrapper:
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
 
 @attrs(slots=False)
 class MetaAgentPipeline(Workflow):
@@ -170,8 +166,7 @@ class MetaAgentPipeline(Workflow):
         if eval_strat == EvaluationStrategy.LLM_JUDGE:
             if self._inferencer is None:
                 raise ValueError(
-                    "LLM_JUDGE evaluation strategy requires an "
-                    "InferencerBase instance"
+                    "LLM_JUDGE evaluation strategy requires an InferencerBase instance"
                 )
 
         self._synthesis_strategy = synth
@@ -181,6 +176,7 @@ class MetaAgentPipeline(Workflow):
         from agent_foundation.automation.meta_agent.prompt_templates import (
             create_prompt_formatter,
         )
+
         self._prompt_formatter = create_prompt_formatter(
             self._config.prompt_templates,
         )
@@ -260,50 +256,61 @@ class MetaAgentPipeline(Workflow):
     # ------------------------------------------------------------------
 
     def _init_state(self) -> dict:
-        if getattr(self, '_pre_populated_state', None) is not None:
+        if getattr(self, "_pre_populated_state", None) is not None:
             return self._pre_populated_state
         return {
-            'traces': [],
-            'evaluation_results': [],
-            'filtered_traces': [],
-            'normalized': [],
-            'aligned': None,
-            'patterns': None,
-            'synthesis_result': None,
-            'validation_results': None,
-            'python_script': None,
-            '_config_generate_script': self._config.generate_script,
+            "traces": [],
+            "evaluation_results": [],
+            "filtered_traces": [],
+            "normalized": [],
+            "aligned": None,
+            "patterns": None,
+            "synthesis_result": None,
+            "validation_results": None,
+            "python_script": None,
+            "_config_generate_script": self._config.generate_script,
         }
 
-    def _on_step_complete(self, result, step_name, step_index, state,
-                          *args, **kwargs):
+    def _on_step_complete(self, result, step_name, step_index, state, *args, **kwargs):
         if step_name == "collection":
             # Guard: only fire on the FIRST collection pass.
-            if not state.get('evaluation_results'):
-                self._invoke_hook("collection", {
-                    "traces": state['traces'],
-                    "trace_count": len(state['traces']),
-                })
+            if not state.get("evaluation_results"):
+                self._invoke_hook(
+                    "collection",
+                    {
+                        "traces": state["traces"],
+                        "trace_count": len(state["traces"]),
+                    },
+                )
         elif step_name == "evaluation":
-            self._invoke_hook("evaluation", {
-                "traces": state['traces'],
-                "evaluation_results": state['evaluation_results'],
-                "filtered_traces": state['filtered_traces'],
-                "passed_count": len(state['filtered_traces']),
-                "total_count": len(state['traces']),
-            })
+            self._invoke_hook(
+                "evaluation",
+                {
+                    "traces": state["traces"],
+                    "evaluation_results": state["evaluation_results"],
+                    "filtered_traces": state["filtered_traces"],
+                    "passed_count": len(state["filtered_traces"]),
+                    "total_count": len(state["traces"]),
+                },
+            )
         elif step_name == "synthesis":
-            sr = state.get('synthesis_result')
+            sr = state.get("synthesis_result")
             if sr:
-                self._invoke_hook("synthesis", {
-                    "graph": sr.graph,
-                    "synthesis_report": sr.report,
-                    "python_script": state.get('python_script'),
-                })
+                self._invoke_hook(
+                    "synthesis",
+                    {
+                        "graph": sr.graph,
+                        "synthesis_report": sr.report,
+                        "python_script": state.get("python_script"),
+                    },
+                )
         elif step_name == "validation":
-            self._invoke_hook("validation", {
-                "validation_results": state.get('validation_results'),
-            })
+            self._invoke_hook(
+                "validation",
+                {
+                    "validation_results": state.get("validation_results"),
+                },
+            )
 
     def _handle_abort(self, abort_exc, step_result, state):
         if abort_exc.partial_result is not None:
@@ -313,8 +320,8 @@ class MetaAgentPipeline(Workflow):
         else:
             failed_stage = abort_exc.step_name
         return PipelineResult(
-            traces=state.get('traces', []) if state else [],
-            evaluation_results=state.get('evaluation_results', []) if state else [],
+            traces=state.get("traces", []) if state else [],
+            evaluation_results=state.get("evaluation_results", []) if state else [],
             error=str(abort_exc),
             failed_stage=failed_stage,
         )
@@ -331,15 +338,13 @@ class MetaAgentPipeline(Workflow):
             synthetic_data_provider=self._synthetic_data_provider,
         )
 
-        if state.get('evaluation_results'):
+        if state.get("evaluation_results"):
             # Retry mode: collect shortfall
-            shortfall = self._config.min_success_traces - len(
-                state['filtered_traces']
-            )
+            shortfall = self._config.min_success_traces - len(state["filtered_traces"])
             logger.info(
                 "Retry: %d/%d passed (need %d), collecting %d more",
-                len(state['filtered_traces']),
-                len(state['traces']),
+                len(state["filtered_traces"]),
+                len(state["traces"]),
                 self._config.min_success_traces,
                 shortfall,
             )
@@ -366,7 +371,7 @@ class MetaAgentPipeline(Workflow):
             inferencer=self._inferencer,
             prompt_formatter=self._prompt_formatter,
         )
-        unevaluated = state['traces'][len(state['evaluation_results']):]
+        unevaluated = state["traces"][len(state["evaluation_results"]) :]
         new_eval = evaluator.evaluate(list(unevaluated), task_description)
         return new_eval
 
@@ -376,11 +381,11 @@ class MetaAgentPipeline(Workflow):
             action_metadata=self._action_metadata,
             custom_type_map=self._config.custom_type_map,
         )
-        return normalizer.normalize(self._state['filtered_traces'])
+        return normalizer.normalize(self._state["filtered_traces"])
 
     def _step_target_convert(self, task_description, input_data=None):
         """Stage 4: Target conversion (optional, may be no-op)."""
-        normalized = self._state['normalized']
+        normalized = self._state["normalized"]
         if self._config.target_converter is not None:
             converter = self._config.target_converter
             for trace in normalized:
@@ -390,35 +395,36 @@ class MetaAgentPipeline(Workflow):
     def _step_align(self, task_description, input_data=None):
         """Stage 5: Alignment."""
         aligner = TraceAligner()
-        return aligner.align(self._state['normalized'])
+        return aligner.align(self._state["normalized"])
 
     def _step_extract(self, task_description, input_data=None):
         """Stage 6: Pattern extraction."""
         extractor = PatternExtractor()
-        return extractor.extract(self._state['aligned'])
+        return extractor.extract(self._state["aligned"])
 
     def _step_synthesize(self, task_description, input_data=None):
         """Stage 7: Graph synthesis."""
         synthesizer = self._create_synthesizer()
         synthesis_result = synthesizer.synthesize(
-            self._state['patterns'], task_description,
+            self._state["patterns"],
+            task_description,
         )
         return synthesis_result
 
     def _step_validate(self, task_description, input_data=None):
         """Stage 8: Validation (optional)."""
         state = self._state
-        sr = state['synthesis_result']
+        sr = state["synthesis_result"]
 
         if not self._config.validate:
             return None
 
         validator = GraphValidator()
-        filtered = state['filtered_traces']
-        test_data = [
-            t.input_data or {} for t in filtered
-        ][:self._config.validation_runs]
-        expected = filtered[:self._config.validation_runs]
+        filtered = state["filtered_traces"]
+        test_data = [t.input_data or {} for t in filtered][
+            : self._config.validation_runs
+        ]
+        expected = filtered[: self._config.validation_runs]
 
         if not test_data:
             test_data = [{}]
@@ -437,63 +443,64 @@ class MetaAgentPipeline(Workflow):
 
     @staticmethod
     def _update_state_collection(state, result):
-        state['traces'].extend(result)
+        state["traces"].extend(result)
         return state
 
     @staticmethod
     def _update_state_evaluation(state, result):
-        state['evaluation_results'].extend(result)
-        state['filtered_traces'] = [
-            t for t, r in zip(state['traces'], state['evaluation_results'])
-            if r.passed
+        state["evaluation_results"].extend(result)
+        state["filtered_traces"] = [
+            t for t, r in zip(state["traces"], state["evaluation_results"]) if r.passed
         ]
         return state
 
     @staticmethod
     def _update_state_normalization(state, result):
-        state['normalized'] = result
+        state["normalized"] = result
         return state
 
     @staticmethod
     def _update_state_target_conversion(state, result):
-        state['normalized'] = result
+        state["normalized"] = result
         return state
 
     @staticmethod
     def _update_state_alignment(state, result):
-        state['aligned'] = result
+        state["aligned"] = result
         return state
 
     @staticmethod
     def _update_state_extraction(state, result):
-        state['patterns'] = result
+        state["patterns"] = result
         return state
 
     @staticmethod
     def _update_state_synthesis(state, result):
-        state['synthesis_result'] = result
+        state["synthesis_result"] = result
         python_script = result.python_script
-        if state.get('_config_generate_script') and python_script is None:
+        if state.get("_config_generate_script") and python_script is None:
             try:
                 python_script = result.graph._generate_python_script()
             except Exception:
                 logger.warning(
-                    "Python script generation failed", exc_info=True,
+                    "Python script generation failed",
+                    exc_info=True,
                 )
-        state['python_script'] = python_script
+        state["python_script"] = python_script
         return state
 
     @staticmethod
     def _update_state_validation(state, result):
-        state['validation_results'] = result
+        state["validation_results"] = result
         return state
 
     # ------------------------------------------------------------------
     # Error handlers
     # ------------------------------------------------------------------
 
-    def _stage_error_handler(self, error, step_result_so_far, state,
-                             step_name, step_index):
+    def _stage_error_handler(
+        self, error, step_result_so_far, state, step_name, step_index
+    ):
         """Generic error handler — wraps error in WorkflowAborted with a
         PipelineResult as partial_result."""
         raise WorkflowAborted(
@@ -501,21 +508,26 @@ class MetaAgentPipeline(Workflow):
             step_name=step_name,
             step_index=step_index,
             partial_result=PipelineResult(
-                traces=state.get('traces', []) if state else [],
-                evaluation_results=state.get('evaluation_results', []) if state else [],
+                traces=state.get("traces", []) if state else [],
+                evaluation_results=state.get("evaluation_results", []) if state else [],
                 error=str(error),
                 failed_stage=step_name,
             ),
         )
 
-    def _evaluation_error_handler(self, error, step_result_so_far, state,
-                                  step_name, step_index):
+    def _evaluation_error_handler(
+        self, error, step_result_so_far, state, step_name, step_index
+    ):
         """Evaluation error handler — propagates InsufficientSuccessTracesError
         directly, wraps everything else."""
         if isinstance(error, InsufficientSuccessTracesError):
             raise error
         self._stage_error_handler(
-            error, step_result_so_far, state, step_name, step_index,
+            error,
+            step_result_so_far,
+            state,
+            step_name,
+            step_index,
         )
 
     # ------------------------------------------------------------------
@@ -524,16 +536,16 @@ class MetaAgentPipeline(Workflow):
 
     def _insufficient_traces(self, state, result):
         """Loop condition: True when fewer traces passed than required."""
-        return len(state['filtered_traces']) < self._config.min_success_traces
+        return len(state["filtered_traces"]) < self._config.min_success_traces
 
     def _on_evaluation_loop_exhausted(self, state, result):
         """Called when max retry rounds exhausted."""
         raise InsufficientSuccessTracesError(
             required=self._config.min_success_traces,
-            actual=len(state['filtered_traces']),
-            total=len(state['traces']),
-            traces=list(state['traces']),
-            evaluation_results=list(state['evaluation_results']),
+            actual=len(state["filtered_traces"]),
+            total=len(state["traces"]),
+            traces=list(state["traces"]),
+            evaluation_results=list(state["evaluation_results"]),
         )
 
     # ------------------------------------------------------------------
@@ -558,10 +570,9 @@ class MetaAgentPipeline(Workflow):
             raise
         except PipelineAborted as exc:
             return PipelineResult(
-                traces=self._state.get('traces', []) if self._state else [],
+                traces=self._state.get("traces", []) if self._state else [],
                 evaluation_results=(
-                    self._state.get('evaluation_results', [])
-                    if self._state else []
+                    self._state.get("evaluation_results", []) if self._state else []
                 ),
                 error=str(exc),
                 failed_stage=f"{exc.stage}_aborted",
@@ -572,14 +583,14 @@ class MetaAgentPipeline(Workflow):
 
         # Build final PipelineResult from state
         state = self._state
-        sr = state.get('synthesis_result')
+        sr = state.get("synthesis_result")
         return PipelineResult(
             graph=sr.graph if sr else None,
             synthesis_report=sr.report if sr else None,
-            validation_results=state.get('validation_results'),
-            traces=state.get('traces', []),
-            evaluation_results=state.get('evaluation_results', []),
-            python_script=state.get('python_script'),
+            validation_results=state.get("validation_results"),
+            traces=state.get("traces", []),
+            evaluation_results=state.get("evaluation_results", []),
+            python_script=state.get("python_script"),
         )
 
     def refine(
@@ -597,9 +608,7 @@ class MetaAgentPipeline(Workflow):
         it is itself a manual retry mechanism.
         """
         task_desc = (
-            existing_result.traces[0].task_description
-            if existing_result.traces
-            else ""
+            existing_result.traces[0].task_description if existing_result.traces else ""
         )
         traces = list(existing_result.traces)
         evaluation_results = list(existing_result.evaluation_results)
@@ -608,9 +617,10 @@ class MetaAgentPipeline(Workflow):
         min_len = min(len(traces), len(evaluation_results))
         if min_len < max(len(traces), len(evaluation_results)):
             logger.warning(
-                "Truncating mismatched traces (%d) / evaluation_results "
-                "(%d) to %d",
-                len(traces), len(evaluation_results), min_len,
+                "Truncating mismatched traces (%d) / evaluation_results (%d) to %d",
+                len(traces),
+                len(evaluation_results),
+                min_len,
             )
         traces = traces[:min_len]
         evaluation_results = evaluation_results[:min_len]
@@ -652,9 +662,7 @@ class MetaAgentPipeline(Workflow):
 
             traces.extend(new_traces)
             evaluation_results.extend(new_eval)
-            filtered = [
-                t for t, r in zip(traces, evaluation_results) if r.passed
-            ]
+            filtered = [t for t, r in zip(traces, evaluation_results) if r.passed]
 
             if len(filtered) < self._config.min_success_traces:
                 raise InsufficientSuccessTracesError(
@@ -665,16 +673,22 @@ class MetaAgentPipeline(Workflow):
                     evaluation_results=evaluation_results,
                 )
 
-            self._invoke_hook("evaluation", {
-                "traces": traces,
-                "evaluation_results": evaluation_results,
-                "filtered_traces": filtered,
-                "passed_count": len(filtered),
-                "total_count": len(traces),
-            })
+            self._invoke_hook(
+                "evaluation",
+                {
+                    "traces": traces,
+                    "evaluation_results": evaluation_results,
+                    "filtered_traces": filtered,
+                    "passed_count": len(filtered),
+                    "total_count": len(traces),
+                },
+            )
 
             return self._run_from_synthesis(
-                task_desc, traces, evaluation_results, filtered,
+                task_desc,
+                traces,
+                evaluation_results,
+                filtered,
             )
         except PipelineAborted as exc:
             return PipelineResult(
@@ -875,18 +889,18 @@ class MetaAgentPipeline(Workflow):
             try:
                 synthesizer = self._create_synthesizer()
                 synthesis_result = synthesizer.synthesize(
-                    patterns, task_description,
+                    patterns,
+                    task_description,
                 )
 
                 python_script = synthesis_result.python_script
                 if self._config.generate_script and python_script is None:
                     try:
-                        python_script = (
-                            synthesis_result.graph._generate_python_script()
-                        )
+                        python_script = synthesis_result.graph._generate_python_script()
                     except Exception:
                         logger.warning(
-                            "Python script generation failed", exc_info=True,
+                            "Python script generation failed",
+                            exc_info=True,
                         )
             except Exception as exc:
                 return PipelineResult(
@@ -896,21 +910,24 @@ class MetaAgentPipeline(Workflow):
                     failed_stage="synthesis",
                 )
 
-            self._invoke_hook("synthesis", {
-                "graph": synthesis_result.graph,
-                "synthesis_report": synthesis_result.report,
-                "python_script": python_script,
-            })
+            self._invoke_hook(
+                "synthesis",
+                {
+                    "graph": synthesis_result.graph,
+                    "synthesis_report": synthesis_result.report,
+                    "python_script": python_script,
+                },
+            )
 
             # --- Stage 8: Validation (optional) ---
             validation_results = None
             if self._config.validate:
                 try:
                     validator = GraphValidator()
-                    test_data = [
-                        t.input_data or {} for t in filtered_traces
-                    ][:self._config.validation_runs]
-                    expected = filtered_traces[:self._config.validation_runs]
+                    test_data = [t.input_data or {} for t in filtered_traces][
+                        : self._config.validation_runs
+                    ]
+                    expected = filtered_traces[: self._config.validation_runs]
 
                     if not test_data:
                         test_data = [{}]
@@ -933,9 +950,12 @@ class MetaAgentPipeline(Workflow):
                         failed_stage="validation",
                     )
 
-            self._invoke_hook("validation", {
-                "validation_results": validation_results,
-            })
+            self._invoke_hook(
+                "validation",
+                {
+                    "validation_results": validation_results,
+                },
+            )
 
             return PipelineResult(
                 graph=synthesis_result.graph,

@@ -13,6 +13,7 @@ Tests cover:
 
 Requirements: 1.1, 1.6
 """
+
 import sys
 import time
 from pathlib import Path
@@ -27,7 +28,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 
 
@@ -241,10 +241,12 @@ class TestFromDict:
 
     def test_from_dict_minimal(self):
         """from_dict with only required fields auto-generates defaults."""
-        meta = EntityMetadata.from_dict({
-            "entity_id": "user:xinli",
-            "entity_type": "user",
-        })
+        meta = EntityMetadata.from_dict(
+            {
+                "entity_id": "user:xinli",
+                "entity_type": "user",
+            }
+        )
         assert meta.entity_id == "user:xinli"
         assert meta.entity_type == "user"
         assert meta.properties == {}

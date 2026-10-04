@@ -1,0 +1,52 @@
+# Default NativeConversationalInferencer config (framework default).
+#
+# The vendor agent (Claude Code, Devmate, Codex, Metamate) owns the
+# conversation: its session, transcript, agent loop, tool calling and
+# compaction. AgentFoundation contributes session instructions (appended to the
+# vendor's system prompt), live SOP state (per-turn context) and its tools (MCP
+# server `af`). Hosts load this through
+# `_ci_host.build_native_from_config(path, backend=<kind>, ...)`, which takes
+# the `backend` node from backend/<kind>.yaml and injects live objects
+# (tool registry/executor, runtime manager, record store, interactive).
+
+_target_: ConversationalNative
+# Fallback when no backend is selected; backend/<kind>.yaml replaces it.
+backend:
+  kind: claude_sdk
+
+# Soft, prompt-level self-governance threshold (rounds); null/0 disables.
+soft_max_iterations: 30
+# Vendor turns per host call (one per answered widget batch); <= 0 = ceiling.
+max_vendor_turns_per_call: 50
+# AF tool results above this size spill to a file (the vendor spills itself
+# where it supports it, e.g. Claude Code's maxResultSizeChars). The Claude
+# backends refuse values above 500000, Claude Code's cap on that limit.
+native_tool_result_max_chars: 16000
+
+# Session instructions changed for a live vendor session: notice | rotate | fail
+on_l1_drift: notice
+# The vendor session cannot continue (switch, cwd change, resume lost):
+# recap | fresh | fail
+on_session_loss: recap
+# Hosts that re-run an earlier turn number opt in to rewinding the vendor
+# session (exact fork where the backend supports it).
+rewind_on_repeat_turn: false
+# A rewind the backend cannot fork exactly: fail | recap
+on_rewind_unsupported: fail
+
+# No vendor events for this long while no AF tool runs interrupts the turn.
+vendor_stall_timeout_s: 1800
+vendor_drain_timeout_s: 30
+# Idle vendor sessions are closed and transparently resumed (private runtime
+# manager only; a host-injected manager keeps its own setting).
+idle_close_seconds: 1800
+
+# SOP catalog filters (both empty = every discovered SOP is listed).
+allowed_sops: []
+disallowed_sops: []
+# SOP-control tools offered to the agent (an empty list leaves SOP control to
+# the user's slash commands).
+sop_control_tools: [enter_sop, resume_sop, pause_sop, exit_sop, sop_status]
+# Offer the tool_argument_form question (one free-text answer; it has no
+# tool.json).
+expose_tool_argument_form: false

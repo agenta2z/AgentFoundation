@@ -22,12 +22,12 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    RuntimeBindings,
     active_run_context,
     enter_run,
     exit_run,
     mint_root,
+    RunContext,
+    RuntimeBindings,
 )
 
 
@@ -51,12 +51,14 @@ class RecordingReporter:
         for n in getattr(event, "nodes", []) or []:
             self.events.append(("topology", n["id"]))
 
-    async def on_node_status(self, node_id: str, status: str,
-                             error: str = "", output_path: str = "") -> None:
+    async def on_node_status(
+        self, node_id: str, status: str, error: str = "", output_path: str = ""
+    ) -> None:
         self.events.append(("status", self._q(node_id)))
 
-    async def on_node_stream(self, node_id: str, content: str,
-                             is_final: bool = True) -> None:
+    async def on_node_stream(
+        self, node_id: str, content: str, is_final: bool = True
+    ) -> None:
         self.events.append(("stream", self._q(node_id)))
 
     async def on_graph_reconcile(self, node_statuses: dict) -> None:
@@ -156,6 +158,7 @@ def test_bta_resolver_distinct_nodes_for_concurrent_ctxs_on_shared_instance():
             # genuinely interleave on the shared instance — proving the resolution
             # is per-ctx (ContextVar-isolated), not per-instance last-write-wins.
             import asyncio as _a
+
             await _a.sleep(0)
             await rep.on_node_status("worker_0", "completed")
         finally:

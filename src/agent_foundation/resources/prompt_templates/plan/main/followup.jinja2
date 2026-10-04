@@ -24,10 +24,10 @@ The prior version is at: `{{ prior_output_path }}`
 **Current Review Iteration Index**: {{ round_index }}
 
 ---
-{% if task_instructions %}
+{% if prior_task_instructions %}
 Here is the original task instructions for your reference.
 <OriginalTaskInstructions>
-{{ task_instructions }}
+{{ prior_task_instructions }}
 </OriginalTaskInstructions>
 {% endif %}
 
@@ -56,9 +56,10 @@ Check the reviewer's `estimated_fix_impact` for each issue. When fixes are mostl
 
 ## Output Requirements
 
-
-Write your **improved artifact** in markdown format to: `{{ output_path }}`
+- Write your **improved artifact** to: `{{ output_path }}`, following the output-related requirements (e.g., on content, structure or format or other aspects) in OriginalUserRequest and OriginalTaskInstructions.
 - The artifact should be human readable and structured with details, that another human or agent could follow or act on later.
+
+## Response Format
 
 Wrap a structured response in `<Response>` tags:
 - **IMPORTANT: You MUST wrap your response in `<Response>` tags**: The system depends on these tags to extract your summary. If you omit them, the entire raw output will be passed to downstream, which may cause failures.

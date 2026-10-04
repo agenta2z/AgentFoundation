@@ -1,0 +1,153 @@
+{
+  "bare": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/s1",
+        "ctx_workspace": null,
+        "label": "one",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      },
+      {
+        "ctx_path": "/s2",
+        "ctx_workspace": null,
+        "label": "two",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      }
+    ],
+    "result": {
+      "_prev_iteration": 1,
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-1"
+    }
+  },
+  "host1": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/s1",
+        "ctx_workspace": "<WS>/host1/children/s1",
+        "label": "one",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/s1"
+      },
+      {
+        "ctx_path": "/s2",
+        "ctx_workspace": "<WS>/host1/children/s2",
+        "label": "two",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/s2"
+      }
+    ],
+    "result": {
+      "_prev_iteration": 1,
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-2"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "host2": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/s1",
+        "ctx_workspace": "<WS>/host2/children/s1",
+        "label": "one",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/s1"
+      },
+      {
+        "ctx_path": "/s2",
+        "ctx_workspace": "<WS>/host2/children/s2",
+        "label": "two",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/s2"
+      }
+    ],
+    "result": {
+      "_prev_iteration": 1,
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-3"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "tree": {
+    "host1/artifacts/.s1_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"s1\"\n}",
+    "host1/artifacts/.s2_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"s2\"\n}",
+    "host1/checkpoints/final_result.json": {
+      "json": {
+        "_prev_iteration": 1,
+        "iteration": 1,
+        "iteration_records": [],
+        "original_input": "task-2"
+      }
+    },
+    "host1/checkpoints/step_s1.json": {
+      "json": "one:task-2"
+    },
+    "host1/checkpoints/step_s2.json": {
+      "json": "two:task-2"
+    },
+    "host1/children/s1/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host1/children/s1/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/children/s2/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host1/children/s2/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/logs/session/LinearWorkflowInferencer-<ID3>.jsonl": "<present>",
+    "host1/logs/session/LinearWorkflowInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/artifacts/.s1_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"s1\"\n}",
+    "host2/artifacts/.s2_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"s2\"\n}",
+    "host2/checkpoints/final_result.json": {
+      "json": {
+        "_prev_iteration": 1,
+        "iteration": 1,
+        "iteration_records": [],
+        "original_input": "task-3"
+      }
+    },
+    "host2/checkpoints/step_s1.json": {
+      "json": "one:task-3"
+    },
+    "host2/checkpoints/step_s2.json": {
+      "json": "two:task-3"
+    },
+    "host2/children/s1/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host2/children/s1/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/children/s2/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host2/children/s2/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/logs/session/LinearWorkflowInferencer-<ID3>.jsonl": "<present>",
+    "host2/logs/session/LinearWorkflowInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>"
+  }
+}

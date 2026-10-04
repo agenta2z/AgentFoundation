@@ -32,10 +32,40 @@ SKILL_EXTENSIONS = {".md", ".mdx"}
 
 # Text file extensions for supporting files
 TEXT_EXTENSIONS = {
-    ".py", ".sh", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml",
-    ".toml", ".rb", ".go", ".rs", ".swift", ".kt", ".java", ".cs", ".cpp",
-    ".c", ".h", ".hpp", ".sql", ".csv", ".ini", ".cfg", ".xml", ".html",
-    ".css", ".scss", ".sass", ".svg", ".txt", ".md", ".mdx",
+    ".py",
+    ".sh",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".rb",
+    ".go",
+    ".rs",
+    ".swift",
+    ".kt",
+    ".java",
+    ".cs",
+    ".cpp",
+    ".c",
+    ".h",
+    ".hpp",
+    ".sql",
+    ".csv",
+    ".ini",
+    ".cfg",
+    ".xml",
+    ".html",
+    ".css",
+    ".scss",
+    ".sass",
+    ".svg",
+    ".txt",
+    ".md",
+    ".mdx",
 }
 
 
@@ -132,8 +162,7 @@ class LocalPackLoader:
                     f"pack-version:{manifest.get('version', '0.0.0')}",
                 ],
                 summary=(
-                    frontmatter.get("description")
-                    or manifest.get("description", "")
+                    frontmatter.get("description") or manifest.get("description", "")
                 ),
             )
             pieces.append(primary_piece)

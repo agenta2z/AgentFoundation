@@ -4,10 +4,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     _record_hitl_checkpoint,
 )
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    RunStateStore,
     enter_run,
     exit_run,
+    RunContext,
+    RunStateStore,
 )
 
 
@@ -40,5 +40,8 @@ def test_hitl_checkpoint_survives_resume_round_trip():
         exit_run(tok)
     # persist + rehydrate the store (M9) -> the approval is restored
     import json
+
     restored = RunStateStore.from_json(json.loads(json.dumps(root._store.to_json())))
-    assert restored.node("/").checkpoints["hitl_0"]["user_input"] == {"approved_plan": True}
+    assert restored.node("/").checkpoints["hitl_0"]["user_input"] == {
+        "approved_plan": True
+    }

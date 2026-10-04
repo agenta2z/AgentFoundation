@@ -49,6 +49,7 @@ def create_inferencer(args):
 
 # ── Demo 1: Non-streaming (sync) ─────────────────────────────────────────
 
+
 def demo_sync(inferencer, query: str) -> None:
     """Sync mode: sends query, waits for full response."""
     print("=" * 70)
@@ -67,13 +68,16 @@ def demo_sync(inferencer, query: str) -> None:
     print()
     print("Response:")
     print("-" * 60)
-    output = response.output if response.success else (response.error or "Unknown error")
+    output = (
+        response.output if response.success else (response.error or "Unknown error")
+    )
     print(output)
     print("-" * 60)
     print()
 
 
 # ── Demo 2: Async streaming (real-time line output) ──────────────────────
+
 
 async def demo_async_streaming(inferencer, query: str) -> None:
     """Async streaming: prints text line-by-line as Kiro generates."""
@@ -113,6 +117,7 @@ async def demo_async_streaming(inferencer, query: str) -> None:
 
 # ── Demo 3: Sync streaming (for non-async code) ─────────────────────────
 
+
 def demo_sync_streaming(inferencer, query: str) -> None:
     """Sync streaming: same real-time output from synchronous code."""
     print("=" * 70)
@@ -142,27 +147,30 @@ def demo_sync_streaming(inferencer, query: str) -> None:
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Kiro CLI — Streaming vs Sync Demo"
-    )
+    parser = argparse.ArgumentParser(description="Kiro CLI — Streaming vs Sync Demo")
     parser.add_argument(
-        "-q", "--query",
+        "-q",
+        "--query",
         default="Explain what a Python decorator is in 3 bullet points.",
         help="Query to send to Kiro",
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="auto",
         help="Model name/alias (default: auto). Examples: claude-sonnet-4.6, haiku, opus",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default="/tmp",
         help="Working directory for Kiro CLI (default: /tmp)",
     )
     parser.add_argument(
-        "-e", "--examples",
+        "-e",
+        "--examples",
         type=int,
         default=3,
         choices=[1, 2, 3],

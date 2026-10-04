@@ -26,4 +26,4 @@ Usage:
 from .content_memory import ContentMemory
 
 
-__all__ = ['ContentMemory']
+__all__ = ["ContentMemory"]

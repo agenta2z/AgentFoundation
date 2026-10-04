@@ -12,6 +12,11 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
+from agent_foundation.common.inferencers.agentic_functions import (
+    agentic_function,
+    AgenticOutput,
+)
+from agent_foundation.common.inferencers.function_inferencer import FunctionInferencer
 from agent_foundation.knowledge.prompt_templates import render_prompt
 from agent_foundation.knowledge.retrieval.models.enums import DedupAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
@@ -46,6 +51,17 @@ class ThreeTierDeduplicator:
         self.embedding_fn = embedding_fn
         self.llm_fn = llm_fn
         self.config = config or DedupConfig()
+        self._judge: Callable[..., DedupResult] = _build_dedup_judge(
+            self._invoke_llm_fn
+        )
+
+    def _invoke_llm_fn(self, prompt: str) -> str:
+        # Read llm_fn dynamically (honors a post-construction swap, as the former
+        # inline call did); _tier3_llm_judge guards that it is set before use.
+        llm_fn = self.llm_fn
+        if llm_fn is None:
+            raise RuntimeError("Tier 3 judge invoked without an llm_fn")
+        return llm_fn(prompt)
 
     def deduplicate(self, piece: KnowledgePiece) -> DedupResult:
         """Run three-tier deduplication on a piece."""
@@ -169,19 +185,11 @@ class ThreeTierDeduplicator:
         )
 
         try:
-            response = self.llm_fn(prompt)
-            parsed = json.loads(response)
-
-            # Safely parse action enum
-            try:
-                action = DedupAction(parsed.get("action", "add").lower())
-            except ValueError:
-                logger.warning(
-                    "Invalid action from LLM: %s. Defaulting to ADD.",
-                    parsed.get("action"),
-                )
-                action = DedupAction.ADD
-
+            return self._judge(
+                prompt,
+                existing_piece_id=existing_piece.piece_id,
+                similarity=similarity,
+            )
         except Exception as e:
             logger.warning("LLM Judge failed: %s. Defaulting to ADD.", e)
             return DedupResult(
@@ -190,12 +198,48 @@ class ThreeTierDeduplicator:
                 similarity_score=similarity,
             )
 
+
+def _build_dedup_judge(
+    llm_callable: Callable[[str], str],
+) -> Callable[..., DedupResult]:
+    """Build the Tier-3 judge as an ``@agentic_function`` over a text LLM.
+
+    ``FunctionInferencer`` adapts the plain ``prompt -> reply`` callable into an
+    inferencer, so the already-rendered DedupJudge prompt is passed through
+    verbatim (``{{ prompt }}``) and the raw string reply arrives in the body as
+    ``response``. The decode mirrors the former inline judge exactly: an
+    unrecognized action falls back to ADD, while a malformed reply raises out to
+    ``_tier3_llm_judge``'s fail-closed handler.
+    """
+
+    @agentic_function(
+        inferencer=FunctionInferencer(func=llm_callable),
+        template_string="{{ prompt }}",
+    )
+    def judge(
+        prompt: str,
+        *,
+        existing_piece_id: Optional[str],
+        similarity: float,
+        response: AgenticOutput,
+    ) -> DedupResult:
+        parsed = json.loads(response.text)
+        try:
+            action = DedupAction(parsed.get("action", "add").lower())
+        except ValueError:
+            logger.warning(
+                "Invalid action from LLM: %s. Defaulting to ADD.",
+                parsed.get("action"),
+            )
+            action = DedupAction.ADD
         return DedupResult(
             action=action,
             reason=parsed.get("reasoning", ""),
             existing_piece_id=(
-                existing_piece.piece_id if action != DedupAction.ADD else None
+                existing_piece_id if action != DedupAction.ADD else None
             ),
             similarity_score=similarity,
             contradiction_detected=parsed.get("contradiction_detected", False),
         )
+
+    return judge

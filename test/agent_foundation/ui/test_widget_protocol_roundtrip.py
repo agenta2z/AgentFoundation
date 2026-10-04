@@ -3,15 +3,15 @@
 Verifies WidgetMessage.to_dict() produces a dict that can be used to
 reconstruct an equivalent message, for every widget_type in WIDGET_TYPES.
 """
-import pytest
 
+import pytest
+from agent_foundation.ui.input_modes import InputMode, InputModeConfig
 from agent_foundation.ui.widget_protocol import (
+    WIDGET_TYPES,
     WidgetField,
     WidgetMessage,
     WidgetResponse,
-    WIDGET_TYPES,
 )
-from agent_foundation.ui.input_modes import InputModeConfig, InputMode
 
 
 @pytest.mark.parametrize("widget_type", WIDGET_TYPES)
@@ -77,8 +77,15 @@ def test_widget_response_roundtrip():
 def test_widget_types_tuple_completeness():
     """WIDGET_TYPES contains all expected canonical types."""
     expected = {
-        "text_input", "single_choice", "multiple_choice",
-        "dropdown", "toggle", "tool_argument_form",
-        "confirmation", "multi_input", "grouped", "default",
+        "text_input",
+        "single_choice",
+        "multiple_choice",
+        "dropdown",
+        "toggle",
+        "tool_argument_form",
+        "confirmation",
+        "multi_input",
+        "grouped",
+        "default",
     }
     assert set(WIDGET_TYPES) == expected

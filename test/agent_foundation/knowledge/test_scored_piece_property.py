@@ -6,6 +6,7 @@ Property 4: ScoredPiece convenience property delegation
 
 Validates: Requirements 2.3
 """
+
 import sys
 from pathlib import Path
 
@@ -22,12 +23,10 @@ _test_dir = _current_file.parent
 if str(_test_dir) not in sys.path:
     sys.path.insert(0, str(_test_dir))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
-
 from conftest import knowledge_piece_strategy
+from hypothesis import given, settings, strategies as st
 
 
 @st.composite
@@ -36,14 +35,18 @@ def scored_piece_strategy(draw):
     piece = draw(knowledge_piece_strategy())
     score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
     normalized_score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-    vector_score = draw(st.one_of(
-        st.none(),
-        st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
-    ))
-    keyword_score = draw(st.one_of(
-        st.none(),
-        st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
-    ))
+    vector_score = draw(
+        st.one_of(
+            st.none(),
+            st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+        )
+    )
+    keyword_score = draw(
+        st.one_of(
+            st.none(),
+            st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+        )
+    )
     return ScoredPiece(
         piece=piece,
         score=score,

@@ -39,22 +39,30 @@ skip_no_backend = pytest.mark.skipif(
 @pytest.mark.timeout(0)  # no outer timeout; each tool manages its own
 def test_sop_role_creation_yolo(tmp_path):
     """Run role_creation SOP in yolo mode via CLI subprocess."""
-    pythonpath = ":".join([
-        str(AF_ROOT / "src"),
-        str(RPU_ROOT / "src"),
-        str(OS_ROOT / "src"),
-    ])
+    pythonpath = ":".join(
+        [
+            str(AF_ROOT / "src"),
+            str(RPU_ROOT / "src"),
+            str(OS_ROOT / "src"),
+        ]
+    )
     env = {**os.environ, "PYTHONPATH": pythonpath}
 
     extra_sop_dirs = str(OS_ROOT / "src" / "openteam" / "server" / "resources" / "sops")
-    extra_tool_dirs = str(OS_ROOT / "src" / "openteam" / "server" / "resources" / "tools")
+    extra_tool_dirs = str(
+        OS_ROOT / "src" / "openteam" / "server" / "resources" / "tools"
+    )
 
     cmd = [
-        sys.executable, "-m", "agent_foundation.resources.tools.sop",
+        sys.executable,
+        "-m",
+        "agent_foundation.resources.tools.sop",
         "role_creation",
         "--yolo",
-        "--extra-sop-dirs", extra_sop_dirs,
-        "--extra-tool-dirs", extra_tool_dirs,
+        "--extra-sop-dirs",
+        extra_sop_dirs,
+        "--extra-tool-dirs",
+        extra_tool_dirs,
         "hire a machine learning engineer",
     ]
 
@@ -100,15 +108,18 @@ def test_sop_role_creation_yolo(tmp_path):
 def test_sop_cli_import():
     """Verify the CLI module imports without errors."""
     cmd = [
-        sys.executable, "-c",
+        sys.executable,
+        "-c",
         "from agent_foundation.resources.tools.sop.cli import main; print('OK')",
     ]
     env = {
         **os.environ,
-        "PYTHONPATH": ":".join([
-            str(AF_ROOT / "src"),
-            str(RPU_ROOT / "src"),
-        ]),
+        "PYTHONPATH": ":".join(
+            [
+                str(AF_ROOT / "src"),
+                str(RPU_ROOT / "src"),
+            ]
+        ),
     }
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert result.returncode == 0, f"Import failed: {result.stderr}"
@@ -118,15 +129,18 @@ def test_sop_cli_import():
 def test_sop_cli_help():
     """Verify --help works without a backend."""
     cmd = [
-        sys.executable, "-c",
+        sys.executable,
+        "-c",
         "from agent_foundation.resources.tools.sop.cli import main; main(['--help'])",
     ]
     env = {
         **os.environ,
-        "PYTHONPATH": ":".join([
-            str(AF_ROOT / "src"),
-            str(RPU_ROOT / "src"),
-        ]),
+        "PYTHONPATH": ":".join(
+            [
+                str(AF_ROOT / "src"),
+                str(RPU_ROOT / "src"),
+            ]
+        ),
     }
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert "sop_name" in result.stdout or "usage" in result.stdout.lower()

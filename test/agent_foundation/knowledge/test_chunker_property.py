@@ -6,6 +6,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 10.1**
 """
+
 import sys
 from pathlib import Path
 
@@ -18,12 +19,8 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, assume, strategies as st
-
-from agent_foundation.knowledge.ingestion.chunker import (
-    ChunkerConfig,
-    MarkdownChunker,
-)
+from agent_foundation.knowledge.ingestion.chunker import ChunkerConfig, MarkdownChunker
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -31,7 +28,9 @@ from agent_foundation.knowledge.ingestion.chunker import (
 # Generate markdown header lines at various levels
 _header_level = st.integers(min_value=1, max_value=6)
 _header_text = st.text(
-    alphabet=st.characters(whitelist_categories=("L", "N", "P", "Z"), blacklist_characters="\n\r\x00#"),
+    alphabet=st.characters(
+        whitelist_categories=("L", "N", "P", "Z"), blacklist_characters="\n\r\x00#"
+    ),
     min_size=1,
     max_size=40,
 )
@@ -43,7 +42,9 @@ def _markdown_header(level: int, text: str) -> str:
 
 # Generate a paragraph of body text (no newlines to keep it a single paragraph)
 _body_paragraph = st.text(
-    alphabet=st.characters(whitelist_categories=("L", "N", "P", "Z"), blacklist_characters="\n\r\x00"),
+    alphabet=st.characters(
+        whitelist_categories=("L", "N", "P", "Z"), blacklist_characters="\n\r\x00"
+    ),
     min_size=1,
     max_size=300,
 )

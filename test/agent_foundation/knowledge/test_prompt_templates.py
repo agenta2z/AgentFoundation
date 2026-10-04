@@ -7,6 +7,7 @@ and the high-level helpers produce well-formed prompts.
 
 Requirements: prompt template migration (all knowledge LLM prompts → .hbs)
 """
+
 import sys
 from pathlib import Path
 
@@ -24,12 +25,11 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
 from agent_foundation.knowledge.prompt_templates import (
+    get_classification_prompt,
+    get_structuring_prompt,
     KNOWLEDGE_TEMPLATE_MANAGER,
     render_prompt,
-    get_structuring_prompt,
-    get_classification_prompt,
 )
 from agent_foundation.knowledge.prompt_templates._config import PROMPT_CONFIGS
 
@@ -279,7 +279,8 @@ class TestPromptConfigs:
     def test_all_base_templates_have_config(self):
         """Every non-variant template key has an entry in PROMPT_CONFIGS."""
         base_keys = [
-            k for k in EXPECTED_KEYS
+            k
+            for k in EXPECTED_KEYS
             if "." not in k.split("/")[-1]  # skip version variants
         ]
         for key in base_keys:

@@ -21,26 +21,36 @@ Usage:
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import resolve_path  # noqa: F401 - Must be first import for path setup
 
-import time
-import threading
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tempfile
+import threading
+import time
 import uuid
 
+import resolve_path  # noqa: F401 - Must be first import for path setup
+from agent_foundation.automation.schema.monitor import (
+    MonitorNode,
+    MonitorResult,
+    MonitorStatus,
+)
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.common.worknode_base import (
+    NextNodesSelector,
+)
 from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
-from rich_python_utils.common_objects.workflow.common.worknode_base import NextNodesSelector
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
 from rich_python_utils.mp_utils.queued_executor import QueuedThreadPoolExecutor
-from rich_python_utils.service_utils.queue_service.thread_queue_service import ThreadQueueService
-
-from agent_foundation.automation.schema.monitor import MonitorNode, MonitorResult, MonitorStatus
+from rich_python_utils.service_utils.queue_service.thread_queue_service import (
+    ThreadQueueService,
+)
 
 
 # =============================================================================
 # Counter Thread
 # =============================================================================
+
 
 class CounterThread(threading.Thread):
     """Background thread that increments a counter in a file."""
@@ -69,6 +79,7 @@ class CounterThread(threading.Thread):
 # Monitor Iteration Factory
 # =============================================================================
 
+
 def create_monitor_iteration(name: str, counter_file: Path, target: int):
     """
     Create a monitor iteration that checks if file counter reaches target.
@@ -91,7 +102,9 @@ def create_monitor_iteration(name: str, counter_file: Path, target: int):
         except (FileNotFoundError, ValueError):
             current_count = 0
 
-        print(f"   [{name}] Check #{check_count[0]}: count={current_count}, target={target}")
+        print(
+            f"   [{name}] Check #{check_count[0]}: count={current_count}, target={target}"
+        )
 
         if current_count >= target:
             print(f"   [{name}] Target reached! count={current_count} >= {target}")
@@ -99,24 +112,24 @@ def create_monitor_iteration(name: str, counter_file: Path, target: int):
             result = MonitorResult(
                 success=True,
                 status=MonitorStatus.CONDITION_MET,
-                matched_content={'name': name, 'count': current_count, 'target': target},
-                check_count=check_count[0]
+                matched_content={
+                    "name": name,
+                    "count": current_count,
+                    "target": target,
+                },
+                check_count=check_count[0],
             )
             return NextNodesSelector(
-                include_self=False,
-                include_others=True,
-                result=result
+                include_self=False, include_others=True, result=result
             )
         else:
             result = MonitorResult(
                 success=False,
                 status=MonitorStatus.MAX_ITERATIONS,
-                check_count=check_count[0]
+                check_count=check_count[0],
             )
             return NextNodesSelector(
-                include_self=True,
-                include_others=False,
-                result=result
+                include_self=True, include_others=False, result=result
             )
 
     return iteration
@@ -125,6 +138,7 @@ def create_monitor_iteration(name: str, counter_file: Path, target: int):
 # =============================================================================
 # Action Functions
 # =============================================================================
+
 
 def action_a(prev_result):
     """Action for Monitor A."""
@@ -135,7 +149,7 @@ def action_a(prev_result):
         info = prev_result
     print(f"   [Action-A] Target reached: {info}")
     time.sleep(0.3)
-    return {'action': 'A', 'info': info, 'timestamp': time.time()}
+    return {"action": "A", "info": info, "timestamp": time.time()}
 
 
 def action_b(prev_result):
@@ -147,16 +161,17 @@ def action_b(prev_result):
         info = prev_result
     print(f"   [Action-B] Target reached: {info}")
     time.sleep(0.3)
-    return {'action': 'B', 'info': info, 'timestamp': time.time()}
+    return {"action": "B", "info": info, "timestamp": time.time()}
 
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
-def unique_queue_ids(prefix='threadpool'):
+
+def unique_queue_ids(prefix="threadpool"):
     unique = uuid.uuid4().hex[:8]
-    return f'{prefix}_in_{unique}', f'{prefix}_out_{unique}'
+    return f"{prefix}_in_{unique}", f"{prefix}_out_{unique}"
 
 
 def create_thread_pool_executor(num_workers=4):
@@ -169,8 +184,8 @@ def create_thread_pool_executor(num_workers=4):
         input_queue_id=input_id,
         output_queue_id=output_id,
         num_workers=num_workers,
-        name='MonitorPool',
-        verbose=False
+        name="MonitorPool",
+        verbose=False,
     )
     return executor, service
 
@@ -178,6 +193,7 @@ def create_thread_pool_executor(num_workers=4):
 # =============================================================================
 # Main Example
 # =============================================================================
+
 
 def main():
     print("""
@@ -271,18 +287,12 @@ This example demonstrates:
 
     # Counter A: faster (1.5s interval)
     counter_thread_a = CounterThread(
-        name="Counter-A",
-        counter_file=counter_file_a,
-        interval=1.5,
-        max_count=20
+        name="Counter-A", counter_file=counter_file_a, interval=1.5, max_count=20
     )
 
     # Counter B: slower (2.5s interval)
     counter_thread_b = CounterThread(
-        name="Counter-B",
-        counter_file=counter_file_b,
-        interval=2.5,
-        max_count=25
+        name="Counter-B", counter_file=counter_file_b, interval=2.5, max_count=25
     )
 
     counter_thread_a.start()
@@ -345,12 +355,14 @@ Key Takeaways:
 """)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print(f"\n[X] Error: {e}")
         import traceback
+
         traceback.print_exc()
         import sys
+
         sys.exit(1)

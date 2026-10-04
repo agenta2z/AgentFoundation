@@ -1,5 +1,3 @@
-
-
 """Shared runtime helpers for conversation tools.
 
 ONE source of truth for turning a parsed :class:`ConversationTool` + a UI
@@ -334,9 +332,7 @@ def group_and_validate(
         prev_key = key
 
     # (d) At most one DISTINCT non-None parallel_group across the response.
-    distinct_groups = {
-        t.parallel_group for t in tools if t.parallel_group is not None
-    }
+    distinct_groups = {t.parallel_group for t in tools if t.parallel_group is not None}
     if len(distinct_groups) > 1:
         raise GroupValidationError(
             "more than one distinct parallel_group present in the response: "

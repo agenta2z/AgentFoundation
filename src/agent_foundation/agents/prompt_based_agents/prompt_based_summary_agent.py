@@ -1,6 +1,7 @@
+from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import (
+    PromptBasedActionAgent,
+)
 from attr import attrs
-
-from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
 from rich_python_utils.common_utils import has_single_key, iter_
 
 
@@ -10,9 +11,9 @@ class PromptBasedSummaryActionAgent(PromptBasedActionAgent):
         answers = []
 
         for response in iter_(instant_response):
-            if has_single_key(response, 'Response'):
-                response = response['Response']
-                answers.append(response['Answer'])
+            if has_single_key(response, "Response"):
+                response = response["Response"]
+                answers.append(response["Answer"])
 
-        joined = '\n\n'.join(answers)
+        joined = "\n\n".join(answers)
         return f"<html><body>{joined}</body></html>"

@@ -94,7 +94,9 @@ class GraphValidator:
 
         # If execution itself failed, report immediately.
         if not getattr(execution_result, "success", True):
-            error_msg = str(getattr(execution_result, "error", "")) or "Execution failed"
+            error_msg = (
+                str(getattr(execution_result, "error", "")) or "Execution failed"
+            )
             return ValidationResult(
                 input_data=input_data,
                 passed=False,
@@ -241,6 +243,7 @@ class GraphValidator:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
 
 def _dict_to_trace_step(d: Any) -> TraceStep:
     """Best-effort conversion of a dict (or dict-like) to a TraceStep."""

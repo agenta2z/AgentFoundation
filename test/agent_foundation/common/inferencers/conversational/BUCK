@@ -1,0 +1,187 @@
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
+
+oncall("ml_oncall")
+
+# unittest.TestCase-style suite (buck python_unittest collects these) covering
+# the SOP phase-progression fixes. The sibling test_user_input_gate_phase_advance.py
+# is pytest-bare-function style and runs under the external pytest interpreter.
+python_unittest(
+    name = "test_phase_progression_guards",
+    srcs = ["test_phase_progression_guards.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# unittest.TestCase-style suite for pending-widget RECOVERY (Layer 2, Piece 3):
+# the deterministic re-arm that applies a persisted widget answer with NO LLM
+# re-inference. Drives a real ConversationalInferencer through run_agentic_loop
+# with a scripted fake base (no network), plus unbound-method decode + round-trip
+# tests.
+python_unittest(
+    name = "test_widget_recovery",
+    srcs = ["test_widget_recovery.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# Byte-for-byte golden renders of conversation/main/initial.jinja2 through
+# ConversationalInferencer._render_prompt. Locks the classic prompt so the
+# shared-section extraction (conversation/sections/*) and the native templates
+# cannot drift it. Regenerate with AF_REGEN_RENDER_GOLDEN=1.
+python_unittest(
+    name = "test_render_prompt_golden",
+    srcs = ["test_render_prompt_golden.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    resources = glob(["fixtures/render_golden/**"]),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# SOPController.enter / resume (typed SOP entry behind the slash commands and
+# the native SOP tools), pause/exit guards, and extra SOP directories (registry
+# load_sop, definition reload, CI extra_sop_dirs forwarding). No network.
+python_unittest(
+    name = "test_sop_enter_resume",
+    srcs = ["test_sop_enter_resume.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# sop_feed: per-turn SOP preparation (legacy auto-discover, user-input gate),
+# the SOP-derived prompt values (guidance, filtered catalog, suspended lists)
+# and templated-feed resolution, shared by the classic and native orchestrators.
+python_unittest(
+    name = "test_sop_feed",
+    srcs = ["test_sop_feed.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/jinja2:jinja2",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# A satisfied user-input gate completing a no-tools "requires user input" phase
+# advances the SOP exactly as check_phase_completion does (current phase, SOP
+# completion, auto-shutdown, the classic prompt). No network.
+python_unittest(
+    name = "test_sop_gate_completion",
+    srcs = ["test_sop_gate_completion.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+# SOPController.enter keeps one instance per SOP name: fresh discards the
+# in-progress instance (suspended or active); otherwise entry is refused.
+python_unittest(
+    name = "test_sop_fresh_entry",
+    srcs = ["test_sop_fresh_entry.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+# InboxDriver: the inbox event loop shared by ConversationalInferencer and the
+# native orchestrator (turn origins, auto-continue on tool completion,
+# shutdown). Scripted fake turns; no network.
+python_unittest(
+    name = "test_inbox_driver",
+    srcs = ["test_inbox_driver.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)
+
+# tool_dispatch: execute / apply_outcome (sync tool, command, async start and
+# completion, failures) over a host double, and AsyncToolTasks keeping
+# concurrent background runs referenced until they finish. No network.
+python_unittest(
+    name = "test_tool_dispatch",
+    srcs = ["test_tool_dispatch.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)
+
+# EffectTarget / WidgetMailboxes: widget effects act on an orchestrator's
+# mailboxes and update_prior_context, CI's _next_* names forward to its
+# mailboxes, and an object of the earlier effect-target shape still works.
+python_unittest(
+    name = "test_effect_target",
+    srcs = ["test_effect_target.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)
+
+# widget_core: the conversation-widget functional core shared by the classic
+# and native orchestrators (prepare, present and collect, decode, yolo,
+# after-answer incl. then_run, recovery) on a real ConversationalInferencer,
+# plus the classic loop around the after-answer steps. No network.
+python_unittest(
+    name = "test_widget_core",
+    srcs = ["test_widget_core.py"],
+    base_module = "",
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)
+
+# fresh_vendor_session_per_round: every agentic-loop round reaches a fresh vendor
+# conversation (the base's areset_conversation under the round's agent context),
+# streaming and not, bare and per-turn hosts; off keeps the old continuation;
+# the default CI config exposes the knob. Session-keeping fake base; no network.
+python_unittest(
+    name = "test_fresh_vendor_session_per_round",
+    srcs = ["test_fresh_vendor_session_per_round.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//later:lib",
+    ],
+)

@@ -7,7 +7,12 @@ from typing import List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
-
+from agent_foundation.knowledge.ingestion.skill_synthesizer import (
+    SkillSynthesisConfig,
+    SkillSynthesizer,
+)
+from agent_foundation.knowledge.models.entity_metadata import EntityMetadata
+from agent_foundation.knowledge.packs.local_pack_loader import LocalPackLoader
 from agent_foundation.knowledge.packs.models import (
     KnowledgePack,
     PackInstallResult,
@@ -15,22 +20,17 @@ from agent_foundation.knowledge.packs.models import (
     PackStatus,
 )
 from agent_foundation.knowledge.packs.pack_manager import KnowledgePackManager
-from agent_foundation.knowledge.packs.local_pack_loader import LocalPackLoader
-from agent_foundation.knowledge.ingestion.skill_synthesizer import (
-    SkillSynthesizer,
-    SkillSynthesisConfig,
-)
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
-from agent_foundation.knowledge.models.entity_metadata import EntityMetadata
 
 
 # ---------------------------------------------------------------------------
 # Minimal in-memory stores for testing
 # ---------------------------------------------------------------------------
+
 
 class InMemoryPieceStore(KnowledgePieceStore):
     """Minimal in-memory piece store for pack tests."""
@@ -55,12 +55,19 @@ class InMemoryPieceStore(KnowledgePieceStore):
         return self._pieces.pop(piece_id, None) is not None
 
     def search(
-        self, query, entity_id=None, knowledge_type=None, tags=None, top_k=5,
+        self,
+        query,
+        entity_id=None,
+        knowledge_type=None,
+        tags=None,
+        top_k=5,
         spaces=None,
     ) -> List[Tuple[KnowledgePiece, float]]:
         return [(p, 0.9) for p in list(self._pieces.values())[:top_k]]
 
-    def list_all(self, entity_id=None, knowledge_type=None, spaces=None) -> List[KnowledgePiece]:
+    def list_all(
+        self, entity_id=None, knowledge_type=None, spaces=None
+    ) -> List[KnowledgePiece]:
         return list(self._pieces.values())
 
 
@@ -101,10 +108,16 @@ class InMemoryGraphStore:
 
     def remove_node(self, node_id: str):
         self._nodes.pop(node_id, None)
-        self._edges = [e for e in self._edges if e.source_id != node_id and e.target_id != node_id]
+        self._edges = [
+            e for e in self._edges if e.source_id != node_id and e.target_id != node_id
+        ]
 
     def get_relations(self, entity_id: str, relation_type=None, direction=None):
-        results = [e for e in self._edges if e.source_id == entity_id or e.target_id == entity_id]
+        results = [
+            e
+            for e in self._edges
+            if e.source_id == entity_id or e.target_id == entity_id
+        ]
         if relation_type:
             results = [e for e in results if e.edge_type == relation_type]
         if direction == "outgoing":
@@ -134,6 +147,7 @@ def _make_manager():
 # ===========================================================================
 # Task 15.1: KnowledgePack model spaces field
 # ===========================================================================
+
 
 class TestKnowledgePackSpacesField:
     """Tests for the spaces field on KnowledgePack."""
@@ -181,14 +195,13 @@ class TestKnowledgePackSpacesField:
 # Task 15.2: KnowledgePackManager install/update space stamping
 # ===========================================================================
 
+
 class TestPackManagerSpaceStamping:
     """Tests for space stamping in install() and update()."""
 
     def test_install_stamps_spaces_on_pieces(self):
         manager, piece_store, _ = _make_manager()
-        pack = KnowledgePack(
-            pack_id="pack:test:1", name="test", spaces=["personal"]
-        )
+        pack = KnowledgePack(pack_id="pack:test:1", name="test", spaces=["personal"])
         pieces = [_make_piece("content A"), _make_piece("content B")]
 
         result = manager.install(pack, pieces)
@@ -234,7 +247,9 @@ class TestPackManagerSpaceStamping:
 
         # Update with spaces
         pack_v2 = KnowledgePack(
-            pack_id="pack:test:4", name="test", version="2.0",
+            pack_id="pack:test:4",
+            name="test",
+            version="2.0",
             spaces=["developmental"],
         )
         new_pieces = [_make_piece("new content")]
@@ -266,6 +281,7 @@ class TestPackManagerSpaceStamping:
 # Task 15.3: ClawhubPackAdapter spaces parameter
 # ===========================================================================
 
+
 class TestClawhubAdapterSpaces:
     """Tests for spaces parameter on ClawhubPackAdapter import/update."""
 
@@ -281,9 +297,14 @@ class TestClawhubAdapterSpaces:
             "latestVersion": {"version": "1.0.0"},
         }
         client.get_version.return_value = {
-            "version": {"version": "1.0.0", "files": [{"path": "SKILL.md", "size": 100}]},
+            "version": {
+                "version": "1.0.0",
+                "files": [{"path": "SKILL.md", "size": 100}],
+            },
         }
-        client.get_file.return_value = "---\nname: Test\ndescription: A test\n---\nBody content"
+        client.get_file.return_value = (
+            "---\nname: Test\ndescription: A test\n---\nBody content"
+        )
 
         adapter = ClawhubPackAdapter(client=client, pack_manager=manager)
         result = adapter.import_skill("test-skill", spaces=["personal"])
@@ -307,9 +328,14 @@ class TestClawhubAdapterSpaces:
             "latestVersion": {"version": "1.0.0"},
         }
         client.get_version.return_value = {
-            "version": {"version": "1.0.0", "files": [{"path": "SKILL.md", "size": 100}]},
+            "version": {
+                "version": "1.0.0",
+                "files": [{"path": "SKILL.md", "size": 100}],
+            },
         }
-        client.get_file.return_value = "---\nname: Test\ndescription: A test\n---\nBody content"
+        client.get_file.return_value = (
+            "---\nname: Test\ndescription: A test\n---\nBody content"
+        )
 
         adapter = ClawhubPackAdapter(client=client, pack_manager=manager)
         result = adapter.import_skill("test-skill-2")
@@ -323,6 +349,7 @@ class TestClawhubAdapterSpaces:
 # ===========================================================================
 # Task 15.4: LocalPackLoader spaces parameter
 # ===========================================================================
+
 
 class TestLocalPackLoaderSpaces:
     """Tests for spaces parameter on LocalPackLoader."""
@@ -401,6 +428,7 @@ class TestLocalPackLoaderSpaces:
 # ===========================================================================
 # Task 15.5: SkillSynthesizer._create_skill_piece() space inheritance
 # ===========================================================================
+
 
 class TestSkillSynthesizerSpaceInheritance:
     """Tests for space inheritance in _create_skill_piece."""

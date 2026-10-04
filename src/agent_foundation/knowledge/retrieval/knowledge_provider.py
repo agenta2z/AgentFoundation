@@ -117,9 +117,7 @@ class BudgetAwareKnowledgeProvider:
 
         return "\n".join(formatted)
 
-    def _format_instructions(
-        self, pieces: List[ScoredPiece], budget: int
-    ) -> str:
+    def _format_instructions(self, pieces: List[ScoredPiece], budget: int) -> str:
         """Instructions: Bullet points with budget enforcement."""
         formatted = ["## Instructions\n"]
         for piece in pieces:
@@ -143,9 +141,7 @@ class BudgetAwareKnowledgeProvider:
         """Episodic: With temporal markers (date prefix) and budget enforcement."""
         formatted = ["## Recent History\n"]
         for piece in pieces:
-            timestamp = (
-                piece.updated_at[:10] if piece.updated_at else "unknown"
-            )
+            timestamp = piece.updated_at[:10] if piece.updated_at else "unknown"
             line = f"[{timestamp}] {piece.piece.content}"
             if self._count_tokens("\n".join(formatted + [line])) > budget:
                 break

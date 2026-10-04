@@ -4,6 +4,7 @@ Unit tests for KnowledgeConsolidator.
 Tests consolidation modes (ENABLED, DISABLED, DISABLED_FOR_SHORT_KNOWLEDGE),
 user_profile exclusion, LLM failure graceful fallback, and prompt formatting.
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -18,7 +19,6 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.knowledge_consolidator import (
     KnowledgeConsolidator,
 )
@@ -67,9 +67,7 @@ class TestEnabledMode:
 
     def test_enabled_mode_calls_llm_and_adds_key(self):
         llm = _make_mock_llm("Deduplicated knowledge output.")
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
         groups = _sample_groups()
 
         result = consolidator.consolidate("what are egg prices?", groups)
@@ -78,13 +76,14 @@ class TestEnabledMode:
         llm.assert_called_once()
         # consolidated_knowledge key added
         assert KnowledgeConsolidator.CONSOLIDATED_KEY in result
-        assert result[KnowledgeConsolidator.CONSOLIDATED_KEY] == "Deduplicated knowledge output."
+        assert (
+            result[KnowledgeConsolidator.CONSOLIDATED_KEY]
+            == "Deduplicated knowledge output."
+        )
 
     def test_original_keys_always_preserved(self):
         llm = _make_mock_llm("Consolidated.")
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
         groups = _sample_groups()
 
         result = consolidator.consolidate("query", groups)
@@ -98,9 +97,7 @@ class TestEnabledMode:
 
     def test_enabled_mode_empty_knowledge_skips(self):
         llm = _make_mock_llm()
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
         groups = {"user_profile": "Alice", "context": "", "instructions": "   "}
 
         result = consolidator.consolidate("query", groups)
@@ -148,9 +145,7 @@ class TestLLMFailure:
 
     def test_llm_failure_returns_input_unchanged(self):
         llm = MagicMock(side_effect=RuntimeError("API error"))
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
         groups = _sample_groups()
 
         result = consolidator.consolidate("query", groups)
@@ -161,9 +156,7 @@ class TestLLMFailure:
 
     def test_llm_empty_response_returns_input_unchanged(self):
         llm = _make_mock_llm("   ")  # Whitespace-only
-        consolidator = KnowledgeConsolidator(
-            llm_fn=llm, mode=ConsolidationMode.ENABLED
-        )
+        consolidator = KnowledgeConsolidator(llm_fn=llm, mode=ConsolidationMode.ENABLED)
         groups = _sample_groups()
 
         result = consolidator.consolidate("query", groups)

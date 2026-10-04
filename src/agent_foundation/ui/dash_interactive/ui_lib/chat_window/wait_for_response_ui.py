@@ -6,6 +6,7 @@ popular AI chat platforms like ChatGPT and Claude.
 """
 
 from typing import Optional
+
 from dash import html
 
 
@@ -19,7 +20,7 @@ def create_typing_indicator(
     animation_duration: str = "1.3s",
     animation_delay_increment: float = 0.15,
     animation_name: str = "wave",
-    container_style: Optional[dict] = None
+    container_style: Optional[dict] = None,
 ) -> html.Div:
     """
     Create an animated typing indicator with bouncing dots.
@@ -75,49 +76,43 @@ def create_typing_indicator(
         delay = f"{i * animation_delay_increment}s"
         dot = html.Span(
             dot_char,
-            className='dot',
+            className="dot",
             style={
-                'animation': f'{animation_name} {animation_duration} ease-in-out infinite',
-                'animationDelay': delay,
-                'fontSize': dot_size,
-                'margin': f'0 {dot_spacing}',
-                'display': 'inline-block'
-            }
+                "animation": f"{animation_name} {animation_duration} ease-in-out infinite",
+                "animationDelay": delay,
+                "fontSize": dot_size,
+                "margin": f"0 {dot_spacing}",
+                "display": "inline-block",
+            },
         )
         dots.append(dot)
 
     # Default container style
-    default_style = {
-        'display': 'flex',
-        'alignItems': 'center'
-    }
+    default_style = {"display": "flex", "alignItems": "center"}
 
     # Merge with custom style if provided
     if container_style:
         default_style.update(container_style)
 
     # Create the complete indicator
-    return html.Div([
-        html.Span(
-            label,
-            style={
-                'marginRight': '8px',
-                'color': label_color
-            }
-        ),
-        html.Span(
-            className='typing-indicator',
-            children=dots,
-            style={'display': 'inline-block'}
-        )
-    ], style=default_style)
+    return html.Div(
+        [
+            html.Span(label, style={"marginRight": "8px", "color": label_color}),
+            html.Span(
+                className="typing-indicator",
+                children=dots,
+                style={"display": "inline-block"},
+            ),
+        ],
+        style=default_style,
+    )
 
 
 def create_pulsing_indicator(
     text: str = "Loading...",
     text_color: str = "#8E8EA0",
     animation_name: str = "pulse",
-    animation_duration: str = "1.5s"
+    animation_duration: str = "1.5s",
 ) -> html.Div:
     """
     Create a simple pulsing text indicator.
@@ -140,9 +135,9 @@ def create_pulsing_indicator(
     return html.Div(
         text,
         style={
-            'color': text_color,
-            'animation': f'{animation_name} {animation_duration} ease-in-out infinite'
-        }
+            "color": text_color,
+            "animation": f"{animation_name} {animation_duration} ease-in-out infinite",
+        },
     )
 
 
@@ -152,7 +147,7 @@ def create_spinner_with_text(
     spinner_char: str = "◐",
     spinner_size: str = "20px",
     animation_name: str = "spin",
-    animation_duration: str = "1s"
+    animation_duration: str = "1s",
 ) -> html.Div:
     """
     Create a spinning character with text label.
@@ -179,18 +174,18 @@ def create_spinner_with_text(
             to { transform: rotate(360deg); }
         }
     """
-    return html.Div([
-        html.Span(
-            spinner_char,
-            style={
-                'fontSize': spinner_size,
-                'marginRight': '8px',
-                'display': 'inline-block',
-                'animation': f'{animation_name} {animation_duration} linear infinite'
-            }
-        ),
-        html.Span(
-            text,
-            style={'color': text_color}
-        )
-    ], style={'display': 'flex', 'alignItems': 'center'})
+    return html.Div(
+        [
+            html.Span(
+                spinner_char,
+                style={
+                    "fontSize": spinner_size,
+                    "marginRight": "8px",
+                    "display": "inline-block",
+                    "animation": f"{animation_name} {animation_duration} linear infinite",
+                },
+            ),
+            html.Span(text, style={"color": text_color}),
+        ],
+        style={"display": "flex", "alignItems": "center"},
+    )

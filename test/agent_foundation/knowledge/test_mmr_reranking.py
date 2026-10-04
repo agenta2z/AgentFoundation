@@ -8,6 +8,7 @@ Tests cover:
 - Passthrough when disabled or input <= top_k
 - Score normalization
 """
+
 import sys
 from pathlib import Path
 
@@ -21,8 +22,8 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 from agent_foundation.knowledge.retrieval.mmr_reranking import (
-    MMRConfig,
     apply_mmr_reranking,
+    MMRConfig,
 )
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
@@ -53,7 +54,10 @@ class TestMMRConfig:
 class TestApplyMMRReranking:
     def test_disabled_returns_truncated(self):
         """When MMR is disabled, return input truncated to top_k."""
-        pieces = [_make_scored_piece(f"p{i}", 1.0 - i * 0.1, embedding=[1.0, 0.0]) for i in range(5)]
+        pieces = [
+            _make_scored_piece(f"p{i}", 1.0 - i * 0.1, embedding=[1.0, 0.0])
+            for i in range(5)
+        ]
         config = MMRConfig(enabled=False)
         result = apply_mmr_reranking(pieces, config, top_k=3)
         assert len(result) == 3
@@ -69,7 +73,10 @@ class TestApplyMMRReranking:
 
     def test_input_equal_to_top_k_returns_all(self):
         """When input length == top_k, return input as-is."""
-        pieces = [_make_scored_piece(f"p{i}", 0.9 - i * 0.1, embedding=[1.0, 0.0]) for i in range(3)]
+        pieces = [
+            _make_scored_piece(f"p{i}", 0.9 - i * 0.1, embedding=[1.0, 0.0])
+            for i in range(3)
+        ]
         config = MMRConfig()
         result = apply_mmr_reranking(pieces, config, top_k=3)
         assert len(result) == 3
@@ -105,8 +112,12 @@ class TestApplyMMRReranking:
     def test_high_lambda_prefers_relevance(self):
         """With high lambda, relevance dominates over diversity."""
         p0 = _make_scored_piece("p0", 1.0, embedding=[1.0, 0.0])
-        p1 = _make_scored_piece("p1", 0.99, embedding=[1.0, 0.0])  # redundant but high score
-        p2 = _make_scored_piece("p2", 0.5, embedding=[0.0, 1.0])  # diverse but low score
+        p1 = _make_scored_piece(
+            "p1", 0.99, embedding=[1.0, 0.0]
+        )  # redundant but high score
+        p2 = _make_scored_piece(
+            "p2", 0.5, embedding=[0.0, 1.0]
+        )  # diverse but low score
 
         config = MMRConfig(lambda_param=0.99)
         result = apply_mmr_reranking([p0, p1, p2], config, top_k=2)
@@ -132,14 +143,20 @@ class TestApplyMMRReranking:
 
     def test_output_length_respects_top_k(self):
         """Output never exceeds top_k."""
-        pieces = [_make_scored_piece(f"p{i}", 1.0 - i * 0.05, embedding=[float(i), 1.0]) for i in range(10)]
+        pieces = [
+            _make_scored_piece(f"p{i}", 1.0 - i * 0.05, embedding=[float(i), 1.0])
+            for i in range(10)
+        ]
         config = MMRConfig()
         result = apply_mmr_reranking(pieces, config, top_k=3)
         assert len(result) == 3
 
     def test_all_output_pieces_from_input(self):
         """Every piece in the output must be present in the input."""
-        pieces = [_make_scored_piece(f"p{i}", 1.0 - i * 0.1, embedding=[float(i), 1.0]) for i in range(5)]
+        pieces = [
+            _make_scored_piece(f"p{i}", 1.0 - i * 0.1, embedding=[float(i), 1.0])
+            for i in range(5)
+        ]
         config = MMRConfig()
         result = apply_mmr_reranking(pieces, config, top_k=3)
 
@@ -168,7 +185,10 @@ class TestApplyMMRReranking:
 
     def test_score_normalization_uniform_scores(self):
         """When all scores are equal, normalized scores should be 1.0."""
-        pieces = [_make_scored_piece(f"p{i}", 0.5, embedding=[float(i), 1.0]) for i in range(5)]
+        pieces = [
+            _make_scored_piece(f"p{i}", 0.5, embedding=[float(i), 1.0])
+            for i in range(5)
+        ]
         config = MMRConfig()
         result = apply_mmr_reranking(pieces, config, top_k=3)
 

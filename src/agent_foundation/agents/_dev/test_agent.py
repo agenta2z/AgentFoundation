@@ -5,6 +5,6 @@ agent = Agent(
     user_profile="static profile",
     context="session context",
     reasoner=lambda x: f"Processed {x}",
-    interactive=TerminalInteractive()
+    interactive=TerminalInteractive(),
 )
 agent.start()

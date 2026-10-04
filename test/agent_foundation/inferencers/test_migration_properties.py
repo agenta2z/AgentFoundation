@@ -8,17 +8,12 @@ import re
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 # Compute the destination inferencers directory relative to this test file
 _TEST_FILE_DIR = Path(__file__).resolve().parent
 _INFERENCERS_DIR = (
-    _TEST_FILE_DIR.parent.parent
-    / "src"
-    / "agent_foundation"
-    / "common"
-    / "inferencers"
+    _TEST_FILE_DIR.parent.parent / "src" / "agent_foundation" / "common" / "inferencers"
 )
 
 
@@ -177,9 +172,9 @@ def test_all_expected_files_exist(rel_path: str) -> None:
     """
     full_path = _INFERENCERS_DIR / rel_path
     assert full_path.is_file(), (
-        f"Expected file missing from destination: {rel_path}\n"
-        f"Full path: {full_path}"
+        f"Expected file missing from destination: {rel_path}\nFull path: {full_path}"
     )
+
 
 # ---------------------------------------------------------------------------
 # Property 3: All destination-only files are preserved
@@ -213,9 +208,7 @@ _TERMINAL_DEST_ONLY_FILES = [
 
 # Flattened manifest of all destination-only files
 _DESTINATION_ONLY_MANIFEST = (
-    _BEDROCK_INFERENCERS_FILES
-    + _AG_FILES
-    + _TERMINAL_DEST_ONLY_FILES
+    _BEDROCK_INFERENCERS_FILES + _AG_FILES + _TERMINAL_DEST_ONLY_FILES
 )
 
 
@@ -235,8 +228,7 @@ def test_destination_only_files_preserved(rel_path: str) -> None:
     """
     full_path = _INFERENCERS_DIR / rel_path
     assert full_path.is_file(), (
-        f"Destination-only file missing or deleted: {rel_path}\n"
-        f"Full path: {full_path}"
+        f"Destination-only file missing or deleted: {rel_path}\nFull path: {full_path}"
     )
 
 
@@ -272,7 +264,9 @@ def _get_class_methods_from_file(filepath: Path) -> set[str]:
 
 @given(method_name=st.sampled_from(_REQUIRED_INFERENCER_BASE_METHODS))
 @settings(max_examples=100)
-def test_destination_only_methods_preserved_in_inferencer_base(method_name: str) -> None:
+def test_destination_only_methods_preserved_in_inferencer_base(
+    method_name: str,
+) -> None:
     """Property 4: Destination-only methods preserved in inferencer_base.py.
 
     For any method in the set {parallel_infer, aconnect, adisconnect, __aenter__,

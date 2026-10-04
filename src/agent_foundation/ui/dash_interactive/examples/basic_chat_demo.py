@@ -8,6 +8,7 @@ This demonstrates:
 
 Run this script and navigate to http://localhost:8050 to see the UI.
 """
+
 import sys
 from pathlib import Path
 
@@ -35,11 +36,7 @@ def simple_echo_handler(message: str) -> str:
 def main():
     """Run the basic chat demo."""
     # Create the app
-    app = DashInteractiveApp(
-        title="Basic Chat Demo",
-        port=8050,
-        debug=True
-    )
+    app = DashInteractiveApp(title="Basic Chat Demo", port=8050, debug=True)
 
     # Set custom message handler
     app.set_message_handler(simple_echo_handler)
@@ -48,5 +45,5 @@ def main():
     app.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

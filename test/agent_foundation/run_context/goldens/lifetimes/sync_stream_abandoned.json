@@ -1,0 +1,56 @@
+{
+  "alive_after_release_and_join": false,
+  "at_close": {
+    "alive_after_close_and_0_5s": false,
+    "leaf_finally_before_release": true,
+    "leaf_raised_before_release": true,
+    "thread_daemon": true,
+    "thread_is_caller": false,
+    "thread_started_before_first_next": false,
+    "thread_target": "iterate_async_in_thread[_Blocking]"
+  },
+  "events": [
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "a",
+      "what": "yield",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": "a",
+      "what": "received",
+      "where": "caller"
+    },
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "CancelledError",
+      "what": "raised",
+      "where": "leaf"
+    },
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": null,
+      "what": "finally",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_close",
+      "where": "caller"
+    }
+  ]
+}

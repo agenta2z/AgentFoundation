@@ -13,6 +13,7 @@ eliminating the need for domain-specific EntityNode/EntityRelation models.
 
 Requirements: 2.1
 """
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 
@@ -211,5 +212,3 @@ class EntityGraphStore(ABC):
         stores with external connections (e.g., Neo4j) to release resources.
         """
         pass
-
-

@@ -34,6 +34,13 @@ max_iterations: -1
 # context); null/0 disables the instruction.
 soft_max_iterations: 30
 compression_threshold: 8000
+# Each round's rendered prompt carries the whole conversation. true makes each
+# round's base call start a fresh vendor conversation (session / client / chat).
+# false (the default) keeps the vendor's conversation across rounds: the only
+# carrier of the vendor's own built-in tool results between rounds, but a round
+# that continues it sends the history twice (the vendor's copy plus the
+# rendered one).
+fresh_vendor_session_per_round: false
 
 # ─── SOP discovery filters (optional, both empty = no filtering) ────
 #

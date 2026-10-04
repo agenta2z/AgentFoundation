@@ -66,12 +66,15 @@ logger = logging.getLogger(__name__)
 # Anthropic SSE helpers
 # ---------------------------------------------------------------------------
 
+
 def _sse_event(event: str, data: dict) -> str:
     """Format a single Server-Sent Event line pair."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _build_streaming_response(text: str, model: str, input_tokens: int = 0) -> Iterator[str]:
+def _build_streaming_response(
+    text: str, model: str, input_tokens: int = 0
+) -> Iterator[str]:
     """Yield SSE events that match Anthropic's streaming message format.
 
     Claude Code's streaming parser expects this sequence:
@@ -87,26 +90,32 @@ def _build_streaming_response(text: str, model: str, input_tokens: int = 0) -> I
     output_tokens = max(1, len(text.split()))
 
     # 1. message_start
-    yield _sse_event("message_start", {
-        "type": "message_start",
-        "message": {
-            "id": message_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [],
-            "model": model,
-            "stop_reason": None,
-            "stop_sequence": None,
-            "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+    yield _sse_event(
+        "message_start",
+        {
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": model,
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+            },
         },
-    })
+    )
 
     # 2. content_block_start
-    yield _sse_event("content_block_start", {
-        "type": "content_block_start",
-        "index": 0,
-        "content_block": {"type": "text", "text": ""},
-    })
+    yield _sse_event(
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""},
+        },
+    )
 
     # 3. ping
     yield _sse_event("ping", {"type": "ping"})
@@ -115,24 +124,33 @@ def _build_streaming_response(text: str, model: str, input_tokens: int = 0) -> I
     chunk_size = 200
     for i in range(0, len(text), chunk_size):
         chunk = text[i : i + chunk_size]
-        yield _sse_event("content_block_delta", {
-            "type": "content_block_delta",
-            "index": 0,
-            "delta": {"type": "text_delta", "text": chunk},
-        })
+        yield _sse_event(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": chunk},
+            },
+        )
 
     # 5. content_block_stop
-    yield _sse_event("content_block_stop", {
-        "type": "content_block_stop",
-        "index": 0,
-    })
+    yield _sse_event(
+        "content_block_stop",
+        {
+            "type": "content_block_stop",
+            "index": 0,
+        },
+    )
 
     # 6. message_delta (stop reason)
-    yield _sse_event("message_delta", {
-        "type": "message_delta",
-        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-        "usage": {"output_tokens": output_tokens},
-    })
+    yield _sse_event(
+        "message_delta",
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": output_tokens},
+        },
+    )
 
     # 7. message_stop
     yield _sse_event("message_stop", {"type": "message_stop"})
@@ -161,6 +179,7 @@ def _build_sync_response(text: str, model: str, input_tokens: int = 0) -> dict:
 # Prompt extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_prompt(body: dict) -> str:
     """Flatten an Anthropic Messages API request body into a single prompt string.
 
@@ -180,8 +199,7 @@ def _extract_prompt(body: dict) -> str:
         if isinstance(system, list):
             # system can be a list of content blocks
             system_text = " ".join(
-                b.get("text", "") if isinstance(b, dict) else str(b)
-                for b in system
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in system
             )
         else:
             system_text = str(system)
@@ -239,6 +257,7 @@ _FAKE_MODELS = [
 # Flask app factory
 # ---------------------------------------------------------------------------
 
+
 def create_app(
     cwd: Optional[str] = None,
     base_path: str = "/vertex/claude",
@@ -263,7 +282,7 @@ def create_app(
         Configured Flask application.
     """
     try:
-        from flask import Flask, Response, jsonify, request, stream_with_context
+        from flask import Flask, jsonify, request, Response, stream_with_context
     except ImportError as e:
         raise ImportError(
             "Flask is required for the RovoDev Anthropic proxy. "
@@ -302,7 +321,7 @@ def create_app(
         def _prefix_strip_middleware(environ, start_response):
             path = environ.get("PATH_INFO", "")
             if path.startswith(base_path):
-                environ["PATH_INFO"] = path[len(base_path):] or "/"
+                environ["PATH_INFO"] = path[len(base_path) :] or "/"
                 environ["SCRIPT_NAME"] = environ.get("SCRIPT_NAME", "") + base_path
             return _inner_wsgi(environ, start_response)
 
@@ -344,7 +363,10 @@ def create_app(
 
         logger.info(
             "POST /v1/messages | model=%s stream=%s tokens~=%d cwd=%s",
-            model, stream, input_tokens, working_dir,
+            model,
+            stream,
+            input_tokens,
+            working_dir,
         )
 
         # ------------------------------------------------------------------
@@ -373,8 +395,10 @@ def create_app(
             }
             status = 500
             if stream:
+
                 def _error_stream():
                     yield _sse_event("error", error_body)
+
                 return Response(
                     stream_with_context(_error_stream()),
                     status=status,
@@ -390,6 +414,7 @@ def create_app(
         # Format response
         # ------------------------------------------------------------------
         if stream:
+
             def _generate():
                 yield from _build_streaming_response(text, model, input_tokens)
 
@@ -413,6 +438,7 @@ def create_app(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def _parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -421,11 +447,12 @@ def _parse_args(argv=None) -> argparse.Namespace:
         )
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         type=int,
         default=9800,
         help="Port to listen on (default: 9800). "
-             "Use 29576 to drop-in replace proximity on its default port.",
+        "Use 29576 to drop-in replace proximity on its default port.",
     )
     parser.add_argument(
         "--host",

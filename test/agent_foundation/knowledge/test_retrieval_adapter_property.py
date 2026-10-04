@@ -9,6 +9,7 @@ space_suggestion_reasons, and space_suggestion_status fields.
 
 **Validates: Requirements 2.7, 1.9**
 """
+
 import sys
 from pathlib import Path
 
@@ -26,8 +27,6 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
@@ -35,6 +34,7 @@ from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
 from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
     RetrievalKnowledgePieceStore,
 )
+from hypothesis import given, settings, strategies as st
 from rich_python_utils.service_utils.retrieval_service.memory_retrieval_service import (
     MemoryRetrievalService,
 )
@@ -133,9 +133,7 @@ class TestFileBasedStoreRoundTripForSpaces:
 
         **Validates: Requirements 2.7, 1.9**
         """
-        store = RetrievalKnowledgePieceStore(
-            retrieval_service=MemoryRetrievalService()
-        )
+        store = RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService())
         doc = store._piece_to_doc(piece)
         restored = store._doc_to_piece(doc)
 
@@ -151,9 +149,7 @@ class TestFileBasedStoreRoundTripForSpaces:
 
         **Validates: Requirements 2.7, 1.9**
         """
-        store = RetrievalKnowledgePieceStore(
-            retrieval_service=MemoryRetrievalService()
-        )
+        store = RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService())
         doc = store._piece_to_doc(piece)
         restored = store._doc_to_piece(doc)
 
@@ -169,9 +165,7 @@ class TestFileBasedStoreRoundTripForSpaces:
 
         **Validates: Requirements 2.7, 1.9**
         """
-        store = RetrievalKnowledgePieceStore(
-            retrieval_service=MemoryRetrievalService()
-        )
+        store = RetrievalKnowledgePieceStore(retrieval_service=MemoryRetrievalService())
         doc = store._piece_to_doc(piece)
 
         # Simulate old-format document without spaces in metadata

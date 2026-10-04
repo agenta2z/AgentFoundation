@@ -11,6 +11,7 @@ for resolving conflicts when knowledge dict keys overlap with prompt feed keys.
 
 Requirements: 4.1, 4.2, 4.3
 """
+
 import sys
 from pathlib import Path
 
@@ -72,9 +73,7 @@ class TestCallableReturningString:
 
     def test_callable_returning_string(self):
         """A callable that returns a string should be stored under its original key."""
-        feed = {
-            "greeting": lambda user_input: f"Hello, {user_input}!"
-        }
+        feed = {"greeting": lambda user_input: f"Hello, {user_input}!"}
         result = resolve_callables(feed, "Alice")
         assert result == {"greeting": "Hello, Alice!"}
 
@@ -121,9 +120,7 @@ class TestCallableReturningDict:
 
     def test_callable_returning_single_key_dict(self):
         """A callable returning a dict with one key should merge that key."""
-        feed = {
-            "provider": lambda user_input: {"context": "Some context"}
-        }
+        feed = {"provider": lambda user_input: {"context": "Some context"}}
         result = resolve_callables(feed, "query")
         assert result == {"context": "Some context"}
         assert "provider" not in result
@@ -281,9 +278,9 @@ class TestFeedConflictResolutionEnum:
     """Test FeedConflictResolution enum values."""
 
     def test_enum_values(self):
-        assert FeedConflictResolution.ATTRIBUTE_ONLY == 'attribute_only'
-        assert FeedConflictResolution.FEED_ONLY == 'feed_only'
-        assert FeedConflictResolution.MERGE == 'merge'
+        assert FeedConflictResolution.ATTRIBUTE_ONLY == "attribute_only"
+        assert FeedConflictResolution.FEED_ONLY == "feed_only"
+        assert FeedConflictResolution.MERGE == "merge"
 
     def test_enum_is_strenum(self):
         assert isinstance(FeedConflictResolution.FEED_ONLY, str)
@@ -297,19 +294,25 @@ class TestFeedOnlyResolution:
 
     def test_overwrites_existing_key(self):
         feed = {"user_profile": "static profile"}
-        merge_into_feed(feed, {"user_profile": "dynamic profile"}, FeedConflictResolution.FEED_ONLY)
+        merge_into_feed(
+            feed, {"user_profile": "dynamic profile"}, FeedConflictResolution.FEED_ONLY
+        )
         assert feed["user_profile"] == "dynamic profile"
 
     def test_adds_new_key(self):
         feed = {"role": "assistant"}
-        merge_into_feed(feed, {"instructions": "Be helpful"}, FeedConflictResolution.FEED_ONLY)
+        merge_into_feed(
+            feed, {"instructions": "Be helpful"}, FeedConflictResolution.FEED_ONLY
+        )
         assert feed["instructions"] == "Be helpful"
         assert feed["role"] == "assistant"
 
     def test_overwrites_none_value(self):
         """When existing value is None/falsy, extra always wins regardless of strategy."""
         feed = {"user_profile": None}
-        merge_into_feed(feed, {"user_profile": "from knowledge"}, FeedConflictResolution.FEED_ONLY)
+        merge_into_feed(
+            feed, {"user_profile": "from knowledge"}, FeedConflictResolution.FEED_ONLY
+        )
         assert feed["user_profile"] == "from knowledge"
 
 
@@ -321,19 +324,29 @@ class TestAttributeOnlyResolution:
 
     def test_keeps_existing_key(self):
         feed = {"user_profile": "static profile"}
-        merge_into_feed(feed, {"user_profile": "dynamic profile"}, FeedConflictResolution.ATTRIBUTE_ONLY)
+        merge_into_feed(
+            feed,
+            {"user_profile": "dynamic profile"},
+            FeedConflictResolution.ATTRIBUTE_ONLY,
+        )
         assert feed["user_profile"] == "static profile"
 
     def test_adds_new_key(self):
         """Non-conflicting keys are always added."""
         feed = {"role": "assistant"}
-        merge_into_feed(feed, {"instructions": "Be helpful"}, FeedConflictResolution.ATTRIBUTE_ONLY)
+        merge_into_feed(
+            feed, {"instructions": "Be helpful"}, FeedConflictResolution.ATTRIBUTE_ONLY
+        )
         assert feed["instructions"] == "Be helpful"
 
     def test_adds_when_existing_is_falsy(self):
         """When existing value is None/empty, extra is added."""
         feed = {"user_profile": None}
-        merge_into_feed(feed, {"user_profile": "from knowledge"}, FeedConflictResolution.ATTRIBUTE_ONLY)
+        merge_into_feed(
+            feed,
+            {"user_profile": "from knowledge"},
+            FeedConflictResolution.ATTRIBUTE_ONLY,
+        )
         assert feed["user_profile"] == "from knowledge"
 
 
@@ -345,17 +358,23 @@ class TestMergeResolution:
 
     def test_merges_conflicting_key(self):
         feed = {"user_profile": "Name: Alice"}
-        merge_into_feed(feed, {"user_profile": "Membership: Gold"}, FeedConflictResolution.MERGE)
+        merge_into_feed(
+            feed, {"user_profile": "Membership: Gold"}, FeedConflictResolution.MERGE
+        )
         assert feed["user_profile"] == "Name: Alice\n\nMembership: Gold"
 
     def test_adds_new_key(self):
         feed = {"role": "assistant"}
-        merge_into_feed(feed, {"instructions": "Be helpful"}, FeedConflictResolution.MERGE)
+        merge_into_feed(
+            feed, {"instructions": "Be helpful"}, FeedConflictResolution.MERGE
+        )
         assert feed["instructions"] == "Be helpful"
 
     def test_adds_when_existing_is_falsy(self):
         feed = {"user_profile": ""}
-        merge_into_feed(feed, {"user_profile": "from knowledge"}, FeedConflictResolution.MERGE)
+        merge_into_feed(
+            feed, {"user_profile": "from knowledge"}, FeedConflictResolution.MERGE
+        )
         assert feed["user_profile"] == "from knowledge"
 
 

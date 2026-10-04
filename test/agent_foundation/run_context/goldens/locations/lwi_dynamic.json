@@ -1,0 +1,261 @@
+{
+  "bare": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": "output.md",
+      "resolved_output_path": "output.md"
+    },
+    "children": [
+      {
+        "ctx_path": "/step_0",
+        "ctx_workspace": null,
+        "label": "init",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      },
+      {
+        "ctx_path": "/step_1",
+        "ctx_workspace": null,
+        "label": "fu",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      },
+      {
+        "ctx_path": "/step_2",
+        "ctx_workspace": null,
+        "label": "fu",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      }
+    ],
+    "result": {
+      "__expansion_count": 2,
+      "_prev_iteration": 1,
+      "dynamic_step_count": 3,
+      "dynamic_step_results": [
+        "init:task-1",
+        "fu:init:task-1",
+        "fu:fu:init:task-1"
+      ],
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-1"
+    }
+  },
+  "host1": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": "output.md",
+      "resolved_output_path": "output.md"
+    },
+    "children": [
+      {
+        "ctx_path": "/step_0",
+        "ctx_workspace": "<WS>/host1/children/initial",
+        "label": "init",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/initial"
+      },
+      {
+        "ctx_path": "/step_1",
+        "ctx_workspace": "<WS>/host1/children/round01",
+        "label": "fu",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/round01"
+      },
+      {
+        "ctx_path": "/step_2",
+        "ctx_workspace": "<WS>/host1/children/round02",
+        "label": "fu",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/round02"
+      }
+    ],
+    "result": {
+      "__expansion_count": 2,
+      "_prev_iteration": 1,
+      "dynamic_step_count": 3,
+      "dynamic_step_results": [
+        "init:task-2",
+        "fu:init:task-2",
+        "fu:fu:init:task-2"
+      ],
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-2"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "host2": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": "output.md",
+      "resolved_output_path": "output.md"
+    },
+    "children": [
+      {
+        "ctx_path": "/step_0",
+        "ctx_workspace": "<WS>/host2/children/initial",
+        "label": "init",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/initial"
+      },
+      {
+        "ctx_path": "/step_1",
+        "ctx_workspace": "<WS>/host2/children/round01",
+        "label": "fu",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/round01"
+      },
+      {
+        "ctx_path": "/step_2",
+        "ctx_workspace": "<WS>/host2/children/round02",
+        "label": "fu",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/round02"
+      }
+    ],
+    "result": {
+      "__expansion_count": 2,
+      "_prev_iteration": 1,
+      "dynamic_step_count": 3,
+      "dynamic_step_results": [
+        "init:task-3",
+        "fu:init:task-3",
+        "fu:fu:init:task-3"
+      ],
+      "iteration": 1,
+      "iteration_records": [],
+      "original_input": "task-3"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "tree": {
+    "host1/checkpoints/final_result.json": {
+      "json": {
+        "__expansion_count": 2,
+        "_prev_iteration": 1,
+        "dynamic_step_count": 3,
+        "dynamic_step_results": [
+          "init:task-2",
+          "fu:init:task-2",
+          "fu:fu:init:task-2"
+        ],
+        "iteration": 1,
+        "iteration_records": [],
+        "original_input": "task-2"
+      }
+    },
+    "host1/checkpoints/step___expanded_0_0_____seq1.json": {
+      "json": "fu:init:task-2"
+    },
+    "host1/checkpoints/step___expanded_1_0_____seq2.json": {
+      "json": "fu:fu:init:task-2"
+    },
+    "host1/checkpoints/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 2,
+        "loop_counts": {},
+        "next_step_index": 3,
+        "result_id": "__expanded_1_0_____seq2",
+        "state": {
+          "__expansion_count": 2,
+          "_prev_iteration": 1,
+          "dynamic_step_count": 3,
+          "dynamic_step_results": [
+            "init:task-2",
+            "fu:init:task-2",
+            "fu:fu:init:task-2"
+          ],
+          "iteration": 1,
+          "iteration_records": [],
+          "original_input": "task-2"
+        },
+        "step_index": 2,
+        "version": 1
+      }
+    },
+    "host1/children/initial/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host1/children/initial/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/children/round01/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host1/children/round01/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/children/round02/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host1/children/round02/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/logs/session/LinearWorkflowInferencer-<ID3>.jsonl": "<present>",
+    "host1/logs/session/LinearWorkflowInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/checkpoints/final_result.json": {
+      "json": {
+        "__expansion_count": 2,
+        "_prev_iteration": 1,
+        "dynamic_step_count": 3,
+        "dynamic_step_results": [
+          "init:task-3",
+          "fu:init:task-3",
+          "fu:fu:init:task-3"
+        ],
+        "iteration": 1,
+        "iteration_records": [],
+        "original_input": "task-3"
+      }
+    },
+    "host2/checkpoints/step___expanded_0_0_____seq1.json": {
+      "json": "fu:init:task-3"
+    },
+    "host2/checkpoints/step___expanded_1_0_____seq2.json": {
+      "json": "fu:fu:init:task-3"
+    },
+    "host2/checkpoints/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 2,
+        "loop_counts": {},
+        "next_step_index": 3,
+        "result_id": "__expanded_1_0_____seq2",
+        "state": {
+          "__expansion_count": 2,
+          "_prev_iteration": 1,
+          "dynamic_step_count": 3,
+          "dynamic_step_results": [
+            "init:task-3",
+            "fu:init:task-3",
+            "fu:fu:init:task-3"
+          ],
+          "iteration": 1,
+          "iteration_records": [],
+          "original_input": "task-3"
+        },
+        "step_index": 2,
+        "version": 1
+      }
+    },
+    "host2/children/initial/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host2/children/initial/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/children/round01/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host2/children/round01/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/children/round02/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host2/children/round02/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/logs/session/LinearWorkflowInferencer-<ID3>.jsonl": "<present>",
+    "host2/logs/session/LinearWorkflowInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>"
+  }
+}

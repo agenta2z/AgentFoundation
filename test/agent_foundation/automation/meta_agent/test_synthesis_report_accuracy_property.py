@@ -19,10 +19,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from agent_foundation.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
@@ -32,6 +28,11 @@ from agent_foundation.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
+from agent_foundation.automation.meta_agent.synthesizer import (
+    GraphSynthesizer,
+    RuleBasedSynthesizer,
+)
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -266,8 +267,7 @@ def test_synthesis_report_counts_match_pattern_counts(patterns: ExtractedPattern
         f"got {report.branch_count}"
     )
     assert report.loop_count == len(patterns.loop_patterns), (
-        f"loop_count: expected {len(patterns.loop_patterns)}, "
-        f"got {report.loop_count}"
+        f"loop_count: expected {len(patterns.loop_patterns)}, got {report.loop_count}"
     )
 
 

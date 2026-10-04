@@ -1,5 +1,3 @@
-
-
 """Implementation-phase prompt templates for DualInferencer testing.
 
 Adapted from rankevolve/src/dual_agent/prompts/templates/ with variable

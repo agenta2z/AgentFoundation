@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Load tool.json files into ToolDefinition instances.
@@ -39,7 +38,9 @@ def load_tool(
         expose = tool.derived_from.get("expose_params", [])
         if expose:
             parent_name = tool.derived_from["tool"]
-            parent = _resolve_parent_tool(parent_name, _all_dirs or [base_dir or _TOOLS_DIR])
+            parent = _resolve_parent_tool(
+                parent_name, _all_dirs or [base_dir or _TOOLS_DIR]
+            )
             if parent:
                 child_names = {p.name for p in tool.parameters}
                 expose_set = set(expose)
@@ -51,7 +52,8 @@ def load_tool(
 
 
 def _resolve_parent_tool(
-    name: str, search_dirs: list[Path],
+    name: str,
+    search_dirs: list[Path],
 ) -> ToolDefinition | None:
     """Find and load a parent tool by name across search directories."""
     for d in search_dirs:
@@ -141,7 +143,9 @@ async def derived_tool_execute(
     return result
 
 
-def load_all_tools(extra_dirs: list[str | Path] | None = None) -> dict[str, ToolDefinition]:
+def load_all_tools(
+    extra_dirs: list[str | Path] | None = None,
+) -> dict[str, ToolDefinition]:
     """Load all tool definitions from framework and optional extra directories.
 
     Args:
@@ -166,14 +170,34 @@ def load_all_tools(extra_dirs: list[str | Path] | None = None) -> dict[str, Tool
     return tools
 
 
-def load_tools_by_type(tool_type: str, extra_dirs: list[str | Path] | None = None) -> dict[str, ToolDefinition]:
+def load_tools_by_type(
+    tool_type: str, extra_dirs: list[str | Path] | None = None
+) -> dict[str, ToolDefinition]:
     """Load tools filtered by tool_type ('Action' or 'Conversation')."""
-    return {n: t for n, t in load_all_tools(extra_dirs=extra_dirs).items() if t.tool_type == tool_type}
+    return {
+        n: t
+        for n, t in load_all_tools(extra_dirs=extra_dirs).items()
+        if t.tool_type == tool_type
+    }
 
 
-def get_bridge_tools(extra_dirs: list[str | Path] | None = None) -> list[ToolDefinition]:
+def get_bridge_tools(
+    extra_dirs: list[str | Path] | None = None,
+) -> list[ToolDefinition]:
     """Return only bridge-based (long-running) tools."""
     return [t for t in load_all_tools(extra_dirs=extra_dirs).values() if t.is_bridge]
+
+
+def get_dashboard_tools(
+    extra_dirs: list[str | Path] | None = None,
+) -> dict[str, ToolDefinition]:
+    """Return tools with ``tool_type == "Dashboard"`` (e.g. the Experiment Hub).
+
+    Used by the conversational inferencer to recognise a ``--<dashboard>`` flag
+    (flag-name == dashboard-tool-name) on any Conversation tool and route the
+    proposal->hub handoff to that dashboard's executor.
+    """
+    return load_tools_by_type("Dashboard", extra_dirs=extra_dirs)
 
 
 def get_tool_names(extra_dirs: list[str | Path] | None = None) -> list[str]:

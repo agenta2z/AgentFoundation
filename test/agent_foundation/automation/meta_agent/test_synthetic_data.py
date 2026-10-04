@@ -14,15 +14,13 @@ Requirements: 9.1, 9.2, 9.3
 from typing import Any, Dict, List
 
 import pytest
-
-from agent_foundation.automation.meta_agent.synthetic_data import (
-    SyntheticDataProvider,
-)
+from agent_foundation.automation.meta_agent.synthetic_data import SyntheticDataProvider
 
 
 # ---------------------------------------------------------------------------
 # Custom generator (Req 9.3)
 # ---------------------------------------------------------------------------
+
 
 class TestCustomGenerator:
     def test_custom_generator_used_when_provided(self):
@@ -59,6 +57,7 @@ class TestCustomGenerator:
 # ---------------------------------------------------------------------------
 # Schema-based generation (Req 9.1, 9.2)
 # ---------------------------------------------------------------------------
+
 
 class TestSchemaGeneration:
     def test_str_type_generates_strings(self):
@@ -112,11 +111,10 @@ class TestSchemaGeneration:
 # Pairwise distinctness (Req 9.1)
 # ---------------------------------------------------------------------------
 
+
 class TestDistinctness:
     def test_generated_data_pairwise_distinct(self):
-        provider = SyntheticDataProvider(
-            parameter_schema={"name": "str", "age": "int"}
-        )
+        provider = SyntheticDataProvider(parameter_schema={"name": "str", "age": "int"})
         result = provider.generate(10)
         # Convert to comparable form
         keys = [str(sorted(item.items())) for item in result]
@@ -142,6 +140,7 @@ class TestDistinctness:
 # Validation
 # ---------------------------------------------------------------------------
 
+
 class TestValidation:
     def test_count_zero_raises_value_error(self):
         provider = SyntheticDataProvider(parameter_schema={"x": "int"})
@@ -155,5 +154,7 @@ class TestValidation:
 
     def test_no_schema_no_generator_raises_value_error(self):
         provider = SyntheticDataProvider()
-        with pytest.raises(ValueError, match="Either parameter_schema or custom_generator"):
+        with pytest.raises(
+            ValueError, match="Either parameter_schema or custom_generator"
+        ):
             provider.generate(1)

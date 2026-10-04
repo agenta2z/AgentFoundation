@@ -38,8 +38,6 @@ import os
 import time
 from typing import Optional
 
-from rich_python_utils.common_utils.map_helper import get__
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.common import (
     ENV_API_TOKEN,
     ENV_ASAP_AUDIENCE,
@@ -54,6 +52,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.c
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.exceptions import (
     RovoChatAuthError,
 )
+from rich_python_utils.common_utils.map_helper import get__
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -138,7 +137,9 @@ class RovoChatAuth:
         if not self.email:
             self.email = get__(os.environ, ENV_EMAIL, *ENV_FALLBACK_EMAIL, default=None)
         if not self.api_token:
-            self.api_token = get__(os.environ, ENV_API_TOKEN, *ENV_FALLBACK_API_TOKEN, default=None)
+            self.api_token = get__(
+                os.environ, ENV_API_TOKEN, *ENV_FALLBACK_API_TOKEN, default=None
+            )
 
         if not self.uct_token:
             self.uct_token = os.environ.get(ENV_UCT_TOKEN)
@@ -196,9 +197,7 @@ class RovoChatAuth:
         """
         # Basic Auth (highest priority — simplest, works via gateway)
         if self.email and self.api_token:
-            b64 = base64.b64encode(
-                f"{self.email}:{self.api_token}".encode()
-            ).decode()
+            b64 = base64.b64encode(f"{self.email}:{self.api_token}".encode()).decode()
             return {"Authorization": f"Basic {b64}"}
 
         # UCT / ASAP token

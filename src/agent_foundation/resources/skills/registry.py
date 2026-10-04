@@ -42,10 +42,11 @@ def _parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
         return {}, content.strip()
 
     frontmatter_raw = match.group(1)
-    body = content[match.end():].strip()
+    body = content[match.end() :].strip()
 
     try:
         import yaml
+
         frontmatter = yaml.safe_load(frontmatter_raw) or {}
     except ImportError:
         # Fallback: extract name and description from YAML-like text

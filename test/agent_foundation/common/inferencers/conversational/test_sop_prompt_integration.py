@@ -1,5 +1,3 @@
-
-
 """Integration test: SOP-driven prompt rotation via ConversationalInferencer.
 
 Verifies that as state transitions happen, the rendered prompt's
@@ -14,14 +12,12 @@ import unittest
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.template_manager_renderer import (
     TemplateManagerPromptRenderer,
 )
-from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
-    TemplateManager,
-)
-from rich_python_utils.common_objects.workflow.stategraph import (
-    StateGraphTracker,
-)
+from rich_python_utils.common_objects.workflow.stategraph import StateGraphTracker
 from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
     SOPManager,
+)
+from rich_python_utils.string_utils.formatting.template_manager.template_manager import (
+    TemplateManager,
 )
 
 # ---------------------------------------------------------------------------
@@ -41,7 +37,7 @@ MOCK_SOP = """\
 
 Configure the workspace.
 
-**Tools** [__must__]:
+**Tools** [__required__]:
 - /set-target-path <path>
 
 ## Phase 1 [__depends on__ Phase 0]: Investigation `findings`
@@ -101,7 +97,11 @@ class TestSOPPromptIntegration(unittest.TestCase):
     def _render_with_state(self, tracker, user_message="what next?"):
         """Render the template with state from the tracker."""
         nextstep_guidance = SOPManager.render_guidance(
-            tracker, self.sop, context={"target_path": tracker.state_outputs.get("target_path", "not set")},
+            tracker,
+            self.sop,
+            context={
+                "target_path": tracker.state_outputs.get("target_path", "not set")
+            },
         )
         feed = {
             "employee": {"name": "TestBot", "role": "a test AI agent"},

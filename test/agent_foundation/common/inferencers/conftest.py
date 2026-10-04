@@ -3,6 +3,7 @@
 Adds src/ and sibling project paths to sys.path so that
 `agent_foundation` and `rich_python_utils` imports resolve correctly.
 """
+
 import sys
 from pathlib import Path
 

@@ -12,13 +12,12 @@ Verifies the additive, byte-identical wiring:
 import asyncio
 import inspect
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
+    RunContext,
 )
+from attr import attrib, attrs
 
 
 @attrs

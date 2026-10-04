@@ -14,29 +14,29 @@ Provides four post-processor implementations:
 
 Requirements: 8.1, 8.2, 9.1, 9.2, 10.1, 10.2, 11.1, 11.2, 11.3
 """
+
 from __future__ import annotations
 
 import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
 )
+from agent_foundation.knowledge.retrieval.knowledge_provider import CONTEXT_BUDGET
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
+from agent_foundation.knowledge.retrieval.provider import (
+    _default_formatter as _fallback_formatter,
+)
 from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
     AgenticRetrievalResult,
     PostProcessor,
     SubQuery,
 )
-from agent_foundation.knowledge.retrieval.provider import (
-    _default_formatter as _fallback_formatter,
-)
-from agent_foundation.knowledge.retrieval.knowledge_provider import CONTEXT_BUDGET
 from agent_foundation.knowledge.retrieval.utils import count_tokens
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +242,7 @@ class AggregatingPostProcessor(PostProcessor):
             weights[key] = sq.weight
 
             scored = [
-                ScoredPiece(piece=piece, score=score)
-                for piece, score in result.pieces
+                ScoredPiece(piece=piece, score=score) for piece, score in result.pieces
             ]
             sub_results[key] = scored
 
@@ -278,8 +277,7 @@ class AggregatingPostProcessor(PostProcessor):
             weights[key] = sq.weight
 
             scored = [
-                ScoredPiece(piece=piece, score=score)
-                for piece, score in result.pieces
+                ScoredPiece(piece=piece, score=score) for piece, score in result.pieces
             ]
             sub_results[key] = scored
 
@@ -361,6 +359,7 @@ class AggregatingPostProcessor(PostProcessor):
 
 # ── Path B variant: Budget-Aware ─────────────────────────────────────────
 
+
 @attrs
 class BudgetAwarePostProcessor(PostProcessor):
     """Path B variant: RetrievalResult → formatted string with token budgets.
@@ -387,8 +386,7 @@ class BudgetAwarePostProcessor(PostProcessor):
 
         # Convert (KnowledgePiece, float) tuples to ScoredPiece
         scored_pieces = [
-            ScoredPiece(piece=piece, score=score)
-            for piece, score in results.pieces
+            ScoredPiece(piece=piece, score=score) for piece, score in results.pieces
         ]
 
         return self._format_with_budget(scored_pieces)
@@ -494,9 +492,7 @@ class BudgetAwarePostProcessor(PostProcessor):
         """Episodic: With temporal markers and budget enforcement."""
         formatted = ["## Recent History\n"]
         for piece in pieces:
-            timestamp = (
-                piece.updated_at[:10] if piece.updated_at else "unknown"
-            )
+            timestamp = piece.updated_at[:10] if piece.updated_at else "unknown"
             line = f"[{timestamp}] {piece.piece.content}"
             if count_tokens("\n".join(formatted + [line])) > budget:
                 break

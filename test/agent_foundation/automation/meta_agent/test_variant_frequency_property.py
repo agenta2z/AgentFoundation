@@ -17,17 +17,14 @@ from __future__ import annotations
 from collections import Counter
 from typing import Dict, List, Optional
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    PatternExtractor,
-)
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +126,8 @@ class TestVariantFrequencyProperty:
     @given(aligned_set=variable_trace_set_st())
     @settings(max_examples=200)
     def test_variant_frequencies_match_trace_counts(
-        self, aligned_set: AlignedTraceSet,
+        self,
+        aligned_set: AlignedTraceSet,
     ):
         """
         After extraction, each variable step's metadata["variants"] dict

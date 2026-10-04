@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator, Iterable, Optional, Union
 
-from attr import attrib, attrs
-
 from agent_foundation.apis.ag.ai_gateway_openai_llm import (
     AIGatewayOpenAIModels,
     generate_text as ai_gateway_generate_text,
@@ -25,6 +23,7 @@ from agent_foundation.apis.ag.gateway_mode import DEFAULT_PROXIMITY_PORT
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -134,15 +133,17 @@ class AgOpenAIApiInferencer(StreamingInferencerBase):
         User-provided values (from call kwargs) take precedence over instance
         attributes, mirroring ``AgClaudeApiInferencer``.
         """
-        args.setdefault('max_new_tokens', self.max_tokens)
-        args.setdefault('temperature', self.temperature)
+        args.setdefault("max_new_tokens", self.max_tokens)
+        args.setdefault("temperature", self.temperature)
         if self.system_prompt:
-            args.setdefault('system', self.system_prompt)
+            args.setdefault("system", self.system_prompt)
         if self.reasoning_effort:
-            args.setdefault('reasoning_effort', self.reasoning_effort)
+            args.setdefault("reasoning_effort", self.reasoning_effort)
         return args
 
-    def _infer(self, inference_input: str, inference_config: Any = None, **_inference_args) -> str:
+    def _infer(
+        self, inference_input: str, inference_config: Any = None, **_inference_args
+    ) -> str:
         """Execute sync inference via the OpenAI gateway backend."""
         self._apply_defaults(_inference_args)
         return ai_gateway_generate_text(
@@ -154,7 +155,9 @@ class AgOpenAIApiInferencer(StreamingInferencerBase):
             **_inference_args,
         )
 
-    async def _ainfer(self, inference_input: Any, inference_config: Any = None, **_inference_args) -> str:
+    async def _ainfer(
+        self, inference_input: Any, inference_config: Any = None, **_inference_args
+    ) -> str:
         """Direct async (non-streaming) inference via the OpenAI gateway backend."""
         self._apply_defaults(_inference_args)
         response = await ai_gateway_generate_text_async(

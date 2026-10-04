@@ -15,6 +15,7 @@ Covers:
 These tests guard against regression of the
 template-mode-flags.md (Plan B v4) implementation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,18 +23,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrs
 
 
 # Resolve the AgentFoundation prompt_templates dir — single source of truth.
 _HERE = Path(__file__).resolve().parent
 TEMPLATES_DIR = (
     _HERE.parents[3]  # AgentFoundation/
-    / "src" / "agent_foundation" / "resources" / "prompt_templates"
+    / "src"
+    / "agent_foundation"
+    / "resources"
+    / "prompt_templates"
 )
 
 
@@ -216,15 +219,21 @@ def test_M7_modes_cascade_to_children(template_manager):
         template_key="initial",
         # child starts with empty modes
     )
+
     # Parent has a `child` field that holds the child inferencer
     @attrs(slots=False)
     class _Parent(TemplatedInferencerBase):
         child: Any = None  # noqa
-        def _infer(self, *a, **kw): return ""
-        async def _ainfer(self, *a, **kw): return ""
+
+        def _infer(self, *a, **kw):
+            return ""
+
+        async def _ainfer(self, *a, **kw):
+            return ""
 
     # Use attr-style construction; `child` is just a holder
     from attr import attrib as _attrib
+
     _Parent.child = _attrib(default=None)
     parent = _Parent(
         template_manager=template_manager,
@@ -264,9 +273,7 @@ def test_M8_jinja2_renders_enabled_mode_block(template_manager):
     # Render a small template that mimics the relevant block
     env = Environment()
     tmpl_src = (
-        "{%- if enable_deep_mode %}"
-        "- {{ instructions.modes.deep_mode }}"
-        "{%- endif %}"
+        "{%- if enable_deep_mode %}- {{ instructions.modes.deep_mode }}{%- endif %}"
     )
     tmpl = env.from_string(tmpl_src)
     out = tmpl.render(**feed)
@@ -333,7 +340,7 @@ def _render_real_template(name: str, modes: dict, template_manager) -> str:
     """Build feed via TemplatedInferencerBase (so mode logic runs), then
     render the real template at plan/main/<name>.jinja2 against that feed.
     """
-    from jinja2 import Environment, FileSystemLoader, ChainableUndefined
+    from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
     inf = _ConcreteTestInferencer(
         template_manager=template_manager,
@@ -504,7 +511,8 @@ def test_real_review_default_modes_renders_both(template_manager):
     feed = inf._build_template_feed("test")
     feed = _stub_feed_for_template(feed)
 
-    from jinja2 import Environment, FileSystemLoader, ChainableUndefined
+    from jinja2 import ChainableUndefined, Environment, FileSystemLoader
+
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         undefined=ChainableUndefined,
@@ -522,7 +530,7 @@ def test_real_review_default_modes_renders_both(template_manager):
 def test_all_three_templates_render_with_default_modes(template_manager):
     """Sanity test: all three templates render successfully with the new
     factory-default modes — no UndefinedError, no Jinja2 crash."""
-    from jinja2 import Environment, FileSystemLoader, ChainableUndefined
+    from jinja2 import ChainableUndefined, Environment, FileSystemLoader
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -535,9 +543,9 @@ def test_all_three_templates_render_with_default_modes(template_manager):
     #   followup.jinja2 → elegant_mode only (line 88)
     #   review.jinja2   → deep_mode (inline, L103) + elegant_mode (L105)
     expected_per_template = {
-        "initial":  {"deep": True,  "elegant": True},
+        "initial": {"deep": True, "elegant": True},
         "followup": {"deep": False, "elegant": True},  # no deep_mode usage
-        "review":   {"deep": True,  "elegant": True},
+        "review": {"deep": True, "elegant": True},
     }
 
     for tmpl_name, expected in expected_per_template.items():
@@ -592,4 +600,6 @@ def test_M9_unexpected_error_logged_at_warning(template_manager, caplog):
         "deep_mode" in r.message and "synthetic" in r.message
         for r in caplog.records
         if r.levelno >= logging.WARNING
-    ), f"Expected WARNING log mentioning the error; got: {[r.message for r in caplog.records]}"
+    ), (
+        f"Expected WARNING log mentioning the error; got: {[r.message for r in caplog.records]}"
+    )

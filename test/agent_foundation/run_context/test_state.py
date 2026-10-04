@@ -5,20 +5,19 @@ import warnings
 
 import attrs
 import pytest
-
 from agent_foundation.common.inferencers.run_context import (
     BTAState,
+    decode_state,
     DualState,
+    encode_state,
     InferencerStateBase,
     MFDualState,
     MultiFlowState,
-    decode_state,
-    encode_state,
     register_state,
 )
 from agent_foundation.common.inferencers.run_context.state import (
-    STATE_REGISTRY,
     _STATE_CLASS_KEY,
+    STATE_REGISTRY,
 )
 
 
@@ -98,7 +97,9 @@ def test_duplicate_registration_name_raises():
 
 
 def test_bta_state_dict_field_round_trips():
-    s = BTAState(effective_sub_queries=["q1", "q2"], latest_per_flow={"0": {"ok": True}})
+    s = BTAState(
+        effective_sub_queries=["q1", "q2"], latest_per_flow={"0": {"ok": True}}
+    )
     back = _json_round_trip(s)
     assert back.effective_sub_queries == ["q1", "q2"]
     assert back.latest_per_flow == {"0": {"ok": True}}

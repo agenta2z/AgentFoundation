@@ -9,11 +9,13 @@ Verifies:
 """
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 # ── Test 1: Import from all expected paths ──────────────────────────────────
+
 
 def test_import_from_linear_workflow_inferencer_module():
     """Import directly from the module file."""
@@ -21,6 +23,7 @@ def test_import_from_linear_workflow_inferencer_module():
         LinearWorkflowInferencer,
         WorkflowStepConfig,
     )
+
     assert LinearWorkflowInferencer is not None
     assert WorkflowStepConfig is not None
 
@@ -31,6 +34,7 @@ def test_import_from_flow_inferencers_package():
         LinearWorkflowInferencer,
         WorkflowStepConfig,
     )
+
     assert LinearWorkflowInferencer is not None
     assert WorkflowStepConfig is not None
 
@@ -41,24 +45,26 @@ def test_import_from_agentic_inferencers_package():
         LinearWorkflowInferencer,
         WorkflowStepConfig,
     )
+
     assert LinearWorkflowInferencer is not None
     assert WorkflowStepConfig is not None
 
 
 def test_import_identity_across_paths():
     """All import paths resolve to the same class objects."""
-    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
-        LinearWorkflowInferencer as LWI_direct,
-        WorkflowStepConfig as WSC_direct,
+    from agent_foundation.common.inferencers.agentic_inferencers import (
+        LinearWorkflowInferencer as LWI_agentic,
+        WorkflowStepConfig as WSC_agentic,
     )
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers import (
         LinearWorkflowInferencer as LWI_flow,
         WorkflowStepConfig as WSC_flow,
     )
-    from agent_foundation.common.inferencers.agentic_inferencers import (
-        LinearWorkflowInferencer as LWI_agentic,
-        WorkflowStepConfig as WSC_agentic,
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+        LinearWorkflowInferencer as LWI_direct,
+        WorkflowStepConfig as WSC_direct,
     )
+
     assert LWI_direct is LWI_flow
     assert LWI_flow is LWI_agentic
     assert WSC_direct is WSC_flow
@@ -66,6 +72,7 @@ def test_import_identity_across_paths():
 
 
 # ── Test 2: Basic 2-step chain with mock inferencers ────────────────────────
+
 
 def _make_mock_inferencer(return_value):
     """Create a mock InferencerBase-like object with ainfer."""
@@ -113,6 +120,7 @@ def test_two_step_chain_sync(tmp_path):
 
 
 # ── Test 3: Disabled step becomes no-op ─────────────────────────────────────
+
 
 def test_disabled_step_is_noop(tmp_path):
     """A disabled step should not execute its inferencer."""
@@ -162,6 +170,7 @@ def test_disabled_step_is_noop(tmp_path):
 
 # ── Test 4: State coherence across steps ────────────────────────────────────
 
+
 def test_state_coherence(tmp_path):
     """State mutations from earlier steps are visible to later steps."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
@@ -206,6 +215,7 @@ def test_state_coherence(tmp_path):
 
 # ── Test 5: Validation — duplicate names rejected ───────────────────────────
 
+
 def test_duplicate_step_names_rejected():
     """WorkflowStepConfig names must be unique."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
@@ -225,6 +235,7 @@ def test_duplicate_step_names_rejected():
 
 
 # ── Test 6: Validation — invalid loop_back_to rejected ─────────────────────
+
 
 def test_invalid_loop_back_to_rejected():
     """loop_back_to must reference an existing step name."""
@@ -249,6 +260,7 @@ def test_invalid_loop_back_to_rejected():
 
 # ── Test 7: Validation — enabled step needs inferencer or step_fn ───────────
 
+
 def test_enabled_step_needs_inferencer_or_step_fn():
     """An enabled step must have either inferencer or step_fn."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
@@ -266,6 +278,7 @@ def test_enabled_step_needs_inferencer_or_step_fn():
 
 
 # ── Test 8: run()/arun() blocked ───────────────────────────────────────────
+
 
 def test_run_blocked():
     """run() should raise NotImplementedError."""
@@ -300,6 +313,7 @@ async def test_arun_blocked():
 
 # ── Test 9: step_fn callable works ──────────────────────────────────────────
 
+
 def test_step_fn_callable(tmp_path):
     """A step using step_fn (instead of inferencer) should work."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
@@ -328,6 +342,7 @@ def test_step_fn_callable(tmp_path):
 
 # ── Test 10: Default response (no response_builder) returns full state ──────
 
+
 def test_default_response_returns_state(tmp_path):
     """Without response_builder, _ainfer returns the full state dict."""
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
@@ -354,6 +369,7 @@ def test_default_response_returns_state(tmp_path):
 
 
 # ── Test 11: aconnect calls aconnect on unique child inferencers ────────────
+
 
 @pytest.mark.asyncio
 async def test_aconnect_calls_unique_children():
@@ -386,6 +402,7 @@ async def test_aconnect_calls_unique_children():
 
 # ── Test 12: adisconnect calls adisconnect on unique child inferencers ──────
 
+
 @pytest.mark.asyncio
 async def test_adisconnect_calls_unique_children():
     """adisconnect should call adisconnect on each unique child inferencer exactly once."""
@@ -416,6 +433,7 @@ async def test_adisconnect_calls_unique_children():
 
 # ── Test 13: aconnect skips inferencers without aconnect method ─────────────
 
+
 @pytest.mark.asyncio
 async def test_aconnect_skips_inferencers_without_method():
     """aconnect should skip child inferencers that lack an aconnect method."""
@@ -432,8 +450,12 @@ async def test_aconnect_skips_inferencers_without_method():
 
     lwi = LinearWorkflowInferencer(
         step_configs=[
-            WorkflowStepConfig(name="s1", inferencer=inf_with, enable_result_save=False),
-            WorkflowStepConfig(name="s2", inferencer=inf_without, enable_result_save=False),
+            WorkflowStepConfig(
+                name="s1", inferencer=inf_with, enable_result_save=False
+            ),
+            WorkflowStepConfig(
+                name="s2", inferencer=inf_without, enable_result_save=False
+            ),
         ],
     )
 
@@ -443,6 +465,7 @@ async def test_aconnect_skips_inferencers_without_method():
 
 
 # ── Test 14: adisconnect skips inferencers without adisconnect method ───────
+
 
 @pytest.mark.asyncio
 async def test_adisconnect_skips_inferencers_without_method():
@@ -459,8 +482,12 @@ async def test_adisconnect_skips_inferencers_without_method():
 
     lwi = LinearWorkflowInferencer(
         step_configs=[
-            WorkflowStepConfig(name="s1", inferencer=inf_with, enable_result_save=False),
-            WorkflowStepConfig(name="s2", inferencer=inf_without, enable_result_save=False),
+            WorkflowStepConfig(
+                name="s1", inferencer=inf_with, enable_result_save=False
+            ),
+            WorkflowStepConfig(
+                name="s2", inferencer=inf_without, enable_result_save=False
+            ),
         ],
     )
 
@@ -470,6 +497,7 @@ async def test_adisconnect_skips_inferencers_without_method():
 
 
 # ── Test 15: async context manager calls aconnect/adisconnect ───────────────
+
 
 @pytest.mark.asyncio
 async def test_async_context_manager():
@@ -499,6 +527,7 @@ async def test_async_context_manager():
 
 # ── Test 16: aconnect/adisconnect skip None inferencers (step_fn steps) ─────
 
+
 @pytest.mark.asyncio
 async def test_aconnect_skips_none_inferencers():
     """aconnect/adisconnect should skip steps that use step_fn (inferencer=None)."""
@@ -513,7 +542,9 @@ async def test_aconnect_skips_none_inferencers():
 
     lwi = LinearWorkflowInferencer(
         step_configs=[
-            WorkflowStepConfig(name="s1", step_fn=lambda x, s: x, enable_result_save=False),
+            WorkflowStepConfig(
+                name="s1", step_fn=lambda x, s: x, enable_result_save=False
+            ),
             WorkflowStepConfig(name="s2", inferencer=inf, enable_result_save=False),
         ],
     )

@@ -7,6 +7,7 @@ Tests cover:
 - Result ordering and top_k limiting
 - Default config values
 """
+
 import sys
 from pathlib import Path
 
@@ -39,7 +40,9 @@ class TestHybridSearchConfig:
         assert config.candidate_multiplier == 3
 
     def test_custom_values(self):
-        config = HybridSearchConfig(vector_weight=0.5, keyword_weight=0.5, rrf_k=30, candidate_multiplier=5)
+        config = HybridSearchConfig(
+            vector_weight=0.5, keyword_weight=0.5, rrf_k=30, candidate_multiplier=5
+        )
         assert config.vector_weight == 0.5
         assert config.keyword_weight == 0.5
         assert config.rrf_k == 30

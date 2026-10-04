@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 from omegaconf import OmegaConf
-
 from rich_python_utils.config_utils._instantiate import load_config
 
 CONFIG = (
@@ -22,13 +21,23 @@ CONFIG = (
 if not CONFIG.exists():  # pragma: no cover - layout fallback
     import agent_foundation.resources.tools.task as _taskpkg
 
-    CONFIG = Path(_taskpkg.__file__).parent / "configs" / "breakdown-multiflow-plan.yaml"
+    CONFIG = (
+        Path(_taskpkg.__file__).parent / "configs" / "breakdown-multiflow-plan.yaml"
+    )
 
 _TASK_VARS = [
-    "TASK__DEFAULT_INFERENCER", "TASK__MAIN_INFERENCER", "TASK__FLOW_INFERENCERS",
-    "TASK__NUM_FLOWS", "TASK__PLAN_MAX_BREAKDOWN", "TASK__FLOW_MAX_DYNAMIC_STEPS",
-    "TASK__CONSENSUS_MAX_ITERATIONS", "TASK__REVIEWER_STRATEGY", "TASK__FIXER_STRATEGY",
-    "TASK__ENABLE_DEEP_MODE", "TASK__ENABLE_ELEGANT_MODE", "TASK__GUARDRAIL_MODEL_TIER",
+    "TASK__DEFAULT_INFERENCER",
+    "TASK__MAIN_INFERENCER",
+    "TASK__FLOW_INFERENCERS",
+    "TASK__NUM_FLOWS",
+    "TASK__PLAN_MAX_BREAKDOWN",
+    "TASK__FLOW_MAX_DYNAMIC_STEPS",
+    "TASK__CONSENSUS_MAX_ITERATIONS",
+    "TASK__REVIEWER_STRATEGY",
+    "TASK__FIXER_STRATEGY",
+    "TASK__ENABLE_DEEP_MODE",
+    "TASK__ENABLE_ELEGANT_MODE",
+    "TASK__GUARDRAIL_MODEL_TIER",
 ]
 
 
@@ -72,7 +81,11 @@ def test_main_inferencer_env_propagates_to_flows(clean_env):
 def test_flow_inferencers_single_var_comma_drives_count(clean_env):
     clean_env.setenv("TASK__FLOW_INFERENCERS", "MetamateSDK,RovoDevCLI,DevmateCLI")
     c = _load()
-    assert c["_params"]["flow_inferencers"] == ["MetamateSDK", "RovoDevCLI", "DevmateCLI"]
+    assert c["_params"]["flow_inferencers"] == [
+        "MetamateSDK",
+        "RovoDevCLI",
+        "DevmateCLI",
+    ]
     assert c["_params"]["num_flows"] == 3
     assert _flow_targets(c) == ["MetamateSDK", "RovoDevCLI", "DevmateCLI"]
 
@@ -107,6 +120,7 @@ def test_cli_override_beats_env(clean_env):
 
 
 # --- TASK__NUM_FLOWS set independently → graceful distribution (no crash) ---
+
 
 def test_num_flows_independent_truncates_longer_list(clean_env):
     clean_env.setenv("TASK__FLOW_INFERENCERS", "Aa,Bb,Cc")

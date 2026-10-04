@@ -10,10 +10,11 @@ Tests cover:
 
 **Validates: Requirements 3.1, 3.2, 3.3, 5.1, 5.2, 5.3, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3**
 """
+
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
-from unittest.mock import MagicMock, call
+from unittest.mock import call, MagicMock
 
 # Path resolution for imports
 _current_file = Path(__file__).resolve()
@@ -34,19 +35,19 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
-from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
-    RetrievalServiceBase,
-)
-
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
 from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
     SemanticGraphStore,
 )
-from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-
 from conftest import InMemoryEntityGraphStore, InMemoryRetrievalService
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
+from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
+    RetrievalServiceBase,
+)
 
 
 # ── Construction validation ──────────────────────────────────────────────────
@@ -180,7 +181,9 @@ class TestSearchModeRouting:
         )
         results = store.search_nodes("test query", top_k=3)
 
-        mock_graph.search_nodes.assert_called_once_with("test query", top_k=3, node_type=None)
+        mock_graph.search_nodes.assert_called_once_with(
+            "test query", top_k=3, node_type=None
+        )
         assert len(results) == 1
         assert results[0][0].node_id == "n1"
 
@@ -201,10 +204,16 @@ class TestSearchModeRouting:
 
         # Manually add a doc to the retrieval service to simulate sidecar content
         from rich_python_utils.service_utils.retrieval_service.document import Document
+
         doc = Document(
             doc_id="sidecar1",
             content="Sidecar Node",
-            metadata={"node_type": "product", "label": "Sidecar", "is_active": True, "properties": {}},
+            metadata={
+                "node_type": "product",
+                "label": "Sidecar",
+                "is_active": True,
+                "properties": {},
+            },
         )
         retrieval.add(doc, namespace="_graph_nodes")
 
@@ -247,8 +256,12 @@ class TestReindexValidation:
         )
 
         # Add nodes directly to graph (bypassing sidecar sync)
-        active = GraphNode(node_id="a1", node_type="service", label="Active", is_active=True)
-        inactive = GraphNode(node_id="i1", node_type="service", label="Inactive", is_active=False)
+        active = GraphNode(
+            node_id="a1", node_type="service", label="Active", is_active=True
+        )
+        inactive = GraphNode(
+            node_id="i1", node_type="service", label="Inactive", is_active=False
+        )
         graph.add_node(active)
         graph.add_node(inactive)
 

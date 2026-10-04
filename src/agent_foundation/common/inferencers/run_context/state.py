@@ -17,6 +17,7 @@ Per the plan (§2.1 / §2.3 / N-R3 / N-S5):
 
 from __future__ import annotations
 
+import hashlib
 import warnings
 from typing import Any
 
@@ -70,6 +71,7 @@ def encode_state(value: Any) -> Any:
     # Defense-in-depth: attrs objects without to_json() → convert to dict so
     # json.dump doesn't truncate the file mid-write on a TypeError.
     import attrs as _attrs_mod
+
     if _attrs_mod.has(type(value)):
         return {
             a.name: encode_state(getattr(value, a.name))
@@ -149,10 +151,11 @@ class MultiFlowState(InferencerStateBase):
     winner_idx: int | None = None
     reviewer_alias: str | None = None
     fixer_alias: str | None = None
-    ranking: list[int] | None = None  # None when unset (byte-identical with the old _last_ranking)
-    # Runtime sub-queries published by ``propagate_runtime_input``; read by the
-    # inherited BTA accessor ``_get_effective_predefined_sub_queries`` on its typed
-    # branch.  Renamed from the unused ``cached_sub_queries`` (G4 — zero readers).
+    ranking: list[int] | None = (
+        None  # None when unset (byte-identical with the old _last_ranking)
+    )
+    # No longer written (the runtime sub-queries live on the BTA attempt); kept so
+    # stores that recorded them still decode.
     effective_sub_queries: list[str] | None = None
     flow_inputs: list | None = None
 
@@ -172,7 +175,7 @@ class MultiFlowAttemptState(InferencerStateBase):
     # is captured. Mirrors latest_per_flow so the followup own_path/peer_path resolution
     # reads a live per-run path instead of a stale leaf-instance _workspace (M7).
     latest_per_flow_path: dict[int, Any] = attrs.field(factory=dict)
-    judgments: list = attrs.field(factory=list)
+    judgments: list[tuple[int, int, str]] = attrs.field(factory=list)
 
 
 @register_state
@@ -200,8 +203,16 @@ class BTAState(InferencerStateBase):
 @register_state
 @attrs.define
 class RoleState(InferencerStateBase):
-    """M7 per-call role state — what ``switch_role`` records into ``ctx.node.call``
-    instead of mutating ``self`` (the role/template definition fields)."""
+    """M7 per-call role state — what ``switch_role`` records into
+    ``ctx.node.role_state`` instead of mutating ``self`` (the role/template
+    definition fields).  Kept apart from ``node.call`` so it never displaces
+    the typed call state a ``state_factory`` owns.
+
+    Every attribute ``switch_role`` can set has its own typed field (B16); a
+    ``None`` field leaves the definition's value in place. Stores saved before
+    the master version, variables and extra feed were typed carry them only in
+    ``changes``; they are lifted into their fields on load.
+    """
 
     new_role: str | None = None
     template_key: str | None = None
@@ -209,6 +220,26 @@ class RoleState(InferencerStateBase):
     template_version: str | None = None
     modes: Any = None
     changes: dict[str, Any] = attrs.field(factory=dict)
+    template_master_version: str | None = None
+    template_variables: dict[str, Any] | None = None
+    template_extra_feed: dict[str, Any] | None = None
+
+    def __attrs_post_init__(self) -> None:
+        for name in ROLE_STATE_ATTRS:
+            if getattr(self, name) is None and self.changes.get(name) is not None:
+                setattr(self, name, self.changes[name])
+
+
+# The definition attributes a ``RoleState`` can overlay, one typed field each.
+ROLE_STATE_ATTRS = (
+    "template_key",
+    "template_root_space",
+    "template_extra_feed",
+    "template_variables",
+    "template_version",
+    "template_master_version",
+    "modes",
+)
 
 
 @register_state
@@ -247,3 +278,72 @@ class MFDualState(InferencerStateBase):
     # LinearWorkflow runner carrier — the per-call workflow working state for the Dual
     # consensus loop (so it does not collide with ``dual``/``multiflow`` — GT#14/G1).
     runner: LinearWorkflowState = attrs.field(factory=LinearWorkflowState)
+
+
+@register_state
+@attrs.define(frozen=True)
+class RenderedTaskContractState(InferencerStateBase):
+    """The task contract one node rendered for its call (plan v8 §5.3)."""
+
+    text: str
+    sha256: str
+    role: str | None
+    source_path: str
+
+    @classmethod
+    def of(
+        cls, text: str, *, role: str | None, source_path: str
+    ) -> RenderedTaskContractState:
+        return cls(
+            text=text,
+            sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            role=role,
+            source_path=source_path,
+        )
+
+
+@register_state
+@attrs.define(frozen=True)
+class BtaCallSummary(InferencerStateBase):
+    """What one BTA run produced, frozen in its tail from the returned attempt
+    (plan v8 §5.7). Finalize and parent readers use it instead of live stages.
+
+    ``worker_child_names`` and ``worker_workspace_roots`` (``None`` without a BTA
+    workspace) are ordered by worker index.
+    """
+
+    worker_child_names: tuple[str, ...] = attrs.field(default=(), converter=tuple)
+    worker_workspace_roots: tuple[str | None, ...] = attrs.field(
+        default=(), converter=tuple
+    )
+    aggregator_output_name: str | None = None
+    aggregator_workspace_root: str | None = None
+    disable_aggregator: bool = False
+    selected_contract_index: int | None = None
+    selected_contract: RenderedTaskContractState | None = None
+
+    @property
+    def worker_count(self) -> int:
+        return len(self.worker_child_names)
+
+    @property
+    def selected_task_contract(self) -> str:
+        """The relayed contract's text (``""`` when no worker reported one)."""
+        return "" if self.selected_contract is None else self.selected_contract.text
+
+
+@register_state
+@attrs.define(frozen=True)
+class NodeOutcomeState(InferencerStateBase):
+    """Typed facts one invocation published at its successful close (plan v8 §5.3).
+
+    The seam clears a node's outcome when an invocation opens and publishes at most
+    once, at that invocation's successful close; ``invocation_id`` names the frame
+    that produced it.
+    """
+
+    task_contract: RenderedTaskContractState | None = None
+    summary: InferencerStateBase | None = None
+    final_output: str | None = None
+    invocation_id: str = ""
+    cleanup_errors: tuple[str, ...] = attrs.field(default=(), converter=tuple)

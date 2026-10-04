@@ -71,9 +71,7 @@ def _load_prompt(prompt_file: str | None, query: str | None) -> str:
     return DEFAULT_QUERY
 
 
-def test_deep_research_sync(
-    query: str, agent_name: str = SPACES_DEEP_RESEARCH_AGENT
-):
+def test_deep_research_sync(query: str, agent_name: str = SPACES_DEEP_RESEARCH_AGENT):
     """Test synchronous deep research call."""
     print("\n" + "=" * 70)
     print(f"TEST: Deep Research Sync (agent={agent_name})")
@@ -248,7 +246,9 @@ def test_compare_agents(query: str):
         print(output[:preview_len] + "..." if len(output) > preview_len else output)
         print("-" * 70)
 
-        results.append((f"Deep Research ({agent_name})", bool(output) and len(output) >= 200))
+        results.append(
+            (f"Deep Research ({agent_name})", bool(output) and len(output) >= 200)
+        )
 
     # Summary
     print(f"\n{'#' * 70}")
@@ -333,7 +333,9 @@ Examples:
     args = parser.parse_args()
 
     query = _load_prompt(args.prompt_file, args.query)
-    agent_name = METAMATE_MDR if args.agent == "metamate_mdr" else SPACES_DEEP_RESEARCH_AGENT
+    agent_name = (
+        METAMATE_MDR if args.agent == "metamate_mdr" else SPACES_DEEP_RESEARCH_AGENT
+    )
 
     print("=" * 70)
     print("METAMATE CLI - DEEP RESEARCH INTEGRATION TESTS")
@@ -347,7 +349,10 @@ Examples:
 
     if args.mode == "deep-research":
         results.append(
-            (f"Deep Research Sync ({agent_name})", test_deep_research_sync(query, agent_name))
+            (
+                f"Deep Research Sync ({agent_name})",
+                test_deep_research_sync(query, agent_name),
+            )
         )
 
     elif args.mode == "streaming":

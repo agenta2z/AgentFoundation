@@ -1,0 +1,60 @@
+{
+  "call": {
+    "active_session_id_after": null,
+    "base_single_calls": [
+      "_ainfer_single"
+    ],
+    "call_kwargs": {},
+    "entry": "ainfer",
+    "initialized_sessions_after": [
+      "main"
+    ],
+    "maybe_initialize_session": [
+      {
+        "initialized_after": true,
+        "initialized_before": false,
+        "session_id": "main"
+      }
+    ],
+    "prompt": "doomed question",
+    "raised": {
+      "cause": null,
+      "message": "Agent request rejected: invalid session state",
+      "type": "OpenClawError"
+    },
+    "streaming_entry_kwargs": [],
+    "transport": [
+      {
+        "method": "transcript_probe",
+        "result": "EXISTS",
+        "session_id": "main"
+      },
+      {
+        "active_run_context": {
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "method": "agent",
+        "params": {
+          "deliver": false,
+          "idempotencyKey": "<UUID1>",
+          "timeout": 600
+        },
+        "prompt": "doomed question",
+        "session_id": "main"
+      }
+    ]
+  },
+  "summary": {
+    "agent_request_count": 1,
+    "backoff_sleeps": [],
+    "construction_warnings": [
+      {
+        "level": "WARNING",
+        "logger": "agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.openclaw_inferencer",
+        "message": "OpenClaw owns its retries; base setting ignored: max_retry=3, fallback_mode=FallbackMode.ON_EXHAUSTED, fallback_inferencer"
+      }
+    ],
+    "fallback_calls": []
+  }
+}

@@ -90,9 +90,14 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         mfd._workspace.child.assert_not_called()
         new_inf.switch_role.assert_called_once()
         call_kwargs = new_inf.switch_role.call_args
-        self.assertEqual(call_kwargs.kwargs.get("new_role") or call_kwargs.args[0], "fixer_inferencer")
+        self.assertEqual(
+            call_kwargs.kwargs.get("new_role") or call_kwargs.args[0],
+            "fixer_inferencer",
+        )
         self.assertNotIn("workspace", call_kwargs.kwargs)
-        self.assertTrue(call_kwargs.kwargs["output_is_deliverable"])
+        # Part 2: switch_role no longer accepts the retired ``output_is_deliverable``
+        # flag kwarg (signature is (new_role, *, workspace=None, reset_session=True)).
+        self.assertNotIn("output_is_deliverable", call_kwargs.kwargs)
 
     def test_role_switch_runs_under_role_child_ctx_not_worker_node(self):
         """§2.7 regression: the role-switch must run under the role's OWN
@@ -109,11 +114,11 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         two distinct-creator leaves land on distinct nodes (no collision).
         """
         from agent_foundation.common.inferencers.run_context import (
-            RunContext,
-            RunStateStore,
             active_run_context,
             enter_run,
             exit_run,
+            RunContext,
+            RunStateStore,
         )
 
         captured = {}
@@ -148,13 +153,9 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         self.assertEqual(
             captured["review_inferencer"], "/propose/plan_bta.worker_0/review"
         )
-        self.assertEqual(
-            captured["fixer_inferencer"], "/propose/plan_bta.worker_0/fix"
-        )
+        self.assertEqual(captured["fixer_inferencer"], "/propose/plan_bta.worker_0/fix")
         # the bug was BOTH landing on the bare worker node:
-        self.assertNotEqual(
-            captured["review_inferencer"], "/propose/plan_bta.worker_0"
-        )
+        self.assertNotEqual(captured["review_inferencer"], "/propose/plan_bta.worker_0")
 
     def test_runtime_reviewer_resolvable_under_review_child_ctx(self):
         """Root-cause regression for the MFDual ``/review`` CollisionError.
@@ -176,10 +177,10 @@ class TestReassignRoleWorkspace(unittest.TestCase):
         read under the ``./review`` child where the pre-render runs.
         """
         from agent_foundation.common.inferencers.run_context import (
-            RunContext,
-            RunStateStore,
             enter_run,
             exit_run,
+            RunContext,
+            RunStateStore,
         )
 
         mfd = _make_mfdual_stub()

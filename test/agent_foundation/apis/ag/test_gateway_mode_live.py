@@ -18,6 +18,7 @@ import pytest
 
 # ─── Mock internal packages (same as test_gateway_mode.py) ────────────────────
 
+
 def _make_mock_package(name):
     mod = types.ModuleType(name)
     mod.__path__ = []
@@ -27,18 +28,33 @@ def _make_mock_package(name):
     mod.hprint_message = lambda *a, **kw: None
     return mod
 
+
 # Only mock if not already importable (allows running with full deps too)
 _MOCK_MODULE_NAMES = [
-    "rich_python_utils", "rich_python_utils.console_utils", "rich_python_utils.common_utils",
-    "rich_python_utils.common_utils.arg_utils", "rich_python_utils.common_utils.arg_utils.param_parse",
-    "rich_python_utils.common_utils.arg_utils.arg_parse", "rich_python_utils.common_objects",
-    "rich_python_utils.common_objects.debuggable", "rich_python_utils.common_utils.function_helper",
-    "rich_python_utils.common_utils.async_function_helper", "rich_python_utils.service_utils",
-    "rich_python_utils.service_utils.common", "rich_python_utils.mp_utils",
-    "rich_python_utils.mp_utils.common", "rich_python_utils.mp_utils.mp_target",
+    "rich_python_utils",
+    "rich_python_utils.console_utils",
+    "rich_python_utils.common_utils",
+    "rich_python_utils.common_utils.arg_utils",
+    "rich_python_utils.common_utils.arg_utils.param_parse",
+    "rich_python_utils.common_utils.arg_utils.arg_parse",
+    "rich_python_utils.common_objects",
+    "rich_python_utils.common_objects.debuggable",
+    "rich_python_utils.common_utils.function_helper",
+    "rich_python_utils.common_utils.async_function_helper",
+    "rich_python_utils.service_utils",
+    "rich_python_utils.service_utils.common",
+    "rich_python_utils.mp_utils",
+    "rich_python_utils.mp_utils.common",
+    "rich_python_utils.mp_utils.mp_target",
     "rich_python_utils.mp_utils.parallel_process",
-    "ai_gateway", "ai_gateway.client", "ai_gateway.client.common", "ai_gateway.client.common.filters",
-    "ai_gateway.constants", "ai_gateway.models", "ai_gateway.models.common", "ai_gateway.models.wrapper",
+    "ai_gateway",
+    "ai_gateway.client",
+    "ai_gateway.client.common",
+    "ai_gateway.client.common.filters",
+    "ai_gateway.constants",
+    "ai_gateway.models",
+    "ai_gateway.models.common",
+    "ai_gateway.models.wrapper",
 ]
 
 _need_mocks = False
@@ -58,10 +74,14 @@ if _need_mocks:
             return cls()
 
     sys.modules["ai_gateway.client"].AIGatewayClient = _MockAIGatewayClient
-    sys.modules["ai_gateway.client.common.filters"].SlauthServerAuthFilter = lambda **kw: True
+    sys.modules["ai_gateway.client.common.filters"].SlauthServerAuthFilter = (
+        lambda **kw: True
+    )
 
     sys.modules["rich_python_utils.common_objects.debuggable"].Debuggable = type(
-        "Debuggable", (), {
+        "Debuggable",
+        (),
+        {
             "__attrs_post_init__": lambda self: None,
             "log_debug": lambda self, *a, **kw: None,
             "log_info": lambda self, *a, **kw: None,
@@ -81,7 +101,9 @@ if _need_mocks:
 
     sys.modules["ai_gateway.constants"].AIGatewayHeaders = _MockHeaders
     sys.modules["ai_gateway.models.common"].HttpHeaders = dict
-    sys.modules["ai_gateway.models.common"].HttpMethod = type("HttpMethod", (), {"POST": "POST"})()
+    sys.modules["ai_gateway.models.common"].HttpMethod = type(
+        "HttpMethod", (), {"POST": "POST"}
+    )()
     sys.modules["ai_gateway.models.wrapper"].RequestWrapper = lambda **kw: kw
 
 
@@ -90,10 +112,10 @@ from agent_foundation.apis.ag.ai_gateway_claude_llm import (
     generate_text,
 )
 from agent_foundation.apis.ag.gateway_mode import (
-    GatewayMode,
     check_direct_available,
     check_proximity_available,
     check_slauth_server_available,
+    GatewayMode,
 )
 from agent_foundation.common.inferencers.api_inferencers.ag.ag_claude_api_inferencer import (
     AgClaudeApiInferencer,
@@ -111,9 +133,11 @@ def _is_direct_available():
     ok, _ = check_direct_available()
     return ok
 
+
 def _is_proximity_available():
     ok, _ = check_proximity_available()
     return ok
+
 
 def _is_slauth_server_available():
     ok, _ = check_slauth_server_available()
@@ -142,8 +166,11 @@ skip_no_slauth_server = pytest.mark.skipif(
 class TestDirectModeLive:
     def test_basic_response(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="direct",
-            max_new_tokens=16, temperature=0.0,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="direct",
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
@@ -152,17 +179,23 @@ class TestDirectModeLive:
     def test_with_system_prompt(self):
         result = generate_text(
             "What color is the sky?",
-            model=LIVE_MODEL, gateway_mode="direct",
+            model=LIVE_MODEL,
+            gateway_mode="direct",
             system="Answer in exactly one word.",
-            max_new_tokens=16, temperature=0.0,
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_raw_results(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="direct",
-            max_new_tokens=16, temperature=0.0, return_raw_results=True,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="direct",
+            max_new_tokens=16,
+            temperature=0.0,
+            return_raw_results=True,
         )
         assert isinstance(result, dict)
         assert "content" in result
@@ -175,8 +208,11 @@ class TestDirectModeLive:
 class TestProximityModeLive:
     def test_basic_response(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="proximity",
-            max_new_tokens=16, temperature=0.0,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="proximity",
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
@@ -185,17 +221,23 @@ class TestProximityModeLive:
     def test_with_system_prompt(self):
         result = generate_text(
             "What color is the sky?",
-            model=LIVE_MODEL, gateway_mode="proximity",
+            model=LIVE_MODEL,
+            gateway_mode="proximity",
             system="Answer in exactly one word.",
-            max_new_tokens=16, temperature=0.0,
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_raw_results(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="proximity",
-            max_new_tokens=16, temperature=0.0, return_raw_results=True,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="proximity",
+            max_new_tokens=16,
+            temperature=0.0,
+            return_raw_results=True,
         )
         assert isinstance(result, dict)
         assert "content" in result
@@ -206,8 +248,11 @@ class TestProximityModeLive:
 class TestSlauthServerModeLive:
     def test_basic_response(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="slauth_server",
-            max_new_tokens=16, temperature=0.0,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="slauth_server",
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
@@ -216,17 +261,23 @@ class TestSlauthServerModeLive:
     def test_with_system_prompt(self):
         result = generate_text(
             "What color is the sky?",
-            model=LIVE_MODEL, gateway_mode="slauth_server",
+            model=LIVE_MODEL,
+            gateway_mode="slauth_server",
             system="Answer in exactly one word.",
-            max_new_tokens=16, temperature=0.0,
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_raw_results(self):
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="slauth_server",
-            max_new_tokens=16, temperature=0.0, return_raw_results=True,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="slauth_server",
+            max_new_tokens=16,
+            temperature=0.0,
+            return_raw_results=True,
         )
         assert isinstance(result, dict)
         assert "content" in result
@@ -240,8 +291,11 @@ class TestAutoModeLive:
     def test_auto_detects_and_works(self):
         """Auto mode should detect an available mode and return a valid response."""
         result = generate_text(
-            LIVE_PROMPT, model=LIVE_MODEL, gateway_mode="auto",
-            max_new_tokens=16, temperature=0.0,
+            LIVE_PROMPT,
+            model=LIVE_MODEL,
+            gateway_mode="auto",
+            max_new_tokens=16,
+            temperature=0.0,
         )
         assert isinstance(result, str)
         assert "4" in result
@@ -255,7 +309,8 @@ class TestAutoModeLive:
 class TestAgClaudeApiInferencerDirectLive:
     def test_inferencer_direct(self):
         inferencer = AgClaudeApiInferencer(
-            model_id=str(LIVE_MODEL), gateway_mode="direct",
+            model_id=str(LIVE_MODEL),
+            gateway_mode="direct",
         )
         result = inferencer(LIVE_PROMPT, max_new_tokens=16, temperature=0.0)
         assert isinstance(result, str)
@@ -267,7 +322,8 @@ class TestAgClaudeApiInferencerDirectLive:
 class TestAgClaudeApiInferencerProximityLive:
     def test_inferencer_proximity(self):
         inferencer = AgClaudeApiInferencer(
-            model_id=str(LIVE_MODEL), gateway_mode="proximity",
+            model_id=str(LIVE_MODEL),
+            gateway_mode="proximity",
         )
         result = inferencer(LIVE_PROMPT, max_new_tokens=16, temperature=0.0)
         assert isinstance(result, str)
@@ -279,7 +335,8 @@ class TestAgClaudeApiInferencerProximityLive:
 class TestAgClaudeApiInferencerSlauthServerLive:
     def test_inferencer_slauth_server(self):
         inferencer = AgClaudeApiInferencer(
-            model_id=str(LIVE_MODEL), gateway_mode="slauth_server",
+            model_id=str(LIVE_MODEL),
+            gateway_mode="slauth_server",
         )
         result = inferencer(LIVE_PROMPT, max_new_tokens=16, temperature=0.0)
         assert isinstance(result, str)
@@ -290,7 +347,8 @@ class TestAgClaudeApiInferencerSlauthServerLive:
 class TestAgClaudeApiInferencerAutoLive:
     def test_inferencer_auto(self):
         inferencer = AgClaudeApiInferencer(
-            model_id=str(LIVE_MODEL), gateway_mode="auto",
+            model_id=str(LIVE_MODEL),
+            gateway_mode="auto",
         )
         result = inferencer(LIVE_PROMPT, max_new_tokens=16, temperature=0.0)
         assert isinstance(result, str)

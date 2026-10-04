@@ -3,8 +3,6 @@
 import asyncio
 import json
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
@@ -12,6 +10,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.mu
     MultiFlowInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrs
 
 
 @attrs
@@ -32,7 +31,11 @@ class _MockLeaf(InferencerBase):
 
 
 def _review_json(approved, issues):
-    return "```json review\n" + json.dumps({"approved": approved, "issues": issues}) + "\n```"
+    return (
+        "```json review\n"
+        + json.dumps({"approved": approved, "issues": issues})
+        + "\n```"
+    )
 
 
 def test_num_reviewers_default_is_one():
@@ -50,11 +53,7 @@ def test_reviewers_list_gives_independent_instances_per_panelist():
     )
     # effective-k derivation the review step performs
     _extra = list(d.reviewers) if d.reviewers else None
-    _k = (
-        1 + len(_extra)
-        if _extra and d.num_reviewers <= 1
-        else d.num_reviewers
-    )
+    _k = 1 + len(_extra) if _extra and d.num_reviewers <= 1 else d.num_reviewers
     assert _k == 3
     # panelist i>=1 maps to its OWN independent instance (not a reused one)
     assert [_extra[(i - 1) % len(_extra)] for i in (1, 2)] == [r0, r1]
@@ -67,11 +66,21 @@ def test_panel_merge_contract_matches_step_review_logic():
     from agent_foundation.common.inferencers.flow_parsers import merge_reviews
 
     panel = [
-        {"approved": False, "issues": [
-            {"location": "f:1", "description": "bug A", "severity": "high"}]},
-        {"approved": False, "issues": [
-            {"location": "f:1", "description": "bug A", "severity": "low"},      # dup of A
-            {"location": "f:2", "description": "bug B", "severity": "medium"}]}, # new
+        {
+            "approved": False,
+            "issues": [{"location": "f:1", "description": "bug A", "severity": "high"}],
+        },
+        {
+            "approved": False,
+            "issues": [
+                {
+                    "location": "f:1",
+                    "description": "bug A",
+                    "severity": "low",
+                },  # dup of A
+                {"location": "f:2", "description": "bug B", "severity": "medium"},
+            ],
+        },  # new
     ]
     merged = merge_reviews(panel)
     issues = merged["issues"]

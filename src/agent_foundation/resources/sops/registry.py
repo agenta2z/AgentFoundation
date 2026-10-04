@@ -47,9 +47,32 @@ class SOPInfo:
     sop: SOP = field(default_factory=lambda: SOP([]))
 
 
-def load_sop(name: str, base_dir: Path | None = None) -> SOPInfo:
-    """Load a single SOP from <base_dir>/<name>/SOP.md + sop.config.json."""
-    base = base_dir or _SOPS_DIR
+def load_sop(
+    name: str,
+    base_dir: Path | None = None,
+    *,
+    extra_dirs: list[str | Path] | None = None,
+) -> SOPInfo:
+    """Load SOP ``name``.
+
+    With ``base_dir``: exactly ``<base_dir>/<name>/SOP.md`` + ``sop.config.json``.
+    Otherwise the effective definition across the framework directory and
+    ``extra_dirs``, with ``load_all_sops``'s precedence: a later extra directory
+    overrides an earlier one, and every extra directory overrides the framework
+    directory.
+    """
+    if base_dir is not None:
+        if extra_dirs:
+            raise ValueError("load_sop: pass base_dir or extra_dirs, not both")
+        return _load_sop_from(Path(base_dir), name)
+    search_dirs = [_SOPS_DIR] + [Path(d) for d in (extra_dirs or [])]
+    for directory in reversed(search_dirs):
+        if (directory / name / "SOP.md").is_file():
+            return _load_sop_from(directory, name)
+    raise SOPNotFound(f"SOP {name!r} not found in {[str(d) for d in search_dirs]}")
+
+
+def _load_sop_from(base: Path, name: str) -> SOPInfo:
     sop_dir = base / name
     sop_md = sop_dir / "SOP.md"
     config_path = sop_dir / "sop.config.json"
@@ -77,7 +100,9 @@ def load_sop(name: str, base_dir: Path | None = None) -> SOPInfo:
     md_description = "\n".join(desc_lines).strip()[:500]
 
     description = config.get("description") or md_description
-    display_name = config.get("display_name") or name.replace("_", " ").replace("-", " ").title()
+    display_name = (
+        config.get("display_name") or name.replace("_", " ").replace("-", " ").title()
+    )
 
     # Merge keywords/example_requests: sop.config.json primary, SOP.md fallback
     merge = config.get("_merge_with_markdown", False)

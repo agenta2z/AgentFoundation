@@ -10,12 +10,15 @@ import logging
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from attr import attrib, attrs
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
+    session_id_of,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -71,6 +74,10 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
         idle_timeout_seconds: Per-chunk idle timeout (default: 1800).
         large_input_mode: How to pass prompt to subprocess (default: STDIN).
     """
+
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
 
     # KiroCli runs the ``kiro-cli`` agent as a subprocess with file-edit /
     # write tools, so it HAS local file access. Override ``InferencerBase``'s
@@ -185,9 +192,7 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         return " ".join(command_parts)
 
-    def parse_output(
-        self, stdout: str, stderr: str, return_code: int
-    ) -> dict:
+    def parse_output(self, stdout: str, stderr: str, return_code: int) -> dict:
         """Parse command output into a response dict.
 
         Simple text-based parsing — no JSON extraction needed.
@@ -272,11 +277,8 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
             True if authenticated, False otherwise.
         """
         try:
-            result = subprocess.run(
+            result = self._run_subprocess(
                 "kiro-cli whoami",
-                shell=True,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=self._resolve_subprocess_cwd(),
             )
@@ -284,7 +286,51 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
         except (subprocess.TimeoutExpired, OSError):
             return False
 
-    # === Override: ainfer() — Session-Aware ===
+    # === Session policy: the invocation seam's provider hooks ===
+
+    def _apply_session_policy(self, kwargs: Dict[str, Any]) -> None:
+        """Resolve ``new_session`` / ``session_id`` / ``resume`` into kwargs."""
+        new_session = kwargs.pop("new_session", False)
+        if new_session:
+            self.active_session_id = None
+
+        # Determine session context
+        session_id = kwargs.get("session_id", self.active_session_id)
+        is_resume = kwargs.get("resume", True)
+
+        if session_id is None:
+            if self.auto_resume and self.active_session_id:
+                session_id = self.active_session_id
+            else:
+                is_resume = False
+
+        kwargs["session_id"] = session_id
+        kwargs["resume"] = is_resume and session_id is not None
+
+    def _prepare_call(self, inference_args: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the session policy inside the invocation, so a claim-rejected
+        call leaves the session untouched."""
+        self._apply_session_policy(inference_args)
+        return inference_args
+
+    def _conclude_call(self, result: Any) -> Any:
+        """Update the active session from the sync call's result."""
+        self._adopt_result_session(session_id_of(result), "Sync")
+        return result
+
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Update the active session from the async call's result."""
+        self._adopt_result_session(session_id_of(result), "Async")
+        return result
+
+    def _adopt_result_session(self, result_session_id: Optional[str], tag: str) -> None:
+        if result_session_id and result_session_id != self.active_session_id:
+            self.active_session_id = result_session_id
+            self.log_debug(
+                f"Updated active session to: {result_session_id[:8]}...", tag
+            )
+
+    # === Public entries: thin adapters over the invocation seam ===
 
     @bridge_entrypoint
     async def ainfer(
@@ -298,50 +344,19 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
         - Response postprocessing (response_post_processor)
         - Total timeout (total_timeout_seconds)
 
+        The session policy runs inside the invocation (``_prepare_call`` /
+        ``_aconclude_call``); ``@bridge_entrypoint`` keeps a bare call unminted.
+
         Args:
             inference_input: Input for inference.
             inference_config: Optional configuration.
-            **kwargs: Additional arguments.
+            **kwargs: Additional arguments (``new_session``, ``session_id``,
+                ``resume``, ...).
 
         Returns:
             Inference result.
         """
-        # Handle new_session flag
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-
-        # Determine session context
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
-
-        # Route through _ainfer_single for retry/preprocessing/timeout
-        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
-
-        # Update active session from result
-        result_session_id = None
-        if isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        elif hasattr(result, "session_id"):
-            result_session_id = result.session_id
-        if result_session_id and result_session_id != self.active_session_id:
-            self.active_session_id = result_session_id
-            self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Async"
-            )
-
-        return result
-
-    # === Override: infer() — Sync Session-Aware ===
+        return await self._ainfer_single(inference_input, inference_config, **kwargs)
 
     @bridge_entrypoint
     def infer(
@@ -351,7 +366,7 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         Mirrors ainfer() for the sync path. Required because the inherited
         resume_session() and new_session() call self.infer() without
-        resume=True, so we must inject session context here.
+        resume=True, so the session policy must apply here too.
 
         Routes through _infer_single() to preserve retry/preprocessing.
 
@@ -363,37 +378,4 @@ class KiroCliInferencer(TerminalSessionTemplatedInferencerBase):
         Returns:
             Inference result.
         """
-        # Handle new_session flag
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-
-        # Determine session context
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
-
-        # Route through _infer_single (preserves retry/preprocessing)
-        result = self._infer_single(inference_input, inference_config, **kwargs)
-
-        # Update active session from result
-        result_session_id = None
-        if isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        elif hasattr(result, "session_id"):
-            result_session_id = result.session_id
-        if result_session_id and result_session_id != self.active_session_id:
-            self.active_session_id = result_session_id
-            self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Sync"
-            )
-
-        return result
+        return self._infer_single(inference_input, inference_config, **kwargs)

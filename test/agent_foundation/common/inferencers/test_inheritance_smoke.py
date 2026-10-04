@@ -11,7 +11,6 @@ Requirements: 9.1, 9.2, 10.1, 10.2, 3.3, 15.1, 15.2, 15.3
 
 import attr
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers import (
     BreakdownThenAggregateInferencer,
     DualInferencer,
@@ -111,7 +110,8 @@ def test_pti_public_attrs_preserved():
 def test_default_reset_sessions_per_iteration_is_false():
     """LWI's reset_sessions_per_iteration must default to False."""
     field = next(
-        a for a in attr.fields(LinearWorkflowInferencer)
+        a
+        for a in attr.fields(LinearWorkflowInferencer)
         if a.name == "reset_sessions_per_iteration"
     )
     assert field.default is False

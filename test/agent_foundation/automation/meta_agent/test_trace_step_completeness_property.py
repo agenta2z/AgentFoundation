@@ -15,13 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.automation.meta_agent.collector import TraceCollector
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -29,17 +25,19 @@ from agent_foundation.automation.meta_agent.models import (
 # ---------------------------------------------------------------------------
 
 # Non-empty action type strings (canonical action types)
-action_type_st = st.sampled_from([
-    "click",
-    "input_text",
-    "visit_url",
-    "scroll",
-    "wait",
-    "no_op",
-    "append_text",
-    "input_and_submit",
-    "scroll_up_to_element",
-])
+action_type_st = st.sampled_from(
+    [
+        "click",
+        "input_text",
+        "visit_url",
+        "scroll",
+        "wait",
+        "no_op",
+        "append_text",
+        "input_and_submit",
+        "scroll_up_to_element",
+    ]
+)
 
 # Timestamps: always non-None for valid actions
 timestamp_st = st.datetimes(
@@ -70,9 +68,11 @@ args_value_st = st.dictionaries(
 # Mock agent that produces actions with known fields
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MockAction:
     """Describes an action the mock agent should produce."""
+
     action_type: str
     target: Optional[Any] = None
     args: Optional[Dict[str, Any]] = None
@@ -180,9 +180,7 @@ class TestTraceStepCompletenessProperty:
         assert len(step.action_type) > 0, (
             f"action_type should have length > 0, got '{step.action_type}'"
         )
-        assert step.timestamp is not None, (
-            "timestamp should be non-None"
-        )
+        assert step.timestamp is not None, "timestamp should be non-None"
 
     @given(
         action_type=action_type_st,
@@ -197,11 +195,13 @@ class TestTraceStepCompletenessProperty:
         For any action that has a target, the TraceStep's target
         SHALL be non-None.
         """
-        actions = [MockAction(
-            action_type=action_type,
-            timestamp=timestamp,
-            target=target,
-        )]
+        actions = [
+            MockAction(
+                action_type=action_type,
+                timestamp=timestamp,
+                target=target,
+            )
+        ]
         agent = MockAgentForCompleteness(actions)
         collector = CompletenessTraceCollector(agent=agent, actions=actions)
         traces = collector.collect("test task", run_count=1)
@@ -224,11 +224,13 @@ class TestTraceStepCompletenessProperty:
         For any action that has arguments, the TraceStep's args
         SHALL be non-None.
         """
-        actions = [MockAction(
-            action_type=action_type,
-            timestamp=timestamp,
-            args=args,
-        )]
+        actions = [
+            MockAction(
+                action_type=action_type,
+                timestamp=timestamp,
+                args=args,
+            )
+        ]
         agent = MockAgentForCompleteness(actions)
         collector = CompletenessTraceCollector(agent=agent, actions=actions)
         traces = collector.collect("test task", run_count=1)
@@ -256,12 +258,14 @@ class TestTraceStepCompletenessProperty:
         For any action with all fields (action_type, timestamp, target,
         args), the TraceStep captures all of them completely.
         """
-        actions = [MockAction(
-            action_type=action_type,
-            timestamp=timestamp,
-            target=target,
-            args=args,
-        )]
+        actions = [
+            MockAction(
+                action_type=action_type,
+                timestamp=timestamp,
+                target=target,
+                args=args,
+            )
+        ]
         agent = MockAgentForCompleteness(actions)
         collector = CompletenessTraceCollector(agent=agent, actions=actions)
         traces = collector.collect("test task", run_count=1)
@@ -279,9 +283,7 @@ class TestTraceStepCompletenessProperty:
         data=st.data(),
     )
     @settings(max_examples=100)
-    def test_multiple_steps_all_complete(
-        self, num_actions: int, data: st.DataObject
-    ):
+    def test_multiple_steps_all_complete(self, num_actions: int, data: st.DataObject):
         """
         For any sequence of N actions, every resulting TraceStep has
         non-empty action_type and non-None timestamp. Steps with
@@ -297,12 +299,14 @@ class TestTraceStepCompletenessProperty:
             tgt = data.draw(target_value_st, label="target") if has_target else None
             ag = data.draw(args_value_st, label="args") if has_args else None
 
-            actions.append(MockAction(
-                action_type=at,
-                timestamp=ts,
-                target=tgt,
-                args=ag,
-            ))
+            actions.append(
+                MockAction(
+                    action_type=at,
+                    timestamp=ts,
+                    target=tgt,
+                    args=ag,
+                )
+            )
 
         agent = MockAgentForCompleteness(actions)
         collector = CompletenessTraceCollector(agent=agent, actions=actions)
@@ -311,12 +315,8 @@ class TestTraceStepCompletenessProperty:
         assert len(traces[0].steps) == num_actions
 
         for i, (step, action) in enumerate(zip(traces[0].steps, actions)):
-            assert step.action_type, (
-                f"Step {i}: action_type should be non-empty"
-            )
-            assert step.timestamp is not None, (
-                f"Step {i}: timestamp should be non-None"
-            )
+            assert step.action_type, f"Step {i}: action_type should be non-empty"
+            assert step.timestamp is not None, f"Step {i}: timestamp should be non-None"
             if action.target is not None:
                 assert step.target is not None, (
                     f"Step {i}: target should be non-None when action had target"

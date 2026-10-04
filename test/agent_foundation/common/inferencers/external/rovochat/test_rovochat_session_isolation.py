@@ -115,7 +115,9 @@ class TestRovoChatSessionIsolation(unittest.TestCase):
             self.assertIsNotNone(session_b, "Session B should have an ID")
 
             # Sessions must be different
-            self.assertNotEqual(session_a, session_b, "Sessions should have different IDs")
+            self.assertNotEqual(
+                session_a, session_b, "Sessions should have different IDs"
+            )
 
             # --- Resume A: recall secret ---
             inf_resume_a = _create_inferencer()
@@ -124,8 +126,16 @@ class TestRovoChatSessionIsolation(unittest.TestCase):
                 "What is the secret word I told you? Reply with just the single word.",
                 session_id=session_a,
             )
-            self.assertIn("banana", response_a.lower(), f"Session A should recall 'banana', got: {response_a}")
-            self.assertNotIn("dragon", response_a.lower(), f"Session A should NOT mention 'dragon', got: {response_a}")
+            self.assertIn(
+                "banana",
+                response_a.lower(),
+                f"Session A should recall 'banana', got: {response_a}",
+            )
+            self.assertNotIn(
+                "dragon",
+                response_a.lower(),
+                f"Session A should NOT mention 'dragon', got: {response_a}",
+            )
 
             # --- Resume B: recall secret ---
             inf_resume_b = _create_inferencer()
@@ -134,8 +144,16 @@ class TestRovoChatSessionIsolation(unittest.TestCase):
                 "What is the secret word I told you? Reply with just the single word.",
                 session_id=session_b,
             )
-            self.assertIn("dragon", response_b.lower(), f"Session B should recall 'dragon', got: {response_b}")
-            self.assertNotIn("banana", response_b.lower(), f"Session B should NOT mention 'banana', got: {response_b}")
+            self.assertIn(
+                "dragon",
+                response_b.lower(),
+                f"Session B should recall 'dragon', got: {response_b}",
+            )
+            self.assertNotIn(
+                "banana",
+                response_b.lower(),
+                f"Session B should NOT mention 'banana', got: {response_b}",
+            )
 
         asyncio.run(_run())
 
@@ -164,11 +182,15 @@ class TestRovoChatSessionIsolation(unittest.TestCase):
                     f"Just confirm you've memorized it.",
                 )
                 sessions[label] = inf.active_session_id
-                self.assertIsNotNone(sessions[label], f"Session {label} should have an ID")
+                self.assertIsNotNone(
+                    sessions[label], f"Session {label} should have an ID"
+                )
 
             # All session IDs must be unique
             ids = list(sessions.values())
-            self.assertEqual(len(set(ids)), 3, "All three sessions should have unique IDs")
+            self.assertEqual(
+                len(set(ids)), 3, "All three sessions should have unique IDs"
+            )
 
             # --- Chitchat in Session A (shouldn't affect secret) ---
             inf_chat_a = _create_inferencer()

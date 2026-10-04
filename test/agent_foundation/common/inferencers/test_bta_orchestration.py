@@ -47,7 +47,10 @@ class TestHeterogeneousWorkerFactory(unittest.TestCase):
         subtasks_obj = {
             "subtasks": [
                 {"description": "Check auth", "args": {"task_type": "security"}},
-                {"description": "Profile latency", "args": {"task_type": "performance"}},
+                {
+                    "description": "Profile latency",
+                    "args": {"task_type": "performance"},
+                },
             ]
         }
         breakdown_json = f"```json\n{json.dumps(subtasks_obj)}\n```"
@@ -177,6 +180,7 @@ class TestExpandTodosToWorkers(unittest.TestCase):
 
         # Wrap factory to capture queries via closure
         original_factory = factory
+
         def tracked_factory(sub_query, index):
             worker_inputs.append(sub_query)
             return original_factory(sub_query, index)
@@ -195,7 +199,8 @@ class TestExpandTodosToWorkers(unittest.TestCase):
 
         # 3 workers should have been created (one per todo)
         self.assertEqual(
-            len(worker_inputs), 3,
+            len(worker_inputs),
+            3,
             f"Expected 3 workers (one per todo), got {len(worker_inputs)}: {worker_inputs}",
         )
 

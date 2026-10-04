@@ -1,4 +1,3 @@
-
 # pyre-strict
 """Workspace file access REST API for the WebUI.
 
@@ -13,12 +12,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
 from agent_foundation.common.workspace.path_completion import (
     complete_path,
     PathContainmentError,
     PrefixNotADirectory,
 )
+from fastapi import APIRouter, HTTPException, Query
 from rankevolve.src.common.workspace.layout import (  # TODO: migrate from rankevolve.src.common.workspace.layout
     ANALYSIS_DIR,
     get_request_text,
@@ -146,7 +145,9 @@ async def path_complete(
     try:
         return complete_path(prefix, partial, dirs_only=dirs_only, limit=limit)
     except PrefixNotADirectory:
-        raise HTTPException(status_code=404, detail=f"Prefix directory not found: {prefix}")
+        raise HTTPException(
+            status_code=404, detail=f"Prefix directory not found: {prefix}"
+        )
     except PathContainmentError:
         raise HTTPException(status_code=403, detail="Path traversal blocked")
     except ValueError:

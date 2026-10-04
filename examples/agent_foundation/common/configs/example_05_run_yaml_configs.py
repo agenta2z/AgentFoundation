@@ -53,6 +53,7 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
 warnings.filterwarnings("ignore")
 
 from typing import Any
+
 from attr import attrib, attrs
 from rich_python_utils.config_utils import instantiate, load_config, register
 
@@ -61,10 +62,12 @@ from rich_python_utils.config_utils import instantiate, load_config, register
 # Mock inferencer classes (same ones used in example_04)
 # ---------------------------------------------------------------------------
 
+
 @register("MockLLM", category="inferencer")
 @attrs
 class MockLLM:
     """Simulates an LLM: echoes input with a prefix."""
+
     model_name: str = attrib(default="mock-model")
     response_prefix: str = attrib(default="")
     _secret_key: str = attrib(default="demo-key")
@@ -82,6 +85,7 @@ class MockLLM:
 @attrs
 class ReviewerInferencer:
     """Wraps a base inferencer and adds a review step."""
+
     base: Any = attrib(default=None)
     review_prompt: str = attrib(default="Please review")
 
@@ -100,6 +104,7 @@ class ReviewerInferencer:
 @attrs
 class ChainInferencer:
     """Chains inferencers in sequence: output of one feeds the next."""
+
     steps: list = attrib(factory=list)
 
     def infer(self, prompt: str) -> str:
@@ -118,6 +123,7 @@ class ChainInferencer:
 # Runner
 # ---------------------------------------------------------------------------
 
+
 def describe_object(obj, indent=2):
     """Print a human-readable description of the instantiated object."""
     prefix = " " * indent
@@ -134,7 +140,9 @@ def describe_object(obj, indent=2):
                 step_names.append(s.model_name)
             else:
                 step_names.append(type(s).__name__)
-        print(f"{prefix}Created: ChainInferencer with {len(obj.steps)} steps: {step_names}")
+        print(
+            f"{prefix}Created: ChainInferencer with {len(obj.steps)} steps: {step_names}"
+        )
     else:
         print(f"{prefix}Created: {cls_name}")
 

@@ -1,15 +1,14 @@
-from typing import Union, List, Dict, Sequence, Tuple, Callable
-
-import openai
 from enum import StrEnum
 from os import environ, path
+from typing import Callable, Dict, List, Sequence, Tuple, Union
 
+import openai
 from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.common_utils import get_
 from rich_python_utils.console_utils import hprint_message
 from rich_python_utils.io_utils.text_io import read_all_text
 
-ENV_NAME_OPENAI_API_KEY = 'OPENAI_APIKEY'
+ENV_NAME_OPENAI_API_KEY = "OPENAI_APIKEY"
 
 
 class OpenAIModels(StrEnum):
@@ -18,25 +17,26 @@ class OpenAIModels(StrEnum):
     See: https://platform.openai.com/docs/models
          https://developers.openai.com/codex/models
     """
+
     # GPT-5.x family (current — 2026)
-    GPT_55 = 'gpt-5.5'
-    GPT_54 = 'gpt-5.4'
-    GPT_54_MINI = 'gpt-5.4-mini'
-    GPT_53_CODEX_SPARK = 'gpt-5.3-codex-spark'
+    GPT_55 = "gpt-5.5"
+    GPT_54 = "gpt-5.4"
+    GPT_54_MINI = "gpt-5.4-mini"
+    GPT_53_CODEX_SPARK = "gpt-5.3-codex-spark"
 
     # GPT-4.x family (legacy — still available via API)
-    GPT4O = 'gpt-4o'
-    GPT4_TURBO = 'gpt-4-turbo'
-    GPT4 = 'gpt-4'
-    GPT4_32K = 'gpt-4-32k-0613'
+    GPT4O = "gpt-4o"
+    GPT4_TURBO = "gpt-4-turbo"
+    GPT4 = "gpt-4"
+    GPT4_32K = "gpt-4-32k-0613"
 
     # GPT-3.5 family (legacy)
-    GPT3 = 'gpt-3.5-turbo'
-    GPT3_16K = 'gpt-3.5-turbo-16k'
+    GPT3 = "gpt-3.5-turbo"
+    GPT3_16K = "gpt-3.5-turbo-16k"
 
     # Version-agnostic aliases (point to the latest in each tier)
-    GPT_LATEST = 'gpt-5.5'
-    GPT_MINI_LATEST = 'gpt-5.4-mini'
+    GPT_LATEST = "gpt-5.5"
+    GPT_MINI_LATEST = "gpt-5.4-mini"
 
 
 DEFAULT_OPENAI_MODEL = OpenAIModels.GPT_LATEST
@@ -44,16 +44,16 @@ DEFAULT_OPENAI_MODEL = OpenAIModels.GPT_LATEST
 
 DEFAULT_MAX_TOKENS = {
     # GPT-5.x (reasoning-capable, generous budgets)
-    f'{OpenAIModels.GPT_55}': 16384,
-    f'{OpenAIModels.GPT_54}': 16384,
-    f'{OpenAIModels.GPT_54_MINI}': 8192,
+    f"{OpenAIModels.GPT_55}": 16384,
+    f"{OpenAIModels.GPT_54}": 16384,
+    f"{OpenAIModels.GPT_54_MINI}": 8192,
     # GPT-4.x (legacy)
-    f'{OpenAIModels.GPT4O}': 4096,
-    f'{OpenAIModels.GPT4}': 2048,
-    f'{OpenAIModels.GPT4_32K}': 3096,
+    f"{OpenAIModels.GPT4O}": 4096,
+    f"{OpenAIModels.GPT4}": 2048,
+    f"{OpenAIModels.GPT4_32K}": 3096,
     # GPT-3.5 (legacy)
-    f'{OpenAIModels.GPT3}': 1024,
-    f'{OpenAIModels.GPT3_16K}': 3096,
+    f"{OpenAIModels.GPT3}": 1024,
+    f"{OpenAIModels.GPT3_16K}": 3096,
 }
 
 
@@ -61,12 +61,7 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
     if isinstance(prompt_or_messages, str):
         if path.exists(prompt_or_messages):
             prompt_or_messages = read_all_text(prompt_or_messages)
-        return [
-            {
-                'role': 'user',
-                'content': prompt_or_messages
-            }
-        ]
+        return [{"role": "user", "content": prompt_or_messages}]
     elif isinstance(prompt_or_messages, Dict):
         return [prompt_or_messages]
     elif isinstance(prompt_or_messages, (List, Tuple)):
@@ -75,22 +70,11 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
             for i in range(0, len(prompt_or_messages) - 1, 2):
                 messages.extend(
                     (
-                        {
-                            'role': 'user',
-                            'content': prompt_or_messages[i]
-                        },
-                        {
-                            'role': 'assistant',
-                            'content': prompt_or_messages[i + 1]
-                        }
+                        {"role": "user", "content": prompt_or_messages[i]},
+                        {"role": "assistant", "content": prompt_or_messages[i + 1]},
                     )
                 )
-            messages.append(
-                {
-                    'role': 'user',
-                    'content': prompt_or_messages[-1]
-                }
-            )
+            messages.append({"role": "user", "content": prompt_or_messages[-1]})
             return messages
         elif isinstance(prompt_or_messages[0], Dict):
             return list(prompt_or_messages)
@@ -100,22 +84,22 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
 
 
 def generate_text(
-        prompt_or_messages: str,
-        model: OpenAIModels = OpenAIModels.GPT4O,
-        max_new_tokens: int = None,
-        n: int = 1,
-        top_p: float = None,
-        stop: str = None,
-        temperature: float = 0.7,
-        api_key: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        result_array_getter: Union[str, Callable] = None,
-        result_processor: Callable = None,
-        **kwargs
+    prompt_or_messages: str,
+    model: OpenAIModels = OpenAIModels.GPT4O,
+    max_new_tokens: int = None,
+    n: int = 1,
+    top_p: float = None,
+    stop: str = None,
+    temperature: float = 0.7,
+    api_key: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    result_array_getter: Union[str, Callable] = None,
+    result_processor: Callable = None,
+    **kwargs,
 ):
     """
 
@@ -183,7 +167,7 @@ def generate_text(
     client = openai.OpenAI(api_key=api_key)
 
     # region build parameters dict
-    model = f'{model}'
+    model = f"{model}"
     if not max_new_tokens:
         max_new_tokens = DEFAULT_MAX_TOKENS.get(model, 4096)
 
@@ -193,37 +177,32 @@ def generate_text(
     messages = _get_messages(prompt_or_messages)
 
     params = {
-        'model': model,
-        'messages': messages,
-        'max_tokens': max_new_tokens,
-        'n': n,
-        'stop': stop,
-        'temperature': temperature,
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_new_tokens,
+        "n": n,
+        "stop": stop,
+        "temperature": temperature,
     }
 
     # Add optional sampling parameters
     if top_p is not None:
-        params['top_p'] = top_p
+        params["top_p"] = top_p
 
     # region Handle timeout setting
     timeout = _resolve_llm_timeout(
         timeout=timeout,
         connect_timeout=connect_timeout,
-        response_timeout=response_timeout
+        response_timeout=response_timeout,
     )
 
     if timeout is not None:
-        params['timeout'] = timeout
+        params["timeout"] = timeout
     # endregion
 
     params.update(kwargs)  # Add any additional kwargs
     if verbose:
-        hprint_message(
-            {
-                **params,
-                'return_raw_results': return_raw_results
-            }
-        )
+        hprint_message({**params, "return_raw_results": return_raw_results})
 
     # endregion
 
@@ -276,16 +255,16 @@ def generate_text(
             return [result.message.content.strip() for result in results]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from rich_python_utils.common_utils.arg_utils.arg_parse import get_parsed_args
 
     args = get_parsed_args(
-        default_prompt='Hello, how are you?',
-        default_model='gpt-4o',
+        default_prompt="Hello, how are you?",
+        default_model="gpt-4o",
         default_max_new_tokens=1024,
         default_n=1,
         default_top_p=0.9,
-        default_stop='[]',
+        default_stop="[]",
         default_temperature=0.7,
         default_return_raw_results=False,
     )
@@ -308,7 +287,7 @@ if __name__ == '__main__':
         stop=_stop,
         temperature=_temperature,
         return_raw_results=_return_raw_results,
-        verbose=True
+        verbose=True,
     )
 
-    hprint_message({'response': _generated_text}, title=_model)
+    hprint_message({"response": _generated_text}, title=_model)

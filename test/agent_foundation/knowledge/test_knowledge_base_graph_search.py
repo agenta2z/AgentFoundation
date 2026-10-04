@@ -17,10 +17,11 @@ Tests cover:
 
 **Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock, call
+from unittest.mock import call, MagicMock
 
 # Path resolution for imports
 _current_file = Path(__file__).resolve()
@@ -41,31 +42,31 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
+from agent_foundation.knowledge.retrieval.graph_walk import (
+    graph_walk,
+    merge_graph_contexts,
+    SeedNode,
+)
+from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
+from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
+from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
+    SemanticGraphStore,
+)
+from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
+# ── Shared test helpers (from conftest.py) ───────────────────────────────────
+from conftest import InMemoryEntityGraphStore, InMemoryRetrievalService
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 from rich_python_utils.service_utils.retrieval_service.document import Document
 from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
     RetrievalServiceBase,
 )
-
-from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.graph_walk import (
-    SeedNode,
-    graph_walk,
-    merge_graph_contexts,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
-    SemanticGraphStore,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
-from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
-from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
-
-
-# ── Shared test helpers (from conftest.py) ───────────────────────────────────
-from conftest import InMemoryEntityGraphStore, InMemoryRetrievalService
 
 
 # ── Helper: build a KnowledgeBase with mock stores ───────────────────────────
@@ -108,29 +109,47 @@ def _build_safeway_graph(graph_store: InMemoryEntityGraphStore) -> Dict[str, Gra
         safeway --LOCATED_IN--> san_francisco
     """
     safeway = GraphNode(
-        node_id="service:safeway", node_type="service",
-        label="Safeway Grocery", properties={"category": "grocery"},
+        node_id="service:safeway",
+        node_type="service",
+        label="Safeway Grocery",
+        properties={"category": "grocery"},
     )
     organic_eggs = GraphNode(
-        node_id="product:organic-eggs", node_type="product",
-        label="Organic Eggs", properties={"price": "5.99"},
+        node_id="product:organic-eggs",
+        node_type="product",
+        label="Organic Eggs",
+        properties={"price": "5.99"},
     )
     san_francisco = GraphNode(
-        node_id="location:sf", node_type="location",
-        label="San Francisco", properties={},
+        node_id="location:sf",
+        node_type="location",
+        label="San Francisco",
+        properties={},
     )
     graph_store.add_node(safeway)
     graph_store.add_node(organic_eggs)
     graph_store.add_node(san_francisco)
-    graph_store.add_relation(GraphEdge(
-        source_id="service:safeway", target_id="product:organic-eggs",
-        edge_type="SELLS", properties={"piece_id": "piece-eggs"},
-    ))
-    graph_store.add_relation(GraphEdge(
-        source_id="service:safeway", target_id="location:sf",
-        edge_type="LOCATED_IN", properties={},
-    ))
-    return {"safeway": safeway, "organic_eggs": organic_eggs, "san_francisco": san_francisco}
+    graph_store.add_relation(
+        GraphEdge(
+            source_id="service:safeway",
+            target_id="product:organic-eggs",
+            edge_type="SELLS",
+            properties={"piece_id": "piece-eggs"},
+        )
+    )
+    graph_store.add_relation(
+        GraphEdge(
+            source_id="service:safeway",
+            target_id="location:sf",
+            edge_type="LOCATED_IN",
+            properties={},
+        )
+    )
+    return {
+        "safeway": safeway,
+        "organic_eggs": organic_eggs,
+        "san_francisco": san_francisco,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -173,7 +192,9 @@ class TestSemanticGraphSearchEnabled:
         piece_store.list_all.return_value = []
 
         kb = _make_knowledge_base(
-            semantic_store, piece_store=piece_store, graph_traversal_depth=1,
+            semantic_store,
+            piece_store=piece_store,
+            graph_traversal_depth=1,
         )
 
         result = kb.retrieve("safeway grocery")
@@ -183,12 +204,18 @@ class TestSemanticGraphSearchEnabled:
         assert len(result.graph_context) > 0
 
         # Should have a SEARCH_HIT entry for safeway
-        search_hits = [e for e in result.graph_context if e["relation_type"] == "SEARCH_HIT"]
+        search_hits = [
+            e for e in result.graph_context if e["relation_type"] == "SEARCH_HIT"
+        ]
         assert len(search_hits) >= 1
         assert any(e["target_node_id"] == "service:safeway" for e in search_hits)
 
         # Should have neighbor entries with linked pieces
-        neighbor_entries = [e for e in result.graph_context if e["target_node_id"] == "product:organic-eggs"]
+        neighbor_entries = [
+            e
+            for e in result.graph_context
+            if e["target_node_id"] == "product:organic-eggs"
+        ]
         assert len(neighbor_entries) == 1
         assert neighbor_entries[0]["piece"] is not None
         assert neighbor_entries[0]["piece"].piece_id == "piece-eggs"
@@ -218,7 +245,9 @@ class TestNonSemanticGraphStoreFallback:
         piece_store.search.return_value = []
         piece_store.list_all.return_value = []
 
-        kb = _make_knowledge_base(graph_store, piece_store=piece_store, graph_traversal_depth=1)
+        kb = _make_knowledge_base(
+            graph_store, piece_store=piece_store, graph_traversal_depth=1
+        )
 
         # Non-semantic store: supports_semantic_search is False
         assert not graph_store.supports_semantic_search
@@ -229,7 +258,9 @@ class TestNonSemanticGraphStoreFallback:
         assert result.graph_context is not None
         assert len(result.graph_context) > 0
         # No SEARCH_HIT entries since semantic search was not used
-        search_hits = [e for e in result.graph_context if e.get("relation_type") == "SEARCH_HIT"]
+        search_hits = [
+            e for e in result.graph_context if e.get("relation_type") == "SEARCH_HIT"
+        ]
         assert len(search_hits) == 0
 
     def test_non_semantic_store_without_entity_id_returns_no_graph(self):
@@ -266,8 +297,10 @@ class TestGraphSearchWithoutEntityId:
         )
 
         safeway = GraphNode(
-            node_id="service:safeway", node_type="service",
-            label="Safeway Grocery", properties={"category": "grocery"},
+            node_id="service:safeway",
+            node_type="service",
+            label="Safeway Grocery",
+            properties={"category": "grocery"},
         )
         inner_store.add_node(safeway)
         semantic_store.add_node(safeway)  # Index in sidecar
@@ -295,21 +328,28 @@ class TestGraphSearchWithoutEntityId:
 
         # Add a node that won't match the query
         unrelated = GraphNode(
-            node_id="service:walmart", node_type="service",
-            label="Walmart", properties={},
+            node_id="service:walmart",
+            node_type="service",
+            label="Walmart",
+            properties={},
         )
         inner_store.add_node(unrelated)
 
         # Add a neighbor to walmart
         product = GraphNode(
-            node_id="product:milk", node_type="product",
-            label="Milk", properties={},
+            node_id="product:milk",
+            node_type="product",
+            label="Milk",
+            properties={},
         )
         inner_store.add_node(product)
-        inner_store.add_relation(GraphEdge(
-            source_id="service:walmart", target_id="product:milk",
-            edge_type="SELLS",
-        ))
+        inner_store.add_relation(
+            GraphEdge(
+                source_id="service:walmart",
+                target_id="product:milk",
+                edge_type="SELLS",
+            )
+        )
 
         kb = _make_knowledge_base(semantic_store)
 
@@ -343,23 +383,33 @@ class TestMergeDedupLayer2AndLayer3a:
         )
 
         safeway = GraphNode(
-            node_id="service:safeway", node_type="service",
-            label="Safeway Grocery", properties={},
+            node_id="service:safeway",
+            node_type="service",
+            label="Safeway Grocery",
+            properties={},
         )
         eggs = GraphNode(
-            node_id="product:eggs", node_type="product",
-            label="Organic Eggs", properties={},
+            node_id="product:eggs",
+            node_type="product",
+            label="Organic Eggs",
+            properties={},
         )
         inner_store.add_node(safeway)
         inner_store.add_node(eggs)
-        inner_store.add_relation(GraphEdge(
-            source_id="service:safeway", target_id="product:eggs",
-            edge_type="SELLS", properties={"piece_id": "piece-eggs"},
-        ))
+        inner_store.add_relation(
+            GraphEdge(
+                source_id="service:safeway",
+                target_id="product:eggs",
+                edge_type="SELLS",
+                properties={"piece_id": "piece-eggs"},
+            )
+        )
         semantic_store.add_node(safeway)
 
         eggs_piece = KnowledgePiece(
-            content="Organic eggs info", piece_id="piece-eggs", info_type="context",
+            content="Organic eggs info",
+            piece_id="piece-eggs",
+            info_type="context",
         )
         piece_store = MagicMock(spec=KnowledgePieceStore)
         piece_store.get_by_id.return_value = eggs_piece
@@ -404,8 +454,10 @@ class TestSearchHitRelationType:
         """Matched nodes from search_nodes appear as SEARCH_HIT at depth 0."""
         graph_store = InMemoryEntityGraphStore()
         safeway = GraphNode(
-            node_id="service:safeway", node_type="service",
-            label="Safeway", properties={},
+            node_id="service:safeway",
+            node_type="service",
+            label="Safeway",
+            properties={},
         )
         graph_store.add_node(safeway)
 
@@ -563,12 +615,30 @@ class TestDifferentRelationTypesPreserved:
     def test_three_different_relations_to_same_node(self):
         """Three different relation_types to the same node are all preserved."""
         entries = [
-            {"relation_type": "SEARCH_HIT", "target_node_id": "n1", "target_label": "N",
-             "piece": None, "depth": 0, "score": 0.9},
-            {"relation_type": "SELLS", "target_node_id": "n1", "target_label": "N",
-             "piece": None, "depth": 1, "score": 0.5},
-            {"relation_type": "LOCATED_IN", "target_node_id": "n1", "target_label": "N",
-             "piece": None, "depth": 1, "score": 0.3},
+            {
+                "relation_type": "SEARCH_HIT",
+                "target_node_id": "n1",
+                "target_label": "N",
+                "piece": None,
+                "depth": 0,
+                "score": 0.9,
+            },
+            {
+                "relation_type": "SELLS",
+                "target_node_id": "n1",
+                "target_label": "N",
+                "piece": None,
+                "depth": 1,
+                "score": 0.5,
+            },
+            {
+                "relation_type": "LOCATED_IN",
+                "target_node_id": "n1",
+                "target_label": "N",
+                "piece": None,
+                "depth": 1,
+                "score": 0.3,
+            },
         ]
 
         merged = merge_graph_contexts(entries, [])
@@ -592,11 +662,15 @@ class TestSpaceFilteringLayer3a:
         filtering before graph_walk() is called."""
         graph_store = InMemoryEntityGraphStore()
         node_work = GraphNode(
-            node_id="n-work", node_type="service", label="Work Node",
+            node_id="n-work",
+            node_type="service",
+            label="Work Node",
             properties={"spaces": ["work"]},
         )
         node_personal = GraphNode(
-            node_id="n-personal", node_type="service", label="Personal Node",
+            node_id="n-personal",
+            node_type="service",
+            label="Personal Node",
             properties={"spaces": ["personal"]},
         )
         graph_store.add_node(node_work)
@@ -614,8 +688,11 @@ class TestSpaceFilteringLayer3a:
             if set(n.properties.get("spaces", ["main"])) & set(requested_spaces)
         ]
         context = graph_walk(
-            graph_store, kb.piece_store, seeds,
-            traversal_depth=1, spaces=requested_spaces,
+            graph_store,
+            kb.piece_store,
+            seeds,
+            traversal_depth=1,
+            spaces=requested_spaces,
         )
 
         node_ids = [e["target_node_id"] for e in context]
@@ -626,33 +703,50 @@ class TestSpaceFilteringLayer3a:
         """Neighbors walked from a search hit are filtered by spaces."""
         graph_store = InMemoryEntityGraphStore()
         root = GraphNode(
-            node_id="root", node_type="service", label="Root",
+            node_id="root",
+            node_type="service",
+            label="Root",
             properties={"spaces": ["work"]},
         )
         neighbor_work = GraphNode(
-            node_id="n-work", node_type="product", label="Work Product",
+            node_id="n-work",
+            node_type="product",
+            label="Work Product",
             properties={"spaces": ["work"]},
         )
         neighbor_personal = GraphNode(
-            node_id="n-personal", node_type="product", label="Personal Product",
+            node_id="n-personal",
+            node_type="product",
+            label="Personal Product",
             properties={"spaces": ["personal"]},
         )
         graph_store.add_node(root)
         graph_store.add_node(neighbor_work)
         graph_store.add_node(neighbor_personal)
-        graph_store.add_relation(GraphEdge(
-            source_id="root", target_id="n-work", edge_type="RELATED",
-        ))
-        graph_store.add_relation(GraphEdge(
-            source_id="root", target_id="n-personal", edge_type="RELATED",
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="root",
+                target_id="n-work",
+                edge_type="RELATED",
+            )
+        )
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="root",
+                target_id="n-personal",
+                edge_type="RELATED",
+            )
+        )
 
         kb = _make_knowledge_base(graph_store, graph_traversal_depth=1)
 
         seeds = [SeedNode(node=root, score=0.9, source="search")]
         context = graph_walk(
-            graph_store, kb.piece_store, seeds,
-            traversal_depth=1, spaces=["work"],
+            graph_store,
+            kb.piece_store,
+            seeds,
+            traversal_depth=1,
+            spaces=["work"],
         )
 
         node_ids = [e["target_node_id"] for e in context]
@@ -666,7 +760,9 @@ class TestSpaceFilteringLayer3a:
         filtering before graph_walk() is called."""
         graph_store = InMemoryEntityGraphStore()
         node_no_spaces = GraphNode(
-            node_id="n-default", node_type="service", label="Default",
+            node_id="n-default",
+            node_type="service",
+            label="Default",
             properties={},  # No spaces → defaults to ["main"]
         )
         graph_store.add_node(node_no_spaces)
@@ -682,8 +778,11 @@ class TestSpaceFilteringLayer3a:
             if set(n.properties.get("spaces", ["main"])) & set(main_spaces)
         ]
         context = graph_walk(
-            graph_store, kb.piece_store, seeds_main,
-            traversal_depth=1, spaces=main_spaces,
+            graph_store,
+            kb.piece_store,
+            seeds_main,
+            traversal_depth=1,
+            spaces=main_spaces,
         )
         assert len(context) >= 1
         assert context[0]["target_node_id"] == "n-default"
@@ -696,8 +795,11 @@ class TestSpaceFilteringLayer3a:
             if set(n.properties.get("spaces", ["main"])) & set(work_spaces)
         ]
         context_work = graph_walk(
-            graph_store, kb.piece_store, seeds_work,
-            traversal_depth=1, spaces=work_spaces,
+            graph_store,
+            kb.piece_store,
+            seeds_work,
+            traversal_depth=1,
+            spaces=work_spaces,
         )
         assert len(context_work) == 0
 
@@ -842,11 +944,15 @@ class TestUpsertAddThenUpdate:
         )
 
         node_v1 = GraphNode(
-            node_id="n1", node_type="service", label="Version 1",
+            node_id="n1",
+            node_type="service",
+            label="Version 1",
             properties={"version": "1"},
         )
         node_v2 = GraphNode(
-            node_id="n1", node_type="service", label="Version 2",
+            node_id="n1",
+            node_type="service",
+            label="Version 2",
             properties={"version": "2"},
         )
 
@@ -874,10 +980,16 @@ class TestUpsertAddThenUpdate:
         )
 
         node_v1 = GraphNode(
-            node_id="n1", node_type="service", label="V1", properties={},
+            node_id="n1",
+            node_type="service",
+            label="V1",
+            properties={},
         )
         node_v2 = GraphNode(
-            node_id="n1", node_type="service", label="V2", properties={"updated": True},
+            node_id="n1",
+            node_type="service",
+            label="V2",
+            properties={"updated": True},
         )
 
         semantic_store.add_node(node_v1)

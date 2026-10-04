@@ -88,7 +88,9 @@ async def demo_streaming(inferencer, query: str) -> None:
                 print(chunk, end="", flush=True)
                 chars += len(chunk)
     print()
-    print(f"  [⏱ {time.time() - start:.1f}s | {chars} chars | session={inferencer.active_session_id}]")
+    print(
+        f"  [⏱ {time.time() - start:.1f}s | {chars} chars | session={inferencer.active_session_id}]"
+    )
     print()
 
 
@@ -144,14 +146,18 @@ def main():
         default="Explain what a Python decorator is in one sentence.",
         help="Query to send",
     )
-    parser.add_argument("--model", default=None, help="Codex model (default: your Codex login's model)")
+    parser.add_argument(
+        "--model", default=None, help="Codex model (default: your Codex login's model)"
+    )
     parser.add_argument(
         "--sandbox",
         default="read-only",
         choices=["read-only", "workspace-write", "full-access"],
         help="Codex sandbox policy (default: read-only)",
     )
-    parser.add_argument("--target-path", default=None, help="Working directory (default: temp dir)")
+    parser.add_argument(
+        "--target-path", default=None, help="Working directory (default: temp dir)"
+    )
     args = parser.parse_args()
 
     if args.target_path is None:

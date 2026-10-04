@@ -4,6 +4,7 @@ Shared helpers for loading the grocery mock knowledge store into a KnowledgeBase
 Used by both the mock-LLM integration test (test_retrieval_flow_grocery.py)
 and the real-LLM e2e test (test_retrieval_e2e_llm.py).
 """
+
 import shutil
 import sys
 from pathlib import Path
@@ -21,14 +22,25 @@ _rpu_src = Path(__file__).resolve().parents[4] / "RichPythonUtils" / "src"
 if _rpu_src.exists() and str(_rpu_src) not in sys.path:
     sys.path.insert(0, str(_rpu_src))
 
-from rich_python_utils.service_utils.graph_service.file_graph_service import FileGraphService
-from rich_python_utils.service_utils.retrieval_service.file_retrieval_service import FileRetrievalService
-from rich_python_utils.service_utils.keyvalue_service.file_keyvalue_service import FileKeyValueService
-
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
-from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import KeyValueMetadataStore
-from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import RetrievalKnowledgePieceStore
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import GraphServiceEntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
+from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
+    KeyValueMetadataStore,
+)
+from agent_foundation.knowledge.retrieval.stores.pieces.retrieval_adapter import (
+    RetrievalKnowledgePieceStore,
+)
+from rich_python_utils.service_utils.graph_service.file_graph_service import (
+    FileGraphService,
+)
+from rich_python_utils.service_utils.keyvalue_service.file_keyvalue_service import (
+    FileKeyValueService,
+)
+from rich_python_utils.service_utils.retrieval_service.file_retrieval_service import (
+    FileRetrievalService,
+)
 
 
 # ── Constants ──────────────────────────────────────────────────────────────

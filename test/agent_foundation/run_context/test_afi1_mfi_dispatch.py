@@ -8,19 +8,18 @@ Verifies the compat-property mechanism directly (no LLM-mocked full ``ainfer`` n
     ``_reset_dispatch_state_for_call`` in ``_init_call_state`` is what clears a stale winner).
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: E501
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
     mint_root,
+    RunContext,
 )
+from attr import attrs
 
 
 @attrs
@@ -113,7 +112,9 @@ def test_reused_node_is_reset_per_call():
     exit_run(tok)
 
     tok = enter_run(root)
-    mfi._init_call_state("q2")  # populate-once won't re-seed; the reset must clear winner
+    mfi._init_call_state(
+        "q2"
+    )  # populate-once won't re-seed; the reset must clear winner
     assert mfi.get_winner_flow_idx() is None
     exit_run(tok)
 

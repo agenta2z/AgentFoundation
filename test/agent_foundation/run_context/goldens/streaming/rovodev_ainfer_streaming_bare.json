@@ -1,0 +1,88 @@
+{
+  "calls": [
+    {
+      "active_session_id": null,
+      "cli": [
+        {
+          "argv": [
+            "rovodev",
+            "legacy",
+            "turn 1",
+            "--yolo",
+            "--output-file",
+            "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "--config-override",
+            "{\"agent\": {\"modelId\": \"anthropic:claude-opus-4-7\"}}"
+          ],
+          "cwd": "<TMP>/ws"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "kwargs": {
+            "output_file": "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "get_final_output": "clean answer to 'turn 1' in session <UUID1>",
+      "last_clean_output": "clean answer to 'turn 1' in session <UUID1>",
+      "live_store": null,
+      "output": "TUI thinking\nTUI done\n",
+      "session_backing": null
+    },
+    {
+      "active_session_id": null,
+      "cli": [
+        {
+          "argv": [
+            "rovodev",
+            "legacy",
+            "turn 2",
+            "--yolo",
+            "--output-file",
+            "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "--config-override",
+            "{\"agent\": {\"modelId\": \"anthropic:claude-opus-4-7\"}}"
+          ],
+          "cwd": "<TMP>/ws"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "kwargs": {
+            "output_file": "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "get_final_output": "clean answer to 'turn 2' in session <UUID2>",
+      "last_clean_output": "clean answer to 'turn 2' in session <UUID2>",
+      "live_store": null,
+      "output": "TUI thinking\nTUI done\n",
+      "session_backing": null
+    }
+  ],
+  "sessions_dir": {
+    "<UUID1>/session_context.json": {
+      "json": {
+        "workspace_path": "<TMP>/ws"
+      }
+    },
+    "<UUID2>/session_context.json": {
+      "json": {
+        "workspace_path": "<TMP>/ws"
+      }
+    }
+  }
+}

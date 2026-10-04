@@ -16,14 +16,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-from rich_python_utils.service_utils.data_operation_record import (
-    DataOperationRecord,
-    generate_operation_id,
-)
 from agent_foundation.knowledge.retrieval.models.enums import DeleteMode
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import OperationResult
 from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
+from rich_python_utils.service_utils.data_operation_record import (
+    DataOperationRecord,
+    generate_operation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,25 +97,29 @@ class KnowledgeDeleter:
         if mode == DeleteMode.SOFT:
             existing.is_active = False
             existing.updated_at = now
-            existing.history.append(DataOperationRecord(
-                operation="delete",
-                timestamp=now,
-                operation_id=op_id,
-                reason=reason,
-                source="KnowledgeDeleter",
-                details={"delete_mode": "soft"},
-            ))
+            existing.history.append(
+                DataOperationRecord(
+                    operation="delete",
+                    timestamp=now,
+                    operation_id=op_id,
+                    reason=reason,
+                    source="KnowledgeDeleter",
+                    details={"delete_mode": "soft"},
+                )
+            )
             self.piece_store.update(existing)
             logger.info("Soft deleted piece: %s", piece_id)
         else:
-            existing.history.append(DataOperationRecord(
-                operation="delete",
-                timestamp=now,
-                operation_id=op_id,
-                reason=reason,
-                source="KnowledgeDeleter",
-                details={"delete_mode": "hard"},
-            ))
+            existing.history.append(
+                DataOperationRecord(
+                    operation="delete",
+                    timestamp=now,
+                    operation_id=op_id,
+                    reason=reason,
+                    source="KnowledgeDeleter",
+                    details={"delete_mode": "hard"},
+                )
+            )
             self.piece_store.remove(piece_id)
             logger.info("Hard deleted piece: %s", piece_id)
 
@@ -151,8 +155,7 @@ class KnowledgeDeleter:
             matches = [
                 (p, s)
                 for p, s in matches
-                if p.domain == domain
-                or domain in getattr(p, "secondary_domains", [])
+                if p.domain == domain or domain in getattr(p, "secondary_domains", [])
             ]
 
         return matches
@@ -251,12 +254,14 @@ class KnowledgeDeleter:
         op_id = generate_operation_id("KnowledgeDeleter", "restore")
         existing.is_active = True
         existing.updated_at = now
-        existing.history.append(DataOperationRecord(
-            operation="restore",
-            timestamp=now,
-            operation_id=op_id,
-            source="KnowledgeDeleter.restore_by_id",
-        ))
+        existing.history.append(
+            DataOperationRecord(
+                operation="restore",
+                timestamp=now,
+                operation_id=op_id,
+                source="KnowledgeDeleter.restore_by_id",
+            )
+        )
         self.piece_store.update(existing)
         logger.info("Restored piece: %s", piece_id)
 

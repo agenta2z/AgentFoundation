@@ -4,7 +4,6 @@ import json
 from typing import List, Optional, Tuple
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.skill_synthesizer import (
     SkillSynthesisConfig,
     SkillSynthesisResult,
@@ -20,10 +19,12 @@ from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePie
 class InMemoryPieceStore(KnowledgePieceStore):
     """Minimal in-memory store for testing."""
 
-    def __init__(self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.8):
+    def __init__(
+        self, pieces: Optional[List[KnowledgePiece]] = None, score: float = 0.8
+    ):
         self._pieces: dict[str, KnowledgePiece] = {}
         self._score = score
-        for p in (pieces or []):
+        for p in pieces or []:
             self._pieces[p.piece_id] = p
 
     def add(self, piece: KnowledgePiece) -> str:
@@ -63,7 +64,9 @@ class InMemoryPieceStore(KnowledgePieceStore):
         return results
 
 
-def _make_piece(content: str, tags: Optional[List[str]] = None, domain: str = "general") -> KnowledgePiece:
+def _make_piece(
+    content: str, tags: Optional[List[str]] = None, domain: str = "general"
+) -> KnowledgePiece:
     return KnowledgePiece(
         content=content,
         tags=tags or [],
@@ -73,28 +76,34 @@ def _make_piece(content: str, tags: Optional[List[str]] = None, domain: str = "g
 
 def _make_llm_fn(is_skill_worthy: bool = True, skill_name: str = "test-skill"):
     """Create a mock LLM function that returns a valid synthesis response."""
+
     def llm_fn(prompt: str) -> str:
         if is_skill_worthy:
-            return json.dumps({
-                "is_skill_worthy": True,
-                "confidence": 0.9,
-                "reasoning": "Pieces form a coherent skill",
-                "synthesized_skill": {
-                    "name": skill_name,
-                    "description": "A test synthesized skill",
-                    "steps": [
-                        {"step": 1, "description": "First step"},
-                        {"step": 2, "description": "Second step"},
-                    ],
-                },
-            })
+            return json.dumps(
+                {
+                    "is_skill_worthy": True,
+                    "confidence": 0.9,
+                    "reasoning": "Pieces form a coherent skill",
+                    "synthesized_skill": {
+                        "name": skill_name,
+                        "description": "A test synthesized skill",
+                        "steps": [
+                            {"step": 1, "description": "First step"},
+                            {"step": 2, "description": "Second step"},
+                        ],
+                    },
+                }
+            )
         else:
-            return json.dumps({
-                "is_skill_worthy": False,
-                "confidence": 0.2,
-                "reasoning": "Pieces do not form a coherent skill",
-                "synthesized_skill": None,
-            })
+            return json.dumps(
+                {
+                    "is_skill_worthy": False,
+                    "confidence": 0.2,
+                    "reasoning": "Pieces do not form a coherent skill",
+                    "synthesized_skill": None,
+                }
+            )
+
     return llm_fn
 
 
@@ -227,6 +236,7 @@ class TestLLMSynthesis:
 
         synthesizer = SkillSynthesizer(piece_store=store, llm_fn=failing_llm)
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = synthesizer.check_and_synthesize(_make_piece("new piece"))
         assert result is None
@@ -242,6 +252,7 @@ class TestLLMSynthesis:
 
         synthesizer = SkillSynthesizer(piece_store=store, llm_fn=bad_json_llm)
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = synthesizer.check_and_synthesize(_make_piece("new piece"))
         assert result is None
@@ -252,6 +263,7 @@ class TestLLMSynthesis:
         store = InMemoryPieceStore(pieces=pieces, score=0.85)
         synthesizer = SkillSynthesizer(piece_store=store, llm_fn=None)
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = synthesizer.check_and_synthesize(_make_piece("new piece"))
         assert result is None
@@ -323,7 +335,9 @@ class TestSkillPieceCreation:
 
     def test_skill_piece_inherits_domain_from_first_source(self):
         """Synthesized skill domain comes from the first source piece (new_piece)."""
-        pieces = [_make_piece(f"piece {i}", domain="model_optimization") for i in range(3)]
+        pieces = [
+            _make_piece(f"piece {i}", domain="model_optimization") for i in range(3)
+        ]
         store = InMemoryPieceStore(pieces=pieces, score=0.85)
         synthesizer = SkillSynthesizer(piece_store=store, llm_fn=_make_llm_fn())
         new_piece = _make_piece("new piece", domain="training_efficiency")

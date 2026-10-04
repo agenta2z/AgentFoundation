@@ -11,10 +11,11 @@ Feature: retrieval-pipeline-refactor
 
 **Validates: Requirements 8.1, 8.2, 9.1, 9.2, 10.1, 10.2, 10.3, 11.1, 11.2, 11.3, 14.1, 14.2**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import call, MagicMock, patch
 
 # Path resolution for imports
 _current_file = Path(__file__).resolve()
@@ -34,25 +35,16 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-from hypothesis import given, settings, strategies as st, assume, HealthCheck
-
 from agent_foundation.knowledge.retrieval.formatter import (
     KnowledgeFormatter,
     RetrievalResult,
 )
+from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
 )
-from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
-from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
-    AgenticRetrievalResult,
-    PostProcessor,
-    QueryExpander,
-    RetrievalPipeline,
-    SubQuery,
-)
 from agent_foundation.knowledge.retrieval.post_processors import (
     AggregatingPostProcessor,
     BudgetAwarePostProcessor,
@@ -60,21 +52,32 @@ from agent_foundation.knowledge.retrieval.post_processors import (
     FlatStringPostProcessor,
     GroupedDictPostProcessor,
 )
+from agent_foundation.knowledge.retrieval.retrieval_pipeline import (
+    AgenticRetrievalResult,
+    PostProcessor,
+    QueryExpander,
+    RetrievalPipeline,
+    SubQuery,
+)
 from agent_foundation.knowledge.retrieval.utils import count_tokens
-
-from conftest import knowledge_piece_strategy, entity_metadata_strategy
+from conftest import entity_metadata_strategy, knowledge_piece_strategy
+from hypothesis import assume, given, HealthCheck, settings, strategies as st
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────
 
-_info_type_strategy = st.sampled_from(["user_profile", "instructions", "context", "skills", "episodic"])
+_info_type_strategy = st.sampled_from(
+    ["user_profile", "instructions", "context", "skills", "episodic"]
+)
 
 
 @st.composite
 def scored_piece_strategy(draw):
     """Generate a ScoredPiece with a random KnowledgePiece and score."""
     piece = draw(knowledge_piece_strategy())
-    score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
     return ScoredPiece(piece=piece, score=score)
 
 
@@ -83,17 +86,29 @@ def sub_query_strategy(draw):
     """Generate a SubQuery with random query, domain, tags, weight."""
     query = draw(st.text(min_size=1, max_size=50).filter(lambda s: s.strip()))
     domain = draw(st.one_of(st.none(), st.sampled_from(["general", "testing", "data"])))
-    tags = draw(st.one_of(st.none(), st.lists(st.text(min_size=1, max_size=10), max_size=3)))
-    weight = draw(st.floats(min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False))
+    tags = draw(
+        st.one_of(st.none(), st.lists(st.text(min_size=1, max_size=10), max_size=3))
+    )
+    weight = draw(
+        st.floats(min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False)
+    )
     return SubQuery(query=query, domain=domain, tags=tags, weight=weight)
 
 
 @st.composite
 def graph_context_entry_strategy(draw):
     """Generate a graph context entry dict."""
-    _relation_type_strategy = st.sampled_from([
-        "SEARCH_HIT", "RELATED", "WORKS_AT", "SELLS", "LOCATED_IN", "KNOWS", "IDENTITY",
-    ])
+    _relation_type_strategy = st.sampled_from(
+        [
+            "SEARCH_HIT",
+            "RELATED",
+            "WORKS_AT",
+            "SELLS",
+            "LOCATED_IN",
+            "KNOWS",
+            "IDENTITY",
+        ]
+    )
     _identifier_text = st.text(
         alphabet=st.characters(whitelist_categories=("L", "N", "P", "S")),
         min_size=1,
@@ -109,7 +124,11 @@ def graph_context_entry_strategy(draw):
         "target_label": draw(st.text(max_size=20)),
         "piece": piece,
         "depth": draw(st.integers(min_value=0, max_value=5)),
-        "score": draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)),
+        "score": draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        ),
     }
 
 
@@ -125,7 +144,11 @@ def retrieval_result_strategy(draw):
     pieces = []
     for _ in range(num_pieces):
         piece = draw(knowledge_piece_strategy())
-        score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
+        score = draw(
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            )
+        )
         pieces.append((piece, score))
 
     num_ctx = draw(st.integers(min_value=0, max_value=5))
@@ -217,11 +240,10 @@ class TestPipelinePathCScoreAggregation:
         for sq in sub_queries:
             # Each sub-query gets 1-3 random pieces from the pool
             import random
+
             num = min(len(piece_pool), max(1, len(piece_pool) // 2))
             selected = piece_pool[:num]
-            pieces = [
-                (p, 0.5 + 0.1 * idx) for idx, p in enumerate(selected)
-            ]
+            pieces = [(p, 0.5 + 0.1 * idx) for idx, p in enumerate(selected)]
             r = RetrievalResult()
             r.pieces = pieces
             results.append(r)
@@ -263,9 +285,9 @@ class TestPipelinePathCScoreAggregation:
         # Verify sorted by (-score, piece_id)
         for i in range(len(output.pieces) - 1):
             a, b = output.pieces[i], output.pieces[i + 1]
-            assert (
-                (-a.score, a.piece.piece_id) <= (-b.score, b.piece.piece_id)
-            ), "Output not sorted by (-score, piece_id)"
+            assert (-a.score, a.piece.piece_id) <= (-b.score, b.piece.piece_id), (
+                "Output not sorted by (-score, piece_id)"
+            )
 
 
 # ── Property 16: Pipeline Fallback Trigger ───────────────────────────────────
@@ -434,7 +456,8 @@ class TestBudgetAwareTokenLimits:
         for i in range(num_pieces):
             info_type = info_types[i % len(info_types)]
             piece = KnowledgePiece(
-                content=f"This is content for piece number {i} with some text to fill space " * 3,
+                content=f"This is content for piece number {i} with some text to fill space "
+                * 3,
                 piece_id=f"piece_{i}",
                 info_type=info_type,
                 updated_at="2024-01-15T10:00:00+00:00",
@@ -537,8 +560,7 @@ class TestPipelineL1L3bSingletonExecution:
     ):
         """L1/L3b called once, L2/L3a called N times."""
         sub_queries = [
-            SubQuery(query=f"sub query {i}", weight=1.0)
-            for i in range(num_sub_queries)
+            SubQuery(query=f"sub query {i}", weight=1.0) for i in range(num_sub_queries)
         ]
 
         # Create a mock expander
@@ -641,7 +663,11 @@ class TestPipelinePathBEquivalence:
 
         def _ensure(it: str):
             if it not in expected_groups:
-                expected_groups[it] = {"metadata": None, "pieces": [], "graph_context": []}
+                expected_groups[it] = {
+                    "metadata": None,
+                    "pieces": [],
+                    "graph_context": [],
+                }
             return expected_groups[it]
 
         # Metadata routing
@@ -695,7 +721,9 @@ class TestPipelinePathBEquivalence:
         class MockConsolidator:
             def consolidate(self, query, output):
                 consolidation_called.append((query, output))
-                return {k: v.upper() if isinstance(v, str) else v for k, v in output.items()}
+                return {
+                    k: v.upper() if isinstance(v, str) else v for k, v in output.items()
+                }
 
         def simple_formatter(metadata, pieces, graph_context):
             return "formatted"

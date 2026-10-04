@@ -1,0 +1,214 @@
+{
+  "bare1": {
+    "after": {
+      "backing_workspace": "<WS>/lwi",
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/lwi/children/probe",
+        "label": "p",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/lwi/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/lwi/children/probe",
+        "label": "p",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/lwi/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/lwi/children/probe",
+        "label": "p",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/lwi/children/probe"
+      }
+    ],
+    "result": {
+      "_prev_iteration": 3,
+      "iteration": 3,
+      "iteration_records": [
+        {
+          "iteration": 2
+        },
+        {
+          "iteration": 3
+        }
+      ],
+      "original_input": "task-1",
+      "work_output": "iter_3"
+    }
+  },
+  "bare2": {
+    "after": {
+      "backing_workspace": "<WS>/lwi",
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [],
+    "result": {
+      "_prev_iteration": 3,
+      "iteration": 3,
+      "iteration_records": [
+        {
+          "iteration": 2
+        },
+        {
+          "iteration": 3
+        }
+      ],
+      "original_input": "task-1",
+      "work_output": "iter_3"
+    }
+  },
+  "tree": {
+    "lwi/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "lwi/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "lwi/checkpoints/final_result.json": {
+      "json": {
+        "_prev_iteration": 3,
+        "iteration": 3,
+        "iteration_records": [
+          {
+            "iteration": 2
+          },
+          {
+            "iteration": 3
+          }
+        ],
+        "original_input": "task-1",
+        "work_output": "iter_3"
+      }
+    },
+    "lwi/checkpoints/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 3,
+        "loop_counts": {
+          "1": 2
+        },
+        "next_step_index": 2,
+        "result_id": "probe___seq3",
+        "state": {
+          "_prev_iteration": 3,
+          "iteration": 3,
+          "iteration_records": [
+            {
+              "iteration": 2
+            },
+            {
+              "iteration": 3
+            }
+          ],
+          "original_input": "task-1",
+          "work_output": "iter_3"
+        },
+        "step_index": 1,
+        "version": 1
+      }
+    },
+    "lwi/checkpoints/step_probe___seq1.json": {
+      "json": "p:task-1"
+    },
+    "lwi/checkpoints/step_probe___seq2.json": {
+      "json": "p:task-1"
+    },
+    "lwi/checkpoints/step_probe___seq3.json": {
+      "json": "p:task-1"
+    },
+    "lwi/children/probe/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "lwi/children/probe/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/iteration_2/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "lwi/iteration_2/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "lwi/iteration_3/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "lwi/iteration_3/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl": "<present>",
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>.json": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>_id_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>_level_<PART>.json": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>_name_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>_time_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceArgs/<TS>_type_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>_id_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>_level_<PART>.json": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>_name_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>_time_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "lwi/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>_type_<PART>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    }
+  }
+}

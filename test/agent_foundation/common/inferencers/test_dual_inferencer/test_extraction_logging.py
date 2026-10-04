@@ -1,5 +1,3 @@
-
-
 """Unit tests verifying that DualInferencer logs post-extraction content
 for ReviewResponse and FollowupResponse (not the raw pre-extraction text).
 
@@ -13,7 +11,7 @@ original raw text (with tags).
 import asyncio
 import json
 import unittest
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, call, MagicMock, patch
 
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
@@ -91,16 +89,21 @@ class DualInferencerExtractionLoggingTest(unittest.TestCase):
         )
 
         # Execute: run consensus loop and capture log_info calls
-        with patch.object(dual, "log_info") as mock_log_info, \
-             patch.object(dual, "log_debug"):
+        with (
+            patch.object(dual, "log_info") as mock_log_info,
+            patch.object(dual, "log_debug"),
+        ):
             self._run_async(dual._ainfer("test request"))
 
         # Assert: find the ReviewResponse log_info call
         review_calls = [
-            c for c in mock_log_info.call_args_list
+            c
+            for c in mock_log_info.call_args_list
             if len(c.args) >= 2 and c.args[1] == "ReviewResponse"
         ]
-        self.assertEqual(len(review_calls), 1, "Expected exactly one ReviewResponse log")
+        self.assertEqual(
+            len(review_calls), 1, "Expected exactly one ReviewResponse log"
+        )
 
         logged_content = review_calls[0].args[0]
 
@@ -131,15 +134,20 @@ class DualInferencerExtractionLoggingTest(unittest.TestCase):
             ),
         )
 
-        with patch.object(dual, "log_debug") as mock_log_debug, \
-             patch.object(dual, "log_info"):
+        with (
+            patch.object(dual, "log_debug") as mock_log_debug,
+            patch.object(dual, "log_info"),
+        ):
             self._run_async(dual._ainfer("test request"))
 
         raw_calls = [
-            c for c in mock_log_debug.call_args_list
+            c
+            for c in mock_log_debug.call_args_list
             if len(c.args) >= 2 and c.args[1] == "RawReviewResponse"
         ]
-        self.assertEqual(len(raw_calls), 1, "Expected exactly one RawReviewResponse log")
+        self.assertEqual(
+            len(raw_calls), 1, "Expected exactly one RawReviewResponse log"
+        )
 
         logged_content = raw_calls[0].args[0]
 
@@ -178,13 +186,16 @@ class DualInferencerExtractionLoggingTest(unittest.TestCase):
             ),
         )
 
-        with patch.object(dual, "log_info") as mock_log_info, \
-             patch.object(dual, "log_debug"):
+        with (
+            patch.object(dual, "log_info") as mock_log_info,
+            patch.object(dual, "log_debug"),
+        ):
             self._run_async(dual._ainfer("test request"))
 
         # Assert: find the FollowupResponse log_info call
         followup_calls = [
-            c for c in mock_log_info.call_args_list
+            c
+            for c in mock_log_info.call_args_list
             if len(c.args) >= 2 and c.args[1] == "FollowupResponse"
         ]
         self.assertEqual(
@@ -227,12 +238,15 @@ class DualInferencerExtractionLoggingTest(unittest.TestCase):
             ),
         )
 
-        with patch.object(dual, "log_debug") as mock_log_debug, \
-             patch.object(dual, "log_info"):
+        with (
+            patch.object(dual, "log_debug") as mock_log_debug,
+            patch.object(dual, "log_info"),
+        ):
             self._run_async(dual._ainfer("test request"))
 
         raw_fix_calls = [
-            c for c in mock_log_debug.call_args_list
+            c
+            for c in mock_log_debug.call_args_list
             if len(c.args) >= 2 and c.args[1] == "RawFixResponse"
         ]
         self.assertEqual(
@@ -262,17 +276,21 @@ class DualInferencerExtractionLoggingTest(unittest.TestCase):
             ),
         )
 
-        with patch.object(dual, "log_info") as mock_log_info, \
-             patch.object(dual, "log_debug") as mock_log_debug:
+        with (
+            patch.object(dual, "log_info") as mock_log_info,
+            patch.object(dual, "log_debug") as mock_log_debug,
+        ):
             self._run_async(dual._ainfer("test request"))
 
         # Extract logged content for both
         review_calls = [
-            c for c in mock_log_info.call_args_list
+            c
+            for c in mock_log_info.call_args_list
             if len(c.args) >= 2 and c.args[1] == "ReviewResponse"
         ]
         raw_calls = [
-            c for c in mock_log_debug.call_args_list
+            c
+            for c in mock_log_debug.call_args_list
             if len(c.args) >= 2 and c.args[1] == "RawReviewResponse"
         ]
 

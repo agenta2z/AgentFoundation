@@ -10,6 +10,7 @@ to get the UI-selected inferencer and use it when creating agents.
 
 # In your WebAgent service's task.py or agent creation code:
 
+
 def create_agent_factory_with_ui_inferencer_selection(app):
     """
     Create an agent factory that respects the UI's inferencer selection.
@@ -20,13 +21,14 @@ def create_agent_factory_with_ui_inferencer_selection(app):
     Returns:
         Factory function that creates agents with UI-selected inferencers
     """
+
     def agent_factory_with_ui_selection(session_id):
         """Create agent with inferencer selected in UI."""
         from agent_foundation.agents.prompt_based_agents.prompt_based_planning_agent import (
-            PromptBasedActionPlanningAgent
+            PromptBasedActionPlanningAgent,
         )
         from agent_foundation.common.inferencers.api_inferencers.claude_api_inferencer import (
-            ClaudeApiInferencer
+            ClaudeApiInferencer,
         )
 
         # Get the UI-selected inferencer for this session
@@ -42,13 +44,15 @@ def create_agent_factory_with_ui_inferencer_selection(app):
             # Fall back to default inferencer
             reasoner = ClaudeApiInferencer(
                 max_retry=3,
-                default_inference_args={'connect_timeout': 20, 'response_timeout': 120}
+                default_inference_args={"connect_timeout": 20, "response_timeout": 120},
             )
             print("Using default ClaudeApiInferencer")
 
         # Create your agent with the selected reasoner
         planning_agent = PromptBasedActionPlanningAgent(
-            default_prompt_template=load_prompt_template('planning_agent_prompt_template'),
+            default_prompt_template=load_prompt_template(
+                "planning_agent_prompt_template"
+            ),
             # ... other config ...
             reasoner=reasoner,  # Use the UI-selected or default inferencer
             # ... rest of config ...
@@ -61,18 +65,15 @@ def create_agent_factory_with_ui_inferencer_selection(app):
 
 # Usage in your Flask app initialization:
 
+
 def initialize_webagent_with_ui_debugger():
     """Initialize web agent service with UI debugger."""
     from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
-        DashInteractiveAppWithLogs
+        DashInteractiveAppWithLogs,
     )
 
     # Create the debugger UI
-    app = DashInteractiveAppWithLogs(
-        title="Web Agent Debugger",
-        port=8050,
-        debug=True
-    )
+    app = DashInteractiveAppWithLogs(title="Web Agent Debugger", port=8050, debug=True)
 
     # Set the agent factory that uses UI-selected inferencers
     factory = create_agent_factory_with_ui_inferencer_selection(app)
@@ -80,23 +81,22 @@ def initialize_webagent_with_ui_debugger():
 
     # Run the app
     print("Web Agent Debugger UI available at http://localhost:8050")
-    print("Use Settings tab to select MockClarificationInferencer or ClaudeApiInferencer")
+    print(
+        "Use Settings tab to select MockClarificationInferencer or ClaudeApiInferencer"
+    )
     app.run()
 
 
 # Alternative: If you want to use inferencer mode (no agents, just direct inferencer calls):
 
+
 def initialize_simple_inferencer_debugger():
     """Initialize debugger for testing inferencers directly (no full agent)."""
     from agent_foundation.ui.dash_interactive.dash_interactive_app_with_logs import (
-        DashInteractiveAppWithLogs
+        DashInteractiveAppWithLogs,
     )
 
-    app = DashInteractiveAppWithLogs(
-        title="Inferencer Debugger",
-        port=8050,
-        debug=True
-    )
+    app = DashInteractiveAppWithLogs(title="Inferencer Debugger", port=8050, debug=True)
 
     # Use inferencer mode - calls inferencers directly without agent wrapper
     app.set_inferencer_mode()
@@ -111,7 +111,7 @@ def initialize_simple_inferencer_debugger():
     app.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Choose one:
 
     # Option 1: Full web agent with UI inferencer selection

@@ -8,9 +8,10 @@ has the same name as a file in react-shared/src/ and is NOT a one-line re-export
 Usage:
     python scripts/check_no_duplicate_widgets.py
 """
-from pathlib import Path
+
 import re
 import sys
+from pathlib import Path
 
 UI_ROOT = Path(__file__).resolve().parent.parent / "src" / "agent_foundation" / "ui"
 SHARED = UI_ROOT / "react-shared" / "src"
@@ -21,8 +22,13 @@ RE_EXPORT_PATTERN = re.compile(
     re.MULTILINE,
 )
 
-SCAN_DIRS = ["components/widgets", "components/common", "components/chat",
-             "components/layout", "components/progress"]
+SCAN_DIRS = [
+    "components/widgets",
+    "components/common",
+    "components/chat",
+    "components/layout",
+    "components/progress",
+]
 
 
 def collect_shared_names() -> set[str]:

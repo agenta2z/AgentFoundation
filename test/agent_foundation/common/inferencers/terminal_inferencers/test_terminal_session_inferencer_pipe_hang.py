@@ -34,11 +34,10 @@ try:
 except (ImportError, RuntimeError):
     pass  # PYTHONPATH already set externally
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalSessionInferencerBase,
 )
+from attr import attrib, attrs
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +183,7 @@ class TestNormalProcessBehavior(unittest.TestCase):
         async def run():
             inf = MockSessionInferencer()
             collected = []
-            async for line in inf._ainfer_streaming(
-                "echo hello; sleep 1; echo world"
-            ):
+            async for line in inf._ainfer_streaming("echo hello; sleep 1; echo world"):
                 collected.append(line.strip())
             return collected, inf._last_streaming_return_code
 
@@ -231,9 +228,7 @@ class TestNormalProcessBehavior(unittest.TestCase):
         async def run():
             inf = MockSessionInferencer()
             collected = []
-            async for line in inf._ainfer_streaming(
-                "seq 1 100"
-            ):
+            async for line in inf._ainfer_streaming("seq 1 100"):
                 collected.append(line.strip())
             return collected, inf._last_streaming_return_code
 
@@ -260,7 +255,11 @@ class TestNormalProcessBehavior(unittest.TestCase):
                 "echo out; echo err >&2; sleep 0.5"
             ):
                 collected.append(line.strip())
-            return collected, inf._last_streaming_return_code, inf._last_streaming_stderr
+            return (
+                collected,
+                inf._last_streaming_return_code,
+                inf._last_streaming_stderr,
+            )
 
         collected, rc, stderr = run_with_timeout(run(), timeout=10.0)
 
@@ -339,6 +338,26 @@ class TestCleanupMechanisms(unittest.TestCase):
             self.assertLess(elapsed, 3.0)
             # Exit code should be 0 or None (already reaped)
             self.assertIn(exit_code, [0, None])
+
+        run_with_timeout(run(), timeout=10.0)
+
+    def test_poll_process_exit_leaves_the_exit_status_to_asyncio(self):
+        """E13: the poller observes the exit without reaping the child, so the
+        process keeps its real exit code instead of the 255 asyncio reports for
+        a child someone else reaped."""
+
+        async def run():
+            inf = MockSessionInferencer(subprocess_exit_poll_interval=0.05)
+            proc = await asyncio.create_subprocess_shell(
+                "exit 3",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # The child exits while the blocked loop cannot reap it yet.
+            time.sleep(0.5)
+            exit_code = await inf._poll_process_exit(proc.pid)
+            await proc.wait()
+            self.assertEqual((exit_code, proc.returncode), (3, 3))
 
         run_with_timeout(run(), timeout=10.0)
 

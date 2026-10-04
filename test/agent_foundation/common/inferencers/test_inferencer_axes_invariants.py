@@ -8,14 +8,12 @@ See: _docs/_plans/inferencer_axes_INTEGRATED_v5_plan.md §11
 """
 
 import attr
-from attr import attrs, attrib
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TemplatedInferencerBase,
-)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
+)
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    TemplatedInferencerBase,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     TerminalInferencerBase,
@@ -25,6 +23,7 @@ from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_i
     TerminalSessionInferencerBase,
     TerminalSessionTemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 
 class TestAxesIsinstanceMatrix:
@@ -40,7 +39,9 @@ class TestAxesIsinstanceMatrix:
         assert not issubclass(TerminalSessionInferencerBase, TemplatedInferencerBase)
 
     def test_tstib_is_templated(self):
-        assert issubclass(TerminalSessionTemplatedInferencerBase, TemplatedInferencerBase)
+        assert issubclass(
+            TerminalSessionTemplatedInferencerBase, TemplatedInferencerBase
+        )
 
     def test_ttib_is_templated(self):
         assert issubclass(TerminalTemplatedInferencerBase, TemplatedInferencerBase)
@@ -52,18 +53,21 @@ class TestAxesIsinstanceMatrix:
         assert issubclass(TerminalSessionInferencerBase, StreamingInferencerBase)
 
     def test_tstib_is_terminal(self):
-        assert issubclass(TerminalSessionTemplatedInferencerBase, TerminalInferencerBase)
+        assert issubclass(
+            TerminalSessionTemplatedInferencerBase, TerminalInferencerBase
+        )
 
     def test_tstib_is_streaming(self):
-        assert issubclass(TerminalSessionTemplatedInferencerBase, StreamingInferencerBase)
+        assert issubclass(
+            TerminalSessionTemplatedInferencerBase, StreamingInferencerBase
+        )
 
 
 class TestThreeDiamondMROs:
     """Pin the C3-linearized MROs for all three diamond classes."""
 
     def _mro_names(self, cls):
-        return [c.__name__ for c in cls.__mro__
-                if c.__name__ not in ("object",)]
+        return [c.__name__ for c in cls.__mro__ if c.__name__ not in ("object",)]
 
     def test_tsib_mro(self):
         mro = self._mro_names(TerminalSessionInferencerBase)
@@ -123,22 +127,19 @@ class TestNoDuplicateFieldsUnderDiamond:
     def test_tsib_no_duplicate_fields(self):
         names = [f.name for f in attr.fields(TerminalSessionInferencerBase)]
         assert len(names) == len(set(names)), (
-            f"Duplicate fields in TSIB: "
-            f"{[n for n in names if names.count(n) > 1]}"
+            f"Duplicate fields in TSIB: {[n for n in names if names.count(n) > 1]}"
         )
 
     def test_tstib_no_duplicate_fields(self):
         names = [f.name for f in attr.fields(TerminalSessionTemplatedInferencerBase)]
         assert len(names) == len(set(names)), (
-            f"Duplicate fields in TSTIB: "
-            f"{[n for n in names if names.count(n) > 1]}"
+            f"Duplicate fields in TSTIB: {[n for n in names if names.count(n) > 1]}"
         )
 
     def test_ttib_no_duplicate_fields(self):
         names = [f.name for f in attr.fields(TerminalTemplatedInferencerBase)]
         assert len(names) == len(set(names)), (
-            f"Duplicate fields in TTIB: "
-            f"{[n for n in names if names.count(n) > 1]}"
+            f"Duplicate fields in TTIB: {[n for n in names if names.count(n) > 1]}"
         )
 
 

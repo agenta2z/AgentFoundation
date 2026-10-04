@@ -7,6 +7,7 @@ refactored retrieve() produces identical output to manual layer assembly.
 
 Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,16 +31,17 @@ if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
 import pytest
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
-
 from agent_foundation.knowledge.retrieval.knowledge_base import KnowledgeBase
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
-from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
+from agent_foundation.knowledge.retrieval.stores.pieces.base import KnowledgePieceStore
 from conftest import InMemoryEntityGraphStore
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,7 +56,9 @@ def _make_metadata(entity_id: str, spaces: List[str] = None) -> EntityMetadata:
     )
 
 
-def _make_piece(piece_id: str, entity_id: str = None, info_type: str = "context") -> KnowledgePiece:
+def _make_piece(
+    piece_id: str, entity_id: str = None, info_type: str = "context"
+) -> KnowledgePiece:
     return KnowledgePiece(
         content=f"Content for {piece_id}",
         piece_id=piece_id,
@@ -173,7 +177,9 @@ class TestRetrieveMetadata:
             "user:test": entity_meta,
         }.get(eid)
 
-        meta, _ = kb.retrieve_metadata("user:test", include_global=False, spaces=["personal"])
+        meta, _ = kb.retrieve_metadata(
+            "user:test", include_global=False, spaces=["personal"]
+        )
         assert meta is entity_meta
 
 
@@ -200,7 +206,9 @@ class TestRetrievePieces:
         piece = _make_piece("p1", entity_id="user:test")
         piece_store.search.return_value = [(piece, 0.9)]
 
-        result = kb.retrieve_pieces("test query", entity_id="user:test", include_global=False)
+        result = kb.retrieve_pieces(
+            "test query", entity_id="user:test", include_global=False
+        )
         assert len(result) == 1
         assert result[0][0] is piece
         assert result[0][1] == 0.9
@@ -282,9 +290,11 @@ class TestRetrieveIdentityGraph:
         neighbor = GraphNode(node_id="company:acme", node_type="company", label="Acme")
         graph_store.add_node(user_node)
         graph_store.add_node(neighbor)
-        graph_store.add_relation(GraphEdge(
-            source_id="user:test", target_id="company:acme", edge_type="WORKS_AT"
-        ))
+        graph_store.add_relation(
+            GraphEdge(
+                source_id="user:test", target_id="company:acme", edge_type="WORKS_AT"
+            )
+        )
 
         result = kb.retrieve_identity_graph("user:test")
         assert len(result) == 2  # IDENTITY + WORKS_AT neighbor
@@ -337,10 +347,19 @@ class TestRetrieveOrchestration:
         # Manually call layer methods
         meta, global_m = kb.retrieve_metadata("user:test", include_global=True)
         pieces = kb.retrieve_pieces(
-            "test query", "user:test", kb.default_top_k, True,
-            None, None, None, 1, None,
+            "test query",
+            "user:test",
+            kb.default_top_k,
+            True,
+            None,
+            None,
+            None,
+            1,
+            None,
         )
-        search_ctx = kb.retrieve_search_graph("test query", kb.default_top_k, None, None)
+        search_ctx = kb.retrieve_search_graph(
+            "test query", kb.default_top_k, None, None
+        )
         identity_ctx = kb.retrieve_identity_graph("user:test", None, None)
 
         # Compare

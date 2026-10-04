@@ -285,7 +285,11 @@ export function AgentChatPanel() {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+    // `flex: 1, minHeight: 0` (instead of `height: 100%`) is the robust
+    // recipe when the parent is a flex-column container (App.js:1053).
+    // `minHeight: 0` lets nested overflow: hidden regions shrink correctly
+    // inside a flex parent (fixes the classic flex-child overflow bug).
+    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
       <AgentStatusBar
         connectionStatus={connectionStatus}
         model={config.model}
@@ -342,8 +346,20 @@ export function AgentChatPanel() {
         </Box>
       )}
 
-      <Container maxWidth="xl" sx={{ flex: 1, display: 'flex', flexDirection: 'column', py: 2, overflow: 'hidden' }}>
-        <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: 'auto', mb: 2, px: 1 }}>
+      {/* `pt: 2, pb: 1` — keep the top breathing room (below AgentStatusBar)
+          but shrink the bottom gap so the input box sits close to the
+          conversation-panel bottom edge (was `py: 2` = 16px on both sides). */}
+      <Container maxWidth="xl" sx={{ flex: 1, display: 'flex', flexDirection: 'column', pt: 2, pb: 1, overflow: 'hidden', minHeight: 0 }}>
+        {/* Chat-app anchor pattern (Slack/WhatsApp/Discord): outer scroll
+            container is `flex: 1 overflow: auto`; inner content wrapper uses
+            `mt: auto` to anchor content to the BOTTOM when it doesn't fill
+            the scroll box. Long threads scroll normally (auto-scroll to bottom
+            via `messagesEndRef.scrollIntoView`); short threads sit right above
+            the input box instead of stranding it in the middle of a big gap.
+            `minHeight: 100%` on the inner wrapper ensures `mt: auto` has a
+            definite parent height to align against. */}
+        <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: 'auto', mb: 2, px: 1, display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ mt: 'auto', minHeight: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           {globalSettings?.welcomeMessage && (
             <AgentStreamSection
               agentId="welcome"
@@ -512,6 +528,7 @@ export function AgentChatPanel() {
           })()}
 
           <div ref={messagesEndRef} />
+          </Box>{/* end inner anchor wrapper (chat-app bottom-anchor pattern) */}
         </Box>
 
         <Box sx={{ position: 'relative' }}>

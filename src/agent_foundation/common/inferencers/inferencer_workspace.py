@@ -23,18 +23,16 @@ import glob
 import json
 import os
 from datetime import datetime, timezone
-from typing import List, Optional, Union
-
-from attr import attrib, attrs
+from typing import List, Optional
 
 from agent_foundation.common.workspace.layout import (
     ARTIFACTS_DIR,
     CHECKPOINTS_DIR,
     CHILDREN_DIR,
-    FINAL_DELIVERABLES_DIR,
     LOGS_DIR,
     OUTPUTS_DIR,
 )
+from attr import attrib, attrs
 
 DEFAULT_OUTPUT_FILENAME = "output.md"
 
@@ -65,11 +63,6 @@ class InferencerWorkspace:
     """
 
     root: str = attrib(default="")
-    # Controls whether a final_deliverables/ directory is created and used.
-    # False (default)   → no deliverables directory
-    # True              → uses the conventional name "final_deliverables/"
-    # str               → uses that string as the subdirectory name
-    use_final_deliverables_folder: "Union[bool, str]" = attrib(default=False)
 
     # -- Standard directory properties --
 
@@ -98,47 +91,30 @@ class InferencerWorkspace:
         """Child inferencer workspace roots."""
         return os.path.join(self.root, CHILDREN_DIR)
 
-    @property
-    def deliverables_dir(self) -> "Optional[str]":
-        """Final deliverables directory under outputs/, or None if use_final_deliverables_folder is False.
-
-        When ``use_final_deliverables_folder=True`` uses ``outputs/final_deliverables/``
-        by convention. When a string, uses ``outputs/<name>/``.
+    def deliverable_path(self, relative: str) -> str:
+        """Resolve a deliverable path. Part 2 (two-axis model): deliverables live
+        directly in ``outputs/`` (``final_deliverables/`` is RETIRED), so this is
+        simply ``outputs/<relative>`` (== :meth:`output_path`).
         """
-        if not self.use_final_deliverables_folder:
-            return None
-        name = (
-            self.use_final_deliverables_folder
-            if isinstance(self.use_final_deliverables_folder, str)
-            else FINAL_DELIVERABLES_DIR
-        )
-        return os.path.join(self.root, OUTPUTS_DIR, name)
-
-    def deliverable_path(self, relative: str) -> "Optional[str]":
-        """Resolve a path relative to deliverables_dir, or None if not configured."""
-        d = self.deliverables_dir
-        if d is None:
-            return None
-        return os.path.join(d, relative)
+        return self.output_path(relative)
 
     @property
     def has_deliverables(self) -> bool:
-        """True iff deliverables_dir exists on disk AND is non-empty.
-
-        v1.7 Phase 1: the non-empty check prevents spurious 'I have
-        deliverables' signals from a directory that was created by
-        ensure_dirs() but never written into.
+        """True iff ``outputs/`` exists on disk AND is non-empty. Part 2: deliverables
+        live directly in ``outputs/`` (``final_deliverables/`` retired). The non-empty
+        check prevents spurious 'I have deliverables' signals from a directory that was
+        created by ensure_dirs() but never written into.
         """
-        d = self.deliverables_dir
+        d = self.outputs_dir
         return bool(d and os.path.isdir(d) and os.listdir(d))
 
     def deliverable_paths(self) -> List[str]:
-        """Return all file paths currently in deliverables_dir, recursively.
+        """Return all deliverable file paths (recursively) under ``outputs/``.
 
-        Paths are relative to deliverables_dir. Returns empty list when
-        deliverables are not configured or the directory doesn't exist.
+        Paths are relative to ``outputs/``. Returns empty list when the directory
+        doesn't exist.
         """
-        d = self.deliverables_dir
+        d = self.outputs_dir
         if not (d and os.path.isdir(d)):
             return []
         result = []
@@ -156,35 +132,30 @@ class InferencerWorkspace:
         namespace: "Optional[str]" = None,
         skip_existing: bool = True,
     ) -> List[str]:
-        """Copy a source workspace's deliverables into this workspace's deliverables_dir.
+        """Copy a source workspace's deliverables into this workspace's outputs_dir.
 
         v1.7 Phase 0 PRIMITIVE: low-level file-copy used by the boundary helpers
         in `deliverable_boundary.py`. Per-file copy preserves provenance.
 
         Args:
             source_workspace: The child workspace whose deliverables to copy.
-            namespace: Optional subdirectory under self.deliverables_dir to
+            namespace: Optional subdirectory under self.outputs_dir to
                 copy files into (e.g., "workers/worker_0" or "planner").
-                If None, files copy directly to self.deliverables_dir/.
+                If None, files copy directly to self.outputs_dir/.
             skip_existing: If True, never overwrite files that already exist.
 
         Returns:
-            List of relative paths copied (relative to self.deliverables_dir).
+            List of relative paths copied (relative to self.outputs_dir).
 
-        Returns empty list (no-op) if either workspace lacks deliverables_dir,
-        or if source has no deliverables.
+        Returns empty list (no-op) if source has no deliverables.
         """
         import shutil
 
-        if self.deliverables_dir is None:
-            return []
-        if source_workspace.deliverables_dir is None:
-            return []
         if not source_workspace.has_deliverables:
             return []
 
         # Compute destination root
-        dst_root = self.deliverables_dir
+        dst_root = self.outputs_dir
         if namespace:
             # Validate each path component
             for component in namespace.split("/"):
@@ -194,10 +165,9 @@ class InferencerWorkspace:
 
         os.makedirs(dst_root, exist_ok=True)
         copied = []
-        src_root = source_workspace.deliverables_dir
+        src_root = source_workspace.outputs_dir
 
         for root_dir, _dirs, files in os.walk(src_root):
-            _dirs[:] = [d for d in _dirs if d != FINAL_DELIVERABLES_DIR]  # v4.8: prevent nesting
             for f in files:
                 src_path = os.path.join(root_dir, f)
                 rel_path = os.path.relpath(src_path, src_root)
@@ -208,8 +178,8 @@ class InferencerWorkspace:
 
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                 shutil.copy2(src_path, dst_path)
-                # Track relative to self.deliverables_dir (include namespace)
-                copied.append(os.path.relpath(dst_path, self.deliverables_dir))
+                # Track relative to self.outputs_dir (include namespace)
+                copied.append(os.path.relpath(dst_path, self.outputs_dir))
 
         return copied
 
@@ -227,15 +197,13 @@ class InferencerWorkspace:
 
             ws.ensure_dirs("analysis", "results", "_runtime")
         """
-        for d in (self.outputs_dir, self.artifacts_dir,
-                  self.checkpoints_dir, self.logs_dir):
+        for d in (
+            self.outputs_dir,
+            self.artifacts_dir,
+            self.checkpoints_dir,
+            self.logs_dir,
+        ):
             os.makedirs(d, exist_ok=True)
-        # v1.7 Phase 0 BUG FIX: also create deliverables_dir when configured.
-        # Previously deliverables_dir was returned by the property but never
-        # created on disk, causing has_deliverables() and downstream copy
-        # operations to silently fail with "directory not found".
-        if self.deliverables_dir is not None:
-            os.makedirs(self.deliverables_dir, exist_ok=True)
         for sub in extra_subdirs:
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
 
@@ -292,16 +260,10 @@ class InferencerWorkspace:
 
         Does NOT create directories on disk — call
         :meth:`ensure_dirs` on the returned workspace when ready.
-
-        v1.7 Phase 0 BUG FIX: propagates ``use_final_deliverables_folder`` to
-        the child workspace. Previously this was lost on every child(), so
-        nested orchestrators silently ran without deliverable directories
-        even though the root requested them.
         """
         self._validate_child_name(name)
         return InferencerWorkspace(
             root=os.path.join(self.children_dir, name),
-            use_final_deliverables_folder=self.use_final_deliverables_folder,
         )
 
     def child_output(self, child_name: str, output_relative: str) -> str:
@@ -311,9 +273,7 @@ class InferencerWorkspace:
         Useful when the parent just needs to read a child's known output.
         """
         self._validate_child_name(child_name)
-        return os.path.join(
-            self.children_dir, child_name, OUTPUTS_DIR, output_relative
-        )
+        return os.path.join(self.children_dir, child_name, OUTPUTS_DIR, output_relative)
 
     # -- Artifact scanning --
 
@@ -327,9 +287,7 @@ class InferencerWorkspace:
 
     # -- Marker files --
 
-    def write_marker(
-        self, name: str, metadata: Optional[dict] = None
-    ) -> None:
+    def write_marker(self, name: str, metadata: Optional[dict] = None) -> None:
         """Write ``artifacts/.<name>_completed`` with timestamp.
 
         Args:
@@ -366,8 +324,8 @@ class InferencerWorkspace:
 # =============================================================================
 # Module-level path resolution helper for orchestrators that need to pass a
 # child inferencer's output path downstream (e.g., BTA aggregator, PTI executor,
-# MFDual peer flows). Provides canonical 3-tier resolution with explicit
-# fallback semantics — see resolve_canonical_output_path() below.
+# MFDual peer flows). Part 2 (final_deliverables/ retired): resolution is a
+# single tier — outputs/<filename> — see resolve_canonical_output_path() below.
 # =============================================================================
 
 
@@ -380,24 +338,16 @@ def resolve_canonical_output_path(
     """Returns the ABSOLUTE on-disk path to an inferencer's canonical
     output file, or ``None``.
 
-    Implements the **THREE-tier resolution** used by ``DualInferencer``'s
-    ``_resolve_prior_proposer_output_path`` (the reference implementation),
-    so it works for BOTH orchestrators (which have ``final_deliverables/``)
-    AND leaf CLI inferencers (which write only to ``outputs/output.md``).
+    Part 2 (``final_deliverables/`` retired): deliverables now live directly in
+    ``outputs/``, so resolution is a **single tier** — ``outputs/<filename>`` —
+    for BOTH orchestrators AND leaf CLI inferencers (RovoDevCli, ClaudeCodeCli).
+    There is no longer a separate deliverable subfolder to prefer or fall back
+    within, so the former three-tier scheme collapses to one lookup.
 
-    **Critical**: Without Tier 2, this helper returns ``None`` for the most
-    common production case (RovoDevCli, ClaudeCodeCli) which write to
-    ``outputs/output.md`` but typically don't promote to
-    ``final_deliverables/``. Tier 2 ensures leaf inferencers also resolve.
-
-    Tiers (in order):
-      Tier 1 — Deliverable file (preferred for orchestrators):
-        If ``workspace.has_deliverables``, try ``final_deliverables/<filename>``.
-        On miss, apply ``deliverables_fallback`` policy.
-      Tier 2 — Outputs file (canonical for leaf inferencers):
-        Try ``outputs/<filename>`` directly. This catches CLI inferencers
-        and any case where the deliverable hasn't been promoted yet.
-      Tier 3 — None: no usable file exists.
+    Resolution:
+      * Try ``outputs/<filename>`` directly. If it exists on disk, return its
+        absolute path.
+      * Otherwise return ``None`` (no usable file exists).
 
     Parameters
     ----------
@@ -406,16 +356,11 @@ def resolve_canonical_output_path(
     filename : str
         Preferred filename (default ``"output.md"``).
     deliverables_fallback : {"first_match", "alphabetical_scan", "none"}
-        Behavior WITHIN Tier 1 when the preferred filename is missing:
-          * ``"first_match"`` (DEFAULT, MFDual semantics):
-            return ``deliverable_paths()[0]``
-          * ``"alphabetical_scan"`` (DualInferencer semantics):
-            return first non-dotfile deliverable in sorted order
-            (filters ``.self_promoted`` etc.)
-          * ``"none"``: skip Tier 1 fallback; proceed to Tier 2 immediately
-
-        (Note: this controls fallback WITHIN Tier 1 only. Tier 2 always runs
-        when Tier 1 produces no result.)
+        RETAINED for call-site compatibility ONLY — no longer consulted. It
+        used to select fallback behavior within the (now-retired)
+        ``final_deliverables/`` tier; with deliverables living directly in
+        ``outputs/`` there is no separate subfolder to scan, so this parameter
+        has no effect.
 
     Returns
     -------
@@ -444,51 +389,11 @@ def resolve_canonical_output_path(
     if workspace is None:
         return None
 
-    # === Tier 1: deliverable file ===
-    if getattr(workspace, "has_deliverables", False):
-        deliverables_dir = getattr(workspace, "deliverables_dir", None)
-        if deliverables_dir:
-            candidate = os.path.join(str(deliverables_dir), filename)
-            if os.path.isfile(candidate):
-                return os.path.abspath(candidate)
-
-            if deliverables_fallback != "none":
-                try:
-                    deliverable_paths_fn = getattr(
-                        workspace, "deliverable_paths", None
-                    )
-                    deliverable_paths = (
-                        deliverable_paths_fn()
-                        if callable(deliverable_paths_fn)
-                        else []
-                    )
-                except Exception:
-                    deliverable_paths = []
-
-                if deliverable_paths:
-                    chosen: Optional[str] = None
-                    if deliverables_fallback == "alphabetical_scan":
-                        non_dotfiles = sorted(
-                            p
-                            for p in deliverable_paths
-                            if not os.path.basename(p).startswith(".")
-                        )
-                        if non_dotfiles:
-                            chosen = non_dotfiles[0]
-                    else:  # "first_match" (DEFAULT)
-                        chosen = deliverable_paths[0]
-
-                    if chosen:
-                        # deliverable_paths() may return basenames or full paths
-                        if not os.path.isabs(chosen):
-                            try:
-                                chosen = workspace.deliverable_path(chosen)
-                            except Exception:
-                                chosen = None
-                        if chosen and os.path.isfile(chosen):
-                            return os.path.abspath(chosen)
-
-    # === Tier 2: outputs/<filename> (CRITICAL for leaf CLI inferencers) ===
+    # Part 2 (final_deliverables/ retired): deliverables live directly in
+    # ``outputs/``, so resolution is a single tier — ``outputs/<filename>`` — for
+    # BOTH orchestrators and leaf CLI inferencers. The ``deliverables_fallback``
+    # parameter is retained for call-site compatibility but no longer consulted
+    # (there is no separate deliverable subfolder to fall back within).
     try:
         out_path = (
             workspace.output_path(filename)
@@ -500,5 +405,5 @@ def resolve_canonical_output_path(
     if out_path and os.path.isfile(out_path):
         return os.path.abspath(out_path)
 
-    # === Tier 3: nothing on disk ===
+    # Nothing on disk.
     return None

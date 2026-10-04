@@ -17,14 +17,17 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 
 function getBreadcrumbLabels(task, graphPath) {
+  // graphPath stores fully-qualified ids (focus-context: focusedPath[i] is
+  // node._qualifiedId; page-switch: after the unify-convention fix, ditto).
+  // The subGraphs key for any level IS graphPath[i] directly — using
+  // slice(0,i+1).join('/') would double-prefix at depth >= 2.
   const labels = ['Pipeline'];
   let graph = task?.graph;
   for (let i = 0; i < graphPath.length; i++) {
     const nodeId = graphPath[i];
     const node = graph?.nodes?.find(n => n.id === nodeId);
     labels.push(node?.label || nodeId);
-    const key = graphPath.slice(0, i + 1).join('/');
-    graph = task?.subGraphs?.[key] || null;
+    graph = task?.subGraphs?.[nodeId] || null;
   }
   return labels;
 }

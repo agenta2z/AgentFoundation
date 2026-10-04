@@ -9,10 +9,9 @@ guarantee.
 
 from pathlib import Path
 
+import agent_foundation.common.configs  # noqa: F401 — registers BTA/MultiFlowDual aliases
 import yaml
 from omegaconf import OmegaConf
-
-import agent_foundation.common.configs  # noqa: F401 — registers BTA/MultiFlowDual aliases
 from rich_python_utils.config_utils import instantiate
 from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
 

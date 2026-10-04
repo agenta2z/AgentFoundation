@@ -17,14 +17,25 @@ import pytest
 
 
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
+YAML_PATH = (
+    _HERE.parents[5]
+    / "src"
+    / "agent_foundation"
+    / "resources"
+    / "tools"
+    / "task"
+    / "configs"
+    / "default.yaml"
+)
 OPENSTARTUP_PATH = Path(
     os.environ.get(
         "OPENSTARTUP_PATH",
         str(_HERE.parents[4]),
     )
 )
-TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+TEMPLATES_DIR = (
+    OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+)
 
 
 def _collect_leaf_inferencers(root):
@@ -63,7 +74,7 @@ def _collect_leaf_inferencers(root):
 
 def _instantiate_yaml(monkeypatch, tmp_path, overrides=None):
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import load_config, instantiate
+    from rich_python_utils.config_utils import instantiate, load_config
 
     base_overrides = {
         "_target_path": str(OPENSTARTUP_PATH),
@@ -77,6 +88,7 @@ def _instantiate_yaml(monkeypatch, tmp_path, overrides=None):
 
 
 # ---- Default: all leaves are ClaudeCodeCliInferencer ----
+
 
 def test_default_inferencer_resolves_to_claude_code_cli(tmp_path, monkeypatch):
     """With no override, every leaf inferencer must be ClaudeCodeCliInferencer."""
@@ -98,6 +110,7 @@ def test_default_inferencer_resolves_to_claude_code_cli(tmp_path, monkeypatch):
 
 # ---- Override: all leaves switch to RovoDevCliInferencer ----
 
+
 def test_default_inferencer_override_to_rovodev(tmp_path, monkeypatch):
     """Overriding _params.default_inferencer=RovoDevCLI must switch every leaf."""
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer import (
@@ -105,7 +118,8 @@ def test_default_inferencer_override_to_rovodev(tmp_path, monkeypatch):
     )
 
     root = _instantiate_yaml(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         overrides={"_params.default_inferencer": "RovoDevCLI"},
     )
     leaves = _collect_leaf_inferencers(root)
@@ -119,23 +133,25 @@ def test_default_inferencer_override_to_rovodev(tmp_path, monkeypatch):
 
 # ---- Structural types preserved under override ----
 
+
 def test_structural_types_preserved_under_override(tmp_path, monkeypatch):
     """Overriding the leaf inferencer must NOT change orchestrator types."""
-    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
-        DualInferencer,
-    )
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
         BreakdownThenAggregateInferencer,
     )
-    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
-        PlanThenImplementInferencer,
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
+        DualInferencer,
     )
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_dual_inferencer import (
         MultiFlowDualInferencer,
     )
+    from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
+        PlanThenImplementInferencer,
+    )
 
     root = _instantiate_yaml(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         overrides={"_params.default_inferencer": "RovoDevCLI"},
     )
 

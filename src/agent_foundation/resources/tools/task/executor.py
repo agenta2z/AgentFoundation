@@ -16,14 +16,16 @@ Pipeline (10 stages):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shutil
 import uuid
-import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+import yaml
 
 _logger = logging.getLogger(__name__)
 
@@ -41,16 +43,17 @@ _PTI_PRESET_NAMES = {"pti", "pti-simple"}
 # detection — and (b) some canonical files are named for history, not for the
 # `--config` value users type.
 _CONFIG_ALIASES: dict[str, str] = {
-    "full-plan": "breakdown-multiflow-plan",   # coverage + diversity (existing file)
-    "pti": "default",                          # full PTI plan+implement
-    "multiflow": "multiflow-plan",             # diversity-only (file formerly multiple.yaml)
-    "conversation": "disabled",                # conversational router (Phase 2)
+    "full-plan": "breakdown-multiflow-plan",  # coverage + diversity (existing file)
+    "pti": "default",  # full PTI plan+implement
+    "multiflow": "multiflow-plan",  # diversity-only (file formerly multiple.yaml)
+    "conversation": "disabled",  # conversational router (Phase 2)
 }
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
+
 
 def _camel_to_kebab(s: str) -> str:
     """Acronym-aware camelCase -> kebab-case (R2.4 two-rule regex).
@@ -62,7 +65,9 @@ def _camel_to_kebab(s: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "-", s).lower()
 
 
-def _resolve_agent_config(spec: str, configs_dir: Path = _CONFIGS_DIR) -> tuple[str, Any]:
+def _resolve_agent_config(
+    spec: str, configs_dir: Path = _CONFIGS_DIR
+) -> tuple[str, Any]:
     """Resolve --agent-config <spec> to ('file', Path) or ('inline', dict).
 
     Detection priority (R2):
@@ -80,11 +85,13 @@ def _resolve_agent_config(spec: str, configs_dir: Path = _CONFIGS_DIR) -> tuple[
     if spec.startswith("{"):
         parsed = yaml.safe_load(spec)
         if not isinstance(parsed, dict):
-            raise ValueError(f"--agent-config inline value must parse to a dict, got: {type(parsed).__name__}")
+            raise ValueError(
+                f"--agent-config inline value must parse to a dict, got: {type(parsed).__name__}"
+            )
         return ("inline", parsed)
 
     # Rule 2: file path
-    looks_like_path = ("/" in spec or "\\" in spec or spec.endswith((".yaml", ".yml")))
+    looks_like_path = "/" in spec or "\\" in spec or spec.endswith((".yaml", ".yml"))
     if looks_like_path:
         path = Path(spec)
         if not path.is_file():
@@ -114,11 +121,18 @@ def _resolve_agent_config(spec: str, configs_dir: Path = _CONFIGS_DIR) -> tuple[
 
     # Rule 5: error with helpful suggestions
     import difflib
+
     available = sorted(p.stem for p in configs_dir.glob("*.yaml"))
     available.extend(k for k in sorted(_CONFIG_ALIASES) if k not in available)
     close = difflib.get_close_matches(spec.lower(), available, n=3)
-    suggest = f"Did you mean: {', '.join(close)}?" if close else f"Available presets: {', '.join(available)}"
-    raise ValueError(f"--agent-config '{spec}' is not a known preset, file path, or registered alias. {suggest}")
+    suggest = (
+        f"Did you mean: {', '.join(close)}?"
+        if close
+        else f"Available presets: {', '.join(available)}"
+    )
+    raise ValueError(
+        f"--agent-config '{spec}' is not a known preset, file path, or registered alias. {suggest}"
+    )
 
 
 def _topology_target_str(source: tuple[str, Any]) -> str:
@@ -139,14 +153,19 @@ def _topology_is_pti(source: tuple[str, Any]) -> bool:
     """
     kind, payload = source
     try:
-        text = str(payload) if kind == "inline" else Path(payload).read_text(encoding="utf-8")
+        text = (
+            str(payload)
+            if kind == "inline"
+            else Path(payload).read_text(encoding="utf-8")
+        )
     except OSError:
         return False
     return "PlanThenImplementInferencer" in text or "_target_: PTI" in text
 
 
 _CONVERSATIONAL_TARGETS = {
-    "Conversational", "ConversationalInferencer",
+    "Conversational",
+    "ConversationalInferencer",
     "agent_foundation.common.inferencers.agentic_inferencers.conversational"
     ".conversational_inferencer.ConversationalInferencer",
 }
@@ -176,7 +195,11 @@ def _config_supports_implementation(source: tuple[str, Any]) -> bool:
     """
     kind, payload = source
     try:
-        text = str(payload) if kind == "inline" else Path(payload).read_text(encoding="utf-8")
+        text = (
+            str(payload)
+            if kind == "inline"
+            else Path(payload).read_text(encoding="utf-8")
+        )
     except OSError:
         return True  # conservative: preserve legacy behavior if the file can't be read
     return (
@@ -211,7 +234,8 @@ def _parse_overrides(items) -> dict:
 
 
 def _resolve_proposal_plan(
-    proposal_path: str, proposal_ids_str: Optional[str],
+    proposal_path: str,
+    proposal_ids_str: Optional[str],
     top_k: Optional[int] = None,
 ) -> Optional[str]:
     """Load proposals, filter by IDs, format as plan file, return temp file path.
@@ -220,9 +244,7 @@ def _resolve_proposal_plan(
     ``top_k`` is a positive int, take the top-K by rank (``all_proposals()`` is
     sorted rank-ascending); otherwise take all proposals.
     """
-    from agent_foundation.common.data_models.proposal.parser import (
-        parse_proposal_file,
-    )
+    from agent_foundation.common.data_models.proposal.parser import parse_proposal_file
 
     proposal_abs = Path(proposal_path).resolve()
     idx = parse_proposal_file(proposal_abs)
@@ -255,7 +277,9 @@ def _resolve_proposal_plan(
     index_dir = proposal_abs.parent
     for p in selected:
         lines.append(f"## {p.id} — {p.title}")
-        lines.append(f"**Rank:** {p.rank} | **Impact:** {p.impact or 'n/a'} | **Complexity:** {p.complexity or 'n/a'}\n")
+        lines.append(
+            f"**Rank:** {p.rank} | **Impact:** {p.impact or 'n/a'} | **Complexity:** {p.complexity or 'n/a'}\n"
+        )
         if p.problem:
             lines.append(f"### Problem\n{p.problem}\n")
         if p.approach:
@@ -275,8 +299,12 @@ def _resolve_proposal_plan(
         lines.append("")
 
     import tempfile
+
     plan_file = tempfile.NamedTemporaryFile(
-        mode="w", suffix="_proposal_plan.md", delete=False, encoding="utf-8",
+        mode="w",
+        suffix="_proposal_plan.md",
+        delete=False,
+        encoding="utf-8",
     )
     plan_text = "\n".join(lines)
     plan_file.write(plan_text)
@@ -284,6 +312,7 @@ def _resolve_proposal_plan(
 
     import json as _json
     from datetime import datetime, timezone
+
     audit = {
         "index_path": str(proposal_abs),
         "selected_ids": [p.id for p in selected],
@@ -293,22 +322,29 @@ def _resolve_proposal_plan(
     with open(audit_path, "w", encoding="utf-8") as f:
         _json.dump(audit, f, indent=2)
 
-    _logger.info("Resolved %d proposals from %s → %s",
-                 len(selected), proposal_abs, plan_file.name)
+    _logger.info(
+        "Resolved %d proposals from %s → %s",
+        len(selected),
+        proposal_abs,
+        plan_file.name,
+    )
     return plan_file.name
 
 
 def _derive_mode_from_flags(arguments: dict) -> Optional[str]:
     """Map mutually-exclusive --plan/--execute/--full/--confirm flags to a mode string."""
-    for f, m in (("plan", "plan"), ("execute", "execute"), ("full", "full"), ("confirm", "confirm")):
+    for f, m in (
+        ("plan", "plan"),
+        ("execute", "execute"),
+        ("full", "full"),
+        ("confirm", "confirm"),
+    ):
         if arguments.get(f):
             return m
     return None
 
 
-def _allocate_workspace(
-    task_id: str, session_context: Optional[dict] = None
-) -> Path:
+def _allocate_workspace(task_id: str, session_context: Optional[dict] = None) -> Path:
     """Allocate workspace via the shared helper.
 
     Path B (server-affiliated): session_context["session_root"] set
@@ -316,9 +352,8 @@ def _allocate_workspace(
     Path A (standalone): no session_root
         → <repo>/_runtime/tasks/task/task_<TS>_<uuid8>/
     """
-    from agent_foundation.common.workspace.allocator import (
-        allocate_tool_workspace,
-    )
+    from agent_foundation.common.workspace.allocator import allocate_tool_workspace
+
     sc = session_context or {}
     tool_name = sc.get("tool_name", "task")
     session_root_str = sc.get("session_root", "")
@@ -365,12 +400,18 @@ def _apply_resume(path_str: str, *, copy_workspace: bool, in_place: bool) -> Pat
     return src
 
 
+_MODEL_KEYS = frozenset({"model_name", "_model_name"})
+
+
 def _walk_replace_model(cfg: Any, new_value: str) -> int:
-    """Recursively walk plain dict/list cfg; replace every `model_name` leaf. Returns count."""
+    """Recursively walk plain dict/list cfg; replace every `model_name` leaf and
+    every `_model_name` cascade (instantiate injects the nearest one into each
+    descendant that sets no `model_name`; a subtree may declare its own).
+    `model_tier` nodes keep their tier. Returns count."""
     count = 0
     if isinstance(cfg, dict):
         for k, v in list(cfg.items()):
-            if k == "model_name" and not isinstance(v, (dict, list)):
+            if k in _MODEL_KEYS and not isinstance(v, (dict, list)):
                 cfg[k] = new_value
                 count += 1
             else:
@@ -381,8 +422,11 @@ def _walk_replace_model(cfg: Any, new_value: str) -> int:
     return count
 
 
-_DUAL_TARGETS = {"Dual", "DualInferencer",
-                 "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer.DualInferencer"}
+_DUAL_TARGETS = {
+    "Dual",
+    "DualInferencer",
+    "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer.DualInferencer",
+}
 
 
 def _collapse_dual(cfg: Any) -> int:
@@ -393,7 +437,9 @@ def _collapse_dual(cfg: Any) -> int:
         for k, v in list(cfg.items()):
             if isinstance(v, dict) and v.get("_target_") in _DUAL_TARGETS:
                 # Iteratively collapse nested Duals at the same slot
-                while isinstance(cfg[k], dict) and cfg[k].get("_target_") in _DUAL_TARGETS:
+                while (
+                    isinstance(cfg[k], dict) and cfg[k].get("_target_") in _DUAL_TARGETS
+                ):
                     base = cfg[k].get("base_inferencer")
                     if base is None:
                         break
@@ -405,7 +451,9 @@ def _collapse_dual(cfg: Any) -> int:
     elif isinstance(cfg, list):
         for i, v in enumerate(cfg):
             if isinstance(v, dict) and v.get("_target_") in _DUAL_TARGETS:
-                while isinstance(cfg[i], dict) and cfg[i].get("_target_") in _DUAL_TARGETS:
+                while (
+                    isinstance(cfg[i], dict) and cfg[i].get("_target_") in _DUAL_TARGETS
+                ):
                     base = cfg[i].get("base_inferencer")
                     if base is None:
                         break
@@ -418,15 +466,23 @@ def _collapse_dual(cfg: Any) -> int:
 
 
 _BTA_TARGETS = {
-    "BTA", "BreakdownThenAggregateInferencer",
+    "BTA",
+    "BreakdownThenAggregateInferencer",
     "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers"
     ".breakdown_then_aggregate_inferencer.BreakdownThenAggregateInferencer",
 }
 _MFDUAL_TARGETS = {
-    "MultiFlowDual", "MultiFlowDualInferencer",
+    "MultiFlowDual",
+    "MultiFlowDualInferencer",
     "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers"
     ".multi_flow_dual_inferencer.MultiFlowDualInferencer",
 }
+
+
+# Subtrees ``--no-aggregate`` leaves alone: ``_params`` is data that is never
+# instantiated, and a ``bta_inferencer`` fan-out template keeps its aggregator
+# because that aggregator produces the fanned-out leaf's own response.
+_NO_AGGREGATE_SKIP_KEYS = frozenset({"_params", "bta_inferencer"})
 
 
 def _disable_aggregation(cfg: Any) -> int:
@@ -434,6 +490,7 @@ def _disable_aggregation(cfg: Any) -> int:
     ``multi_flow_disable_aggregator=True`` on every MFDual node, so workers run
     but their outputs are returned as a list (no synthesis). Operates on the
     plain dict cfg (pre-instantiate), same as ``_collapse_dual``. Returns count.
+    Subtrees under ``_NO_AGGREGATE_SKIP_KEYS`` are not visited.
 
     Note: ``_factory_:`` markers are rewritten to ``_target_:`` by ``load_config``
     before this walk runs, so ``_factory_: MultiFlowDual`` worker entries are
@@ -448,56 +505,26 @@ def _disable_aggregation(cfg: Any) -> int:
         elif tgt in _MFDUAL_TARGETS:
             cfg["multi_flow_disable_aggregator"] = True
             count += 1
-        for v in cfg.values():
-            count += _disable_aggregation(v)
+        for k, v in cfg.items():
+            if k not in _NO_AGGREGATE_SKIP_KEYS:
+                count += _disable_aggregation(v)
     elif isinstance(cfg, list):
         for v in cfg:
             count += _disable_aggregation(v)
     return count
 
 
-def _serialize_multi_output(parts: list) -> str:
-    """Serialize multiple worker outputs (no-aggregate mode) into one markdown
-    document so the FULL list survives into the calling conversation.
-
-    Without this, ``_extract_result_text`` collapsed a multi-worker tuple to
-    ``result[0]`` and silently dropped the rest — which made the no-aggregate /
-    list-of-outputs-to-conversation pattern impossible. Each part renders under a
-    ``### Worker N`` header.
-    """
-    blocks = []
-    for i, part in enumerate(parts, start=1):
-        text = _extract_result_text(part)
-        blocks.append(f"### Worker {i}\n\n{text}".rstrip())
-    return "\n\n".join(blocks)
-
-
 def _extract_result_text(result: Any) -> str:
     """Defensive normalization across PTI / BTA / Dual / single result shapes.
 
-    Multi-element tuples (e.g. a ``disable_aggregator`` BTA / MFDual that returns
-    one output per worker) are serialized in FULL via ``_serialize_multi_output``
-    so no worker output is silently dropped.
+    Promoted to ``common/response_parsers/result_text.py`` (together with its
+    ``_serialize_multi_output`` helper for multi-worker tuples) so ``common/``
+    code can reuse it without importing up from the ``resources/tools/`` layer;
+    this thin wrapper preserves the executor's existing call sites.
     """
-    if result is None:
-        return ""
-    base = getattr(result, "base_response", None)
-    if isinstance(base, str) and base:
-        return base
-    plain = getattr(result, "result", None)
-    if isinstance(plain, str) and plain:
-        return plain
-    output = getattr(result, "output", None)
-    if isinstance(output, str) and output:
-        return output
-    if isinstance(result, tuple):
-        non_none = [r for r in result if r is not None]
-        if not non_none:
-            return ""
-        if len(non_none) == 1:
-            return _extract_result_text(non_none[0])
-        return _serialize_multi_output(non_none)
-    return str(result)
+    from agent_foundation.common.response_parsers.result_text import extract_result_text
+
+    return extract_result_text(result)
 
 
 def _discover_artifacts(workspace: Optional[Path]) -> dict:
@@ -506,13 +533,27 @@ def _discover_artifacts(workspace: Optional[Path]) -> dict:
         return {}
     ws = Path(workspace)
     out = {}
-    for relpath, key in (("outputs/plan.md", "plan_path"),
-                         ("outputs/implementation.md", "impl_path"),
-                         ("outputs/role_document.md", "doc_path"),
-                         ("outputs/role_setup_report.md", "report_path")):
+    for relpath, key in (
+        ("outputs/plan.md", "plan_path"),
+        ("outputs/implementation.md", "impl_path"),
+        ("outputs/role_document.md", "doc_path"),
+        ("outputs/role_setup_report.md", "report_path"),
+        ("outputs/proposals.json", "proposals_path"),
+    ):
         p = ws / relpath
         if p.is_file():
             out[key] = str(p)
+
+    pointers_file = ws / "outputs" / "doc_pointers.json"
+    if pointers_file.is_file():
+        try:
+            pointers = json.loads(pointers_file.read_text())
+            idx = pointers.get("index_path", "")
+            if idx and Path(idx).is_file():
+                out["doc_index_path"] = idx
+        except Exception:
+            pass
+
     return out
 
 
@@ -521,6 +562,7 @@ def _error(msg: str):
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
         ToolExecutionResult,
     )
+
     _logger.error("[task] %s", msg)
     return ToolExecutionResult(result=msg, context_updates={"success": False})
 
@@ -532,9 +574,24 @@ def _error(msg: str):
 _TASK_TOOL_NAMES = {"task", "task-plan", "task-execute", "task-full", "task-confirm"}
 
 
+def _answerable_interactive(session_context: dict) -> Any:
+    """The caller's interactive transport if a question asked through it gets an
+    answer, else ``None``.
+
+    In the main async chat, ``session_context["interactive"]`` is present but its
+    receive queue is torn down after the dispatching turn, so a question would
+    wait forever. Only a caller that guarantees a registered receive queue
+    (``session_context["router_interactive_safe"]``: the dev-slash path, a
+    dispatcher background task with its own queue, a CLI terminal) gets asked.
+    """
+    if not session_context.get("router_interactive_safe"):
+        return None
+    return session_context.get("interactive")
+
+
 async def _run_conversational_router(
     *,
-    config_path: Any,                  # path to disabled.yaml (the Conversational config)
+    config_path: Any,  # path to disabled.yaml (the Conversational config)
     request: str,
     model: Optional[str],
     working_dir: Path,
@@ -547,12 +604,8 @@ async def _run_conversational_router(
     router can read their results), runs the agentic loop, and returns the router's
     final message.
 
-    Interactive-hang safety: in the main async chat, ``session_context["interactive"]``
-    is present but its receive queue is torn down after the dispatching turn — so a
-    clarifying-question round-trip would block forever. We therefore only enable
-    interactive when the caller explicitly guarantees a registered receive queue
-    via ``session_context["router_interactive_safe"]`` (e.g. the dev-slash `/task`
-    path or a CLI terminal). Otherwise the router runs autonomously (yolo).
+    The router asks clarifying questions only through an answerable interactive
+    transport (``_answerable_interactive``); otherwise it runs autonomously (yolo).
     """
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
         ToolExecutionResult,
@@ -569,7 +622,7 @@ async def _run_conversational_router(
     # can read results and synthesize. Mirrors sop/cli.py.
     _ci_host.force_tools_synchronous(registry)
 
-    interactive = sc.get("interactive") if sc.get("router_interactive_safe") else None
+    interactive = _answerable_interactive(sc)
 
     # Depth-guarded dispatcher: increment task_depth on nested `task` calls and,
     # at the cap, coerce a nested router (`disabled`/`conversation`/unset) to
@@ -581,11 +634,15 @@ async def _run_conversational_router(
     async def _router_tool_executor(tool_name: str, arguments: dict) -> Any:
         if tool_name in _TASK_TOOL_NAMES:
             arguments = dict(arguments)
-            cfg = str(arguments.get("config") or arguments.get("agent_config") or "").lower()
+            cfg = str(
+                arguments.get("config") or arguments.get("agent_config") or ""
+            ).lower()
             if depth + 1 >= _MAX_TASK_DEPTH and cfg in ("", "disabled", "conversation"):
                 _logger.info(
                     "[task] router depth cap (%d) reached: coercing nested "
-                    "--config %r -> full-plan", _MAX_TASK_DEPTH, cfg or "(unset)",
+                    "--config %r -> full-plan",
+                    _MAX_TASK_DEPTH,
+                    cfg or "(unset)",
                 )
                 arguments["config"] = "full-plan"
             return await nested_exec(tool_name, arguments)
@@ -659,16 +716,22 @@ async def _run_conversational_router(
 
     text = getattr(result, "text", None) or _extract_result_text(result)
     artifacts = _discover_artifacts(working_dir)
-    context_updates = {"workspace_path": str(working_dir), "router": True, "success": True}
+    context_updates = {
+        "workspace_path": str(working_dir),
+        "router": True,
+        "success": True,
+    }
     context_updates.update(artifacts)
     return ToolExecutionResult(result=text, context_updates=context_updates)
 
 
 async def _run_topology(
     *,
-    source: tuple,                              # ("file", Path) | ("inline", dict)
+    source: tuple,  # ("file", Path) | ("inline", dict)
     request: str,
-    overrides: Optional[dict] = None,           # dotted-key → already-typed value (NO string parsing)
+    overrides: Optional[
+        dict
+    ] = None,  # dotted-key → already-typed value (NO string parsing)
     model: Optional[str] = None,
     no_dual: bool = False,
     aggregate: bool = True,
@@ -676,11 +739,19 @@ async def _run_topology(
     analysis: bool = False,
     multi_iter: bool = False,
     max_iter: int = 3,
-    init_plan_path: Optional[str] = None,       # absolute path; --use-plan feeds PTI's initial_plan_file
-    resume_workspace: Optional[str] = None,     # absolute path; takes precedence over auto-allocation
+    init_plan_path: Optional[
+        str
+    ] = None,  # absolute path; --use-plan feeds PTI's initial_plan_file
+    resume_workspace: Optional[
+        str
+    ] = None,  # absolute path; takes precedence over auto-allocation
     session_context: Optional[dict] = None,
-    env_prefix: Optional[str] = None,           # highest-priority env namespace for _params (e.g. a derived tool's)
-    config_defaults: Optional[dict] = None,     # tool defaults applied below env (overridable by env/CLI)
+    env_prefix: Optional[
+        str
+    ] = None,  # highest-priority env namespace for _params (e.g. a derived tool's)
+    config_defaults: Optional[
+        dict
+    ] = None,  # tool defaults applied below env (overridable by env/CLI)
 ):
     """Programmatic core — Stages 3-10 of the slash pipeline.
 
@@ -724,7 +795,9 @@ async def _run_topology(
     # tool_registry + tool_executor.
     if _topology_is_conversational(source):
         if source[0] != "file":
-            return _error("Conversational router requires a file config (disabled.yaml).")
+            return _error(
+                "Conversational router requires a file config (disabled.yaml)."
+            )
         return await _run_conversational_router(
             config_path=source[1],
             request=request,
@@ -761,11 +834,24 @@ async def _run_topology(
     # over AF defaults (listed first = higher priority in TemplateManager).
     if "_template_manager.templates" not in overrides:
         import agent_foundation.resources as _af_res
+
         _af_templates = Path(_af_res.__file__).parent / "prompt_templates"
         extra_roots = [str(p) for p in (sc or {}).get("extra_template_dirs", [])]
         overrides["_template_manager.templates"] = extra_roots + [str(_af_templates)]
     if resume_workspace:
         overrides["resume_workspace"] = str(working_dir)
+        # Cascade ``resume_with_saved_results`` so checkpoint-aware inferencers
+        # (BTA, MFDual, PTI, Dual-with-checkpoint) actually load their saved
+        # checkpoints. The Resumable mixin defaults this to ``False``; without
+        # this cascade, ``--resume`` only reuses the workspace path but re-runs
+        # every LLM call (BTA's ``_load_breakdown_checkpoint`` short-circuits on
+        # the unset flag at ``breakdown_then_aggregate_inferencer.py:1159``).
+        # PTI has its own deeper cascade via ``_detect_resume_point`` — this
+        # ``setdefault`` covers Dual-rooted (Dual{BTA{...}}) and bare-BTA
+        # topologies; mirror of the ``initial_plan_file`` pattern below.
+        # ``setdefault`` respects explicit ``--override`` values.
+        overrides.setdefault("resume_with_saved_results", True)
+        overrides.setdefault("base_inferencer.resume_with_saved_results", True)
     if init_plan_path and is_pti:
         # PTI is the root _target_ in default.yaml. The base_inferencer
         # prefix is kept for backward compat with any custom config that
@@ -800,15 +886,13 @@ async def _run_topology(
         if source[0] == "file":
             full_yaml_path = Path(source[1])
             standalone_path = full_yaml_path.parent / "breakdown-multiflow-plan.yaml"
-            if (
-                full_yaml_path.name == "default.yaml"
-                and standalone_path.is_file()
-            ):
+            if full_yaml_path.name == "default.yaml" and standalone_path.is_file():
                 _logger.info(
                     "[task] --plan: swapping topology %s → %s "
                     "(standalone planner has its own outer Dual reviewing "
                     "the plan; avoids empty-deliverable review).",
-                    full_yaml_path.name, standalone_path.name,
+                    full_yaml_path.name,
+                    standalone_path.name,
                 )
                 source = ("file", standalone_path)
                 # Recompute is_pti: standalone has no PTI wrapper.
@@ -825,7 +909,8 @@ async def _run_topology(
                     "(source=%s, standalone exists=%s). Falling back to "
                     "enable_implementation=False on PTI; outer Dual may "
                     "review an empty deliverable.",
-                    full_yaml_path, standalone_path.is_file(),
+                    full_yaml_path,
+                    standalone_path.is_file(),
                 )
                 overrides["enable_implementation"] = False
         else:
@@ -851,15 +936,21 @@ async def _run_topology(
 
     # Stage 7 — Load + post-process cfg
     import agent_foundation.common.configs.registered_targets  # noqa: F401 — register aliases
-    from rich_python_utils.config_utils import load_config, instantiate
-    from omegaconf import OmegaConf, DictConfig
+    from omegaconf import DictConfig, OmegaConf
+    from rich_python_utils.config_utils import instantiate, load_config
 
     try:
         if source[0] == "file":
-            cfg = load_config(str(source[1]), overrides=overrides,
-                              env_prefix=env_prefix, config_defaults=config_defaults)
+            cfg = load_config(
+                str(source[1]),
+                overrides=overrides,
+                env_prefix=env_prefix,
+                config_defaults=config_defaults,
+            )
         else:
-            cfg = OmegaConf.merge(OmegaConf.create(source[1]), OmegaConf.create(overrides))
+            cfg = OmegaConf.merge(
+                OmegaConf.create(source[1]), OmegaConf.create(overrides)
+            )
     except Exception as exc:
         return _error(f"load_config failed for source {source}: {exc}")
 
@@ -878,7 +969,8 @@ async def _run_topology(
         n = _disable_aggregation(cfg)
         _logger.info(
             "[task] --no-aggregate disabled aggregation on %d node(s) "
-            "(workers return a list; the caller/conversation aggregates)", n,
+            "(workers return a list; the caller/conversation aggregates)",
+            n,
         )
 
     # Re-wrap as DictConfig for instantiate()
@@ -889,7 +981,9 @@ async def _run_topology(
         try:
             plan_text = Path(init_plan_path).read_text(encoding="utf-8")
             request = f"Plan (preloaded):\n{plan_text}\n\nRequest: {request}"
-            _logger.warning("--use-plan with non-PTI topology: prepending plan to request")
+            _logger.warning(
+                "--use-plan with non-PTI topology: prepending plan to request"
+            )
         except OSError:
             pass
 
@@ -900,12 +994,33 @@ async def _run_topology(
         keys = list(cfg.keys()) if isinstance(cfg, dict) else "(non-dict cfg)"
         return _error(f"Instantiation failed: {exc}\nTopology root keys: {keys}")
 
+    # U2b: preflight — walk the instantiated topology and surface missing runtime
+    # hard-dependencies (e.g. metamate's msl) as ONE actionable error up front,
+    # instead of a worker crashing ~40 min in. Never block on the mechanism itself.
+    try:
+        _missing = (
+            await inferencer.preflight_all()
+            if hasattr(inferencer, "preflight_all")
+            else []
+        )
+    except Exception as _pf_exc:  # pragma: no cover - preflight is best-effort
+        _missing = []
+        _logger.debug("[task] preflight_all raised: %s", _pf_exc, exc_info=True)
+    if _missing:
+        return _error(
+            "Preflight failed — missing runtime dependencies:\n  - "
+            + "\n  - ".join(_missing)
+        )
+
     try:
         from agent_foundation.ui.graph_reporter_factory import make_graph_reporter
+
         inferencer.graph_reporter = make_graph_reporter(sc, task_id)
         if inferencer.graph_reporter is not None:
-            _logger.info("[task] graph_reporter attached: %s",
-                         type(inferencer.graph_reporter).__name__)
+            _logger.info(
+                "[task] graph_reporter attached: %s",
+                type(inferencer.graph_reporter).__name__,
+            )
     except Exception as exc:
         _logger.warning("[task] graph_reporter attach failed: %s", exc)
 
@@ -913,9 +1028,16 @@ async def _run_topology(
     # async-native checkpoint_plan_review which uses asend_response/aget_input —
     # natively compatible with WebSocketInteractive. The single_choice
     # (Approve/Modify/Reject) mode renders via the existing SingleChoiceWidget —
-    # no custom widget tagging needed.
-    if mode == "confirm" and hasattr(inferencer, "interactive") and interactive is not None:
-        inferencer.interactive = interactive
+    # no custom widget tagging needed. Without an interactive PTI approves the plan.
+    if mode == "confirm":
+        interactive = _answerable_interactive(sc)
+        if interactive is None:
+            _logger.warning(
+                "[task] --confirm: no interactive transport can answer the plan "
+                "review; the plan is approved without one"
+            )
+        elif hasattr(inferencer, "interactive"):
+            inferencer.interactive = interactive
 
     # Stage 9 — Run with cancellation propagation.
     # §9.4 host: mint the root RunContext (workspace-rooted) and thread it so the
@@ -975,6 +1097,142 @@ async def _run_topology(
             except Exception:  # pragma: no cover - persistence is best-effort
                 _logger.debug("[task] RunStateStore persist skipped", exc_info=True)
 
+    # Fix 3 — research_propose finalize: derive outputs/proposals.json from the
+    # aggregator's on-disk outputs/output.md. This is the single PRODUCTION site
+    # for the proposal index (symmetric with the CONSUMPTION side,
+    # _resolve_proposal_plan -> parse_proposal_file). Parses the deliverable FILE
+    # (not the in-memory result, which _extract_result_text flattens lossily),
+    # applies the G8 three-way, and is gated to research_propose so every other
+    # topology is a byte-identical no-op. Best-effort: never fails the run.
+    if sc.get("tool_name") == "research_propose":
+        try:
+            from datetime import timezone as _timezone
+
+            from agent_foundation.common.data_models.proposal.parser import (
+                make_empty_index,
+                parse_proposal_index_from_text,
+                write_proposal_index,
+            )
+
+            _out_md = Path(working_dir) / "outputs" / "output.md"
+            _proposals_json = Path(working_dir) / "outputs" / "proposals.json"
+            _src_ws = str(working_dir)
+            if _out_md.is_file():
+                _idx = parse_proposal_index_from_text(
+                    _out_md.read_text(encoding="utf-8", errors="replace")
+                )
+                if _idx is not None and _idx.all_proposals():
+                    _idx.source_workspace = _src_ws
+                    _idx.created_at = datetime.now(_timezone.utc).isoformat()
+                    write_proposal_index(_proposals_json, _idx)
+                    _logger.info(
+                        "[task] research_propose: wrote %d proposals -> %s",
+                        len(_idx.all_proposals()),
+                        _proposals_json,
+                    )
+                    # Fix 4 — per-proposal file splitter, gated on the derived
+                    # --separate-proposal-files flag (feed_mappings deposits it in
+                    # config_defaults under the aggregator template_extra_feed
+                    # dotted key). Deterministic + best-effort: a bad proposal is
+                    # logged and skipped, never fails the run.
+                    _sep_files = bool(
+                        (config_defaults or {}).get(
+                            "base_inferencer.aggregator_inferencer."
+                            "template_extra_feed.separate_proposal_files"
+                        )
+                    )
+                    if _sep_files:
+                        _prop_dir = Path(working_dir) / "outputs" / "proposals"
+                        _prop_dir.mkdir(parents=True, exist_ok=True)
+                        _n_files = 0
+                        for _p in _idx.all_proposals():
+                            try:
+                                _pid = str(_p.id).strip() or f"r{_p.rank}"
+                                _stem = _pid if _pid[:1] in ("P", "p") else f"P{_pid}"
+                                _md = [f"# {_stem}: {_p.title}".rstrip(), ""]
+                                _md.append(f"- **Rank:** {_p.rank}")
+                                if _p.impact:
+                                    _md.append(f"- **Impact:** {_p.impact}")
+                                if _p.complexity:
+                                    _md.append(f"- **Complexity:** {_p.complexity}")
+                                if _p.tags:
+                                    _md.append(
+                                        "- **Tags:** "
+                                        + ", ".join(str(t) for t in _p.tags)
+                                    )
+                                if _p.dependencies:
+                                    _md.append(
+                                        "- **Dependencies:** "
+                                        + ", ".join(str(d) for d in _p.dependencies)
+                                    )
+                                if _p.cross_refs:
+                                    _md.append(f"- **Cross-refs:** {_p.cross_refs}")
+                                if _p.summary:
+                                    _md += ["", "## Summary", "", _p.summary]
+                                if _p.problem:
+                                    _md += ["", "## Problem", "", _p.problem]
+                                if _p.approach:
+                                    _md += ["", "## Approach", "", _p.approach]
+                                if _p.metadata:
+                                    _md += [
+                                        "",
+                                        "## Metadata",
+                                        "",
+                                        "```json",
+                                        json.dumps(
+                                            _p.metadata, indent=2, sort_keys=True
+                                        ),
+                                        "```",
+                                    ]
+                                _md.append("")
+                                (_prop_dir / f"{_stem}.md").write_text(
+                                    "\n".join(_md), encoding="utf-8"
+                                )
+                                _n_files += 1
+                            except Exception:  # pragma: no cover - per-file best-effort
+                                _logger.warning(
+                                    "[task] research_propose: failed to write "
+                                    "proposal file id=%r",
+                                    getattr(_p, "id", "?"),
+                                    exc_info=True,
+                                )
+                        _logger.info(
+                            "[task] research_propose: wrote %d per-proposal "
+                            "files -> %s",
+                            _n_files,
+                            _prop_dir,
+                        )
+                elif _idx is not None:
+                    write_proposal_index(
+                        _proposals_json,
+                        make_empty_index(
+                            source_workspace=_src_ws,
+                            warnings=["parsed-proposal-index-was-empty"],
+                        ),
+                    )
+                    _logger.info(
+                        "[task] research_propose: parsed 0 proposals; wrote "
+                        "explicit empty index -> %s",
+                        _proposals_json,
+                    )
+                else:
+                    _logger.warning(
+                        "[task] research_propose: no parseable proposal_index fence "
+                        "in %s; leaving proposals.json unwritten",
+                        _out_md,
+                    )
+            else:
+                _logger.warning(
+                    "[task] research_propose: expected output.md not found at %s; "
+                    "leaving proposals.json unwritten",
+                    _out_md,
+                )
+        except Exception:  # pragma: no cover - sidecar write is best-effort
+            _logger.warning(
+                "[task] research_propose: proposals.json finalize failed",
+                exc_info=True,
+            )
+
     # Stage 10 — Return ToolExecutionResult
     artifacts = _discover_artifacts(working_dir)
     context_updates = {"workspace_path": str(working_dir), "success": True}
@@ -1013,7 +1271,20 @@ async def execute(arguments: dict, session_context: dict):
     template_master_version = arguments.get("template_master_version")
 
     if sum(bool(arguments.get(f)) for f in ("plan", "execute", "full", "confirm")) > 1:
-        return _error("Multiple mode flags provided; use only one of --plan/--execute/--full/--confirm.")
+        return _error(
+            "Multiple mode flags provided; use only one of --plan/--execute/--full/--confirm."
+        )
+    # --no-planning / --no-implementation (e.g. understand_codebase's --docs-only
+    # / --investigation-only) are the --execute / --plan runs.
+    skipped = [f for f in ("no_planning", "no_implementation") if arguments.get(f)]
+    if len(skipped) > 1:
+        return _error("--no-planning with --no-implementation leaves nothing to run.")
+    if skipped:
+        skip_mode = "execute" if skipped[0] == "no_planning" else "plan"
+        if mode not in ("full", skip_mode):
+            flag = skipped[0].replace("_", "-")
+            return _error(f"--{flag} conflicts with --{mode}.")
+        mode = skip_mode
 
     # Stage 2 — Resolve --agent-config
     try:
@@ -1026,7 +1297,9 @@ async def execute(arguments: dict, session_context: dict):
     resume_workspace_str = None
     if resume:
         try:
-            working_dir = _apply_resume(resume, copy_workspace=copy_ws, in_place=in_place)
+            working_dir = _apply_resume(
+                resume, copy_workspace=copy_ws, in_place=in_place
+            )
             resume_workspace_str = str(working_dir)
         except FileNotFoundError as e:
             return _error(str(e))
@@ -1040,7 +1313,11 @@ async def execute(arguments: dict, session_context: dict):
             return _error(f"--use-plan file not found: {use_plan}")
         init_plan_path = str(plan_abs)
 
-    use_proposal = arguments.get("use_proposal")
+    # B1 (v3): `--proposals-path` is an SOP-convention alias of
+    # `--use-proposal` — matches the tool-output convention
+    # `{{ research_propose__proposals_path }}`. Coerce when the primary
+    # form is unset. Mutually-exclusive check below still catches misuse.
+    use_proposal = arguments.get("use_proposal") or arguments.get("proposals_path")
     proposal_ids_str = arguments.get("proposal_ids")
     top_k_raw = arguments.get("top_k")
     top_k_val: Optional[int] = None

@@ -1,5 +1,3 @@
-
-
 """Integration tests for dialog_completion mode in MetaGen API.
 
 Tests cover:
@@ -39,27 +37,54 @@ def test_resolve_completion_mode():
     print("\n--- test_resolve_completion_mode ---")
 
     # AUTO → DIALOG for Claude models
-    assert _resolve_completion_mode("claude-4-6-opus-genai", CompletionMode.AUTO) == CompletionMode.DIALOG
-    assert _resolve_completion_mode("claude-4-sonnet-genai", CompletionMode.AUTO) == CompletionMode.DIALOG
-    assert _resolve_completion_mode("claude-3-7-sonnet-20250219-us", CompletionMode.AUTO) == CompletionMode.DIALOG
-    assert _resolve_completion_mode("CLAUDE-4-6-OPUS-GENAI", CompletionMode.AUTO) == CompletionMode.DIALOG
+    assert (
+        _resolve_completion_mode("claude-4-6-opus-genai", CompletionMode.AUTO)
+        == CompletionMode.DIALOG
+    )
+    assert (
+        _resolve_completion_mode("claude-4-sonnet-genai", CompletionMode.AUTO)
+        == CompletionMode.DIALOG
+    )
+    assert (
+        _resolve_completion_mode("claude-3-7-sonnet-20250219-us", CompletionMode.AUTO)
+        == CompletionMode.DIALOG
+    )
+    assert (
+        _resolve_completion_mode("CLAUDE-4-6-OPUS-GENAI", CompletionMode.AUTO)
+        == CompletionMode.DIALOG
+    )
 
     # AUTO → CHAT for non-Claude models
-    assert _resolve_completion_mode("llama3.1-405b-instruct", CompletionMode.AUTO) == CompletionMode.CHAT
-    assert _resolve_completion_mode("gpt-5-genai", CompletionMode.AUTO) == CompletionMode.CHAT
-    assert _resolve_completion_mode("gemini-2-5-pro", CompletionMode.AUTO) == CompletionMode.CHAT
+    assert (
+        _resolve_completion_mode("llama3.1-405b-instruct", CompletionMode.AUTO)
+        == CompletionMode.CHAT
+    )
+    assert (
+        _resolve_completion_mode("gpt-5-genai", CompletionMode.AUTO)
+        == CompletionMode.CHAT
+    )
+    assert (
+        _resolve_completion_mode("gemini-2-5-pro", CompletionMode.AUTO)
+        == CompletionMode.CHAT
+    )
 
     # Explicit modes always override AUTO detection
-    assert _resolve_completion_mode("claude-4-6-opus-genai", CompletionMode.CHAT) == CompletionMode.CHAT
-    assert _resolve_completion_mode("llama3.1-405b-instruct", CompletionMode.DIALOG) == CompletionMode.DIALOG
+    assert (
+        _resolve_completion_mode("claude-4-6-opus-genai", CompletionMode.CHAT)
+        == CompletionMode.CHAT
+    )
+    assert (
+        _resolve_completion_mode("llama3.1-405b-instruct", CompletionMode.DIALOG)
+        == CompletionMode.DIALOG
+    )
 
     print("  ✅ PASS")
 
 
 def test_build_dialog_string_input():
     """Test _build_dialog with a simple string prompt."""
-    from metagen import Dialog, DialogMessage, DialogSource, DialogTextContent
     from agent_foundation.apis.metagen.metagen_llm import _build_dialog
+    from metagen import Dialog, DialogMessage, DialogSource, DialogTextContent
 
     print("\n--- test_build_dialog_string_input ---")
 
@@ -79,12 +104,14 @@ def test_build_dialog_string_input():
 
 def test_build_dialog_dict_input():
     """Test _build_dialog with a single message dict."""
-    from metagen import DialogSource
     from agent_foundation.apis.metagen.metagen_llm import _build_dialog
+    from metagen import DialogSource
 
     print("\n--- test_build_dialog_dict_input ---")
 
-    dialog = _build_dialog({"role": "system", "content": "You are a helpful assistant."})
+    dialog = _build_dialog(
+        {"role": "system", "content": "You are a helpful assistant."}
+    )
     assert len(dialog.messages) == 1
     assert dialog.messages[0].source == DialogSource.SYSTEM
     assert dialog.messages[0].contents[0].text == "You are a helpful assistant."
@@ -100,8 +127,8 @@ def test_build_dialog_dict_input():
 
 def test_build_dialog_list_of_strings():
     """Test _build_dialog with alternating user/assistant string pairs."""
-    from metagen import DialogSource
     from agent_foundation.apis.metagen.metagen_llm import _build_dialog
+    from metagen import DialogSource
 
     print("\n--- test_build_dialog_list_of_strings ---")
 
@@ -128,8 +155,8 @@ def test_build_dialog_list_of_strings():
 
 def test_build_dialog_list_of_dicts():
     """Test _build_dialog with a list of role/content dicts (multi-turn)."""
-    from metagen import DialogSource
     from agent_foundation.apis.metagen.metagen_llm import _build_dialog
+    from metagen import DialogSource
 
     print("\n--- test_build_dialog_list_of_dicts ---")
 
@@ -169,9 +196,7 @@ def test_build_dialog_invalid_input():
 
 def test_extract_dialog_response_text():
     """Test _extract_dialog_response_text handles various response shapes."""
-    from agent_foundation.apis.metagen.metagen_llm import (
-        _extract_dialog_response_text,
-    )
+    from agent_foundation.apis.metagen.metagen_llm import _extract_dialog_response_text
     from metagen import Dialog, DialogMessage, DialogSource, DialogTextContent
 
     print("\n--- test_extract_dialog_response_text ---")
@@ -319,7 +344,10 @@ def test_e2e_generate_text_multi_turn():
     messages = [
         {"role": "user", "content": "Remember the number 42."},
         {"role": "assistant", "content": "I'll remember the number 42."},
-        {"role": "user", "content": "What number did I ask you to remember? Just the number."},
+        {
+            "role": "user",
+            "content": "What number did I ask you to remember? Just the number.",
+        },
     ]
 
     t0 = time.time()
@@ -380,16 +408,18 @@ async def test_e2e_parallel_async():
     ]
 
     t0 = time.time()
-    results = await asyncio.gather(*[
-        generate_text_async(
-            q,
-            model=MetaGenModels.CLAUDE_4_6_OPUS,
-            max_new_tokens=128,
-            temperature=0.7,
-            completion_mode=CompletionMode.DIALOG,
-        )
-        for q in queries
-    ])
+    results = await asyncio.gather(
+        *[
+            generate_text_async(
+                q,
+                model=MetaGenModels.CLAUDE_4_6_OPUS,
+                max_new_tokens=128,
+                temperature=0.7,
+                completion_mode=CompletionMode.DIALOG,
+            )
+            for q in queries
+        ]
+    )
     elapsed = time.time() - t0
 
     for i, (q, r) in enumerate(zip(queries, results)):
@@ -397,16 +427,16 @@ async def test_e2e_parallel_async():
         print(f"      A: {r[:120]}")
         assert isinstance(r, str) and len(r) > 5
 
-    print(f"  Total: {elapsed:.1f}s (avg {elapsed/len(queries):.1f}s/query)")
+    print(f"  Total: {elapsed:.1f}s (avg {elapsed / len(queries):.1f}s/query)")
     print("  ✅ PASS")
 
 
 def test_e2e_inferencer_defaults():
     """E2E: MetagenApiInferencer with default model (Claude Opus 4.6)."""
+    from agent_foundation.apis.metagen import MetaGenModels
     from agent_foundation.common.inferencers.api_inferencers.metagen import (
         MetagenApiInferencer,
     )
-    from agent_foundation.apis.metagen import MetaGenModels
 
     print("\n--- test_e2e_inferencer_defaults ---")
 
@@ -462,9 +492,9 @@ E2E_ASYNC_TESTS = [
 
 
 def run_tests(tests, label):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {label} ({len(tests)} tests)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     passed, failed = 0, 0
     for test_fn in tests:
@@ -502,12 +532,12 @@ def main():
         total_failures += run_tests(E2E_SYNC_TESTS, "E2E Sync Tests")
         total_failures += run_tests(E2E_ASYNC_TESTS, "E2E Async Tests")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if total_failures == 0:
         print("ALL TESTS PASSED ✅")
     else:
         print(f"FAILURES: {total_failures} ❌")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     sys.exit(1 if total_failures > 0 else 0)
 

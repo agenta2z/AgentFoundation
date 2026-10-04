@@ -1,5 +1,3 @@
-
-
 """Real E2E integration tests for MetagenApiInferencer.
 
 Tests sync, async, streaming, system_prompt, set_messages, and parallel calls

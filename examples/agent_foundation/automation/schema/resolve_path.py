@@ -9,11 +9,12 @@ Usage:
     import resolve_path  # Must be first import
     from agent_foundation.automation.schema.action_graph import ActionGraph
 """
+
 import sys
 from pathlib import Path
 
 # Configuration
-PROJECT_ROOT_NAME = 'ScienceModelingTools'  # The project root folder name
+PROJECT_ROOT_NAME = "ScienceModelingTools"  # The project root folder name
 
 # Get absolute path to this file
 current_file = Path(__file__).resolve()
@@ -43,4 +44,6 @@ if rich_python_utils_src.exists() and str(rich_python_utils_src) not in sys.path
 # Verify the setup worked
 _modeling_tools_module_path = src_dir / "agent_foundation"
 if not _modeling_tools_module_path.exists():
-    raise RuntimeError(f"agent_foundation module not found at {_modeling_tools_module_path}")
+    raise RuntimeError(
+        f"agent_foundation module not found at {_modeling_tools_module_path}"
+    )

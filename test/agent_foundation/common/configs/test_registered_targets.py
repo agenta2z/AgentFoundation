@@ -2,12 +2,10 @@
 
 import importlib
 
-import pytest
-
-from rich_python_utils.config_utils import list_registered, resolve_target
-
 # Importing the configs package triggers registration.
 import agent_foundation.common.configs  # noqa: F401
+import pytest
+from rich_python_utils.config_utils import list_registered, resolve_target
 
 
 class TestAllAliasesResolve:

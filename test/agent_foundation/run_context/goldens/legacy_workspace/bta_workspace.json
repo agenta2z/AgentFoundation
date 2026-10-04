@@ -1,0 +1,217 @@
+{
+  "fixture_tree": {
+    "artifacts/aggregation_report_manifest.json": {
+      "json": {
+        "contributors": [
+          {
+            "category": "session_log",
+            "path": "<WS>/logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl",
+            "size_bytes": "<VOLATILE>"
+          },
+          {
+            "category": "inferenceinput",
+            "path": "<WS>/logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl.parts/InferenceInput/<TS>.txt",
+            "size_bytes": "<VOLATILE>"
+          }
+        ],
+        "output": {
+          "path": "<WS>/outputs/aggregation_report.md",
+          "produced_by": "BreakdownThenAggregateInferencer",
+          "size_bytes": "<VOLATILE>",
+          "workspace_root": "<WS>"
+        },
+        "schema_version": "1.0",
+        "stats": {
+          "total": 2
+        }
+      }
+    },
+    "checkpoints/aggregator_result/gbta.aggregator_result/main.pkl": {
+      "pickle": "str",
+      "value": "agg:task"
+    },
+    "checkpoints/aggregator_result/gbta.aggregator_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "checkpoints/breakdown/__graph_expansion__breakdown_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "expanding_node": "breakdown",
+        "expansion_id": "bta_diamond",
+        "subgraph": {
+          "entry_node_names": [
+            "gbta.worker_00",
+            "gbta.worker_01"
+          ],
+          "nodes": [
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": "skip_resumable",
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 1
+              },
+              "name": "gbta.worker_00",
+              "next_names": [
+                "gbta.aggregator"
+              ],
+              "previous_names": [],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.worker_fn"
+            },
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": "skip_resumable",
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 1
+              },
+              "name": "gbta.worker_01",
+              "next_names": [
+                "gbta.aggregator"
+              ],
+              "previous_names": [],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.worker_fn"
+            },
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": true,
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 0
+              },
+              "name": "gbta.aggregator",
+              "next_names": [],
+              "previous_names": [
+                "gbta.worker_00",
+                "gbta.worker_01"
+              ],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.agg_fn"
+            }
+          ]
+        }
+      }
+    },
+    "checkpoints/breakdown/__graph_expansion__breakdown_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "checkpoints/breakdown/breakdown_result/main.pkl": {
+      "pickle": "list",
+      "value": [
+        "q0",
+        "q1"
+      ]
+    },
+    "checkpoints/breakdown/breakdown_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "checkpoints/gbta_result.json": {
+      "json": [
+        [
+          null,
+          "agg:task"
+        ]
+      ]
+    },
+    "checkpoints/gbta_result.json.types.json": {
+      "json": {}
+    },
+    "children/aggregator/logs/session/_M-<ID1>.jsonl": "<present>",
+    "children/aggregator/logs/session/_M-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "children/worker_00/checkpoints/gbta.worker_00_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "__bta_worker_outcome__": 1,
+        "failure": null,
+        "index": 0,
+        "node_name": "gbta.worker_00",
+        "value": "w0:q0"
+      }
+    },
+    "children/worker_00/checkpoints/gbta.worker_00_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_00/logs/session/_M-<ID2>.jsonl": "<present>",
+    "children/worker_00/logs/session/_M-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "children/worker_01/checkpoints/gbta.worker_01_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "__bta_worker_outcome__": 1,
+        "failure": null,
+        "index": 1,
+        "node_name": "gbta.worker_01",
+        "value": "w1:q1"
+      }
+    },
+    "children/worker_01/checkpoints/gbta.worker_01_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_01/logs/session/_M-<ID3>.jsonl": "<present>",
+    "children/worker_01/logs/session/_M-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl": "<present>",
+    "logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "outputs/aggregation_report.md": "agg:task"
+  },
+  "fresh_run": {
+    "result": "agg:task"
+  },
+  "fresh_tree_differs_from_fixture": [
+    "checkpoints/.bta_execution.lock",
+    "checkpoints/bta_manifest.json"
+  ],
+  "resume": {
+    "error": "UnverifiedLegacyBtaResumeError: checkpoints at '<WS>/legacy/checkpoints' have no resume manifest (written before manifests, or over an earlier call's checkpoints by a call that did not resume them), so nothing proves they belong to this call; resume them once with resume_identity_policy='trust_legacy' or certify them with certify_resume_manifest(), or use a fresh workspace"
+  },
+  "resume_calls": [],
+  "resume_changed_files": [
+    "checkpoints/.bta_execution.lock",
+    "logs/session/BreakdownThenAggregateInferencer-<ID5>.jsonl",
+    "logs/session/BreakdownThenAggregateInferencer-<ID5>.jsonl.parts/InferenceInput/<TS>.txt"
+  ],
+  "trusted_resume": {
+    "result": "agg:task"
+  },
+  "trusted_resume_calls": [],
+  "trusted_resume_changed_files": [
+    "artifacts/aggregation_report_manifest.json",
+    "checkpoints/.bta_execution.lock",
+    "logs/session/BreakdownThenAggregateInferencer-<ID5>.jsonl",
+    "logs/session/BreakdownThenAggregateInferencer-<ID5>.jsonl.parts/InferenceInput/<TS>.txt",
+    "logs/session/BreakdownThenAggregateInferencer-<ID6>.jsonl",
+    "logs/session/BreakdownThenAggregateInferencer-<ID6>.jsonl.parts/InferenceInput/<TS>.txt"
+  ]
+}

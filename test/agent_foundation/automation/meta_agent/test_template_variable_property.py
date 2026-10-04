@@ -17,17 +17,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignedTraceSet,
     AlignmentType,
     TraceStep,
 )
-from agent_foundation.automation.meta_agent.pattern_extractor import (
-    PatternExtractor,
-)
+from agent_foundation.automation.meta_agent.pattern_extractor import PatternExtractor
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +179,8 @@ class TestTemplateVariableProperty:
     @given(aligned_set=parameterizable_trace_set_st())
     @settings(max_examples=200)
     def test_variable_constant_keys_cover_all_arg_keys(
-        self, aligned_set: AlignedTraceSet,
+        self,
+        aligned_set: AlignedTraceSet,
     ):
         """
         After extraction, for each parameterizable step the union of

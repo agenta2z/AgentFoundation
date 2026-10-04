@@ -14,6 +14,8 @@ import {
   Box,
   Button,
   Collapse,
+  Menu,
+  MenuItem,
   Typography,
 } from '@mui/material';
 import { SmartToy as SmartToyIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
@@ -32,13 +34,28 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function AgentMessageBubble({ message, onViewPrompt, onViewFullResponse }) {
+export function AgentMessageBubble({ message, onViewPrompt, onViewFullResponse, onResumeFromRound, disabled }) {
   const theme = useTheme();
   const maxBodyHeight = theme.custom?.layout?.responseMaxHeight || DEFAULT_BODY_HEIGHT;
   const maxWidth = theme.custom?.layout?.responseMaxWidth || DEFAULT_MAX_WIDTH;
   const [folded, setFolded] = useState(false);
   const [contentOverflows, setContentOverflows] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState(null);
   const contentRef = useRef(null);
+
+  // "Resume from this round" affordance — generic (no host coupling): shown only
+  // on a fully-stamped committed round bubble, when a handler is wired and we are
+  // not busy/disabled. onResumeFromRound(message, dropTasks) is provided by the host.
+  const canResume =
+    Boolean(onResumeFromRound) &&
+    !disabled &&
+    Boolean(message.id) &&
+    message.turnNumber != null &&
+    message.roundIndex != null;
+  const handleResume = (dropTasks) => {
+    setMenuAnchor(null);
+    if (canResume) onResumeFromRound(message, dropTasks);
+  };
 
   const agentName = message.agent_name || message.metadata?.agent_name || 'AI Assistant';
   const hasThinking = message.thinkingContent && message.responsePhase !== 'no_tags';
@@ -56,10 +73,30 @@ export function AgentMessageBubble({ message, onViewPrompt, onViewFullResponse }
   return (
     <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
       <Avatar
-        sx={{ mr: 1, width: 32, height: 32, bgcolor: '#4a90d9', flexShrink: 0, mt: 0.5 }}
+        onClick={canResume ? (e) => setMenuAnchor(e.currentTarget) : undefined}
+        sx={{
+          mr: 1,
+          width: 32,
+          height: 32,
+          bgcolor: '#4a90d9',
+          flexShrink: 0,
+          mt: 0.5,
+          cursor: canResume ? 'pointer' : 'default',
+          '&:hover': canResume ? { boxShadow: '0 0 0 2px rgba(74,144,217,0.5)' } : undefined,
+        }}
       >
         <SmartToyIcon sx={{ fontSize: 18 }} />
       </Avatar>
+      {canResume && (
+        <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
+          <MenuItem onClick={() => handleResume(false)}>
+            Resume from this round (keep tasks)
+          </MenuItem>
+          <MenuItem onClick={() => handleResume(true)}>
+            Resume from this round (drop tasks)
+          </MenuItem>
+        </Menu>
+      )}
 
       <Box sx={{ maxWidth: maxWidth, flex: 1, minWidth: 0 }}>
         {/* ── Header bar ─────────────────────────────────────────── */}

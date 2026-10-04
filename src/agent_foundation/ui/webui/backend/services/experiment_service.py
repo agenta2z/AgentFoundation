@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 from chatbot_demo_react.experiment_engine import (
-    TaskConfig,
     ContinueButtonConfig,
     ExperimentFlowConfig,
     ExperimentFlowEngine,
@@ -34,6 +33,7 @@ from chatbot_demo_react.experiment_engine import (
     ProgressHeaderConfig,
     ProgressSection,
     StepConfig,
+    TaskConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -1019,9 +1019,7 @@ class ExperimentService:
                             if len(delays) > 0
                             else last_msg_delay
                         )
-                        progress_duration_ms = max(
-                            progress_duration_ms, task_duration
-                        )
+                        progress_duration_ms = max(progress_duration_ms, task_duration)
             else:
                 # Regular progress section
                 slot = section_dict["slot"]

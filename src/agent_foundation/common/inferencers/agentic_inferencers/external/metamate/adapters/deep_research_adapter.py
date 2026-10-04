@@ -308,7 +308,9 @@ class DeepResearchAdapter:
 
     def _get_doc_types_for_query(self, query: ResearchQuery) -> list[str]:
         """Get document types to search based on query type."""
-        from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import QueryType
+        from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.types import (
+            QueryType,
+        )
 
         if query.query_type == QueryType.INTERNAL:
             return ["wiki", "workplace", "diff", "task"]

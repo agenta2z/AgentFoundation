@@ -9,7 +9,6 @@ to force approval (keeping tests deterministic).
 """
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -24,12 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementResponse,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    PUZZLE_PROMPT,
-    skip_claude,
-    verify_deep_flatten,
-)
+from .conftest import DEFAULT_TIMEOUT, PUZZLE_PROMPT, skip_claude, verify_deep_flatten
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -198,9 +192,7 @@ async def test_pti_multi_iteration_with_analysis(tmp_workspace):
     assert result.plan_output is not None and result.plan_output != "", (
         "plan_output should be populated"
     )
-    assert result.executor_output is not None, (
-        "executor_output should be populated"
-    )
+    assert result.executor_output is not None, "executor_output should be populated"
 
     # iteration_history should have at least one record (Req 14.4)
     assert len(result.iteration_history) >= 1, (

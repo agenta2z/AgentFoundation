@@ -1,9 +1,8 @@
 from abc import ABC
 from typing import Any
 
-from attr import attrs, attrib
-
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
@@ -58,7 +57,9 @@ class TerminalInteractive(InteractiveBase, ABC):
     def _send_pending_message(self):
         print(f"\n\n{self.pending_message}")
 
-    def _send_response(self, response: Any, flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def _send_response(
+        self, response: Any, flag: InteractionFlags = InteractionFlags.TurnCompleted
+    ) -> None:
         """
         Sends the response to the user in the terminal.
 
@@ -78,6 +79,7 @@ class TerminalInteractive(InteractiveBase, ABC):
         try:
             from webaxon.html_utils.common import is_html_string
         except ImportError:
+
             def is_html_string(_s):
                 return False
 
@@ -85,12 +87,14 @@ class TerminalInteractive(InteractiveBase, ABC):
             import tempfile
             import webbrowser
 
-            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                "w", delete=False, suffix=".html", encoding="utf-8"
+            ) as f:
                 f.write(response)
                 temp_filename = f.name
 
             print(temp_filename)
             print("Displaying response in your default web browser ...")
-            webbrowser.open('file://' + temp_filename)
+            webbrowser.open("file://" + temp_filename)
         else:
             print(self.get_system_response_string(response))

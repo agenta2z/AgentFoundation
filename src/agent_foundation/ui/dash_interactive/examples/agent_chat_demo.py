@@ -8,12 +8,13 @@ This demonstrates:
 
 Run this script and navigate to http://localhost:8050 to interact with an agent.
 """
+
 import sys
-from pathlib import Path
-from typing import Optional
-from queue import Queue, Empty
-from threading import Thread
 import time
+from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
+from typing import Optional
 
 # Add source to path if needed
 project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -45,14 +46,14 @@ class MockAgent:
             Agent response
         """
         # Store in history
-        self.conversation_history.append(('user', message))
+        self.conversation_history.append(("user", message))
 
         # Simple rule-based responses for demo
         message_lower = message.lower()
 
-        if 'hello' in message_lower or 'hi' in message_lower:
+        if "hello" in message_lower or "hi" in message_lower:
             response = "Hello! I'm a demo agent. How can I help you today?"
-        elif 'help' in message_lower:
+        elif "help" in message_lower:
             response = (
                 "I can help you with:\n"
                 "- Answering questions\n"
@@ -60,9 +61,9 @@ class MockAgent:
                 "- Debugging logs\n\n"
                 "Just type your question or command!"
             )
-        elif 'bye' in message_lower:
+        elif "bye" in message_lower:
             response = "Goodbye! Feel free to start a new chat anytime."
-        elif '?' in message:
+        elif "?" in message:
             response = (
                 f"That's an interesting question: '{message}'\n\n"
                 f"In a real implementation, I would process this using an LLM "
@@ -78,7 +79,7 @@ class MockAgent:
             )
 
         # Store response
-        self.conversation_history.append(('assistant', response))
+        self.conversation_history.append(("assistant", response))
 
         return response
 
@@ -93,6 +94,7 @@ def create_agent_handler(agent: MockAgent):
     Returns:
         Message handler function
     """
+
     def handler(message: str) -> str:
         try:
             response = agent.process_message(message)
@@ -109,11 +111,7 @@ def main():
     agent = MockAgent()
 
     print("Creating Dash app...")
-    app = DashInteractiveApp(
-        title="Agent Chat Demo",
-        port=8050,
-        debug=True
-    )
+    app = DashInteractiveApp(title="Agent Chat Demo", port=8050, debug=True)
 
     # Set agent handler
     app.set_message_handler(create_agent_handler(agent))
@@ -131,5 +129,5 @@ def main():
     app.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

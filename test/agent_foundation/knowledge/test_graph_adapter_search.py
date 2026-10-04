@@ -5,6 +5,7 @@ Tests that the adapter correctly delegates supports_semantic_search and
 search_nodes() to the underlying graph service, with proper inactive
 node filtering.
 """
+
 import sys
 from pathlib import Path
 
@@ -22,16 +23,15 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
+from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
+    GraphServiceEntityGraphStore,
+)
 from rich_python_utils.service_utils.graph_service.file_graph_service import (
     FileGraphService,
 )
+from rich_python_utils.service_utils.graph_service.graph_node import GraphNode
 from rich_python_utils.service_utils.graph_service.memory_graph_service import (
     MemoryGraphService,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.graph_adapter import (
-    GraphServiceEntityGraphStore,
 )
 
 
@@ -57,9 +57,13 @@ class TestSearchNodesDelegation:
     def test_search_delegates_to_file_graph_service(self, tmp_path):
         svc = FileGraphService(base_dir=str(tmp_path))
         store = GraphServiceEntityGraphStore(graph_service=svc)
-        store.add_node(GraphNode(
-            node_id="n1", node_type="person", label="Alice",
-        ))
+        store.add_node(
+            GraphNode(
+                node_id="n1",
+                node_type="person",
+                label="Alice",
+            )
+        )
         results = store.search_nodes("alice")
         assert len(results) == 1
         assert results[0][0].node_id == "n1"
@@ -70,12 +74,18 @@ class TestSearchNodesDelegation:
         svc = FileGraphService(base_dir=str(tmp_path))
         store = GraphServiceEntityGraphStore(graph_service=svc)
         # Add an active node
-        store.add_node(GraphNode(
-            node_id="n1", node_type="person", label="Alice",
-        ))
+        store.add_node(
+            GraphNode(
+                node_id="n1",
+                node_type="person",
+                label="Alice",
+            )
+        )
         # Add an inactive node directly via the underlying service
         inactive = GraphNode(
-            node_id="n2", node_type="person", label="Alice Inactive",
+            node_id="n2",
+            node_type="person",
+            label="Alice Inactive",
             is_active=False,
         )
         svc.add_node(inactive)
@@ -87,20 +97,32 @@ class TestSearchNodesDelegation:
     def test_search_returns_empty_for_no_match(self, tmp_path):
         svc = FileGraphService(base_dir=str(tmp_path))
         store = GraphServiceEntityGraphStore(graph_service=svc)
-        store.add_node(GraphNode(
-            node_id="n1", node_type="person", label="Alice",
-        ))
+        store.add_node(
+            GraphNode(
+                node_id="n1",
+                node_type="person",
+                label="Alice",
+            )
+        )
         assert store.search_nodes("nonexistent") == []
 
     def test_search_passes_node_type_filter(self, tmp_path):
         svc = FileGraphService(base_dir=str(tmp_path))
         store = GraphServiceEntityGraphStore(graph_service=svc)
-        store.add_node(GraphNode(
-            node_id="n1", node_type="person", label="Alice",
-        ))
-        store.add_node(GraphNode(
-            node_id="n2", node_type="place", label="Alice Springs",
-        ))
+        store.add_node(
+            GraphNode(
+                node_id="n1",
+                node_type="person",
+                label="Alice",
+            )
+        )
+        store.add_node(
+            GraphNode(
+                node_id="n2",
+                node_type="place",
+                label="Alice Springs",
+            )
+        )
         results = store.search_nodes("alice", node_type="person")
         assert len(results) == 1
         assert results[0][0].node_type == "person"
@@ -109,8 +131,12 @@ class TestSearchNodesDelegation:
         svc = FileGraphService(base_dir=str(tmp_path))
         store = GraphServiceEntityGraphStore(graph_service=svc)
         for i in range(10):
-            store.add_node(GraphNode(
-                node_id=f"n{i}", node_type="person", label=f"Person {i}",
-            ))
+            store.add_node(
+                GraphNode(
+                    node_id=f"n{i}",
+                    node_type="person",
+                    label=f"Person {i}",
+                )
+            )
         results = store.search_nodes("person", top_k=3)
         assert len(results) == 3

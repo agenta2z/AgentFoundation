@@ -193,13 +193,15 @@ class PatternExtractor:
                     body_start = positions[i].index
                     body_end = positions[i + body_len - 1].index
                     body_steps = positions[i : i + body_len]
-                    found.append(LoopPattern(
-                        body_start=body_start,
-                        body_end=body_end,
-                        min_iterations=reps,
-                        max_iterations=reps,
-                        body_steps=body_steps,
-                    ))
+                    found.append(
+                        LoopPattern(
+                            body_start=body_start,
+                            body_end=body_end,
+                            min_iterations=reps,
+                            max_iterations=reps,
+                            body_steps=body_steps,
+                        )
+                    )
                     for k in range(i, j):
                         consumed.add(k)
                     i = j
@@ -229,9 +231,7 @@ class PatternExtractor:
         found: List[BranchPattern] = []
 
         for pos in positions:
-            if pos.alignment_type not in (
-                AlignmentType.BRANCH_POINT,
-            ):
+            if pos.alignment_type not in (AlignmentType.BRANCH_POINT,):
                 continue
 
             # Group non-None steps by action_type to form branches.
@@ -243,20 +243,24 @@ class PatternExtractor:
                 if label not in branches:
                     branches[label] = []
                 # Each branch gets a single-position list for now.
-                branches[label].append(AlignedPosition(
-                    index=pos.index,
-                    alignment_type=AlignmentType.VARIABLE,
-                    steps={tid: step},
-                    confidence=pos.confidence,
-                ))
+                branches[label].append(
+                    AlignedPosition(
+                        index=pos.index,
+                        alignment_type=AlignmentType.VARIABLE,
+                        steps={tid: step},
+                        confidence=pos.confidence,
+                    )
+                )
 
             if len(branches) >= 2:
-                found.append(BranchPattern(
-                    branch_point_index=pos.index,
-                    branches=branches,
-                    condition_description="Unknown: runs diverge at this point",
-                    condition_source=None,
-                ))
+                found.append(
+                    BranchPattern(
+                        branch_point_index=pos.index,
+                        branches=branches,
+                        condition_description="Unknown: runs diverge at this point",
+                        condition_source=None,
+                    )
+                )
 
         return found
 
@@ -297,9 +301,7 @@ class PatternExtractor:
             ),
         )
 
-        strategies = [
-            TargetSpec(strategy=s, value=v) for (s, v), _ in sorted_specs
-        ]
+        strategies = [TargetSpec(strategy=s, value=v) for (s, v), _ in sorted_specs]
         return TargetSpecWithFallback(strategies=strategies)
 
     # ------------------------------------------------------------------
@@ -391,11 +393,13 @@ class PatternExtractor:
             variant_counts[atype] += 1
             if atype not in variant_details:
                 variant_details[atype] = []
-            variant_details[atype].append({
-                "trace_id": tid,
-                "target": _target_summary(step.target),
-                "args": step.args,
-            })
+            variant_details[atype].append(
+                {
+                    "trace_id": tid,
+                    "target": _target_summary(step.target),
+                    "args": step.args,
+                }
+            )
 
         # Store in the first non-None step's metadata.
         for step in pos.steps.values():
@@ -441,11 +445,7 @@ class PatternExtractor:
 
         sigs: List[str] = []
         for pos in positions:
-            types = sorted(
-                s.action_type
-                for s in pos.steps.values()
-                if s is not None
-            )
+            types = sorted(s.action_type for s in pos.steps.values() if s is not None)
             sigs.append("|".join(types) if types else "<gap>")
         return sigs
 

@@ -4,17 +4,19 @@ Verifies that aget_input() and asend_response() exist and work correctly,
 closing the latent bug where interactive_checkpoint.py called these methods
 but they didn't exist on the base class.
 """
+
 import asyncio
-import pytest
 from unittest.mock import MagicMock
 
-from attr import attrs, attrib
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
+import pytest
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 
 
 @attrs
 class StubInteractive(InteractiveBase):
     """Minimal concrete subclass for testing."""
+
     input_value: str = attrib(default="stub_input", kw_only=True)
     _sent_responses: list = attrib(factory=list, init=False)
 

@@ -9,17 +9,16 @@ Legacy / no-ctx falls back to the instance `__dict__` backing (byte-identical).
 before writing this test; the resolver was verified working by hand and is captured here.)
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     enter_run,
     exit_run,
+    RunContext,
 )
+from attr import attrs
 
 
 @attrs(slots=False)

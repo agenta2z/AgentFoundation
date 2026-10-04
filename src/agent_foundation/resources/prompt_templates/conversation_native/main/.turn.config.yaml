@@ -1,0 +1,8 @@
+# Config for turn.jinja2 — display settings for the WebUI "View Prompt" panel.
+rendering:
+  structural_xml_tags:
+    - af_context
+    - SOPDescription
+    - SOPStatus
+    - SOPNextStepGuidance
+    - SOPPhases

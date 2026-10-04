@@ -9,26 +9,27 @@ and verifies:
 
 Requirements: 21.2, 21.4, 21.5
 """
+
 import os
 import pickle
 import shutil
 import tempfile
 import unittest
 
-from attr import attrib, attrs
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
     parse_numbered_list,
 )
-from agent_foundation.common.inferencers.inferencer_base import (
-    InferencerBase,
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
 )
-from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
 from rich_python_utils.common_objects.workflow.common.worknode_base import (
-    WorkGraphStopFlags,
     NextNodesSelector,
+    WorkGraphStopFlags,
 )
+from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
 
 
 @attrs
@@ -235,7 +236,10 @@ class TestBTAWorkGraphStopFlags(unittest.TestCase):
         )
         aggregator = WorkGraphNode(
             name="aggregator",
-            value=lambda *args: (call_log.append("aggregator"), "+".join(str(a) for a in args))[1],
+            value=lambda *args: (
+                call_log.append("aggregator"),
+                "+".join(str(a) for a in args),
+            )[1],
         )
 
         planner.add_next(worker_1)

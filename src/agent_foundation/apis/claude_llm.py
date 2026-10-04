@@ -1,11 +1,11 @@
 from enum import StrEnum
 from os import environ, path
-from typing import Union, List, Dict, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, Union
 
 from agent_foundation.apis.common import _resolve_llm_timeout
 from rich_python_utils.console_utils import hprint_message
 
-ENV_NAME_CLAUDE_API_KEY = 'ANTHROPIC_API_KEY'
+ENV_NAME_CLAUDE_API_KEY = "ANTHROPIC_API_KEY"
 
 
 class ClaudeModels(StrEnum):
@@ -13,41 +13,40 @@ class ClaudeModels(StrEnum):
     Enumeration for supported Claude models.
     See details at https://docs.anthropic.com/claude/docs/models-overview
     """
+
     # Claude 4.5
-    CLAUDE_45_HAIKU = 'claude-haiku-4-5-20251001'
-    CLAUDE_45_SONNET = 'claude-sonnet-4-5-20250929'
-    CLAUDE_45_OPUS = 'claude-opus-4-5-20251101'
+    CLAUDE_45_HAIKU = "claude-haiku-4-5-20251001"
+    CLAUDE_45_SONNET = "claude-sonnet-4-5-20250929"
+    CLAUDE_45_OPUS = "claude-opus-4-5-20251101"
 
     # Claude 4.6 (latest - Feb 2026)
-    CLAUDE_46_SONNET = 'claude-sonnet-4-6'
-    CLAUDE_46_OPUS = 'claude-opus-4-6'
-    CLAUDE_47_OPUS = 'claude-opus-4-7'
-    CLAUDE_46_OPUS_1M = 'claude-opus-4-6[1m]'
-    CLAUDE_47_OPUS_1M = 'claude-opus-4-7[1m]'
-    CLAUDE_47_OPUS_LATEST = 'opus'
-    CLAUDE_47_OPUS_LATEST_1M = 'opus[1m]'
-    CLAUDE_OPUS_LATEST_1M = 'opus[1m]'
+    CLAUDE_46_SONNET = "claude-sonnet-4-6"
+    CLAUDE_46_OPUS = "claude-opus-4-6"
+    CLAUDE_47_OPUS = "claude-opus-4-7"
+    CLAUDE_46_OPUS_1M = "claude-opus-4-6[1m]"
+    CLAUDE_47_OPUS_1M = "claude-opus-4-7[1m]"
+    CLAUDE_47_OPUS_LATEST = "opus"
+    CLAUDE_47_OPUS_LATEST_1M = "opus[1m]"
+    CLAUDE_OPUS_LATEST_1M = "opus[1m]"
+
 
 DEFAULT_MAX_TOKENS = {
     # Source-of-truth max output tokens per Anthropic public docs (verified May 2026).
     # NOTE: These are *direct API* limits. AI Gateway (Atlassian internal) may cap lower.
     # Batch API supports up to 300K with output-300k-2026-03-24 beta header.
-
     # Claude 4.5 family — max output 64K
-    f'{ClaudeModels.CLAUDE_45_HAIKU}': 64000,
-    f'{ClaudeModels.CLAUDE_45_SONNET}': 64000,
-    f'{ClaudeModels.CLAUDE_45_OPUS}': 64000,
-
+    f"{ClaudeModels.CLAUDE_45_HAIKU}": 64000,
+    f"{ClaudeModels.CLAUDE_45_SONNET}": 64000,
+    f"{ClaudeModels.CLAUDE_45_OPUS}": 64000,
     # Claude 4.6 — Sonnet 4.6 caps at 64K, Opus 4.6 supports 128K
-    f'{ClaudeModels.CLAUDE_46_SONNET}': 64000,
-    f'{ClaudeModels.CLAUDE_46_OPUS}': 128000,
-    f'{ClaudeModels.CLAUDE_46_OPUS_1M}': 128000,
-
+    f"{ClaudeModels.CLAUDE_46_SONNET}": 64000,
+    f"{ClaudeModels.CLAUDE_46_OPUS}": 128000,
+    f"{ClaudeModels.CLAUDE_46_OPUS_1M}": 128000,
     # Claude 4.7 — Opus 4.7 supports 128K (1M-context variant uses same output cap)
-    f'{ClaudeModels.CLAUDE_47_OPUS}': 128000,
-    f'{ClaudeModels.CLAUDE_47_OPUS_1M}': 128000,
-    f'{ClaudeModels.CLAUDE_47_OPUS_LATEST}': 128000,
-    f'{ClaudeModels.CLAUDE_47_OPUS_LATEST_1M}': 128000,
+    f"{ClaudeModels.CLAUDE_47_OPUS}": 128000,
+    f"{ClaudeModels.CLAUDE_47_OPUS_1M}": 128000,
+    f"{ClaudeModels.CLAUDE_47_OPUS_LATEST}": 128000,
+    f"{ClaudeModels.CLAUDE_47_OPUS_LATEST_1M}": 128000,
 }
 
 DEFAULT_CLAUDE_MODEL = ClaudeModels.CLAUDE_OPUS_LATEST_1M
@@ -59,14 +58,9 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
     """
     if isinstance(prompt_or_messages, str):
         if path.exists(prompt_or_messages):
-            with open(prompt_or_messages, 'r', encoding='utf-8') as f:
+            with open(prompt_or_messages, "r", encoding="utf-8") as f:
                 prompt_or_messages = f.read()
-        return [
-            {
-                'role': 'user',
-                'content': prompt_or_messages
-            }
-        ]
+        return [{"role": "user", "content": prompt_or_messages}]
     elif isinstance(prompt_or_messages, Dict):
         return [prompt_or_messages]
     elif isinstance(prompt_or_messages, (List, Tuple)):
@@ -75,22 +69,11 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
             for i in range(0, len(prompt_or_messages) - 1, 2):
                 messages.extend(
                     (
-                        {
-                            'role': 'user',
-                            'content': prompt_or_messages[i]
-                        },
-                        {
-                            'role': 'assistant',
-                            'content': prompt_or_messages[i + 1]
-                        }
+                        {"role": "user", "content": prompt_or_messages[i]},
+                        {"role": "assistant", "content": prompt_or_messages[i + 1]},
                     )
                 )
-            messages.append(
-                {
-                    'role': 'user',
-                    'content': prompt_or_messages[-1]
-                }
-            )
+            messages.append({"role": "user", "content": prompt_or_messages[-1]})
             return messages
         elif isinstance(prompt_or_messages[0], Dict):
             return list(prompt_or_messages)
@@ -100,19 +83,19 @@ def _get_messages(prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[D
 
 
 def generate_text(
-        prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
-        model: ClaudeModels = DEFAULT_CLAUDE_MODEL,
-        max_new_tokens: int = None,
-        temperature: float = 0.7,
-        top_p: float = None,
-        stop: List[str] = None,
-        api_key: str = None,
-        timeout: Union[float, Tuple[float, float]] = None,
-        connect_timeout: float = None,
-        response_timeout: float = None,
-        return_raw_results: bool = False,
-        verbose: bool = False,
-        **kwargs
+    prompt_or_messages: Union[str, Dict, Sequence[str], Sequence[Dict]],
+    model: ClaudeModels = DEFAULT_CLAUDE_MODEL,
+    max_new_tokens: int = None,
+    temperature: float = 0.7,
+    top_p: float = None,
+    stop: List[str] = None,
+    api_key: str = None,
+    timeout: Union[float, Tuple[float, float]] = None,
+    connect_timeout: float = None,
+    response_timeout: float = None,
+    return_raw_results: bool = False,
+    verbose: bool = False,
+    **kwargs,
 ) -> Union[str, List[str], Dict]:
     """
     Generate text using Claude API.
@@ -167,40 +150,35 @@ def generate_text(
     client = Anthropic(api_key=api_key)
 
     # region build parameters dict
-    model = f'{model}'
+    model = f"{model}"
     if not max_new_tokens:
         max_new_tokens = DEFAULT_MAX_TOKENS.get(model, 4096)
 
     params = {
-        'model': model,
-        'messages': messages,
-        'max_tokens': max_new_tokens,
-        'temperature': temperature,
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_new_tokens,
+        "temperature": temperature,
     }
 
     # Add optional sampling parameters
     if top_p is not None:
-        params['top_p'] = top_p
+        params["top_p"] = top_p
 
     # region Handle timeout setting
     timeout = _resolve_llm_timeout(
         timeout=timeout,
         connect_timeout=connect_timeout,
-        response_timeout=response_timeout
+        response_timeout=response_timeout,
     )
 
     if timeout is not None:
-        params['timeout'] = timeout
+        params["timeout"] = timeout
     # endregion
 
     params.update(kwargs)  # Add any additional kwargs
     if verbose:
-        hprint_message(
-            {
-                **params,
-                'return_raw_results': return_raw_results
-            }
-        )
+        hprint_message({**params, "return_raw_results": return_raw_results})
     # endregion
 
     response = client.messages.create(**params)
@@ -220,17 +198,17 @@ def generate_text(
     return generated_text.strip()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from rich_python_utils.common_utils.arg_utils.arg_parse import get_parsed_args
 
     args = get_parsed_args(
         default_prompt="Hello! What's the capital of France?",
-        default_model='claude-3-5-sonnet-20241022',
+        default_model="claude-3-5-sonnet-20241022",
         default_max_new_tokens=1024,
         default_top_p=0.9,
-        default_stop='[]',
+        default_stop="[]",
         default_temperature=0.7,
-        default_return_raw_results=False
+        default_return_raw_results=False,
     )
 
     _prompt_or_messages = args.prompt
@@ -249,7 +227,7 @@ if __name__ == '__main__':
         stop=_stop,
         temperature=_temperature,
         return_raw_results=_return_raw_results,
-        verbose=True
+        verbose=True,
     )
 
-    hprint_message({'response': _generated_text}, title=_model)
+    hprint_message({"response": _generated_text}, title=_model)

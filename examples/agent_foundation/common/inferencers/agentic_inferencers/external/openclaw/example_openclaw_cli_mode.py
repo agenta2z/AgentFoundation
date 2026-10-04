@@ -37,8 +37,8 @@ for _sub in ("AgentFoundation/src", "RichPythonUtils/src"):
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw import (
-    OpenClawInferencer,
     OpenClawError,
+    OpenClawInferencer,
     OpenClawNotFoundError,
 )
 
@@ -121,7 +121,7 @@ def demo_custom_targeting() -> None:
     print(f"Prompt: {prompt!r}")
     t0 = time.time()
     result = inf(prompt)
-    print(f"Response ({time.time()-t0:.1f}s): {result}")
+    print(f"Response ({time.time() - t0:.1f}s): {result}")
 
 
 async def demo_async_cli(session_id: str) -> None:
@@ -148,11 +148,15 @@ async def demo_async_cli(session_id: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenClaw CLI mode examples")
     parser.add_argument("--session-id", default="cli-demo", help="Session ID")
-    parser.add_argument("--thinking", default=None,
-                        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
-                        help="Thinking level")
-    parser.add_argument("--demo", type=int, default=0,
-                        help="Run specific demo (1-4), 0=all")
+    parser.add_argument(
+        "--thinking",
+        default=None,
+        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
+        help="Thinking level",
+    )
+    parser.add_argument(
+        "--demo", type=int, default=0, help="Run specific demo (1-4), 0=all"
+    )
     args = parser.parse_args()
 
     demos = {
@@ -169,7 +173,9 @@ def main() -> None:
             demos[d]()
         except OpenClawNotFoundError as e:
             print(f"\n❌ OpenClaw not found: {e}")
-            print("   Make sure to run: cd atlassian-packages/openclaw && ./run.sh start")
+            print(
+                "   Make sure to run: cd atlassian-packages/openclaw && ./run.sh start"
+            )
             sys.exit(1)
         except OpenClawError as e:
             print(f"\n⚠️  OpenClaw error in demo {d}: {e}")

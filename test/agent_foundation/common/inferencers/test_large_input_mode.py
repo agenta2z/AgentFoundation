@@ -344,7 +344,7 @@ class TestInferSubprocessTimeout(unittest.TestCase):
         mock_result.stderr = ""
         mock_result.returncode = 0
 
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
+        with patch.object(inf, "_run_subprocess", return_value=mock_result) as mock_run:
             inf._infer("test")
 
             call_kwargs = mock_run.call_args
@@ -462,7 +462,8 @@ class TestDevmateCliAinferFix(unittest.TestCase):
         asyncio.run(run())
 
     def test_ainfer_preserves_session_kwargs(self):
-        """Verify session_id and resume are passed through to _ainfer_single()."""
+        """Verify session_id and resume reach the transport (``_ainfer``): the
+        session policy runs inside ``_ainfer_single``."""
         from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.devmate_cli_inferencer import (
             DevmateCliInferencer,
         )
@@ -477,11 +478,11 @@ class TestDevmateCliAinferFix(unittest.TestCase):
 
         async def run():
             with patch.object(
-                inf, "_ainfer_single", new=AsyncMock(return_value=mock_result)
-            ) as mock_ainfer_single:
+                inf, "_ainfer", new=AsyncMock(return_value=mock_result)
+            ) as mock_ainfer:
                 await inf.ainfer("follow up")
 
-                call_kwargs = mock_ainfer_single.call_args[1]
+                call_kwargs = mock_ainfer.call_args[1]
                 self.assertEqual(call_kwargs["session_id"], "existing-session")
                 self.assertTrue(call_kwargs["resume"])
 

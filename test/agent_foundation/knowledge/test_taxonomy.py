@@ -1,7 +1,6 @@
 """Unit tests for the domain taxonomy module."""
 
 import pytest
-
 from agent_foundation.knowledge.ingestion.taxonomy import (
     DOMAIN_TAXONOMY,
     format_taxonomy_for_prompt,

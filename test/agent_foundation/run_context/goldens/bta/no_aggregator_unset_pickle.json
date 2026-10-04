@@ -1,0 +1,269 @@
+{
+  "calls": [
+    "w0",
+    "w1",
+    "w2"
+  ],
+  "result": [
+    "w0:q0",
+    "w1:q1",
+    "w2:q2"
+  ],
+  "session_chronological": {
+    "children/worker_00/logs/session/Stub-<ID>.jsonl": [
+      [
+        "InferenceInput",
+        "InferenceArgs"
+      ]
+    ],
+    "children/worker_01/logs/session/Stub-<ID>.jsonl": [
+      [
+        "InferenceInput",
+        "InferenceArgs"
+      ]
+    ],
+    "children/worker_02/logs/session/Stub-<ID>.jsonl": [
+      [
+        "InferenceInput",
+        "InferenceArgs"
+      ]
+    ],
+    "logs/session/BreakdownThenAggregateInferencer-<ID>.jsonl": [
+      [
+        "InferenceInput",
+        "InferenceArgs",
+        "InferenceInputStats",
+        "WorkerWsAssigned",
+        "WorkerWsAssigned",
+        "WorkerWsAssigned"
+      ]
+    ]
+  },
+  "tree": {
+    "checkpoints/.bta_execution.lock": "",
+    "checkpoints/breakdown/__graph_expansion__breakdown_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "expanding_node": "breakdown",
+        "expansion_id": "bta_workers",
+        "subgraph": {
+          "entry_node_names": [
+            "gbta.worker_00",
+            "gbta.worker_01",
+            "gbta.worker_02"
+          ],
+          "nodes": [
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": "skip_resumable",
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 1
+              },
+              "name": "gbta.worker_00",
+              "next_names": [],
+              "previous_names": [],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.worker_fn"
+            },
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": "skip_resumable",
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 1
+              },
+              "name": "gbta.worker_01",
+              "next_names": [],
+              "previous_names": [],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.worker_fn"
+            },
+            {
+              "_module": "rich_python_utils.common_objects.workflow.workgraph",
+              "_type": "WorkGraphNode",
+              "config": {
+                "enable_result_save": "skip_resumable",
+                "max_repeat": 1,
+                "max_repeat_wait": 0,
+                "min_repeat_wait": 0,
+                "pass_abstain_result_flag_downstream": true,
+                "remove_abstain_result_flag_from_upstream_input": false,
+                "result_pass_down_mode": 1
+              },
+              "name": "gbta.worker_02",
+              "next_names": [],
+              "previous_names": [],
+              "value_ref": "agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer.worker_fn"
+            }
+          ]
+        }
+      }
+    },
+    "checkpoints/breakdown/__graph_expansion__breakdown_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "checkpoints/breakdown/breakdown_result/main.pkl": {
+      "pickle": "list",
+      "value": [
+        "q0",
+        "q1",
+        "q2"
+      ]
+    },
+    "checkpoints/breakdown/breakdown_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "checkpoints/bta_manifest.json": {
+      "json": {
+        "checkpoint_version": 1,
+        "header": {
+          "arguments": "<SHA1>",
+          "definition": null,
+          "input": {
+            "digest": "<SHA2>",
+            "length": 5,
+            "type": "builtins:str"
+          },
+          "unverifiable": "definition.worker_inferencers: function test_no_aggregator.<locals>.<lambda> has no stable resume identity (lambdas, closures and bound methods have none); give it a `resume_identity`"
+        },
+        "plan": {
+          "sub_queries": [
+            "q0",
+            "q1",
+            "q2"
+          ],
+          "workers": [
+            "gbta.worker_00",
+            "gbta.worker_01",
+            "gbta.worker_02"
+          ]
+        },
+        "schema_version": 1
+      }
+    },
+    "checkpoints/gbta_result/main.pkl": {
+      "pickle": "tuple",
+      "value": [
+        [
+          {
+            "__bta_worker_outcome__": 1,
+            "failure": null,
+            "index": 0,
+            "node_name": "gbta.worker_00",
+            "value": "w0:q0"
+          },
+          {
+            "__bta_worker_outcome__": 1,
+            "failure": null,
+            "index": 1,
+            "node_name": "gbta.worker_01",
+            "value": "w1:q1"
+          },
+          {
+            "__bta_worker_outcome__": 1,
+            "failure": null,
+            "index": 2,
+            "node_name": "gbta.worker_02",
+            "value": "w2:q2"
+          }
+        ]
+      ]
+    },
+    "checkpoints/gbta_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_00/checkpoints/gbta.worker_00_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "__bta_worker_outcome__": 1,
+        "failure": null,
+        "index": 0,
+        "node_name": "gbta.worker_00",
+        "value": "w0:q0"
+      }
+    },
+    "children/worker_00/checkpoints/gbta.worker_00_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_00/logs/session/Stub-<ID1>.jsonl": "<present>",
+    "children/worker_00/logs/session/Stub-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "children/worker_00/outputs/answer.md": "w0:q0",
+    "children/worker_01/checkpoints/gbta.worker_01_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "__bta_worker_outcome__": 1,
+        "failure": null,
+        "index": 1,
+        "node_name": "gbta.worker_01",
+        "value": "w1:q1"
+      }
+    },
+    "children/worker_01/checkpoints/gbta.worker_01_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_01/logs/session/Stub-<ID2>.jsonl": "<present>",
+    "children/worker_01/logs/session/Stub-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "children/worker_01/outputs/answer.md": "w1:q1",
+    "children/worker_02/checkpoints/gbta.worker_02_result/main.pkl": {
+      "pickle": "dict",
+      "value": {
+        "__bta_worker_outcome__": 1,
+        "failure": null,
+        "index": 2,
+        "node_name": "gbta.worker_02",
+        "value": "w2:q2"
+      }
+    },
+    "children/worker_02/checkpoints/gbta.worker_02_result/manifest.json": {
+      "json": {
+        "main_file": "main.pkl",
+        "parts": [],
+        "version": 1
+      }
+    },
+    "children/worker_02/logs/session/Stub-<ID3>.jsonl": "<present>",
+    "children/worker_02/logs/session/Stub-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "children/worker_02/outputs/answer.md": "w2:q2",
+    "logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl": "<present>",
+    "logs/session/BreakdownThenAggregateInferencer-<ID4>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "outputs/aggregation_report.md": "w2:q2",
+    "outputs/workers/worker_00": {
+      "symlink": "<WS>/children/worker_00/outputs"
+    },
+    "outputs/workers/worker_01": {
+      "symlink": "<WS>/children/worker_01/outputs"
+    },
+    "outputs/workers/worker_02": {
+      "symlink": "<WS>/children/worker_02/outputs"
+    }
+  }
+}

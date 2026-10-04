@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "output": {
+    "path": "/tmp/af_golden_legacy/bta/outputs/aggregation_report.md",
+    "size_bytes": 8,
+    "produced_by": "BreakdownThenAggregateInferencer",
+    "workspace_root": "/tmp/af_golden_legacy/bta"
+  },
+  "contributors": [
+    {
+      "category": "session_log",
+      "path": "/tmp/af_golden_legacy/bta/logs/session/BreakdownThenAggregateInferencer-f3131d97.jsonl",
+      "size_bytes": 2351
+    },
+    {
+      "category": "inferenceinput",
+      "path": "/tmp/af_golden_legacy/bta/logs/session/BreakdownThenAggregateInferencer-f3131d97.jsonl.parts/InferenceInput/20260928_101056_0f778bce.txt",
+      "size_bytes": 4
+    }
+  ],
+  "stats": {
+    "total": 2
+  }
+}

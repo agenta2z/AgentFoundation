@@ -177,7 +177,9 @@ def test_sync_with_dump_output(query: str):
             print("\n✅ DUMP OUTPUT TEST PASSED!")
             return True
         else:
-            print(f"\n❌ DUMP OUTPUT TEST FAILED: {result.get('error', 'Unknown error')}")
+            print(
+                f"\n❌ DUMP OUTPUT TEST FAILED: {result.get('error', 'Unknown error')}"
+            )
             return False
 
     except Exception as e:
@@ -427,7 +429,9 @@ async def test_async_streaming(query: str):
             return False
 
     except Exception as e:
-        print(f"\n❌ ASYNC STREAMING TEST FAILED with exception: {type(e).__name__}: {e}")
+        print(
+            f"\n❌ ASYNC STREAMING TEST FAILED with exception: {type(e).__name__}: {e}"
+        )
         import traceback
 
         traceback.print_exc()
@@ -459,7 +463,9 @@ async def test_async_session_continuation():
         # First call - start new session
         print("\nFirst call: 'My favorite number is 42. Remember it.'")
         start_time = time.time()
-        result1 = await inferencer.anew_session("My favorite number is 42. Remember it.")
+        result1 = await inferencer.anew_session(
+            "My favorite number is 42. Remember it."
+        )
         elapsed1 = time.time() - start_time
 
         print(f"✓ Response 1 in {elapsed1:.2f}s:")
@@ -480,7 +486,9 @@ async def test_async_session_continuation():
             print("\n✅ ASYNC SESSION CONTINUATION TEST PASSED! Model remembered '42'")
             return True
         else:
-            print("\n⚠️ ASYNC SESSION CONTINUATION TEST WARNING: '42' not found in response")
+            print(
+                "\n⚠️ ASYNC SESSION CONTINUATION TEST WARNING: '42' not found in response"
+            )
             if result2.get("success"):
                 print("\n✅ ASYNC SESSION CONTINUATION TEST PASSED (with warning)")
                 return True
@@ -620,7 +628,9 @@ async def run_async_tests(query: str):
     results = []
     results.append(("Async Single Call", await test_async_single_call(query)))
     results.append(("Async Streaming", await test_async_streaming(query)))
-    results.append(("Async Session Continuation", await test_async_session_continuation()))
+    results.append(
+        ("Async Session Continuation", await test_async_session_continuation())
+    )
     return results
 
 

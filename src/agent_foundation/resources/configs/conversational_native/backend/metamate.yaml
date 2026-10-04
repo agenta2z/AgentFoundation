@@ -1,0 +1,15 @@
+# Metamate (remote, tool-less): session instructions ride an inline agent
+# config appended to Metamate's system prompt (fixed per conversation), and the
+# per-turn SOP state rides a labelled <af_context> envelope before the user's
+# text. SOP control is via slash commands; SOP phases that need AF tools must
+# run on a tool-capable backend. Needs the Buck-only Metamate SDK
+# (//msl/metamate/sdk:metamate_sdk) in the host binary.
+kind: metamate
+model: ""
+l2_envelope_allowed: true
+# Optional: api_key, surface, entry (LLMVM entry; default "Unified Auto").
+extra:
+  # Seconds without any new output from Metamate before the turn fails (the
+  # SDK's own default is 300). The request may still finish server-side, so
+  # the turn is recorded uncertain and is never re-sent.
+  idle_timeout_s: 120

@@ -104,7 +104,7 @@ class MockWorker:
         await asyncio.sleep(per_chunk)
         if self.should_error:
             raise RuntimeError(f"[Mock error in {self.label}]")
-        if self.stream_observer is not None and hasattr(self.stream_observer, 'flush'):
+        if self.stream_observer is not None and hasattr(self.stream_observer, "flush"):
             await self.stream_observer.flush()
         return self.output
 
@@ -138,6 +138,6 @@ class MockAggregator:
             if self.stream_observer is not None:
                 await self.stream_observer(chunk)
         await asyncio.sleep(per_chunk)
-        if self.stream_observer is not None and hasattr(self.stream_observer, 'flush'):
+        if self.stream_observer is not None and hasattr(self.stream_observer, "flush"):
             await self.stream_observer.flush()
         return self.output_template

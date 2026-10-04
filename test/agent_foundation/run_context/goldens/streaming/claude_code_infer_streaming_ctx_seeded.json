@@ -1,0 +1,58 @@
+{
+  "calls": [
+    {
+      "active_session_id": "seed-backing-sid",
+      "active_session_id_under_ctx": "seed-slot-sid",
+      "cli": [
+        {
+          "argv": [
+            "-p",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "max",
+            "--dangerously-skip-permissions",
+            "--resume",
+            "seed-slot-sid",
+            "turn 1"
+          ],
+          "cwd": "<TMP>/ws",
+          "stdin": null
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": false,
+            "path": "/leaf"
+          },
+          "kwargs": {
+            "resume": true,
+            "session_id": "seed-slot-sid"
+          }
+        }
+      ],
+      "get_streaming_result": {
+        "error": null,
+        "output": "",
+        "raw_output": "",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "live_store": {
+        "<HEX1> /leaf": {
+          "live_session_id": "seed-slot-sid"
+        }
+      },
+      "output": "plain reply to 'turn 1'\nsecond line\n",
+      "session_backing": "seed-backing-sid"
+    }
+  ],
+  "host_ctx": {
+    "legacy_mint": false,
+    "path": "/leaf"
+  }
+}

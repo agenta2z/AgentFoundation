@@ -11,7 +11,6 @@ DualInferencers) per sub-query, and optionally an aggregator_inferencer.
 import time
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -25,10 +24,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
     DualInferencer,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -83,9 +79,7 @@ def _make_dual_worker_inferencers(tmp_workspace):
 
     def factory(sub_query, index):
         base = _make_claude(tmp_workspace)
-        review = _make_claude(
-            tmp_workspace, append_system_prompt=APPROVE_SYSTEM_PROMPT
-        )
+        review = _make_claude(tmp_workspace, append_system_prompt=APPROVE_SYSTEM_PROMPT)
         return DualInferencer(
             base_inferencer=base,
             review_inferencer=review,
@@ -178,9 +172,7 @@ async def test_bta_async_execution(tmp_workspace):
         assert str(result).strip() != "", "Result should not be empty"
 
     # Async execution should complete — we just verify it doesn't hang
-    assert elapsed < DEFAULT_TIMEOUT * 2, (
-        f"Async BTA took too long: {elapsed:.1f}s"
-    )
+    assert elapsed < DEFAULT_TIMEOUT * 2, f"Async BTA took too long: {elapsed:.1f}s"
 
 
 # ===========================================================================

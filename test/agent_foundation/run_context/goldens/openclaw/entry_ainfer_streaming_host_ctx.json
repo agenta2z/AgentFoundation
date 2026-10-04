@@ -1,0 +1,78 @@
+{
+  "calls": [
+    {
+      "active_session_id_after": "main",
+      "active_session_id_under_sibling_ctx": null,
+      "base_single_calls": [],
+      "call_kwargs": {
+        "run_context": {
+          "RunContext": {
+            "legacy_mint": false,
+            "path": "/host"
+          }
+        }
+      },
+      "entry": "ainfer_streaming",
+      "initialized_sessions_after": [
+        "main"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": false,
+          "session_id": "main"
+        }
+      ],
+      "output": [
+        "answer 2 to: h",
+        "osted question"
+      ],
+      "prompt": "hosted question",
+      "streaming_entry_kwargs": [
+        {
+          "run_context": {
+            "RunContext": {
+              "legacy_mint": false,
+              "path": "/host"
+            }
+          }
+        }
+      ],
+      "transport": [
+        {
+          "method": "transcript_probe",
+          "result": "NEW",
+          "session_id": "main"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": false,
+            "path": "/host"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID1>",
+            "timeout": 600
+          },
+          "prompt": "Session initialization. Respond with exactly one word: Ready.",
+          "session_id": "main"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": false,
+            "path": "/host"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID2>",
+            "timeout": 600
+          },
+          "prompt": "hosted question",
+          "session_id": "main"
+        }
+      ]
+    }
+  ]
+}

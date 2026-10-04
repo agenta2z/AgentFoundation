@@ -26,11 +26,15 @@ import signal
 from collections.abc import Callable, Mapping
 from typing import Any, AsyncIterator, Literal, Optional
 
-from attr import attrib, attrs
-
+from agent_foundation.common.inferencers.run_context import (
+    frame_for,
+    invocation_of,
+    RuntimeKey,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
+from attr import attrib, attrs
 from rich_python_utils.cli_utils.cmd_helpers import render_argv
 
 
@@ -108,6 +112,10 @@ class ToolAsInferencer(StreamingInferencerBase):
     SIGTERMs the subprocess, waits 5 s, then SIGKILLs.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     # --- Identity / labels ------------------------------------------------
     tool_name: str = attrib()
 
@@ -151,12 +159,11 @@ class ToolAsInferencer(StreamingInferencerBase):
     logged at WARNING and the stream continues)."""
 
     # --- Internal state (not init params) --------------------------------
-    _proc: Optional[asyncio.subprocess.Process] = attrib(
-        default=None, init=False, repr=False
-    )
-    _last_response: Optional[ToolInferencerResponse] = attrib(
-        default=None, init=False, repr=False
-    )
+    # The subprocesses this instance's calls are running, for ``cancel()``.
+    _procs: set = attrib(factory=set, init=False, repr=False)
+    # A call's structured response, built when its stream ends and returned by
+    # ``_ainfer`` of the same invocation (B28).
+    _TOOL_RESPONSE = RuntimeKey("ToolAsInferencer.response")
     term_grace_seconds: float = attrib(default=5.0)
 
     # ---------------------------------------------------------------------
@@ -178,9 +185,7 @@ class ToolAsInferencer(StreamingInferencerBase):
                 scrub failure.
         """
         if not self.command:
-            raise ValueError(
-                f"ToolAsInferencer({self.tool_name!r}): command is empty"
-            )
+            raise ValueError(f"ToolAsInferencer({self.tool_name!r}): command is empty")
         binary = self.command[0]
         # Allow either a bare binary name ("python3") OR an absolute path
         # whose basename matches an allowed binary.
@@ -225,9 +230,7 @@ class ToolAsInferencer(StreamingInferencerBase):
     # Streaming primitive
     # ---------------------------------------------------------------------
 
-    async def _ainfer_streaming(
-        self, prompt: str, **kwargs: Any
-    ) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Spawn the subprocess, async-merge stdout+stderr, yield lines.
 
         The base class :meth:`StreamingInferencerBase.ainfer_streaming`
@@ -273,19 +276,15 @@ class ToolAsInferencer(StreamingInferencerBase):
             env=env,
             limit=_MAX_STREAM_LINE_BYTES,
         )
-        self._proc = proc
+        self._procs.add(proc)
 
         # Async-merge stdout + stderr line-by-line via a queue. Two
         # pumper tasks read each pipe in parallel; the consumer (this
         # generator) drains the queue. A sentinel `(None, None)` marks
         # each pumper's completion; we yield until both have signalled.
-        line_queue: asyncio.Queue[tuple[Optional[str], Optional[str]]] = (
-            asyncio.Queue()
-        )
+        line_queue: asyncio.Queue[tuple[Optional[str], Optional[str]]] = asyncio.Queue()
 
-        async def _pump(
-            stream: Optional[asyncio.StreamReader], channel: str
-        ) -> None:
+        async def _pump(stream: Optional[asyncio.StreamReader], channel: str) -> None:
             if stream is None:
                 await line_queue.put((None, channel))
                 return
@@ -296,7 +295,9 @@ class ToolAsInferencer(StreamingInferencerBase):
                         break
                     try:
                         line = raw.decode("utf-8", errors="replace")
-                    except Exception as e:  # pragma: no cover — replace mode shouldn't raise
+                    except (
+                        Exception
+                    ) as e:  # pragma: no cover — replace mode shouldn't raise
                         logger.warning(
                             "[ToolAsInferencer:%s] decode failed on %s: %s",
                             self.tool_name,
@@ -356,6 +357,7 @@ class ToolAsInferencer(StreamingInferencerBase):
                 # Normal exit path didn't run (exception or generator drop)
                 # — make sure the process isn't left running.
                 await self._terminate_proc(proc)
+            self._procs.discard(proc)
             if tee_handle is not None:
                 try:
                     tee_handle.close()
@@ -376,20 +378,24 @@ class ToolAsInferencer(StreamingInferencerBase):
                 if self.output_parser is not None
                 else None
             )
-            self._last_response = ToolInferencerResponse(
+            response = ToolInferencerResponse(
                 stdout=stdout_text,
                 stderr=stderr_text,
-                return_code=proc.returncode if proc.returncode is not None else return_code,
+                return_code=proc.returncode
+                if proc.returncode is not None
+                else return_code,
                 success=success,
                 parsed=parsed,
                 cache_path=None,  # base class owns the cache path
                 tee_log_path=self.tee_log_path,
             )
-            self._proc = None
+            frame = frame_for(self)
+            if frame is not None:
+                frame.put(self._TOOL_RESPONSE, response)
             logger.info(
                 "[ToolAsInferencer:%s] exit rc=%s success=%s",
                 self.tool_name,
-                self._last_response.return_code,
+                response.return_code,
                 success,
             )
 
@@ -403,8 +409,8 @@ class ToolAsInferencer(StreamingInferencerBase):
         inference_config: Any = None,
         **kwargs: Any,
     ) -> ToolInferencerResponse:
-        """Run :meth:`ainfer_streaming`, accumulate, return the structured
-        :class:`ToolInferencerResponse` built during streaming.
+        """Run :meth:`_ainfer_streaming_pipeline`, accumulate, return the
+        structured :class:`ToolInferencerResponse` built during streaming.
 
         Overrides the base which returns the concatenated stream string.
         We need the structured response so workflow steps in
@@ -424,15 +430,16 @@ class ToolAsInferencer(StreamingInferencerBase):
             }
         else:
             kwargs.setdefault("_tool_substitutions", {})
-        async for _chunk in self.ainfer_streaming(
+        async for _chunk in self._ainfer_streaming_pipeline(
             inference_input, inference_config, **kwargs
         ):
             pass
-        if self._last_response is None:  # pragma: no cover — defensive
+        response = invocation_of(self).get(self._TOOL_RESPONSE)
+        if response is None:  # pragma: no cover — defensive
             return ToolInferencerResponse(
                 stdout="", stderr="", return_code=-1, success=False
             )
-        return self._last_response
+        return response
 
     def _infer(
         self,
@@ -449,9 +456,7 @@ class ToolAsInferencer(StreamingInferencerBase):
         Tools are usually invoked through ``ainfer``; this exists for the
         rare sync caller and to satisfy the ABC.
         """
-        from rich_python_utils.common_utils.async_function_helper import (
-            _run_async,
-        )
+        from rich_python_utils.common_utils.async_function_helper import _run_async
 
         return _run_async(self._ainfer(inference_input, inference_config, **kwargs))
 
@@ -532,17 +537,15 @@ class ToolAsInferencer(StreamingInferencerBase):
             )
 
     async def cancel(self) -> None:
-        """Public cancel: terminate the subprocess if one is running.
+        """Public cancel: terminate the subprocesses this instance is running.
 
         Most call sites won't need this — abandoning the ``ainfer`` task
         runs the generator's ``finally`` cleanup automatically. Provided
         for parity so callers that track per-tool cancellation explicitly
         have a uniform API.
         """
-        proc = self._proc
-        if proc is None:
-            return
-        await self._terminate_proc(proc)
+        for proc in list(self._procs):
+            await self._terminate_proc(proc)
 
 
 # =============================================================================

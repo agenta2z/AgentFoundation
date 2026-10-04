@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
 import yaml
-
 from agent_foundation.knowledge.packs.models import (
     KnowledgePack,
     PackInstallResult,
@@ -53,7 +52,7 @@ def parse_skill_md(content: str) -> Tuple[Dict[str, Any], str]:
         return {}, content.strip()
 
     frontmatter_raw = match.group(1)
-    body = content[match.end():].strip()
+    body = content[match.end() :].strip()
 
     try:
         frontmatter = yaml.safe_load(frontmatter_raw) or {}
@@ -89,6 +88,7 @@ class ClawhubClient:
             self._session = session
         else:
             import requests
+
             self._session = requests.Session()
 
         if self.token:
@@ -270,7 +270,9 @@ class ClawhubPackAdapter:
             skill_data = self.client.get_skill(slug)
             skill_info = skill_data.get("skill", {})
             latest_version = skill_data.get("latestVersion", {})
-            resolved_version = version or (latest_version.get("version") if latest_version else None)
+            resolved_version = version or (
+                latest_version.get("version") if latest_version else None
+            )
 
             if not resolved_version:
                 return PackInstallResult(
@@ -302,8 +304,7 @@ class ClawhubPackAdapter:
 
             # Build bundle files manifest (for the primary piece properties)
             bundle_files = [
-                {"path": f["path"], "size": f.get("size", 0)}
-                for f in files_manifest
+                {"path": f["path"], "size": f.get("size", 0)} for f in files_manifest
             ]
 
             # Extract content tags from frontmatter (NOT from skill_info.tags
@@ -333,10 +334,11 @@ class ClawhubPackAdapter:
             # Store bundle manifest in the piece for retrieval discovery
             # We use embedding_text to store a concise version for search
             if len(bundle_files) > 1:
-                file_list = ", ".join(f["path"] for f in bundle_files if f["path"].lower() != "skill.md")
+                file_list = ", ".join(
+                    f["path"] for f in bundle_files if f["path"].lower() != "skill.md"
+                )
                 primary_piece.embedding_text = (
-                    f"{primary_piece.summary or ''} "
-                    f"(includes: {file_list})"
+                    f"{primary_piece.summary or ''} (includes: {file_list})"
                 )[:2000]
             pieces.append(primary_piece)
 
@@ -351,7 +353,9 @@ class ClawhubPackAdapter:
                 if size > MAX_FILE_SIZE:
                     logger.warning(
                         "Skipping oversized file %s (%d bytes) in %s",
-                        path, size, slug,
+                        path,
+                        size,
+                        slug,
                     )
                     continue
 
@@ -384,7 +388,8 @@ class ClawhubPackAdapter:
                 pack_id=pack_id,
                 name=skill_info.get("displayName") or frontmatter.get("name") or slug,
                 version=resolved_version,
-                description=frontmatter.get("description") or skill_info.get("summary", ""),
+                description=frontmatter.get("description")
+                or skill_info.get("summary", ""),
                 source_type=PackSource.CLAWHUB,
                 source_url=f"{self.client.base_url}/skills/{slug}",
                 source_identifier=slug,
@@ -485,7 +490,9 @@ class ClawhubPackAdapter:
         try:
             skill_data = self.client.get_skill(slug)
             latest_version = skill_data.get("latestVersion", {})
-            resolved_version = version or (latest_version.get("version") if latest_version else None)
+            resolved_version = version or (
+                latest_version.get("version") if latest_version else None
+            )
 
             if not resolved_version:
                 return PackInstallResult(
@@ -516,8 +523,7 @@ class ClawhubPackAdapter:
             requires = openclaw.get("requires", {})
 
             bundle_files = [
-                {"path": f["path"], "size": f.get("size", 0)}
-                for f in files_manifest
+                {"path": f["path"], "size": f.get("size", 0)} for f in files_manifest
             ]
 
             # Extract content tags from frontmatter (NOT from skill_info.tags
@@ -544,10 +550,11 @@ class ClawhubPackAdapter:
                 summary=frontmatter.get("description") or skill_info.get("summary", ""),
             )
             if len(bundle_files) > 1:
-                file_list = ", ".join(f["path"] for f in bundle_files if f["path"].lower() != "skill.md")
+                file_list = ", ".join(
+                    f["path"] for f in bundle_files if f["path"].lower() != "skill.md"
+                )
                 primary_piece.embedding_text = (
-                    f"{primary_piece.summary or ''} "
-                    f"(includes: {file_list})"
+                    f"{primary_piece.summary or ''} (includes: {file_list})"
                 )[:2000]
             new_pieces.append(primary_piece)
 
@@ -586,7 +593,8 @@ class ClawhubPackAdapter:
                 pack_id=pack_id,
                 name=skill_info.get("displayName") or frontmatter.get("name") or slug,
                 version=resolved_version,
-                description=frontmatter.get("description") or skill_info.get("summary", ""),
+                description=frontmatter.get("description")
+                or skill_info.get("summary", ""),
                 source_type=PackSource.CLAWHUB,
                 source_url=f"{self.client.base_url}/skills/{slug}",
                 source_identifier=slug,

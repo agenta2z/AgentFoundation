@@ -17,22 +17,22 @@ Usage:
     python example_multiprocessing_agent.py
 """
 
-import sys
-from pathlib import Path
-import tempfile
-import shutil
-import time
 import multiprocessing as mp
+import shutil
+import sys
+import tempfile
+import time
 from datetime import datetime
+from pathlib import Path
 
 # Add src to path
 # From: examples/agent_foundation/ui/queue_interactive/example_multiprocessing_agent.py
 # To: src/
 project_root = Path(__file__).parent.parent.parent.parent.parent
-sys.path.insert(0, str(project_root / 'src'))
+sys.path.insert(0, str(project_root / "src"))
 
 # Also add rich_python_utils to path if available
-rich_python_utils_path = project_root.parent / 'SciencePythonUtils' / 'src'
+rich_python_utils_path = project_root.parent / "SciencePythonUtils" / "src"
 if rich_python_utils_path.exists():
     sys.path.insert(0, str(rich_python_utils_path))
 
@@ -40,8 +40,9 @@ from agent_foundation.ui.queue_interactive import QueueInteractive
 
 try:
     from rich_python_utils.service_utils.queue_service.storage_based_queue_service import (
-        StorageBasedQueueService
+        StorageBasedQueueService,
     )
+
     QUEUE_SERVICES_AVAILABLE = True
 except ImportError:
     QUEUE_SERVICES_AVAILABLE = False
@@ -67,10 +68,10 @@ def simple_agent_process(root_path):
         user_name="User",
         input_queue=queue_service,
         response_queue=queue_service,
-        input_queue_id='user_questions',
-        response_queue_id='agent_answers',
+        input_queue_id="user_questions",
+        response_queue_id="agent_answers",
         blocking=True,
-        timeout=30.0
+        timeout=30.0,
     )
 
     print("[Agent] Ready to answer questions...")
@@ -97,13 +98,15 @@ def simple_agent_process(root_path):
         print(f"[Agent] Question {question_count}: {question}")
 
         # Check for exit
-        if question.lower() in ['exit', 'quit', 'bye']:
+        if question.lower() in ["exit", "quit", "bye"]:
             interactive.send_response("Goodbye! Have a great day!", flag=False)
             break
 
         # Look up answer
-        question_lower = question.lower().strip('?').strip()
-        answer = knowledge.get(question_lower, "I'm not sure about that. Can you ask something else?")
+        question_lower = question.lower().strip("?").strip()
+        answer = knowledge.get(
+            question_lower, "I'm not sure about that. Can you ask something else?"
+        )
 
         # Send response
         interactive.send_response(answer, flag=False)
@@ -129,10 +132,10 @@ def user_process(root_path, questions):
         print(f"\n[User] Question {i}: {question}")
 
         # Send question
-        queue_service.put('user_questions', question)
+        queue_service.put("user_questions", question)
 
         # Wait for answer
-        answer = queue_service.get('agent_answers', blocking=True, timeout=5.0)
+        answer = queue_service.get("agent_answers", blocking=True, timeout=5.0)
 
         if answer:
             print(f"[User] Answer: {answer}")
@@ -147,21 +150,16 @@ def user_process(root_path, questions):
 
 def example_1_simple_qa():
     """Example 1: Simple Q&A between user and agent in separate processes"""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("EXAMPLE 1: Simple Q&A (Cross-Process)")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
     try:
         print("\n1. Starting agent and user processes...")
 
-        questions = [
-            "Who are you?",
-            "What can you do?",
-            "What is Python?",
-            "exit"
-        ]
+        questions = ["Who are you?", "What can you do?", "What is Python?", "exit"]
 
         # Start agent process
         agent_proc = mp.Process(target=simple_agent_process, args=(tmpdir,))
@@ -201,10 +199,10 @@ def worker_agent(root_path, agent_id, num_tasks):
         user_name="TaskQueue",
         input_queue=queue_service,
         response_queue=queue_service,
-        input_queue_id='task_queue',
-        response_queue_id='result_queue',
+        input_queue_id="task_queue",
+        response_queue_id="result_queue",
         blocking=True,
-        timeout=3.0
+        timeout=3.0,
     )
 
     print(f"[Worker {agent_id}] Started, will process up to {num_tasks} tasks")
@@ -216,7 +214,7 @@ def worker_agent(root_path, agent_id, num_tasks):
 
         if not task:
             # Timeout - check if queue is empty
-            if queue_service.size('task_queue') == 0:
+            if queue_service.size("task_queue") == 0:
                 print(f"[Worker {agent_id}] No more tasks")
                 break
             continue
@@ -229,10 +227,10 @@ def worker_agent(root_path, agent_id, num_tasks):
 
         # Send result
         result = {
-            'worker_id': agent_id,
-            'task': task,
-            'result': f'Completed by Worker {agent_id}',
-            'timestamp': datetime.now().isoformat()
+            "worker_id": agent_id,
+            "task": task,
+            "result": f"Completed by Worker {agent_id}",
+            "timestamp": datetime.now().isoformat(),
         }
         interactive.send_response(str(result), flag=False)
 
@@ -242,9 +240,9 @@ def worker_agent(root_path, agent_id, num_tasks):
 
 def example_2_agent_pool():
     """Example 2: Pool of agents processing tasks (load balancing)"""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("EXAMPLE 2: Agent Pool with Load Balancing")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -254,8 +252,8 @@ def example_2_agent_pool():
 
         num_tasks = 15
         for i in range(num_tasks):
-            task = f"Task-{i+1:02d}"
-            queue_service.put('task_queue', task)
+            task = f"Task-{i + 1:02d}"
+            queue_service.put("task_queue", task)
             print(f"   [+] Added {task}")
 
         queue_service.close()
@@ -267,8 +265,7 @@ def example_2_agent_pool():
         workers = []
         for worker_id in range(1, num_workers + 1):
             worker_proc = mp.Process(
-                target=worker_agent,
-                args=(tmpdir, worker_id, tasks_per_worker)
+                target=worker_agent, args=(tmpdir, worker_id, tasks_per_worker)
             )
             worker_proc.start()
             workers.append(worker_proc)
@@ -280,20 +277,20 @@ def example_2_agent_pool():
         print("\n3. Collecting results...")
         queue_service = StorageBasedQueueService(root_path=tmpdir)
 
-        results_count = queue_service.size('result_queue')
+        results_count = queue_service.size("result_queue")
         print(f"   [OK] {results_count} results in queue")
 
         # Get all results
         results = []
-        while queue_service.size('result_queue') > 0:
-            result = queue_service.get('result_queue', blocking=False)
+        while queue_service.size("result_queue") > 0:
+            result = queue_service.get("result_queue", blocking=False)
             if result:
                 results.append(result)
 
         print(f"\n4. Results summary:")
         print(f"   Total tasks: {num_tasks}")
         print(f"   Results received: {len(results)}")
-        print(f"   Success rate: {len(results)/num_tasks*100:.1f}%")
+        print(f"   Success rate: {len(results) / num_tasks * 100:.1f}%")
 
         queue_service.close()
 
@@ -319,7 +316,7 @@ def specialized_agent(root_path, agent_type, input_queue_id, output_queue_id):
         input_queue_id=input_queue_id,
         response_queue_id=output_queue_id,
         blocking=True,
-        timeout=5.0
+        timeout=5.0,
     )
 
     print(f"[{agent_type}] Agent started")
@@ -346,9 +343,9 @@ def specialized_agent(root_path, agent_type, input_queue_id, output_queue_id):
 
 def example_3_specialized_agents():
     """Example 3: Multiple specialized agents with routing"""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("EXAMPLE 3: Specialized Agents with Routing")
-    print("="*80)
+    print("=" * 80)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -361,11 +358,11 @@ def example_3_specialized_agents():
         text_tasks = ["uppercase: hello", "reverse: world", "length: python"]
 
         for task in math_tasks:
-            queue_service.put('math_queue', task)
+            queue_service.put("math_queue", task)
             print(f"   [Math] {task}")
 
         for task in text_tasks:
-            queue_service.put('text_queue', task)
+            queue_service.put("text_queue", task)
             print(f"   [Text] {task}")
 
         queue_service.close()
@@ -375,14 +372,14 @@ def example_3_specialized_agents():
         # Math agent
         math_agent = mp.Process(
             target=specialized_agent,
-            args=(tmpdir, "Math", "math_queue", "math_results")
+            args=(tmpdir, "Math", "math_queue", "math_results"),
         )
         math_agent.start()
 
         # Text agent
         text_agent = mp.Process(
             target=specialized_agent,
-            args=(tmpdir, "Text", "text_queue", "text_results")
+            args=(tmpdir, "Text", "text_queue", "text_results"),
         )
         text_agent.start()
 
@@ -394,15 +391,15 @@ def example_3_specialized_agents():
         queue_service = StorageBasedQueueService(root_path=tmpdir)
 
         math_results = []
-        while queue_service.size('math_results') > 0:
-            result = queue_service.get('math_results', blocking=False)
+        while queue_service.size("math_results") > 0:
+            result = queue_service.get("math_results", blocking=False)
             if result:
                 math_results.append(result)
                 print(f"   {result}")
 
         text_results = []
-        while queue_service.size('text_results') > 0:
-            result = queue_service.get('text_results', blocking=False)
+        while queue_service.size("text_results") > 0:
+            result = queue_service.get("text_results", blocking=False)
             if result:
                 text_results.append(result)
                 print(f"   {result}")
@@ -450,8 +447,8 @@ Use Cases:
         sys.exit(1)
 
     # Set multiprocessing start method
-    if sys.platform == 'win32':
-        mp.set_start_method('spawn', force=True)
+    if sys.platform == "win32":
+        mp.set_start_method("spawn", force=True)
 
     examples = [
         example_1_simple_qa,
@@ -465,18 +462,20 @@ Use Cases:
         except Exception as e:
             print(f"\n[ERROR] {example_func.__name__}: {e}")
             import traceback
+
             traceback.print_exc()
 
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("[OK] All multiprocessing examples completed successfully!")
-    print("="*80 + "\n")
+    print("=" * 80 + "\n")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

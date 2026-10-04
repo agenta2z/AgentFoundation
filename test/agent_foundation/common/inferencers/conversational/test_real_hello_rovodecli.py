@@ -110,7 +110,7 @@ _BANNER_MARKERS = (
     "Jira projects:",
     "Using model:",
     "Session context:",
-    "\u2517",   # box-drawing
+    "\u2517",  # box-drawing
     "\u2501",
 )
 
@@ -147,10 +147,10 @@ def _build_production_like_ci(target_path: str, cache_dir: str):
       * The pre-built backend ``base`` is injected (production also injects).
     """
     import agent_foundation
-    from agent_foundation.resources.tools import _ci_host
     from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev import (
         RovoDevCliInferencer,
     )
+    from agent_foundation.resources.tools import _ci_host
 
     base = RovoDevCliInferencer(
         target_path=target_path,
@@ -162,7 +162,10 @@ def _build_production_like_ci(target_path: str, cache_dir: str):
 
     ci_config_path = (
         Path(agent_foundation.__file__).parent
-        / "resources" / "configs" / "conversational" / "default.yaml"
+        / "resources"
+        / "configs"
+        / "conversational"
+        / "default.yaml"
     )
 
     ci = _ci_host.build_ci_from_config(
@@ -189,7 +192,9 @@ class TestRealHelloRovoDevCLI(unittest.IsolatedAsyncioTestCase):
         cache_dir = tempfile.mkdtemp(prefix="ci_hello_cache_")
 
         # Enable INFO logging so any timeout or fallback path is visible
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        logging.basicConfig(
+            level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        )
 
         ci, base = _build_production_like_ci(target_path, cache_dir)
 
@@ -217,7 +222,9 @@ class TestRealHelloRovoDevCLI(unittest.IsolatedAsyncioTestCase):
         print(f"  AgenticResult type:       {type(result).__name__}")
         print(f"  raw_response (len={len(raw)}): {raw[:300]!r}")
         print(f"  base.get_final_output() (len={len(final)}): {final[:300]!r}")
-        print(f"  base._last_clean_output (len={len(last_clean)}): {last_clean[:300]!r}")
+        print(
+            f"  base._last_clean_output (len={len(last_clean)}): {last_clean[:300]!r}"
+        )
         print(f"  recorded stream chunks: {len(interactive.stream_chunks)}")
         print(f"  recorded widgets:       {len(interactive.emitted_widgets)}")
         if interactive.stream_chunks:
@@ -268,7 +275,8 @@ class TestRealHelloRovoDevCLI(unittest.IsolatedAsyncioTestCase):
         #    ``get_final_output()`` (both should hold the file content
         #    pre-cleanup; see rovodev_cli_inferencer.py:606-612).
         self.assertEqual(
-            last_clean.strip(), final.strip(),
+            last_clean.strip(),
+            final.strip(),
             f"``_last_clean_output`` ({len(last_clean)} chars) does not match "
             f"``get_final_output()`` ({len(final)} chars). These accessors "
             f"are supposed to return the same documented value.",
@@ -292,7 +300,8 @@ class TestRealHelloRovoDevCLI(unittest.IsolatedAsyncioTestCase):
         if interactive.stream_chunks:
             joined_stream = "".join(interactive.stream_chunks)
             self.assertGreaterEqual(
-                len(joined_stream), len(final),
+                len(joined_stream),
+                len(final),
                 f"Streamed bytes ({len(joined_stream)}) < final output bytes "
                 f"({len(final)}). Violates streams_differ_from_final_output "
                 f"invariant.",

@@ -1,4 +1,8 @@
 load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
+
+oncall("ml_oncall")
 
 python_binary(
     name = "contract_smoke",
@@ -9,5 +13,259 @@ python_binary(
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_output_guardrail",
+    srcs = ["test_output_guardrail.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_research_propose_contract",
+    srcs = ["test_research_propose_contract.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_breakdown_block_registry",
+    srcs = ["test_breakdown_block_registry.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_resume_original_query",
+    srcs = ["test_bta_resume_original_query.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_resume_workspace_binding",
+    srcs = ["test_bta_resume_workspace_binding.py"],
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_task_instructions_snapshot",
+    srcs = ["test_task_instructions_snapshot.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_reviewer_guardrail_cascade",
+    srcs = ["test_reviewer_guardrail_cascade.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_streaming_recovery",
+    srcs = ["test_streaming_recovery.py"],
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/hypothesis:hypothesis",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_checkpoint_promotion",
+    srcs = ["test_bta_checkpoint_promotion.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_worker_resume",
+    srcs = ["test_bta_worker_resume.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_outcome_pairing",
+    srcs = ["test_bta_outcome_pairing.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_fresh_instance",
+    srcs = ["test_fresh_instance.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_fanout_primitives",
+    srcs = ["test_fanout_primitives.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_bta_inferencer_fanout",
+    srcs = ["test_bta_inferencer_fanout.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_research_propose_fanout_config",
+    srcs = ["test_research_propose_fanout_config.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/hydra-core:hydra-core",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_breakdown_then_aggregate",
+    srcs = ["test_breakdown_then_aggregate.py"],
+    base_module = "",
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_function_inferencer",
+    srcs = ["test_function_inferencer.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_inferencer_variable_expansion",
+    srcs = ["test_inferencer_variable_expansion.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+    ],
+)
+
+python_unittest(
+    name = "test_lwi_step_workspace",
+    srcs = ["test_lwi_step_workspace.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_lwi_iteration_records",
+    srcs = ["test_lwi_iteration_records.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_lwi_single_step_resume",
+    srcs = ["test_lwi_single_step_resume.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+    ],
+)
+
+python_unittest(
+    name = "test_unified_finalize_output",
+    srcs = ["test_unified_finalize_output.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
     ],
 )

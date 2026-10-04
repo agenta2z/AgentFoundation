@@ -23,8 +23,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
-from attr import attrs, attrib
-
+from attr import attrib, attrs
 from rich_python_utils.service_utils.data_operation_record import DataOperationRecord
 
 
@@ -40,6 +39,7 @@ class KnowledgeType(StrEnum):
     - Episodic: Past interaction summary or event record
     - Example: Worked example or case study
     """
+
     Fact = "fact"
     Instruction = "instruction"
     Preference = "preference"
@@ -85,6 +85,7 @@ class KnowledgePiece:
         version: Version number for this piece.
         summary: Short summary for progressive disclosure.
     """
+
     # ── Existing fields (order preserved for positional arg compatibility) ──
     content: str = attrib()
     piece_id: str = attrib(default=None)
@@ -162,7 +163,9 @@ class KnowledgePiece:
         else:
             self.space = self.spaces[0] if self.spaces else "main"
         # Normalize spaces: strip, lowercase, deduplicate (preserving order), ensure non-empty
-        self.spaces = list(dict.fromkeys(s.strip().lower() for s in self.spaces if s and s.strip()))
+        self.spaces = list(
+            dict.fromkeys(s.strip().lower() for s in self.spaces if s and s.strip())
+        )
         if not self.spaces:
             self.spaces = ["main"]
         self.space = self.spaces[0]
@@ -296,8 +299,5 @@ class KnowledgePiece:
             pending_space_suggestions=data.get("pending_space_suggestions"),
             space_suggestion_reasons=data.get("space_suggestion_reasons"),
             space_suggestion_status=data.get("space_suggestion_status"),
-            history=[
-                DataOperationRecord.from_dict(r)
-                for r in data.get("history", [])
-            ],
+            history=[DataOperationRecord.from_dict(r) for r in data.get("history", [])],
         )

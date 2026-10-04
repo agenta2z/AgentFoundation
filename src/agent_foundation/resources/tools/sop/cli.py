@@ -59,14 +59,17 @@ async def run_sop(
     extra_tool_dirs: list[str] | None = None,
 ) -> int:
     """Run an SOP end-to-end. Returns exit code."""
-    from agent_foundation.resources.tools.sop.executor import execute
     from agent_foundation.resources.tools.registry import load_all_tools
-    from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
+    from agent_foundation.resources.tools.sop.executor import execute
+    from rich_python_utils.common_objects.workflow.common.phase_status import (
+        PhaseStatus,
+    )
 
     interactive = None
     if not yolo:
         try:
             from agent_foundation.ui.cli import RichTerminalInteractive
+
             interactive = RichTerminalInteractive(system_name="SOP")
         except ImportError:
             pass
@@ -82,7 +85,7 @@ async def run_sop(
     _ci_host.force_tools_synchronous(tool_registry)
 
     # Session workspace: _runtime/sop/<sop_name>__<timestamp>/
-    from datetime import UTC, datetime
+    from datetime import datetime, UTC
     from uuid import uuid4
 
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -95,7 +98,9 @@ async def run_sop(
 
     session_context: dict[str, Any] = {
         "extra_sop_dirs": [Path(d) for d in extra_sop_dirs] if extra_sop_dirs else [],
-        "extra_tool_dirs": [Path(d) for d in extra_tool_dirs] if extra_tool_dirs else [],
+        "extra_tool_dirs": [Path(d) for d in extra_tool_dirs]
+        if extra_tool_dirs
+        else [],
         "session_root": str(session_dir),
         "working_dir": str(Path.cwd()),
         "session_id": session_id,
@@ -127,36 +132,45 @@ async def run_sop(
         turn_dir.mkdir(exist_ok=True)
         (turn_dir / "user_input.txt").write_text(user_input or "", encoding="utf-8")
         ci = _ci_ref[0]
-        if ci and hasattr(ci, "base_inferencer"):
-            ci.base_inferencer.cache_folder = str(turn_dir)
+        if ci:
+            ci.cache_folder = str(turn_dir)
         return _turn_counter[0]
 
     async def _on_prompt_rendered(ci_instance, raw_response):
         import json as _json
+
         _round_counter[0] += 1
         turn_dir = turns_dir / f"turn_{_turn_counter[0]:03d}"
         round_dir = turn_dir / f"round_{_round_counter[0]:03d}"
         round_dir.mkdir(parents=True, exist_ok=True)
-        rendered = getattr(ci_instance, "_last_rendered_prompt", "")
+        prompt = (
+            ci_instance.last_prompt_data()
+            if getattr(ci_instance, "supports_prompt_manifest", False)
+            else {}
+        )
+        rendered = prompt.get("rendered_prompt", "")
         (round_dir / "rendered_prompt.txt").write_text(rendered, encoding="utf-8")
-        tmpl_src = getattr(ci_instance, "_last_template_source", "")
+        tmpl_src = prompt.get("template_source", "")
         (round_dir / "template_source.txt").write_text(tmpl_src, encoding="utf-8")
-        feed = getattr(ci_instance, "_last_template_feed", {})
+        feed = prompt.get("template_feed", {})
         try:
             (round_dir / "template_feed.json").write_text(
-                _json.dumps(feed, indent=2, default=str), encoding="utf-8",
+                _json.dumps(feed, indent=2, default=str),
+                encoding="utf-8",
             )
         except Exception:
             pass
-        config = getattr(ci_instance, "_last_template_config", {})
+        config = prompt.get("template_config", {})
         try:
             (round_dir / "template_config.json").write_text(
-                _json.dumps(config, indent=2, default=str), encoding="utf-8",
+                _json.dumps(config, indent=2, default=str),
+                encoding="utf-8",
             )
         except Exception:
             pass
         (round_dir / "response.md").write_text(
-            str(raw_response) if raw_response else "", encoding="utf-8",
+            str(raw_response) if raw_response else "",
+            encoding="utf-8",
         )
 
     async def _on_turn_complete(turn_number):
@@ -165,9 +179,10 @@ async def run_sop(
         ci = _ci_ref[0]
         if ci:
             import json as _json
+
             try:
                 (turn_dir / "messages.json").write_text(
-                    _json.dumps(ci._messages, indent=2, default=str),
+                    _json.dumps(ci.get_messages(), indent=2, default=str),
                     encoding="utf-8",
                 )
             except Exception:
@@ -191,7 +206,7 @@ async def run_sop(
     )
     # So the /sop command + Available-SOPs list discover the same SOPs the
     # executor sees via session_context (static config; set before any turn).
-    ci._extra_sop_dirs = session_context.get("extra_sop_dirs") or []
+    ci.extra_sop_dirs = session_context.get("extra_sop_dirs") or []
     _ci_ref[0] = ci
 
     result = await execute(
@@ -255,14 +270,16 @@ async def run_sop(
             if ci.sop_state and ci.sop_state.phase_status == PhaseStatus.COMPLETED:
                 print("SOP completed successfully.")
             elif ci.sop_state:
-                print(f"SOP ended at phase {ci.sop_state.current_phase} ({ci.sop_state.phase_status})")
+                print(
+                    f"SOP ended at phase {ci.sop_state.current_phase} ({ci.sop_state.phase_status})"
+                )
         else:
             # Interactive: run() in background, user input feeds inbox
             import asyncio as _aio
 
             run_task = _aio.create_task(ci.run(run_context=_sop_root))
             try:
-                while not ci._shutdown_requested:
+                while not ci.shutdown_requested:
                     try:
                         line = await _aio.to_thread(input, "\n> ")
                         ci.inbox_put_user(line)
@@ -271,7 +288,7 @@ async def run_sop(
                         ci.request_shutdown()
                         break
             finally:
-                if not ci._shutdown_requested:
+                if not ci.shutdown_requested:
                     ci.request_shutdown()
                 await run_task
 
@@ -282,7 +299,7 @@ async def run_sop(
         # resume — mirrors the task executor's outer-finally persistence. Best-effort.
         if _sop_root is not None:
             try:
-                _sop_root._store.save(str(_sop_store_path))
+                _sop_root.store.save(str(_sop_store_path))
             except Exception:  # pragma: no cover
                 pass
 
@@ -294,21 +311,47 @@ def main(argv: list[str] | None = None) -> int:
         prog="sop",
         description="Run a Standard Operating Procedure end-to-end.",
     )
-    parser.add_argument("sop_name", help="SOP name (e.g., role_creation, code_optimization)")
-    parser.add_argument("request", nargs="?", default="", help="Initial request/context for the SOP (place before flags, or use --request)")
-    parser.add_argument("--request", dest="request_flag", default=None, help="Initial request (alternative to positional arg, safe with nargs=* flags)")
-    parser.add_argument("--yolo", action="store_true", help="Auto-resolve all confirmations")
-    parser.add_argument("--model", default="opus[1m]", help="LLM model (default: opus[1m])")
-    parser.add_argument("--backend", default=None, help="Backend inferencer: claude_code (default), rovodev, or custom YAML name")
-    parser.add_argument("--extra-sop-dirs", nargs="*", default=[], help="Additional SOP directories")
-    parser.add_argument("--extra-tool-dirs", nargs="*", default=[], help="Additional tool directories")
+    parser.add_argument(
+        "sop_name", help="SOP name (e.g., role_creation, code_optimization)"
+    )
+    parser.add_argument(
+        "request",
+        nargs="?",
+        default="",
+        help="Initial request/context for the SOP (place before flags, or use --request)",
+    )
+    parser.add_argument(
+        "--request",
+        dest="request_flag",
+        default=None,
+        help="Initial request (alternative to positional arg, safe with nargs=* flags)",
+    )
+    parser.add_argument(
+        "--yolo", action="store_true", help="Auto-resolve all confirmations"
+    )
+    parser.add_argument(
+        "--model", default="opus[1m]", help="LLM model (default: opus[1m])"
+    )
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="Backend inferencer: claude_code (default), rovodev, or custom YAML name",
+    )
+    parser.add_argument(
+        "--extra-sop-dirs", nargs="*", default=[], help="Additional SOP directories"
+    )
+    parser.add_argument(
+        "--extra-tool-dirs", nargs="*", default=[], help="Additional tool directories"
+    )
 
     args = parser.parse_args(argv)
 
     return asyncio.run(
         run_sop(
             sop_name=args.sop_name,
-            request=args.request_flag or args.request or f"Starting SOP: {args.sop_name}",
+            request=args.request_flag
+            or args.request
+            or f"Starting SOP: {args.sop_name}",
             yolo=args.yolo,
             model=args.model,
             backend=args.backend,

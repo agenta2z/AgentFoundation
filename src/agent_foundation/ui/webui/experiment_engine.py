@@ -116,7 +116,9 @@ class TaskConfig:
     id: str
     title: str
     messages: List[ProgressMessage]
-    result: Optional[Dict[str, Any]] = None  # {delta_latency, is_better, result_message}
+    result: Optional[Dict[str, Any]] = (
+        None  # {delta_latency, is_better, result_message}
+    )
 
 
 @dataclass
@@ -394,9 +396,11 @@ class ExperimentFlowEngine:
 
             print(f"[ExperimentFlowEngine] Trying package resource: {resource_path}")
 
-            with importlib.resources.files(package).joinpath(resource_path).open(
-                "r"
-            ) as f:
+            with (
+                importlib.resources.files(package)
+                .joinpath(resource_path)
+                .open("r") as f
+            ):
                 return f.read()
         except Exception as e:
             raise FileNotFoundError(
@@ -567,9 +571,11 @@ class ExperimentFlowLoader:
             resource_path = f"experiment_configs/{flow_name}/flow.json"
 
             # Use importlib.resources to get the resource file
-            with importlib.resources.files(package).joinpath(resource_path).open(
-                "r"
-            ) as f:
+            with (
+                importlib.resources.files(package)
+                .joinpath(resource_path)
+                .open("r") as f
+            ):
                 data = json.load(f)
 
             # Get the base path for the flow directory

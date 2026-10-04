@@ -197,9 +197,7 @@ class GraphSynthesizer(ABC):
                 self._synthesize_branch(graph, bp)
                 branch_count += 1
             except Exception as exc:
-                warnings.append(
-                    f"Branch at index {bp.branch_point_index}: {exc}"
-                )
+                warnings.append(f"Branch at index {bp.branch_point_index}: {exc}")
 
         # Walk step_order for the remaining positions.
         for idx in patterns.step_order:
@@ -210,21 +208,26 @@ class GraphSynthesizer(ABC):
             if idx in uib_set:
                 self._synthesize_user_input_boundary(graph)
                 user_input_boundary_count += 1
-                decisions.append(ActionDecision(
-                    position_index=idx,
-                    action_type="wait",
-                    target=True,
-                    decision_source=self._decision_source,
-                ))
+                decisions.append(
+                    ActionDecision(
+                        position_index=idx,
+                        action_type="wait",
+                        target=True,
+                        decision_source=self._decision_source,
+                    )
+                )
                 continue
 
             # Deterministic.
             det_pos = self._find_position(patterns.deterministic_steps, idx)
             if det_pos is not None:
-                decision = self._decide_action(det_pos, {
-                    "task_description": task_description,
-                    "pattern_type": "deterministic",
-                })
+                decision = self._decide_action(
+                    det_pos,
+                    {
+                        "task_description": task_description,
+                        "pattern_type": "deterministic",
+                    },
+                )
                 decisions.append(decision)
                 self._apply_decision_to_graph(graph, decision, "deterministic")
                 deterministic_count += 1
@@ -237,11 +240,14 @@ class GraphSynthesizer(ABC):
             )
             if param_pos is not None:
                 info = param_map[idx]
-                decision = self._decide_action(param_pos, {
-                    "task_description": task_description,
-                    "pattern_type": "parameterizable",
-                    "param_info": info,
-                })
+                decision = self._decide_action(
+                    param_pos,
+                    {
+                        "task_description": task_description,
+                        "pattern_type": "parameterizable",
+                        "param_info": info,
+                    },
+                )
                 decisions.append(decision)
                 self._apply_decision_to_graph(graph, decision, "parameterizable")
                 parameterizable_count += 1
@@ -252,10 +258,13 @@ class GraphSynthesizer(ABC):
             # Variable.
             var_pos = self._find_position(patterns.variable_steps, idx)
             if var_pos is not None:
-                decision = self._decide_action(var_pos, {
-                    "task_description": task_description,
-                    "pattern_type": "variable",
-                })
+                decision = self._decide_action(
+                    var_pos,
+                    {
+                        "task_description": task_description,
+                        "pattern_type": "variable",
+                    },
+                )
                 decisions.append(decision)
                 self._apply_decision_to_graph(graph, decision, "variable")
                 agent_node_count += 1
@@ -264,10 +273,13 @@ class GraphSynthesizer(ABC):
             # Optional.
             opt_pos = self._find_position(patterns.optional_steps, idx)
             if opt_pos is not None:
-                decision = self._decide_action(opt_pos, {
-                    "task_description": task_description,
-                    "pattern_type": "optional",
-                })
+                decision = self._decide_action(
+                    opt_pos,
+                    {
+                        "task_description": task_description,
+                        "pattern_type": "optional",
+                    },
+                )
                 decisions.append(decision)
                 self._apply_decision_to_graph(graph, decision, "optional")
                 optional_count += 1
@@ -500,7 +512,9 @@ class GraphSynthesizer(ABC):
 
         iteration_state = {"count": 0}
 
-        def _loop_condition(result: Any, _s: dict = iteration_state, _m: int = max_iter, **kw: Any) -> bool:
+        def _loop_condition(
+            result: Any, _s: dict = iteration_state, _m: int = max_iter, **kw: Any
+        ) -> bool:
             return _s["count"] < _m
 
         def _loop_advance(result: Any, _s: dict = iteration_state, **kw: Any) -> Any:
@@ -563,8 +577,8 @@ class GraphSynthesizer(ABC):
         if isinstance(target, TargetSpecWithFallback):
             try:
                 from agent_foundation.automation.schema.common import (
-                    TargetSpecWithFallback as GraphTargetSpecWithFallback,
                     TargetSpec as GraphTargetSpec,
+                    TargetSpecWithFallback as GraphTargetSpecWithFallback,
                 )
 
                 strategies = [
@@ -721,7 +735,9 @@ class GraphSynthesizer(ABC):
 
         # Plain text fallback: treat the entire response as reasoning.
         # action_type remains None, signaling rule-based fallback.
-        logger.debug("LLM response is not structured JSON, using as reasoning: %s", text)
+        logger.debug(
+            "LLM response is not structured JSON, using as reasoning: %s", text
+        )
         result["reasoning"] = text if text else None
         return result
 
@@ -842,7 +858,10 @@ class LLMSynthesizer(GraphSynthesizer):
         prompt_formatter: Optional["TemplateManager"] = None,
     ):
         super().__init__(
-            action_executor, action_metadata, agent_action_type, prompt_formatter,
+            action_executor,
+            action_metadata,
+            agent_action_type,
+            prompt_formatter,
         )
         if inferencer is None:
             raise ValueError("LLMSynthesizer requires an InferencerBase instance")
@@ -956,7 +975,10 @@ class HybridSynthesizer(GraphSynthesizer):
         prompt_formatter: Optional["TemplateManager"] = None,
     ):
         super().__init__(
-            action_executor, action_metadata, agent_action_type, prompt_formatter,
+            action_executor,
+            action_metadata,
+            agent_action_type,
+            prompt_formatter,
         )
         if inferencer is None:
             raise ValueError("HybridSynthesizer requires an InferencerBase instance")

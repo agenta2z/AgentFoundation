@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from hypothesis import given, settings, assume
-from hypothesis import strategies as st
-
-from agent_foundation.automation.meta_agent.synthesizer import GraphSynthesizer, RuleBasedSynthesizer
 from agent_foundation.automation.meta_agent.models import (
     AlignedPosition,
     AlignmentType,
@@ -23,10 +19,15 @@ from agent_foundation.automation.meta_agent.models import (
     ParameterizableInfo,
     TraceStep,
 )
+from agent_foundation.automation.meta_agent.synthesizer import (
+    GraphSynthesizer,
+    RuleBasedSynthesizer,
+)
 from agent_foundation.automation.meta_agent.target_converter import (
     TargetSpec,
     TargetSpecWithFallback,
 )
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +118,11 @@ def mixed_patterns(draw):
     step_order = []
 
     for i in range(n_steps):
-        category = draw(st.sampled_from(["deterministic", "variable", "optional", "parameterizable"]))
+        category = draw(
+            st.sampled_from(
+                ["deterministic", "variable", "optional", "parameterizable"]
+            )
+        )
         step_order.append(i)
 
         if category == "deterministic":

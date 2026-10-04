@@ -55,7 +55,7 @@ class Tier1_BackwardCompatibilityTest(unittest.TestCase):
         source = inspect.getsource(LinearWorkflowInferencer._load_final_result)
         self.assertIn("final_result.json", source)
         # Verify it uses workspace path (not hardcoded)
-        self.assertIn("self._workspace", source)
+        self.assertIn("self._checkpoint_workspace()", source)
 
     def test_part_b_does_not_break_bta_workgraph_resume(self):
         """BTA's resume_with_saved_results still finds worker_X/ checkpoints."""
@@ -74,7 +74,7 @@ class Tier1_BackwardCompatibilityTest(unittest.TestCase):
         # Per-round logic only mutates inf_instance._workspace, not self._workspace
         self.assertIn("inf_instance._workspace", source)
         # Verify self._workspace is NOT being mutated by per-round logic
-        per_round_section = source[source.find("Part D"):source.find("# 2. Execute")]
+        per_round_section = source[source.find("Part D") : source.find("# 2. Execute")]
         self.assertNotIn("self._workspace =", per_round_section)
 
     def test_no_op_when_resume_disabled(self):
@@ -87,7 +87,8 @@ class Tier1_BackwardCompatibilityTest(unittest.TestCase):
         """Default mode (independent) preserves all existing semantics."""
         # coordinated_stop default is False
         attr = next(
-            a for a in MultiFlowInferencer.__attrs_attrs__
+            a
+            for a in MultiFlowInferencer.__attrs_attrs__
             if a.name == "coordinated_stop"
         )
         self.assertEqual(attr.default, False)
@@ -118,7 +119,7 @@ class Tier2_CheckpointNormalCompletionTest(unittest.TestCase):
     def test_part_d_each_round_has_separate_checkpoint(self):
         """Hierarchical: round02/, round03/ each have separate workspaces."""
         source = inspect.getsource(LinearWorkflowInferencer._build_dynamic_step_wrapper)
-        self.assertIn('round{step_index:02d}', source)
+        self.assertIn("round{step_index:02d}", source)
 
     def test_identity_guard_prevents_clobbering_original_fixer(self):
         """Test directly verifies identity guard."""
@@ -156,6 +157,7 @@ class Tier3_ResumeFromCrashTest(unittest.TestCase):
         # By code: cache lookup (hash-keyed) means propose re-runs are cache hits
         # if input is identical. Verify by inspection.
         from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+
         # _try_resume_from_cache exists for backward compat
         self.assertTrue(hasattr(InferencerBase, "_try_resume_from_cache"))
 
@@ -185,6 +187,7 @@ class Tier3_ResumeFromCrashTest(unittest.TestCase):
             _MockWorkspace,
             _SimulateHierarchicalStep,
         )
+
         lwi_ws = _MockWorkspace("flow_0")
         inf = MagicMock()
         inf._workspace = _MockWorkspace("round01")
@@ -210,6 +213,7 @@ class Tier3_ResumeFromCrashTest(unittest.TestCase):
             _MockWorkspace,
             _SimulateHierarchicalStep,
         )
+
         lwi_ws = _MockWorkspace("flow_0")
         inf = MagicMock()
         inf._workspace = _MockWorkspace("round01")
@@ -240,8 +244,11 @@ class Tier3_ResumeFromCrashTest(unittest.TestCase):
         Verify Dual's iteration tracking is still in place.
         """
         attr_names = {a.name for a in DualInferencer.__attrs_attrs__}
-        self.assertIn("consensus_config", attr_names,
-                      "Dual must have consensus_config which carries max_iterations")
+        self.assertIn(
+            "consensus_config",
+            attr_names,
+            "Dual must have consensus_config which carries max_iterations",
+        )
 
     def test_part_c_coordinated_mode_resume_scaffold(self):
         """Opt-in coordinated_stop=True correctly raises NotImplementedError
@@ -290,6 +297,7 @@ class Tier4_StateRestorationTest(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
+
         source = inspect.getsource(BreakdownThenAggregateInferencer)
         self.assertIn("deliverable", source.lower())
 
@@ -325,6 +333,7 @@ class Tier5_MultiAttemptTest(unittest.TestCase):
             _MockWorkspace,
             _SimulateHierarchicalStep,
         )
+
         lwi_ws = _MockWorkspace("flow_0")
         inf = MagicMock()
         inf._workspace = _MockWorkspace("round01")
@@ -338,6 +347,7 @@ class Tier5_MultiAttemptTest(unittest.TestCase):
         from agent_foundation.common.inferencers.inferencer_workspace import (
             InferencerWorkspace,
         )
+
         source = inspect.getsource(InferencerWorkspace.ensure_dirs)
         # Should use exist_ok or not raise
         self.assertTrue(
@@ -403,6 +413,7 @@ class Tier6_EdgeCasesTest(unittest.TestCase):
             _MockWorkspace,
             _SimulateHierarchicalStep,
         )
+
         lwi_ws = _MockWorkspace("flow_0")
         inf = MagicMock()
         inf._workspace = _MockWorkspace("round01")

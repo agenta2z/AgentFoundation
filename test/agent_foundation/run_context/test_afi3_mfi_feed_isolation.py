@@ -18,24 +18,24 @@ ctx tree) instead of the shared child instance. These tests prove:
   * the legacy / no-ctx path still writes the instance dict (byte-identical).
 """
 
-from attr import attrs
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.templated_inferencer_base import (
-    TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
-    TemplatedInferencerBase,
-    _resolve_ctx_feed_override,
-)
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (  # noqa: E501
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
     mint_root,
+    open_invocation,
+    RunContext,
 )
+from agent_foundation.common.inferencers.templated_inferencer_base import (
+    _resolve_ctx_feed_override,
+    TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
+    TemplatedInferencerBase,
+)
+from attr import attrs
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,9 @@ class _FeedLeaf(TemplatedInferencerBase):
         # Satisfy ``_render_prompt``'s "must name a template" guard.
         self.template_root_space = "plan"
 
-    def _infer(self, inference_input, inference_config=None, **kwargs):  # pragma: no cover
+    def _infer(
+        self, inference_input, inference_config=None, **kwargs
+    ):  # pragma: no cover
         return inference_input
 
 
@@ -100,6 +102,12 @@ def _make_mfi(*, aggregator):
     )
 
 
+def _build_input(mfi, builder, plans, query):
+    """The builder runs inside MFI's invocation, as BTA's aggregator node calls it."""
+    with open_invocation(mfi):
+        return builder(plans, original_query=query)
+
+
 # ---------------------------------------------------------------------------
 # Aggregator path — feed goes to the ctx, not the shared aggregator instance
 # ---------------------------------------------------------------------------
@@ -115,7 +123,7 @@ def test_aggregator_feed_published_to_ctx_not_instance():
     try:
         # Builder runs under the MFI/BTA ctx; BTA later invokes the aggregator with
         # run_context=self._rc_child("aggregator"), so the feed must land there.
-        agg_input = builder(["plan_0"], original_query="master")
+        agg_input = _build_input(mfi, builder, ["plan_0"], "master")
     finally:
         exit_run(tok)
 
@@ -144,7 +152,7 @@ def test_aggregator_rendered_prompt_contains_upstream_content():
     ctx = RunContext.root(workspace=None)
     tok = enter_run(ctx)
     try:
-        agg_input = builder(["plan_0", "plan_1"], original_query="master")
+        agg_input = _build_input(mfi, builder, ["plan_0", "plan_1"], "master")
         # Simulate BTA invoking the aggregator under run_context=_rc_child("aggregator"):
         # the leaf renders under its own ctx and must see the published upstream feed.
         agg_ctx = ctx.child("aggregator")
@@ -214,8 +222,12 @@ def test_followup_latest_step_value_wins():
 
     tok = enter_run(flow_ctx)
     try:
-        mfi._publish_child_template_feed(followup, None, {"upstream_artifacts": "STEP1"})
-        mfi._publish_child_template_feed(followup, None, {"upstream_artifacts": "STEP2"})
+        mfi._publish_child_template_feed(
+            followup, None, {"upstream_artifacts": "STEP1"}
+        )
+        mfi._publish_child_template_feed(
+            followup, None, {"upstream_artifacts": "STEP2"}
+        )
     finally:
         exit_run(tok)
 
@@ -244,19 +256,23 @@ def test_two_concurrent_ctxs_do_not_bleed_feed():
 
     tok = enter_run(ctx_a)
     try:
-        builder(["A_plan_0", "A_plan_1"], original_query="master_A")
+        _build_input(mfi, builder, ["A_plan_0", "A_plan_1"], "master_A")
     finally:
         exit_run(tok)
 
     tok = enter_run(ctx_b)
     try:
-        builder(["B_plan_0", "B_plan_1"], original_query="master_B")
+        _build_input(mfi, builder, ["B_plan_0", "B_plan_1"], "master_B")
     finally:
         exit_run(tok)
 
     # Each ctx holds its OWN aggregator-feed override; no cross-talk.
-    override_a = ctx_a.child("aggregator").handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE)
-    override_b = ctx_b.child("aggregator").handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE)
+    override_a = ctx_a.child("aggregator").handles.get(
+        TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE
+    )
+    override_b = ctx_b.child("aggregator").handles.get(
+        TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE
+    )
     assert "A_plan_0" in override_a["upstream_artifacts"]
     assert "B_plan_0" in override_b["upstream_artifacts"]
     assert "B_plan_0" not in override_a["upstream_artifacts"]

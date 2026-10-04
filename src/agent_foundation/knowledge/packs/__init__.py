@@ -6,6 +6,12 @@ of KnowledgePieces as atomic units. Supports importing from ClawHub registry
 and loading from local directories or JSON files.
 """
 
+from agent_foundation.knowledge.packs.clawhub_adapter import (
+    ClawhubClient,
+    ClawhubPackAdapter,
+    parse_skill_md,
+)
+from agent_foundation.knowledge.packs.local_pack_loader import LocalPackLoader
 from agent_foundation.knowledge.packs.models import (
     KnowledgePack,
     PackInstallResult,
@@ -14,12 +20,6 @@ from agent_foundation.knowledge.packs.models import (
     PackStatus,
 )
 from agent_foundation.knowledge.packs.pack_manager import KnowledgePackManager
-from agent_foundation.knowledge.packs.clawhub_adapter import (
-    ClawhubClient,
-    ClawhubPackAdapter,
-    parse_skill_md,
-)
-from agent_foundation.knowledge.packs.local_pack_loader import LocalPackLoader
 
 __all__ = [
     # Models

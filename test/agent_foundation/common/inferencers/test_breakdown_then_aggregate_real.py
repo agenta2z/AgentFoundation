@@ -1,5 +1,3 @@
-
-
 """Real E2E integration test for BreakdownThenAggregateInferencer.
 
 Tests the full diamond pipeline: breakdown -> parallel workers -> aggregate.
@@ -187,7 +185,7 @@ def _robust_breakdown_parser(raw_output, max_queries=10):
     queries = []
 
     # Try to find numbered items anywhere in the text
-    for match in re.finditer(r'^\s*(\d+)[.)]\s+(.+)', text, re.MULTILINE):
+    for match in re.finditer(r"^\s*(\d+)[.)]\s+(.+)", text, re.MULTILINE):
         item = match.group(2).strip()
         # Skip items that look like agentic formatting
         if item and not item.startswith("```") and len(item) > 5:
@@ -195,7 +193,7 @@ def _robust_breakdown_parser(raw_output, max_queries=10):
 
     if not queries:
         # Fallback: try bullet points
-        for match in re.finditer(r'^\s*[-*]\s+(.+)', text, re.MULTILINE):
+        for match in re.finditer(r"^\s*[-*]\s+(.+)", text, re.MULTILINE):
             item = match.group(1).strip()
             if item and len(item) > 5:
                 queries.append(item)
@@ -476,23 +474,32 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--query", "-q", type=str, default=DEFAULT_QUERY,
+        "--query",
+        "-q",
+        type=str,
+        default=DEFAULT_QUERY,
         help="Query to test",
     )
     parser.add_argument(
-        "--mode", "-m", type=str,
+        "--mode",
+        "-m",
+        type=str,
         choices=["simple", "bta", "bta-no-agg", "all"],
         default="all",
         help="Test mode (default: all)",
     )
     parser.add_argument(
-        "--backend", "-b", type=str,
+        "--backend",
+        "-b",
+        type=str,
         choices=["metagen", "devmate", "claude_code", "auto"],
         default="auto",
         help="Backend inferencer (default: auto-detect)",
     )
     parser.add_argument(
-        "--max-breakdown", type=int, default=3,
+        "--max-breakdown",
+        type=int,
+        default=3,
         help="Max sub-queries for breakdown (default: 3)",
     )
 
@@ -509,9 +516,7 @@ def main():
     results = []
 
     if args.mode in ("simple", "all"):
-        results.append(
-            ("Simple Query", test_simple_query(args.query, args.backend))
-        )
+        results.append(("Simple Query", test_simple_query(args.query, args.backend)))
 
     if args.mode in ("bta-no-agg", "all"):
         results.append(

@@ -1,0 +1,22 @@
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+
+oncall("ml_oncall")
+
+# The native Metamate backend, kept out of
+# //_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation (whose glob stops
+# at this BUCK file) so the core library has no //msl dependency. Hosts that run
+# `kind: metamate` add this target to their binary; without it the backend
+# factory raises NativeCapabilityError.
+python_library(
+    # @autodeps-skip
+    name = "metamate",
+    srcs = glob(["*.py"]),
+    base_module = "agent_foundation.common.inferencers.agentic_inferencers.conversational_native.session.metamate",
+    typing = False,
+    visibility = ["PUBLIC"],
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/sdk:metamate_sdk",
+    ],
+)

@@ -1,6 +1,6 @@
 """Tests for proposal data models — round-trip, methods, edge cases."""
-import pytest
 
+import pytest
 from agent_foundation.common.data_models.proposal.model import (
     Proposal,
     ProposalConstraint,
@@ -22,31 +22,52 @@ def sample_index():
                 label="Quick Wins",
                 description="Low-hanging fruit",
                 proposals=[
-                    Proposal(id="P1", rank=1, title="Add caching",
-                             summary="Cache hot paths", impact="high",
-                             complexity="low", approach="Redis layer",
-                             problem="Latency", dependencies=[],
-                             cross_refs="synergistic with P2",
-                             tags=["perf"], metadata={"est_hours": 4}),
-                    Proposal(id="P2", rank=2, title="Batch queries",
-                             summary="Batch DB calls", impact="medium",
-                             complexity="low"),
+                    Proposal(
+                        id="P1",
+                        rank=1,
+                        title="Add caching",
+                        summary="Cache hot paths",
+                        impact="high",
+                        complexity="low",
+                        approach="Redis layer",
+                        problem="Latency",
+                        dependencies=[],
+                        cross_refs="synergistic with P2",
+                        tags=["perf"],
+                        metadata={"est_hours": 4},
+                    ),
+                    Proposal(
+                        id="P2",
+                        rank=2,
+                        title="Batch queries",
+                        summary="Batch DB calls",
+                        impact="medium",
+                        complexity="low",
+                    ),
                 ],
             ),
             ProposalGroup(
                 phase=2,
                 label="Core",
                 proposals=[
-                    Proposal(id="P3", rank=3, title="Rewrite auth",
-                             dependencies=["P1"], tags=["security"]),
+                    Proposal(
+                        id="P3",
+                        rank=3,
+                        title="Rewrite auth",
+                        dependencies=["P1"],
+                        tags=["security"],
+                    ),
                 ],
             ),
         ],
         constraints=[
             ProposalConstraint(
-                id="C1", kind="requires",
-                proposal_ids=["P3"], requires_ids=["P1"],
-                label="auth needs cache", reason="P3 depends on P1",
+                id="C1",
+                kind="requires",
+                proposal_ids=["P3"],
+                requires_ids=["P1"],
+                label="auth needs cache",
+                reason="P3 depends on P1",
                 severity="error",
             ),
         ],
@@ -56,10 +77,20 @@ def sample_index():
 
 class TestProposalRoundTrip:
     def test_proposal_round_trip(self):
-        p = Proposal(id="P1", rank=1, title="Test", summary="s",
-                     impact="high", complexity="low", approach="a",
-                     problem="p", dependencies=["P2"], cross_refs="see P2",
-                     tags=["t"], metadata={"k": "v"})
+        p = Proposal(
+            id="P1",
+            rank=1,
+            title="Test",
+            summary="s",
+            impact="high",
+            complexity="low",
+            approach="a",
+            problem="p",
+            dependencies=["P2"],
+            cross_refs="see P2",
+            tags=["t"],
+            metadata={"k": "v"},
+        )
         d = p.to_dict()
         p2 = Proposal.from_dict(d)
         assert p2.id == p.id
@@ -99,9 +130,16 @@ class TestProposalRoundTrip:
         assert idx2.constraints[0].requires_ids == ["P1"]
 
     def test_metadata_preserves_arbitrary_dict(self):
-        p = Proposal(id="P1", rank=1, title="T",
-                     metadata={"probability": "75%", "slots": ["a", "b"],
-                                "nested": {"deep": True}})
+        p = Proposal(
+            id="P1",
+            rank=1,
+            title="T",
+            metadata={
+                "probability": "75%",
+                "slots": ["a", "b"],
+                "nested": {"deep": True},
+            },
+        )
         d = p.to_dict()
         p2 = Proposal.from_dict(d)
         assert p2.metadata["probability"] == "75%"
@@ -109,16 +147,18 @@ class TestProposalRoundTrip:
         assert p2.metadata["nested"]["deep"] is True
 
     def test_constraint_default_severity(self):
-        c = ProposalConstraint(id="C1", kind="mutually_exclusive",
-                                proposal_ids=["P1", "P2"])
+        c = ProposalConstraint(
+            id="C1", kind="mutually_exclusive", proposal_ids=["P1", "P2"]
+        )
         d = c.to_dict()
         assert "severity" not in d  # default "error" omitted
         c2 = ProposalConstraint.from_dict(d)
         assert c2.severity == "error"
 
     def test_constraint_non_default_severity_preserved(self):
-        c = ProposalConstraint(id="C1", kind="recommends",
-                                proposal_ids=["P1"], severity="warning")
+        c = ProposalConstraint(
+            id="C1", kind="recommends", proposal_ids=["P1"], severity="warning"
+        )
         d = c.to_dict()
         assert d["severity"] == "warning"
         c2 = ProposalConstraint.from_dict(d)
@@ -203,7 +243,12 @@ class TestConstraintTolerance:
 
     def test_dialect_beta_reason_not_note(self):
         c = ProposalConstraint.from_dict(
-            {"type": "recommends", "from": "P3", "to": "P1", "reason": "stronger together"}
+            {
+                "type": "recommends",
+                "from": "P3",
+                "to": "P1",
+                "reason": "stronger together",
+            }
         )
         assert c.kind == "recommends"
         assert c.reason == "stronger together"
@@ -244,8 +289,11 @@ class TestConstraintTolerance:
         data = {
             "total_count": 1,
             "groups": [
-                {"phase": 1, "label": "G", "proposals": [
-                    {"id": "P1", "rank": 1, "title": "Keep me"}]},
+                {
+                    "phase": 1,
+                    "label": "G",
+                    "proposals": [{"id": "P1", "rank": 1, "title": "Keep me"}],
+                },
             ],
             "constraints": [{"type": "ordering", "rule": "free form"}],
         }

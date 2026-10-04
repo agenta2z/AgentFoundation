@@ -1,9 +1,10 @@
 """
 Dummy WorkGraph executor for generating hierarchical logs.
 """
+
 import sys
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 
 # Add paths for imports
 # Navigate up from utils/ -> dash_interactive/ -> ui/ -> agent_foundation/ -> src/ -> ScienceModelingTools/ -> PythonProjects/
@@ -18,9 +19,11 @@ elif not rich_python_utils_src.exists():
     if fallback_path.exists() and str(fallback_path) not in sys.path:
         sys.path.insert(0, str(fallback_path))
 
-from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
 from agent_foundation.ui.dash_interactive.utils.log_collector import LogCollector
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
 
 
 def dummy_task_1(x: int) -> int:
@@ -70,7 +73,7 @@ def create_sequential_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     node2 = WorkGraphNode(
@@ -80,7 +83,7 @@ def create_sequential_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     node3 = WorkGraphNode(
@@ -90,7 +93,7 @@ def create_sequential_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Link nodes
@@ -105,7 +108,7 @@ def create_sequential_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     return graph
@@ -133,7 +136,7 @@ def create_parallel_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Create parallel branches
@@ -144,7 +147,7 @@ def create_parallel_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     parallel_b = WorkGraphNode(
@@ -154,7 +157,7 @@ def create_parallel_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Create summarizer node
@@ -164,7 +167,7 @@ def create_parallel_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Link nodes
@@ -181,7 +184,7 @@ def create_parallel_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     return graph
@@ -209,7 +212,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Level 2
@@ -220,7 +223,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     level2b = WorkGraphNode(
@@ -230,7 +233,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Level 3
@@ -241,7 +244,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     level3b = WorkGraphNode(
@@ -251,7 +254,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     level3c = WorkGraphNode(
@@ -261,7 +264,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Level 4 - merge
@@ -271,7 +274,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     # Link nodes
@@ -291,7 +294,7 @@ def create_complex_graph(log_collector: LogCollector) -> WorkGraph:
         logger=log_collector,
         always_add_logging_based_logger=False,
         debug_mode=True,
-        log_time=False
+        log_time=False,
     )
 
     return graph
@@ -314,31 +317,63 @@ def simulate_graph_logs(graph_type: str, collector: LogCollector, input_value: i
     if graph_type == "sequential":
         # Sequential: Task1 -> Task2 -> Task3
         nodes = [
-            ('SequentialGraph', None, 'SequentialGraph'),
-            ('Task1', 'SequentialGraph', 'SequentialGraph > Task1'),
-            ('Task2', 'SequentialGraph > Task1', 'SequentialGraph > Task1 > Task2'),
-            ('Task3', 'SequentialGraph > Task1 > Task2', 'SequentialGraph > Task1 > Task2 > Task3')
+            ("SequentialGraph", None, "SequentialGraph"),
+            ("Task1", "SequentialGraph", "SequentialGraph > Task1"),
+            ("Task2", "SequentialGraph > Task1", "SequentialGraph > Task1 > Task2"),
+            (
+                "Task3",
+                "SequentialGraph > Task1 > Task2",
+                "SequentialGraph > Task1 > Task2 > Task3",
+            ),
         ]
     elif graph_type == "parallel":
         # Parallel: Start -> (ParallelA, ParallelB) -> Summarizer
         nodes = [
-            ('ParallelGraph', None, 'ParallelGraph'),
-            ('StartNode', 'ParallelGraph', 'ParallelGraph > StartNode'),
-            ('ParallelA', 'ParallelGraph > StartNode', 'ParallelGraph > StartNode > ParallelA'),
-            ('ParallelB', 'ParallelGraph > StartNode', 'ParallelGraph > StartNode > ParallelB'),
-            ('Summarizer', 'ParallelGraph > StartNode', 'ParallelGraph > StartNode > Summarizer')
+            ("ParallelGraph", None, "ParallelGraph"),
+            ("StartNode", "ParallelGraph", "ParallelGraph > StartNode"),
+            (
+                "ParallelA",
+                "ParallelGraph > StartNode",
+                "ParallelGraph > StartNode > ParallelA",
+            ),
+            (
+                "ParallelB",
+                "ParallelGraph > StartNode",
+                "ParallelGraph > StartNode > ParallelB",
+            ),
+            (
+                "Summarizer",
+                "ParallelGraph > StartNode",
+                "ParallelGraph > StartNode > Summarizer",
+            ),
         ]
     elif graph_type == "complex":
         # Complex: Multi-level hierarchy
         nodes = [
-            ('ComplexGraph', None, 'ComplexGraph'),
-            ('Level1', 'ComplexGraph', 'ComplexGraph > Level1'),
-            ('Level2A', 'ComplexGraph > Level1', 'ComplexGraph > Level1 > Level2A'),
-            ('Level2B', 'ComplexGraph > Level1', 'ComplexGraph > Level1 > Level2B'),
-            ('Level3A', 'ComplexGraph > Level1 > Level2A', 'ComplexGraph > Level1 > Level2A > Level3A'),
-            ('Level3B', 'ComplexGraph > Level1 > Level2B', 'ComplexGraph > Level1 > Level2B > Level3B'),
-            ('Level3C', 'ComplexGraph > Level1 > Level2B', 'ComplexGraph > Level1 > Level2B > Level3C'),
-            ('Level4', 'ComplexGraph > Level1 > Level2B', 'ComplexGraph > Level1 > Level2B > Level4')
+            ("ComplexGraph", None, "ComplexGraph"),
+            ("Level1", "ComplexGraph", "ComplexGraph > Level1"),
+            ("Level2A", "ComplexGraph > Level1", "ComplexGraph > Level1 > Level2A"),
+            ("Level2B", "ComplexGraph > Level1", "ComplexGraph > Level1 > Level2B"),
+            (
+                "Level3A",
+                "ComplexGraph > Level1 > Level2A",
+                "ComplexGraph > Level1 > Level2A > Level3A",
+            ),
+            (
+                "Level3B",
+                "ComplexGraph > Level1 > Level2B",
+                "ComplexGraph > Level1 > Level2B > Level3B",
+            ),
+            (
+                "Level3C",
+                "ComplexGraph > Level1 > Level2B",
+                "ComplexGraph > Level1 > Level2B > Level3C",
+            ),
+            (
+                "Level4",
+                "ComplexGraph > Level1 > Level2B",
+                "ComplexGraph > Level1 > Level2B > Level4",
+            ),
         ]
     else:
         raise ValueError(f"Unknown graph type: {graph_type}")
@@ -346,61 +381,75 @@ def simulate_graph_logs(graph_type: str, collector: LogCollector, input_value: i
     # Generate logs for each node
     for node_name, parent_id, full_id in nodes:
         # Determine log_group_id (last part of full_id)
-        log_group_id = full_id.split(' > ')[-1]
+        log_group_id = full_id.split(" > ")[-1]
 
         # Node start
-        collector({
-            'level': 20,  # INFO
-            'name': node_name,
-            'log_group_id': log_group_id,
-            'parent_log_group_id': parent_id,
-            'full_log_group_id': full_id,
-            'type': 'NodeStart',
-            'item': f'Starting execution of {node_name}'
-        })
+        collector(
+            {
+                "level": 20,  # INFO
+                "name": node_name,
+                "log_group_id": log_group_id,
+                "parent_log_group_id": parent_id,
+                "full_log_group_id": full_id,
+                "type": "NodeStart",
+                "item": f"Starting execution of {node_name}",
+            }
+        )
 
         # Generate 4-8 processing logs per node
         num_logs = random.randint(4, 8)
-        log_types = ['TaskInput', 'Processing', 'Validation', 'Transformation', 'Computation']
+        log_types = [
+            "TaskInput",
+            "Processing",
+            "Validation",
+            "Transformation",
+            "Computation",
+        ]
 
         for i in range(num_logs):
             log_type = random.choice(log_types)
             level = random.choice([10, 10, 20, 20])  # More DEBUG and INFO
 
-            if log_type == 'TaskInput':
+            if log_type == "TaskInput":
                 item = f"Received input: {input_value + i}"
-            elif log_type == 'Processing':
-                item = f"Processing step {i+1}/{num_logs} in {node_name}"
-            elif log_type == 'Validation':
-                item = f"Validation check passed for step {i+1}"
-            elif log_type == 'Transformation':
+            elif log_type == "Processing":
+                item = f"Processing step {i + 1}/{num_logs} in {node_name}"
+            elif log_type == "Validation":
+                item = f"Validation check passed for step {i + 1}"
+            elif log_type == "Transformation":
                 item = f"Applied transformation: {random.choice(['normalize', 'scale', 'filter', 'aggregate'])}"
             else:
-                item = f"Computed intermediate result: {input_value * (i+1)}"
+                item = f"Computed intermediate result: {input_value * (i + 1)}"
 
-            collector({
-                'level': level,
-                'name': node_name,
-                'log_group_id': log_group_id,
-                'parent_log_group_id': parent_id,
-                'full_log_group_id': full_id,
-                'type': log_type,
-                'item': item
-            })
+            collector(
+                {
+                    "level": level,
+                    "name": node_name,
+                    "log_group_id": log_group_id,
+                    "parent_log_group_id": parent_id,
+                    "full_log_group_id": full_id,
+                    "type": log_type,
+                    "item": item,
+                }
+            )
 
         # Node complete
-        collector({
-            'level': 20,  # INFO
-            'name': node_name,
-            'log_group_id': log_group_id,
-            'parent_log_group_id': parent_id,
-            'full_log_group_id': full_id,
-            'type': 'NodeComplete',
-            'item': f'Completed execution of {node_name} successfully'
-        })
+        collector(
+            {
+                "level": 20,  # INFO
+                "name": node_name,
+                "log_group_id": log_group_id,
+                "parent_log_group_id": parent_id,
+                "full_log_group_id": full_id,
+                "type": "NodeComplete",
+                "item": f"Completed execution of {node_name} successfully",
+            }
+        )
 
 
-def execute_and_collect_logs(graph_type: str = "sequential", input_value: int = 5) -> LogCollector:
+def execute_and_collect_logs(
+    graph_type: str = "sequential", input_value: int = 5
+) -> LogCollector:
     """
     Simulate graph execution and collect hierarchical logs.
 
@@ -417,39 +466,45 @@ def execute_and_collect_logs(graph_type: str = "sequential", input_value: int = 
     collector = LogCollector()
 
     # Log the start
-    collector({
-        'level': 20,  # INFO
-        'name': 'GraphExecutor',
-        'log_group_id': 'GraphExecutor',
-        'parent_log_group_id': None,
-        'full_log_group_id': 'GraphExecutor',
-        'type': 'ExecutionStart',
-        'item': f'Starting {graph_type} graph execution with input={input_value}'
-    })
+    collector(
+        {
+            "level": 20,  # INFO
+            "name": "GraphExecutor",
+            "log_group_id": "GraphExecutor",
+            "parent_log_group_id": None,
+            "full_log_group_id": "GraphExecutor",
+            "type": "ExecutionStart",
+            "item": f"Starting {graph_type} graph execution with input={input_value}",
+        }
+    )
 
     # Simulate the graph execution and log generation
     try:
         simulate_graph_logs(graph_type, collector, input_value)
 
-        collector({
-            'level': 20,  # INFO
-            'name': 'GraphExecutor',
-            'log_group_id': 'GraphExecutor',
-            'parent_log_group_id': None,
-            'full_log_group_id': 'GraphExecutor',
-            'type': 'ExecutionComplete',
-            'item': f'Graph execution simulated successfully. Generated {len(collector.logs)} log entries.'
-        })
+        collector(
+            {
+                "level": 20,  # INFO
+                "name": "GraphExecutor",
+                "log_group_id": "GraphExecutor",
+                "parent_log_group_id": None,
+                "full_log_group_id": "GraphExecutor",
+                "type": "ExecutionComplete",
+                "item": f"Graph execution simulated successfully. Generated {len(collector.logs)} log entries.",
+            }
+        )
     except Exception as e:
-        collector({
-            'level': 40,  # ERROR
-            'name': 'GraphExecutor',
-            'log_group_id': 'GraphExecutor',
-            'parent_log_group_id': None,
-            'full_log_group_id': 'GraphExecutor',
-            'type': 'ExecutionError',
-            'item': f'Graph execution failed: {str(e)}'
-        })
+        collector(
+            {
+                "level": 40,  # ERROR
+                "name": "GraphExecutor",
+                "log_group_id": "GraphExecutor",
+                "parent_log_group_id": None,
+                "full_log_group_id": "GraphExecutor",
+                "type": "ExecutionError",
+                "item": f"Graph execution failed: {str(e)}",
+            }
+        )
         raise
 
     return collector

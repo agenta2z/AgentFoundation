@@ -41,6 +41,20 @@ python_library(
     # (``ImportError: cannot import name 'MappingProxyType' from partially
     # initialized module 'types'``).
     base_module = "agent_foundation.common.inferencers.agentic_inferencers.external.metamate",
+    # Co-located Jinja2 prompt templates (e.g. the code scope judge's
+    # ``prompt_templates/code_scope_judge.jinja2``). This directory is a
+    # BUCK-package boundary, so the parent ``:agent_foundation`` glob does NOT
+    # reach these resources; without this entry the template would be absent at
+    # runtime and ``@agentic_function`` rendering would raise FileNotFoundError.
+    resources = glob([
+        "*.jinja2",
+        "prompt_templates/*.jinja2",
+        # Per-inferencer prompt-variable extensions
+        # (``prompt_templates/_variables/<key>/<variant>.jinja2``) discovered by
+        # ``InferencerBase._discover_inferencer_variable_roots``; nested, so the
+        # flat ``prompt_templates/*.jinja2`` glob above does not reach them.
+        "prompt_templates/_variables/**/*.jinja2",
+    ]),
     typing = False,
     visibility = ["PUBLIC"],
     deps = [],

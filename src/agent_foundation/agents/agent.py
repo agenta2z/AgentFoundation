@@ -2,47 +2,83 @@ from collections.abc import Callable
 from copy import copy
 from enum import StrEnum
 from functools import partial
-from typing import Tuple, Any, Union, Mapping, Dict, Sequence, Iterable, Optional, TypeAlias, Protocol, \
-    runtime_checkable
-
-from attr import attrs, attrib
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    Sequence,
+    Tuple,
+    TypeAlias,
+    Union,
+)
 
 from agent_foundation.agents.agent_attachment import AgentAttachment
-from agent_foundation.agents.agent_response import AgentResponse, AgentAction
-from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem, AgentStates
+from agent_foundation.agents.agent_response import AgentAction, AgentResponse
+from agent_foundation.agents.agent_state import (
+    AgentStateItem,
+    AgentStates,
+    AgentTaskStatusFlags,
+)
+from agent_foundation.agents.constants import (
+    DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_TASK_LABEL,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT,
+    DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE,
+)
 from agent_foundation.automation.schema.action_executor import MultiActionExecutor
-from agent_foundation.agents.constants import DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT, \
-    DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE, DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT, \
-    DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS, DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES, \
-    DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION, DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS, \
-    DEFAULT_AGENT_TASK_INPUT_FIELD_TASK_LABEL, DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS, \
-    DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.common.inferencers.run_context.bridge import (
+    active_run_context,
+    enter_run,
+    exit_run,
+)
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
+from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
-from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import ResultPassDownMode
-from rich_python_utils.common_objects.workflow.common.worknode_base import WorkGraphStopFlags
-from rich_python_utils.common_objects.workflow.workgraph import WorkGraphNode, WorkGraph
+from rich_python_utils.common_objects.workflow.common.result_pass_down_mode import (
+    ResultPassDownMode,
+)
+from rich_python_utils.common_objects.workflow.common.worknode_base import (
+    WorkGraphStopFlags,
+)
+from rich_python_utils.common_objects.workflow.workgraph import WorkGraph, WorkGraphNode
 from rich_python_utils.common_utils import (
+    append_,
     dict_,
     get_,
-    set_,
+    get_relevant_named_args,
     is_none_or_empty_str,
+    iter_,
+    list_,
+    set_,
     solve_as_single_input,
-    get_relevant_named_args, iter_, append_, list_
 )
 from rich_python_utils.common_utils.attr_helper import getattr_
 from rich_python_utils.common_utils.workflow import CommonWorkflowStatus
-from rich_python_utils.string_utils import join_, add_prefix, remove_prefix
+from rich_python_utils.string_utils import add_prefix, join_, remove_prefix
 from rich_python_utils.string_utils.misc import snake_to_camel_case
 from rich_python_utils.string_utils.xml_helpers import mapping_to_xml
 
-LOG_TYPE_SET_AGENT_ACTIVE_LAST_NODE = 'SetAgentActiveLastNode'
-LOG_TYPE_AGENT_WORKSTREAM_COMPLETED = 'AgentWorkstreamCompleted'
+LOG_TYPE_SET_AGENT_ACTIVE_LAST_NODE = "SetAgentActiveLastNode"
+LOG_TYPE_AGENT_WORKSTREAM_COMPLETED = "AgentWorkstreamCompleted"
 
 # Type aliases for improved type clarity
 ReasonerInput: TypeAlias = Any  # Can be str, dict, or structured input
-ReasonerInferenceConfig: TypeAlias = Optional[Any]  # Configuration for inference (e.g., temperature, model params)
-ReasonerResponse: TypeAlias = Any  # Raw response from reasoner (to be parsed by _parse_raw_response)
+ReasonerInferenceConfig: TypeAlias = Optional[
+    Any
+]  # Configuration for inference (e.g., temperature, model params)
+ReasonerResponse: TypeAlias = (
+    Any  # Raw response from reasoner (to be parsed by _parse_raw_response)
+)
 ReasonerArgs: TypeAlias = Mapping[str, Any]  # Additional keyword arguments for reasoner
 
 
@@ -63,11 +99,12 @@ class ReasonerProtocol(Protocol):
     Note:
         This protocol is runtime_checkable, allowing isinstance() checks at runtime.
     """
+
     def __call__(
         self,
         reasoner_input: ReasonerInput,
         reasoner_inference_config: ReasonerInferenceConfig = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ReasonerResponse:
         """
         Process input and generate a response.
@@ -84,11 +121,11 @@ class ReasonerProtocol(Protocol):
 
 
 class AgentLogTypes(StrEnum):
-    AgentState = 'AgentState'
-    AgentResponse = 'AgentResponse'
-    AgentNextActions = 'AgentNextActions'
-    ActionResult = 'AgentActionResults'
-    ActionError = 'AgentActionError'
+    AgentState = "AgentState"
+    AgentResponse = "AgentResponse"
+    AgentNextActions = "AgentNextActions"
+    ActionResult = "AgentActionResults"
+    ActionError = "AgentActionError"
 
 
 class AgentCompletionReason(StrEnum):
@@ -99,8 +136,9 @@ class AgentCompletionReason(StrEnum):
         Normal: Agent completed normally (agent_state == Completed, no more next_actions)
         MaxLoops: Agent completed due to reaching max_num_loops limit
     """
-    Normal = 'Normal'
-    MaxLoops = 'MaxLoops'
+
+    Normal = "Normal"
+    MaxLoops = "MaxLoops"
 
 
 class AgentControls(StrEnum):
@@ -116,10 +154,11 @@ class AgentControls(StrEnum):
         Continue: Signal to continue or resume execution
         StepByStep: Execute one step at a time, pausing at each checkpoint (agent-specific)
     """
-    Stop = 'Stop'
-    Pause = 'Pause'
-    Continue = 'Continue'
-    StepByStep = 'StepByStep'
+
+    Stop = "Stop"
+    Pause = "Pause"
+    Continue = "Continue"
+    StepByStep = "StepByStep"
 
 
 @attrs
@@ -171,25 +210,48 @@ class Agent(Debuggable):
         An `Agent` instance requires an `InteractiveBase` object for handling interactions, a `reasoner`
         function to process inputs, and optional user profiling and context management.
     """
+
     user_profile: Union[str, Callable[[Any], Any], Any] = attrib(default=None)
     context: Union[str, Callable[[Any], Any], Any] = attrib(default=None)
-    knowledge_provider: Union[Callable[[str], Dict[str, str]], Dict[str, str], None] = attrib(default=None)
-    _reasoner: ReasonerProtocol = attrib(default=None, alias='reasoner')
+    knowledge_provider: Union[Callable[[str], Dict[str, str]], Dict[str, str], None] = (
+        attrib(default=None)
+    )
+    _reasoner: ReasonerProtocol = attrib(default=None, alias="reasoner")
     reasoner_args: Optional[ReasonerArgs] = attrib(default=None)
     actor: Union[Callable[[Any], Any], MultiActionExecutor] = attrib(default=None)
     summarizer: Callable[[Any], Any] = attrib(default=None)
-    actor_args_transformation: Union[Callable, Mapping] = attrib(default=partial(add_prefix, prefix='action', sep='_'))
+    actor_args_transformation: Union[Callable, Mapping] = attrib(
+        default=partial(add_prefix, prefix="action", sep="_")
+    )
     interactive: InteractiveBase = attrib(default=None)
 
-    task_input_field_user_input: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT)
-    task_input_field_user_profile: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE)
-    task_input_field_context: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT)
-    task_input_field_action_results: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS)
-    task_input_field_previous_agent_results: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS)
-    task_input_field_agent_states: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES)
-    task_input_field_trigger_action: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION)
-    task_input_field_attachments: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS)
-    task_input_field_max_num_loops: str = attrib(default=DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS)
+    task_input_field_user_input: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_USER_INPUT
+    )
+    task_input_field_user_profile: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE
+    )
+    task_input_field_context: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_CONTEXT
+    )
+    task_input_field_action_results: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_ACTION_RESULTS
+    )
+    task_input_field_previous_agent_results: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_PREVIOUS_AGENT_RESULTS
+    )
+    task_input_field_agent_states: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_AGENT_STATES
+    )
+    task_input_field_trigger_action: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_TRIGGER_ACTION
+    )
+    task_input_field_attachments: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_ATTACHMENTS
+    )
+    task_input_field_max_num_loops: str = attrib(
+        default=DEFAULT_AGENT_TASK_INPUT_FIELD_MAX_NUM_LOOPS
+    )
 
     states: AgentStates = attrib(factory=AgentStates)
     branching_agent_start_as_new: bool = attrib(default=False)
@@ -237,12 +299,18 @@ class Agent(Debuggable):
     # This reflects the current state of the agent, updated when control signals are executed
     # External code should read via the public status property
     # Defaults to Stopped - changes to Running when execution begins
-    _status: CommonWorkflowStatus = attrib(default=CommonWorkflowStatus.Stopped, init=False)
+    _status: CommonWorkflowStatus = attrib(
+        default=CommonWorkflowStatus.Stopped, init=False
+    )
 
     def __attrs_post_init__(self):
         super().__attrs_post_init__()
         # Auto-wrap Mapping actor into MultiActionExecutor
-        if self.actor is not None and isinstance(self.actor, Mapping) and not isinstance(self.actor, MultiActionExecutor):
+        if (
+            self.actor is not None
+            and isinstance(self.actor, Mapping)
+            and not isinstance(self.actor, MultiActionExecutor)
+        ):
             self.actor = MultiActionExecutor(self.actor)
         if self.interactive is not None and isinstance(self.interactive, Debuggable):
             self.interactive.set_parent_debuggable(self)
@@ -281,7 +349,7 @@ class Agent(Debuggable):
         return self._status
 
     @property
-    def control(self) -> 'AgentControls':
+    def control(self) -> "AgentControls":
         """
         Get the current control signal of the agent.
 
@@ -323,7 +391,7 @@ class Agent(Debuggable):
         # Case 3: actor is a single callable - convert to MultiActionExecutor
         elif callable(self.actor):
             default_actor = self.actor
-            self.actor = MultiActionExecutor({'default': default_actor})
+            self.actor = MultiActionExecutor({"default": default_actor})
             self.actor.add_executor(actor_name, actor)
 
         # Case 4: Unexpected type
@@ -334,9 +402,7 @@ class Agent(Debuggable):
             )
 
     def _extract_user_input_and_metadata(
-            self,
-            raw_input: Any,
-            existing_metadata: Dict = None
+        self, raw_input: Any, existing_metadata: Dict = None
     ) -> Tuple[Any, Dict, Dict]:
         """
         Extracts user input, metadata, and agent fields from raw input received from interactive.get_input().
@@ -403,7 +469,10 @@ class Agent(Debuggable):
             metadata = dict(existing_metadata)
 
         # Extract user_input, metadata, and agent fields from structured dict input
-        if isinstance(raw_input, Dict) and self.task_input_field_user_input in raw_input:
+        if (
+            isinstance(raw_input, Dict)
+            and self.task_input_field_user_input in raw_input
+        ):
             raw_input_copy = dict(raw_input)
             user_input = raw_input_copy.pop(self.task_input_field_user_input)
 
@@ -413,14 +482,16 @@ class Agent(Debuggable):
                 self.task_input_field_context,
                 self.task_input_field_action_results,
                 self.task_input_field_agent_states,
-                self.task_input_field_trigger_action
+                self.task_input_field_trigger_action,
             }
 
             # Separate agent fields from metadata
-            agent_fields = {k: v for k, v in raw_input_copy.items()
-                            if k in agent_field_names}
-            new_metadata = {k: v for k, v in raw_input_copy.items()
-                            if k not in agent_field_names}
+            agent_fields = {
+                k: v for k, v in raw_input_copy.items() if k in agent_field_names
+            }
+            new_metadata = {
+                k: v for k, v in raw_input_copy.items() if k not in agent_field_names
+            }
 
             # Validate consistency of critical metadata fields
             if self.ensure_consistent_session_metadata_fields and existing_metadata:
@@ -451,14 +522,14 @@ class Agent(Debuggable):
         return self.states.last_action.source
 
     def _construct_reasoner_input(
-            self,
-            task_input: Any,
-            user_input: Any,
-            user_profile: Any = None,
-            context: Any = None,
-            action_results: Any = None,
-            attachments: Sequence = None,
-            knowledge: Dict[str, str] = None
+        self,
+        task_input: Any,
+        user_input: Any,
+        user_profile: Any = None,
+        context: Any = None,
+        action_results: Any = None,
+        attachments: Sequence = None,
+        knowledge: Dict[str, str] = None,
     ) -> ReasonerInput:
         """
         Prepares the input for the reasoning function by integrating user input, profile data,
@@ -488,12 +559,13 @@ class Agent(Debuggable):
             context,
             action_results,
             *(attachments if attachments is not None else ()),
-            sep='\n\n'
+            sep="\n\n",
         )
 
-    def _parse_raw_response(self, raw_response: ReasonerResponse) -> Tuple[
-        Union[str, AgentResponse],
-        Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
+    def _parse_raw_response(
+        self, raw_response: ReasonerResponse
+    ) -> Tuple[
+        Union[str, AgentResponse], Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
     ]:
         """
         Converts the raw response from the reasoning function into a user-friendly format
@@ -515,7 +587,7 @@ class Agent(Debuggable):
         return raw_response, AgentTaskStatusFlags.Completed
 
     def _get_next_actions_from_response(self, response: Any):
-        next_action = get_(response, 'next_actions', default=None)
+        next_action = get_(response, "next_actions", default=None)
         return response if next_action is None else next_action
 
     # region actor related methods
@@ -523,20 +595,20 @@ class Agent(Debuggable):
     @staticmethod
     def _is_stateless_actor(actor):
         return not (
-                (
-                        hasattr(actor, 'set_state')
-                        and callable(actor.get_state)
-                        and hasattr(actor, 'get_state')
-                        and callable(actor.set_state)
-                )
-                or hasattr(actor, 'state')
+            (
+                hasattr(actor, "set_state")
+                and callable(actor.get_state)
+                and hasattr(actor, "get_state")
+                and callable(actor.set_state)
+            )
+            or hasattr(actor, "state")
         )
 
     @staticmethod
     def _set_actor_state(actor, state):
-        if hasattr(actor, 'set_state') and callable(actor.set_state):
+        if hasattr(actor, "set_state") and callable(actor.set_state):
             actor.set_state(state)
-        elif hasattr(actor, 'state'):
+        elif hasattr(actor, "state"):
             actor.state = state
         else:
             raise ValueError(
@@ -545,9 +617,9 @@ class Agent(Debuggable):
 
     @staticmethod
     def _get_actor_state(actor):
-        if hasattr(actor, 'get_state') and callable(actor.get_state):
+        if hasattr(actor, "get_state") and callable(actor.get_state):
             return actor.get_state()
-        elif hasattr(actor, 'state'):
+        elif hasattr(actor, "state"):
             return actor.state
         else:
             raise ValueError(
@@ -565,7 +637,9 @@ class Agent(Debuggable):
             # Single callable actor assumed stateless
             return None
         else:
-            raise ValueError(f"Actor must be a Callable or MultiActionExecutor; got {type(self.actor)}")
+            raise ValueError(
+                f"Actor must be a Callable or MultiActionExecutor; got {type(self.actor)}"
+            )
 
     def _resolve_actor_for_next_action(self, next_action):
         # NOTE: `self.actor_state` might be empty if this method is called before agent execution.
@@ -574,7 +648,8 @@ class Agent(Debuggable):
 
         if isinstance(self.actor, MultiActionExecutor):
             next_action_type = (
-                next_action.type if isinstance(next_action, AgentAction)
+                next_action.type
+                if isinstance(next_action, AgentAction)
                 else next_action
             )
             actor = self.actor.resolve(next_action_type)
@@ -588,12 +663,18 @@ class Agent(Debuggable):
             # Single callable actor assumed stateless, no state management needed
             actor = self.actor
         else:
-            raise ValueError(f"Actor must be a Callable or MultiActionExecutor; got {type(self.actor)}")
+            raise ValueError(
+                f"Actor must be a Callable or MultiActionExecutor; got {type(self.actor)}"
+            )
 
         return actor
 
-    def _create_actor_args(self, raw_action_items, attachments=None, **kwargs) -> Mapping:
-        actor_args = dict_(raw_action_items, key_transformation=self.actor_args_transformation)
+    def _create_actor_args(
+        self, raw_action_items, attachments=None, **kwargs
+    ) -> Mapping:
+        actor_args = dict_(
+            raw_action_items, key_transformation=self.actor_args_transformation
+        )
         if attachments is not None:
             actor_args[self.task_input_field_attachments] = attachments
         actor_args.update(kwargs)
@@ -602,7 +683,9 @@ class Agent(Debuggable):
     # endregion
 
     @staticmethod
-    def _resolve_task_input_field(user_input: Any, task_input: Dict, field_name: str, default: Any):
+    def _resolve_task_input_field(
+        user_input: Any, task_input: Dict, field_name: str, default: Any
+    ):
         if not task_input:
             return default
         field_value = task_input.pop(field_name, default)
@@ -614,7 +697,7 @@ class Agent(Debuggable):
         else:
             return field_value
 
-    def copy(self, clear_states: bool = True) -> 'Agent':
+    def copy(self, clear_states: bool = True) -> "Agent":
         """
         Create a copy of the agent.
 
@@ -647,6 +730,25 @@ class Agent(Debuggable):
 
         return new_agent
 
+    def _call_reasoner(
+        self,
+        reasoner_input: ReasonerInput,
+        reasoner_inference_config: ReasonerInferenceConfig,
+    ) -> ReasonerResponse:
+        caller_rc = active_run_context()
+        token = (
+            enter_run(caller_rc.child("reasoner")) if caller_rc is not None else None
+        )
+        try:
+            return self.reasoner(
+                reasoner_input,
+                reasoner_inference_config,
+                **(self.reasoner_args or {}),
+            )
+        finally:
+            if token is not None:
+                exit_run(token)
+
     def _construct_reasoner_inference_config(self) -> ReasonerInferenceConfig:
         """
         Constructs configuration for reasoner inference.
@@ -660,17 +762,17 @@ class Agent(Debuggable):
         return None
 
     def _run_single_action(
-            self,
-            action: Union[AgentAction, Any],
-            task_input,
-            agent_state: Union[AgentStateItem, Any],
-            agent_response: Union[AgentResponse, Any],
-            previous_action_results,
-            task_input_metadata: Dict = None,
-            attachments: Sequence = None,
-            ongoing_sequence_actions: bool = False
+        self,
+        action: Union[AgentAction, Any],
+        task_input,
+        agent_state: Union[AgentStateItem, Any],
+        agent_response: Union[AgentResponse, Any],
+        previous_action_results,
+        task_input_metadata: Dict = None,
+        attachments: Sequence = None,
+        ongoing_sequence_actions: bool = False,
     ):
-        if action.type.startswith('UserInputsRequired.'):
+        if action.type.startswith("UserInputsRequired."):
             self.log_info(f"Detected user input required action: {action.type}")
             self.log_info(f"User input required reasoning: {action.reasoning}")
 
@@ -680,7 +782,7 @@ class Agent(Debuggable):
             # Construct response list: [instant_response, question]
             agent_response.instant_response = [
                 agent_response.instant_response,
-                question
+                question,
             ]
             self.log_info(
                 f"Constructed user input required response with {len(agent_response.instant_response)} parts:\n"
@@ -693,18 +795,20 @@ class Agent(Debuggable):
                 task_input_metadata = {}
             response_with_metadata = {
                 **task_input_metadata,
-                'response': agent_response.instant_response
+                "response": agent_response.instant_response,
             }
 
             # Determine input_mode from mapping based on action subtype
-            subtype = action.type.split('.', 1)[1] if '.' in action.type else ''
+            subtype = action.type.split(".", 1)[1] if "." in action.type else ""
             input_mode_entry = self.user_input_mode_mapping.get(subtype)
             if callable(input_mode_entry):
                 input_mode = input_mode_entry(action)
             else:
                 input_mode = input_mode_entry  # InputModeConfig or None
 
-            self.log_info("Sending user input required response to user (is_pending=True)")
+            self.log_info(
+                "Sending user input required response to user (is_pending=True)"
+            )
             if self.interactive is not None:
                 self.interactive.send_response(
                     response=response_with_metadata,
@@ -717,14 +821,18 @@ class Agent(Debuggable):
             raw_input = self.interactive.get_input()
             self.log_info(f"Received user response: {raw_input}")
 
-            follow_up_user_input, updated_metadata, _ = self._extract_user_input_and_metadata(
-                raw_input, existing_metadata=task_input_metadata
+            follow_up_user_input, updated_metadata, _ = (
+                self._extract_user_input_and_metadata(
+                    raw_input, existing_metadata=task_input_metadata
+                )
             )
             # Update task_input_metadata for next iteration
             task_input_metadata.update(updated_metadata)
 
             self.log_info(f"Extracted follow-up user input: {follow_up_user_input}")
-            self.log_info("User input required flow complete, continuing to next reasoning iteration")
+            self.log_info(
+                "User input required flow complete, continuing to next reasoning iteration"
+            )
 
             # Determine output action results.
             # Unlike normal actions which produce a fresh result via an actor call,
@@ -732,24 +840,28 @@ class Agent(Debuggable):
             # Two cases: copilot (user changed the page) needs fresh capture via no_op;
             # non-copilot uses the last accumulated snapshot (matches live state).
             is_copilot = False
-            if input_mode is not None and getattr(input_mode, 'options', None):
+            if input_mode is not None and getattr(input_mode, "options", None):
                 selected_opt = next(
                     (o for o in input_mode.options if o.value == follow_up_user_input),
-                    None
+                    None,
                 )
                 if selected_opt is not None:
-                    is_copilot = getattr(selected_opt, 'needs_user_copilot', False)
+                    is_copilot = getattr(selected_opt, "needs_user_copilot", False)
                 else:
                     follow_up_options = [
-                        o for o in input_mode.options if getattr(o, 'follow_up_prompt', '')
+                        o
+                        for o in input_mode.options
+                        if getattr(o, "follow_up_prompt", "")
                     ]
                     if follow_up_options:
                         is_copilot = any(
-                            getattr(o, 'needs_user_copilot', False) for o in follow_up_options
+                            getattr(o, "needs_user_copilot", False)
+                            for o in follow_up_options
                         )
                     else:
                         is_copilot = any(
-                            getattr(o, 'needs_user_copilot', False) for o in input_mode.options
+                            getattr(o, "needs_user_copilot", False)
+                            for o in input_mode.options
                         )
 
             if is_copilot and isinstance(self.actor, MultiActionExecutor):
@@ -759,9 +871,7 @@ class Agent(Debuggable):
                 )
                 try:
                     default_actor = self.actor.resolve(self.actor.default_key)
-                    output_action_results = default_actor(
-                        action_type='no_op'
-                    )
+                    output_action_results = default_actor(action_type="no_op")
                 except Exception as e:
                     self.log_error(
                         f"Failed to capture fresh page state after copilot: {e}"
@@ -772,7 +882,9 @@ class Agent(Debuggable):
                 # previous_action_results may be an accumulated list from sequential
                 # actions earlier in this WorkGraph (via _merge_action_results_to_list).
                 if isinstance(previous_action_results, (list, tuple)):
-                    output_action_results = previous_action_results[-1] if previous_action_results else None
+                    output_action_results = (
+                        previous_action_results[-1] if previous_action_results else None
+                    )
                 else:
                     output_action_results = previous_action_results
 
@@ -780,8 +892,8 @@ class Agent(Debuggable):
                 WorkGraphStopFlags.Terminate,  # graph's stop flag
                 {
                     self.task_input_field_user_input: follow_up_user_input,
-                    self.task_input_field_action_results: output_action_results
-                }
+                    self.task_input_field_action_results: output_action_results,
+                },
             )
         else:
             # Wrap with metadata for multi-session support
@@ -789,19 +901,18 @@ class Agent(Debuggable):
                 task_input_metadata = {}
             response_with_metadata = {
                 **task_input_metadata,
-                'response': agent_response.instant_response
+                "response": agent_response.instant_response,
             }
             if self.interactive is not None:
                 self.interactive.send_response(
-                    response=response_with_metadata,
-                    flag=InteractionFlags.MessageOnly
+                    response=response_with_metadata, flag=InteractionFlags.MessageOnly
                 )
 
             # NOTE: the actor will be set at its state in `self.actor_state` when it is resolved
             actor: Callable = self._resolve_actor_for_next_action(action)
             if isinstance(actor, Debuggable):
                 actor.set_parent_debuggable(self)
-            action.source = getattr_(actor, 'source', None)
+            action.source = getattr_(actor, "source", None)
             self.states.set_last_action(action, self.anchor_action_types)
 
             actor_args = self._create_actor_args(
@@ -809,19 +920,22 @@ class Agent(Debuggable):
                 task_input=task_input,
                 action_results=previous_action_results,
                 attachments=attachments,
-                ongoing_sequence_actions=ongoing_sequence_actions
+                ongoing_sequence_actions=ongoing_sequence_actions,
             )
             actor_args = get_relevant_named_args(actor, **actor_args)
 
             task_status_description_extended = mapping_to_xml(
                 {
-                    snake_to_camel_case(remove_prefix(k, 'action_')): v
+                    snake_to_camel_case(remove_prefix(k, "action_")): v
                     for k, v in actor_args.items()
-                    if v is not None and k in ('action_type', 'action_target', 'action_args')
+                    if v is not None
+                    and k in ("action_type", "action_target", "action_args")
                 },
-                root_tag='Action'
+                root_tag="Action",
             )
-            agent_state.task_status_description_extended = task_status_description_extended
+            agent_state.task_status_description_extended = (
+                task_status_description_extended
+            )
             try:
                 # ACTION EXECUTION: Call the actor and capture raw operational results
                 # The actor performs the actual work (e.g., web scraping, API calls, etc.)
@@ -832,8 +946,13 @@ class Agent(Debuggable):
             except Exception as action_error:
                 self.log_error(action_error, AgentLogTypes.ActionError)
                 raise action_error
-            set_(action, 'result', new_action_results)
-            self.log_info(new_action_results, AgentLogTypes.ActionResult, artifacts_as_parts=True, parts_min_size=0)
+            set_(action, "result", new_action_results)
+            self.log_info(
+                new_action_results,
+                AgentLogTypes.ActionResult,
+                artifacts_as_parts=True,
+                parts_min_size=0,
+            )
 
             # Return the raw action_results to be passed to the next i teration
             # This will become the action_results parameter in the next reasoner call
@@ -841,8 +960,8 @@ class Agent(Debuggable):
                 WorkGraphStopFlags.Continue,
                 {
                     self.task_input_field_user_input: None,
-                    self.task_input_field_action_results: new_action_results  # Raw operational data
-                }
+                    self.task_input_field_action_results: new_action_results,  # Raw operational data
+                },
             )
 
     def _get_agent_results(self, trigger_action, trigger_action_results, new_states):
@@ -910,7 +1029,7 @@ class Agent(Debuggable):
         # Return a minimal result dict that the agent expects
         return {
             self.task_input_field_user_input: None,
-            self.task_input_field_action_results: args[0] if args else None
+            self.task_input_field_action_results: args[0] if args else None,
         }
 
     def _merge_action_results_to_list(self, result, shared_list, *_args, **_kwargs):
@@ -942,9 +1061,10 @@ class Agent(Debuggable):
     def _make_attachments(self, base_obj) -> Sequence[AgentAttachment]:
         pass
 
-    def _parse_base_action(self, base_action: Any) -> Tuple[
-        Union[str, AgentResponse],
-        Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
+    def _parse_base_action(
+        self, base_action: Any
+    ) -> Tuple[
+        Union[str, AgentResponse], Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
     ]:
         """
         Parse base_action when it's not a StructuredResponse string.
@@ -972,7 +1092,7 @@ class Agent(Debuggable):
         agent_response: Union[AgentResponse, Any],
         agent_results: Any,
         task_input_metadata: Dict,
-        completion_reason: AgentCompletionReason
+        completion_reason: AgentCompletionReason,
     ):
         """
         Finalize agent results and send the final response to the user.
@@ -993,41 +1113,57 @@ class Agent(Debuggable):
         # AUGMENT RESPONSE: Enhance the final response with agent_results summaries
         # The agent_results (human-readable summaries) are appended to the instant_response
         # to provide the user with structured output beyond the raw response text
-        agent_response_string = agent_response if isinstance(agent_response, str) else agent_response.instant_response
+        agent_response_string = (
+            agent_response
+            if isinstance(agent_response, str)
+            else agent_response.instant_response
+        )
 
         if agent_results:
-            agent_response_string = agent_response_string.replace('<html>', '').replace('</html>', '').replace(
-                '<body>', '').replace('</body>', '')
+            agent_response_string = (
+                agent_response_string.replace("<html>", "")
+                .replace("</html>", "")
+                .replace("<body>", "")
+                .replace("</body>", "")
+            )
             # Extract summary field from each agent_result_item (e.g., markdown summaries)
             for agent_result_item in iter_(agent_results):
                 try:
-                    agent_response_string += '\n' + agent_result_item.summary
+                    agent_response_string += "\n" + agent_result_item.summary
                 except:
-                    agent_response_string += '\n' + str(agent_result_item)
-            agent_response_string = '<html><body>' + agent_response_string + '</body></html>'
+                    agent_response_string += "\n" + str(agent_result_item)
+            agent_response_string = (
+                "<html><body>" + agent_response_string + "</body></html>"
+            )
 
         # Attach metadata from task_input (like session_id) to response
         # This enables multi-session support for queue-based systems
         response_with_metadata = {
             **task_input_metadata,
-            'response': agent_response_string
+            "response": agent_response_string,
         }
 
         if self.interactive is not None:
             self.interactive.send_response(
                 response=response_with_metadata,
-                flag=InteractionFlags.TurnCompleted  # Final response - agent is done
+                flag=InteractionFlags.TurnCompleted,  # Final response - agent is done
             )
 
         # Log completion with appropriate message based on completion reason
         if completion_reason == AgentCompletionReason.Normal:
-            log_message = f"Agent work stream completed at node `{self._active_last_node.id}`."
+            log_message = (
+                f"Agent work stream completed at node `{self._active_last_node.id}`."
+            )
         elif completion_reason == AgentCompletionReason.MaxLoops:
             log_message = f"Agent work stream completed due to max_num_loops limit at node `{self._active_last_node.id}`."
         else:
-            raise ValueError(f"Invalid completion reason: {completion_reason}. Expected {AgentCompletionReason.Normal} or {AgentCompletionReason.MaxLoops}.")
+            raise ValueError(
+                f"Invalid completion reason: {completion_reason}. Expected {AgentCompletionReason.Normal} or {AgentCompletionReason.MaxLoops}."
+            )
 
-        self._active_last_node.log_info(log_message, LOG_TYPE_AGENT_WORKSTREAM_COMPLETED)
+        self._active_last_node.log_info(
+            log_message, LOG_TYPE_AGENT_WORKSTREAM_COMPLETED
+        )
 
     @staticmethod
     def _resolve_task_input_from_call_args(args: tuple, kwargs: dict) -> Any:
@@ -1062,14 +1198,14 @@ class Agent(Debuggable):
         #   inside a `task_input` dict.
         # Here we unwrap the `task_input`, but the arguments inside it has lower priority than the pre-filled partial arguments.
         # We forbit a child class to fill the `task_input` argument. This argument is preserved for up-stream Agent to pass down arguments.
-        if isinstance(task_input, Dict) and 'task_input' in task_input:
-            _task_input = task_input['task_input']
+        if isinstance(task_input, Dict) and "task_input" in task_input:
+            _task_input = task_input["task_input"]
             if isinstance(_task_input, Dict):
                 task_input = dict(task_input)
                 for k, v in _task_input.items():
                     if k not in task_input:
                         task_input[k] = v
-                del task_input['task_input']
+                del task_input["task_input"]
 
         return task_input
 
@@ -1237,7 +1373,9 @@ class Agent(Debuggable):
         task_input = self._resolve_task_input_from_call_args(args, kwargs)
 
         if task_input:
-            max_num_loops = task_input.pop(self.task_input_field_max_num_loops, self.max_num_loops)
+            max_num_loops = task_input.pop(
+                self.task_input_field_max_num_loops, self.max_num_loops
+            )
             attachments = task_input.pop(self.task_input_field_attachments, [])
             task_label = task_input.pop(DEFAULT_AGENT_TASK_INPUT_FIELD_TASK_LABEL, None)
 
@@ -1254,7 +1392,9 @@ class Agent(Debuggable):
             #   5. Attachments are included in _construct_reasoner_input() for the LLM to see
             #
             # This enables chained agents to receive context from their predecessors in the dependency graph.
-            previous_agent_results = task_input.pop(self.task_input_field_previous_agent_results, None)
+            previous_agent_results = task_input.pop(
+                self.task_input_field_previous_agent_results, None
+            )
             if previous_agent_results is not None:
                 attachments.extend(self._make_attachments(previous_agent_results))
         else:
@@ -1271,23 +1411,30 @@ class Agent(Debuggable):
             if isinstance(task_input, str):
                 user_input = task_input
                 task_input = None
-                self.log_debug(f"Using explicit string input: {user_input}", 'UserInput')
+                self.log_debug(
+                    f"Using explicit string input: {user_input}", "UserInput"
+                )
             # Case 2: Dict with user_input field (e.g., agent({"user_input": "hello", "session_id": "..."}))
-            elif isinstance(task_input, Dict) and self.task_input_field_user_input in task_input:
+            elif (
+                isinstance(task_input, Dict)
+                and self.task_input_field_user_input in task_input
+            ):
                 # Use utility method to extract user_input, metadata, and agent fields
-                user_input, task_input_metadata, agent_fields = self._extract_user_input_and_metadata(task_input)
+                user_input, task_input_metadata, agent_fields = (
+                    self._extract_user_input_and_metadata(task_input)
+                )
                 # Keep only agent-specific fields in task_input for downstream processing
                 task_input = agent_fields if agent_fields else None
                 self.log_debug(
                     f"Using explicit dict input: user_input={user_input}, metadata={task_input_metadata}",
-                    'UserInput'
+                    "UserInput",
                 )
             # Case 3: Invalid explicit input - log error and fall back to queue
             else:
                 self.log_error(
                     f"Invalid explicit task_input: expected string or dict with '{self.task_input_field_user_input}' field, "
                     f"got {type(task_input).__name__}: {task_input}. Falling back to interactive.get_input().",
-                    'UserInput'
+                    "UserInput",
                 )
                 # Fall back to reading from interactive queue
                 if self.interactive is None:
@@ -1296,10 +1443,13 @@ class Agent(Debuggable):
                         f"and self.interactive is None. Either provide valid task_input (string or dict with "
                         f"'{self.task_input_field_user_input}' field) or configure self.interactive."
                     )
-                user_input, task_input_metadata, _ = self._extract_user_input_and_metadata(
-                    self.interactive.get_input()
+                user_input, task_input_metadata, _ = (
+                    self._extract_user_input_and_metadata(self.interactive.get_input())
                 )
-                self.log_debug(f"Read from interactive queue (invalid explict input): {user_input}", 'UserInput')
+                self.log_debug(
+                    f"Read from interactive queue (invalid explicit input): {user_input}",
+                    "UserInput",
+                )
                 task_input = None
         else:
             # Case 4: No explicit input - read from interactive queue (e.g., agent())
@@ -1309,12 +1459,15 @@ class Agent(Debuggable):
                     f"Either call agent with input (e.g., agent('message') or agent({{'{self.task_input_field_user_input}': 'message'}})) "
                     f"or configure self.interactive."
                 )
-            self.log_debug("Reading input from interactive queue (no explicit task_input)", 'UserInput')
+            self.log_debug(
+                "Reading input from interactive queue (no explicit task_input)",
+                "UserInput",
+            )
             # Get input and extract metadata
             user_input, task_input_metadata, _ = self._extract_user_input_and_metadata(
                 self.interactive.get_input()
             )
-            self.log_debug(f"Read from interactive queue: {user_input}", 'UserInput')
+            self.log_debug(f"Read from interactive queue: {user_input}", "UserInput")
 
         # endregion
 
@@ -1324,31 +1477,31 @@ class Agent(Debuggable):
                 user_input=user_input,
                 task_input=task_input,
                 field_name=self.task_input_field_trigger_action,
-                default=None
+                default=None,
             )
             user_profile = self._resolve_task_input_field(
                 user_input=user_input,
                 task_input=task_input,
                 field_name=self.task_input_field_user_profile,
-                default=self.user_profile
+                default=self.user_profile,
             )
             context = self._resolve_task_input_field(
                 user_input=user_input,
                 task_input=task_input,
                 field_name=self.task_input_field_context,
-                default=self.context
+                default=self.context,
             )
             action_results = self._resolve_task_input_field(
                 user_input=user_input,
                 task_input=task_input,
                 field_name=self.task_input_field_action_results,
-                default=None
+                default=None,
             )
             self.states = self._resolve_task_input_field(
                 user_input=user_input,
                 task_input=task_input,
                 field_name=self.task_input_field_agent_states,
-                default=self.states
+                default=self.states,
             )
         else:
             trigger_action = action_results = None
@@ -1376,11 +1529,11 @@ class Agent(Debuggable):
         self.actor_state = self._get_all_actor_states()
         # endregion
 
-        self.log_debug(user_input, 'UserInput')
-        self.log_debug(user_profile, 'UserProfile')
-        self.log_debug(context, 'Context')
-        self.log_debug(action_results, 'ActionResults')
-        self.log_debug(task_input, 'TaskInput')
+        self.log_debug(user_input, "UserInput")
+        self.log_debug(user_profile, "UserProfile")
+        self.log_debug(context, "Context")
+        self.log_debug(action_results, "ActionResults")
+        self.log_debug(task_input, "TaskInput")
 
         # endregion
 
@@ -1404,7 +1557,9 @@ class Agent(Debuggable):
         trigger_action_results = action_results
         self._active_last_node = self
         loop_count = 0
-        agent_response = None  # Will be set during reasoning; initialized for defensive programming
+        agent_response = (
+            None  # Will be set during reasoning; initialized for defensive programming
+        )
 
         while True:
             loop_count += 1
@@ -1415,7 +1570,9 @@ class Agent(Debuggable):
 
             # Check if max loops reached
             if max_num_loops > 0 and loop_count > max_num_loops:
-                self.log_info(f"Max loops limit reached ({max_num_loops}). Wrapping current results and completing.")
+                self.log_info(
+                    f"Max loops limit reached ({max_num_loops}). Wrapping current results and completing."
+                )
                 completion_reason = AgentCompletionReason.MaxLoops
                 break
 
@@ -1426,15 +1583,29 @@ class Agent(Debuggable):
             if loop_count == 1 and self.base_action is not None:
                 # Check if base_action is a StructuredResponse string
                 reasoner_input = None
-                if isinstance(self.base_action, str) and '<StructuredResponse>' in self.base_action:
+                if (
+                    isinstance(self.base_action, str)
+                    and "<StructuredResponse>" in self.base_action
+                ):
                     # Use as raw_response (will be parsed by _parse_raw_response below)
-                    self.log_info("First iteration with base_action (StructuredResponse string) - skipping reasoner")
+                    self.log_info(
+                        "First iteration with base_action (StructuredResponse string) - skipping reasoner"
+                    )
                     raw_response: ReasonerResponse = self.base_action
-                    self.log_info(raw_response, 'BaseActionRawResponse', artifacts_as_parts=True, parts_min_size=0)
+                    self.log_info(
+                        raw_response,
+                        "BaseActionRawResponse",
+                        artifacts_as_parts=True,
+                        parts_min_size=0,
+                    )
                 else:
                     # Use _parse_base_action for custom formats
-                    self.log_info("First iteration with base_action (custom format) - calling _parse_base_action")
-                    agent_response, agent_state = self._parse_base_action(self.base_action)
+                    self.log_info(
+                        "First iteration with base_action (custom format) - calling _parse_base_action"
+                    )
+                    agent_response, agent_state = self._parse_base_action(
+                        self.base_action
+                    )
                     skip_parse_raw_response = True
             else:
                 # FEEDBACK LOOP: Construct reasoner input with action_results from previous iteration
@@ -1443,24 +1614,35 @@ class Agent(Debuggable):
                 # reasoner → action → action_results → reasoner → action → ...
                 # Example: action_results might contain HTML changes, status flags, etc.
                 reasoner_input: ReasonerInput = self._construct_reasoner_input(
-                        task_input=task_input_metadata,
-                        user_input=user_input,
-                        user_profile=user_profile,
-                        context=context,
-                        action_results=action_results,  # Raw data from previous action (or None on first iteration),
-                        attachments=attachments,
-                        knowledge=knowledge
+                    task_input=task_input_metadata,
+                    user_input=user_input,
+                    user_profile=user_profile,
+                    context=context,
+                    action_results=action_results,  # Raw data from previous action (or None on first iteration),
+                    attachments=attachments,
+                    knowledge=knowledge,
                 )
-                reasoner_inference_config: ReasonerInferenceConfig = self._construct_reasoner_inference_config()
-                self.log_info(reasoner_input, 'ReasonerInput', is_artifact=True, parts_min_size=0)
-                self.log_debug(reasoner_inference_config, 'ReasonerInferenceConfig')
+                reasoner_inference_config: ReasonerInferenceConfig = (
+                    self._construct_reasoner_inference_config()
+                )
+                self.log_info(
+                    reasoner_input, "ReasonerInput", is_artifact=True, parts_min_size=0
+                )
+                self.log_debug(reasoner_inference_config, "ReasonerInferenceConfig")
 
                 self.log_info(f"Start reasoning with reasoner '{self.reasoner}'")
 
                 # TODO: we need to retry the two steps
-                raw_response: ReasonerResponse = self.reasoner(reasoner_input, reasoner_inference_config, **(self.reasoner_args or {}))
-                self.log_info('End reasoning')
-                self.log_info(raw_response, 'ReasonerResponse', artifacts_as_parts=True, parts_min_size=0)
+                raw_response: ReasonerResponse = self._call_reasoner(
+                    reasoner_input, reasoner_inference_config
+                )
+                self.log_info("End reasoning")
+                self.log_info(
+                    raw_response,
+                    "ReasonerResponse",
+                    artifacts_as_parts=True,
+                    parts_min_size=0,
+                )
 
             # Only parse raw_response if we didn't use _parse_base_action
             if not skip_parse_raw_response:
@@ -1470,23 +1652,35 @@ class Agent(Debuggable):
                 # direct response - wrap with metadata for multi-session support
                 response_with_metadata = {
                     **task_input_metadata,
-                    'response': agent_response
+                    "response": agent_response,
                 }
                 if self.interactive is not None:
-                    self.interactive.send_response(response=response_with_metadata, flag=InteractionFlags.PendingInput)
+                    self.interactive.send_response(
+                        response=response_with_metadata,
+                        flag=InteractionFlags.PendingInput,
+                    )
 
                     # Get follow-up input and extract metadata
-                    user_input, task_input_metadata, _ = self._extract_user_input_and_metadata(
-                        self.interactive.get_input(),
-                        existing_metadata=task_input_metadata
+                    user_input, task_input_metadata, _ = (
+                        self._extract_user_input_and_metadata(
+                            self.interactive.get_input(),
+                            existing_metadata=task_input_metadata,
+                        )
                     )
-                self.log_info(agent_response, AgentLogTypes.AgentResponse, is_artifact=True, parts_min_size=0)
+                self.log_info(
+                    agent_response,
+                    AgentLogTypes.AgentResponse,
+                    is_artifact=True,
+                    parts_min_size=0,
+                )
             else:
                 # region special support for build-in AgentState class
                 if isinstance(agent_state, AgentStateItem):
                     agent_state.last_action_source = self.states.last_action_source
                     agent_state.last_action_type = self.states.last_action_type
-                    agent_state.last_anchor_action_type = self.states.last_anchor_action_type
+                    agent_state.last_anchor_action_type = (
+                        self.states.last_anchor_action_type
+                    )
                     agent_state.user_input = user_input
                     agent_state.reasoner_input = reasoner_input
                     agent_state.raw_response = raw_response
@@ -1498,8 +1692,18 @@ class Agent(Debuggable):
                     if not agent_response.next_actions:
                         agent_state = AgentTaskStatusFlags.Completed
 
-                self.log_info(agent_response, AgentLogTypes.AgentResponse, artifacts_as_parts=True, parts_min_size=0)
-                self.log_info(agent_state, AgentLogTypes.AgentState, artifacts_as_parts=True, parts_min_size=0)
+                self.log_info(
+                    agent_response,
+                    AgentLogTypes.AgentResponse,
+                    artifacts_as_parts=True,
+                    parts_min_size=0,
+                )
+                self.log_info(
+                    agent_state,
+                    AgentLogTypes.AgentState,
+                    artifacts_as_parts=True,
+                    parts_min_size=0,
+                )
 
                 # endregion
 
@@ -1526,12 +1730,12 @@ class Agent(Debuggable):
                             task_input_metadata = {}
                         response_with_metadata = {
                             **task_input_metadata,
-                            'response': agent_response.instant_response
+                            "response": agent_response.instant_response,
                         }
                         if self.interactive is not None:
                             self.interactive.send_response(
                                 response=response_with_metadata,
-                                flag=InteractionFlags.MessageOnly  # Work is still ongoing (WorkGraph execution)
+                                flag=InteractionFlags.MessageOnly,  # Work is still ongoing (WorkGraph execution)
                             )
 
                         # Execute the WorkGraph (e.g., from PromptBasedActionPlanningAgent)
@@ -1541,7 +1745,7 @@ class Agent(Debuggable):
                                 self.task_input_field_user_profile: user_profile,
                                 self.task_input_field_context: context,
                                 self.task_input_field_action_results: action_results,
-                                **task_input_metadata
+                                **task_input_metadata,
                             }
                         )
                     else:
@@ -1570,7 +1774,7 @@ class Agent(Debuggable):
                                 # actions so the actor can skip post-action
                                 # housekeeping (e.g., DOM re-indexing) that would
                                 # invalidate element references for later actions.
-                                is_last_group = (group_idx == num_groups - 1)
+                                is_last_group = group_idx == num_groups - 1
                                 action_node = WorkGraphNode(
                                     value=partial(
                                         self._run_single_action,
@@ -1581,15 +1785,15 @@ class Agent(Debuggable):
                                         previous_action_results=previous_action_results,
                                         task_input_metadata=task_input_metadata,
                                         attachments=attachments,
-                                        ongoing_sequence_actions=not is_last_group
+                                        ongoing_sequence_actions=not is_last_group,
                                     ),
                                     result_pass_down_mode=partial(
                                         self._merge_action_results_to_list,
-                                        shared_list=previous_action_results
+                                        shared_list=previous_action_results,
                                     ),
                                     copy_debuggable_config_from=self,
-                                    id=f'$class-Actioner',
-                                    enable_suffix_for_initial_id=True
+                                    id=f"$class-Actioner",
+                                    enable_suffix_for_initial_id=True,
                                 )
 
                                 # Chain sequential actions: action1 → action2 → action3 ...
@@ -1616,17 +1820,19 @@ class Agent(Debuggable):
                                     ),
                                     result_pass_down_mode=partial(
                                         self._merge_action_results_to_list,
-                                        shared_list=previous_action_results
+                                        shared_list=previous_action_results,
                                     ),
                                     copy_debuggable_config_from=self,
-                                    id=f'$class-Summarizer',
-                                    enable_suffix_for_initial_id=True
+                                    id=f"$class-Summarizer",
+                                    enable_suffix_for_initial_id=True,
                                 )
 
                                 action_nodes = []
                                 for next_action in next_action_group:
                                     # Create a branched agent (independent copy) as a mean for parallel recursion
-                                    branched_agent = self.copy(clear_states=self.branching_agent_start_as_new)
+                                    branched_agent = self.copy(
+                                        clear_states=self.branching_agent_start_as_new
+                                    )
 
                                     # Create action_node to execute the immediate next action
                                     action_node = WorkGraphNode(
@@ -1638,12 +1844,12 @@ class Agent(Debuggable):
                                             agent_response=agent_response,
                                             previous_action_results=previous_action_results,
                                             task_input_metadata=task_input_metadata,
-                                            attachments=attachments
+                                            attachments=attachments,
                                         ),
                                         result_pass_down_mode=ResultPassDownMode.ResultAsFirstArg,
                                         copy_debuggable_config_from=self,
-                                        id=f'$class-Actioner',
-                                        enable_suffix_for_initial_id=True
+                                        id=f"$class-Actioner",
+                                        enable_suffix_for_initial_id=True,
                                     )
 
                                     # Create branched_agent_node for RECURSIVE agent execution
@@ -1654,8 +1860,8 @@ class Agent(Debuggable):
                                         branched_agent,  # Callable via __call__ method
                                         result_pass_down_mode=ResultPassDownMode.ResultAsFirstArg,
                                         copy_debuggable_config_from=self,
-                                        id=f'$class-Agent',
-                                        enable_suffix_for_initial_id=True
+                                        id=f"$class-Agent",
+                                        enable_suffix_for_initial_id=True,
                                     )
 
                                     # Wire up the branch: action → recursive agent → summary
@@ -1679,15 +1885,14 @@ class Agent(Debuggable):
                         # Execute the constructed WorkGraph
                         # This runs all the action nodes (and any branched agents recursively)
                         work_graph = WorkGraph(
-                            start_nodes=start_nodes,
-                            copy_debuggable_config_from=self
+                            start_nodes=start_nodes, copy_debuggable_config_from=self
                         )
 
                         if last_node is not None:
                             work_graph.set_parent_debuggable(self._active_last_node)
                             last_node.log_info(
                                 f"`{last_node.id}` is set as agent `{self.id}`'s active last node",
-                                log_type=LOG_TYPE_SET_AGENT_ACTIVE_LAST_NODE
+                                log_type=LOG_TYPE_SET_AGENT_ACTIVE_LAST_NODE,
                             )
                             self._active_last_node = last_node
 
@@ -1697,7 +1902,7 @@ class Agent(Debuggable):
                                 self.task_input_field_user_profile: user_profile,
                                 self.task_input_field_context: context,
                                 self.task_input_field_action_results: action_results,
-                                **task_input_metadata
+                                **task_input_metadata,
                             }
                         )
 
@@ -1713,9 +1918,13 @@ class Agent(Debuggable):
                         # Extract the action_results dict which contains raw operational data from the last action
                         # This action_results will feed into the next reasoner call (line 1072), closing the feedback loop
                         # Example: {'body_html_after': '<div>...', 'is_follow_up': False, 'source': 'https://...'}
-                        user_input = work_graph_final_result[self.task_input_field_user_input]
+                        user_input = work_graph_final_result[
+                            self.task_input_field_user_input
+                        ]
                         agent_state.action_results = action_results = (
-                            work_graph_final_result[self.task_input_field_action_results]
+                            work_graph_final_result[
+                                self.task_input_field_action_results
+                            ]
                         )
                         # Loop continues: the agent will call the reasoner again with updated action_results
 
@@ -1730,7 +1939,7 @@ class Agent(Debuggable):
         agent_results = self._get_agent_results(
             trigger_action=trigger_action,
             trigger_action_results=trigger_action_results,
-            new_states=self.states[num_states_when_starting:]
+            new_states=self.states[num_states_when_starting:],
         )
 
         # Finalize and send response (handles both Normal and MaxLoops completion)
@@ -1738,7 +1947,7 @@ class Agent(Debuggable):
             agent_response=agent_response,
             agent_results=agent_results,
             task_input_metadata=task_input_metadata,
-            completion_reason=completion_reason
+            completion_reason=completion_reason,
         )
 
         # EXIT POINT: Return agent results after successful completion
@@ -1770,6 +1979,7 @@ class Agent(Debuggable):
             self.log_info("Agent execution paused by control signal")
             # Wait loop until resumed or stopped
             import time
+
             while self._control == AgentControls.Pause:
                 time.sleep(0.1)  # Small sleep to prevent CPU busy-waiting
 
@@ -1787,6 +1997,7 @@ class Agent(Debuggable):
             self.log_info("Agent in step-by-step mode - pausing before next step")
             # Wait loop until user calls resume() or stop()
             import time
+
             while self._control == AgentControls.StepByStep:
                 time.sleep(0.1)  # Small sleep to prevent CPU busy-waiting
 

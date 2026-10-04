@@ -1,7 +1,8 @@
-from attr import attrs
-
 from agent_foundation.agents.agent_actor import AgentActionResult
-from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import PromptBasedActionAgent
+from agent_foundation.agents.prompt_based_agents.prompt_based_action_agent import (
+    PromptBasedActionAgent,
+)
+from attr import attrs
 from rich_python_utils.common_utils import has_single_key, iter_
 
 
@@ -14,11 +15,11 @@ class PromptBasedResponseActionAgent(PromptBasedActionAgent):
             answers = []
 
             for response in iter_(instant_response):
-                if has_single_key(response, 'Response'):
-                    response = response['Response']
-                    answers.append(response['Answer'])
+                if has_single_key(response, "Response"):
+                    response = response["Response"]
+                    answers.append(response["Answer"])
 
-            joined = '\n\n'.join(answers)
+            joined = "\n\n".join(answers)
             return f"<html><body>{joined}</body></html>"
 
     def _get_agent_results(self, trigger_action, trigger_action_results, new_states):
@@ -28,5 +29,5 @@ class PromptBasedResponseActionAgent(PromptBasedActionAgent):
                 summary=last_agent_state.response.instant_response,
                 details=self._get_action_result_string(trigger_action_results),
                 source=trigger_action_results.source,
-                action=trigger_action
+                action=trigger_action,
             )

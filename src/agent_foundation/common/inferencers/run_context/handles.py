@@ -15,15 +15,30 @@ Per the plan (§2.0 Note B / §2.1 / V7 / T-MAJOR2):
 
 These are **never persisted** (a live connection is not a concurrency-safe sink
 and cannot be serialized).
+
+Every store carries a ``scope_id``, assigned at construction (never ``id()``,
+which GC reuses). A leaf that holds connections for many hosts keys its branches
+by ``(scope, path)`` (plan v8 §5.5, B32): a host ctx's scope is its root's
+handle-store ``scope_id``, and every legacy-minted root shares
+:data:`LEGACY_HANDLE_SCOPE`, so two independent host roots (both at ``"/"``)
+never share a leaf's session or client while bare calls keep their continuity.
 """
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Hashable
 from typing import Any
+
+# The one handle scope every legacy-minted root shares (bare-call continuity).
+LEGACY_HANDLE_SCOPE = "legacy"
 
 
 class LiveHandles:
     """A per-branch bag of live connection handles (NOT serialized).
+
+    ``path`` is the branch key it was created under: a ctx path in a ctx's own
+    store, a ``(scope, path)`` pair in a leaf's connection store.
 
     Deliberately flexible: leaf inferencers stash backend-specific handles
     (``sdk_client``, ``subprocess``, ``http_client``, ``base_url``,
@@ -34,7 +49,7 @@ class LiveHandles:
 
     __never_persist__ = True
 
-    def __init__(self, path: str = "/", **initial: Any) -> None:
+    def __init__(self, path: Hashable = "/", **initial: Any) -> None:
         # Use object.__setattr__ to avoid recursion through our __setattr__.
         object.__setattr__(self, "path", path)
         object.__setattr__(self, "_data", dict(initial))
@@ -65,28 +80,31 @@ class LiveHandles:
 
 
 class LiveHandleStore:
-    """Connection-scoped, path-keyed store of :class:`LiveHandles`.
+    """Connection-scoped store of :class:`LiveHandles`, keyed by branch: a ctx path
+    in a ctx's own store, a ``(scope, path)`` pair in a leaf's connection store.
 
     Lifetime = the connection (``aconnect``..``adisconnect``), **not** the per-turn
-    run.  ``get_or_create`` is idempotent per path.
+    run.  ``get_or_create`` is idempotent per key.  ``scope_id`` identifies the
+    store as the handle scope of the roots built on it.
     """
 
     __never_persist__ = True
 
     def __init__(self) -> None:
-        self._by_path: dict[str, LiveHandles] = {}
+        self.scope_id: str = uuid.uuid4().hex
+        self._by_path: dict[Hashable, LiveHandles] = {}
 
-    def get_or_create(self, path: str) -> LiveHandles:
+    def get_or_create(self, path: Hashable) -> LiveHandles:
         handles = self._by_path.get(path)
         if handles is None:
             handles = LiveHandles(path=path)
             self._by_path[path] = handles
         return handles
 
-    def peek(self, path: str) -> LiveHandles | None:
+    def peek(self, path: Hashable) -> LiveHandles | None:
         return self._by_path.get(path)
 
-    def teardown(self, path: str | None = None) -> None:
+    def teardown(self, path: Hashable | None = None) -> None:
         """Tear down one branch's handles (``adisconnect``), or all of them."""
         if path is None:
             for handles in self._by_path.values():

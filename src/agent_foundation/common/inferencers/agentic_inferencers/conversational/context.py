@@ -1,5 +1,3 @@
-
-
 """Context data classes for the ConversationalInferencer agentic loop.
 
 CompletedAction — a single tool execution record.
@@ -120,7 +118,12 @@ class AgenticResult:
     last_rendered_prompt: str = ""  # for logging
     last_template_source: str = ""  # for View Prompt
     last_template_feed: dict[str, Any] = field(default_factory=dict)
-    last_template_config: dict[str, Any] = field(default_factory=dict)  # for UI rendering
+    last_template_config: dict[str, Any] = field(
+        default_factory=dict
+    )  # for UI rendering
+    # Native orchestrator metadata (backend, hashed session id, injection
+    # routes, usage); empty for the text-protocol orchestrator.
+    native_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

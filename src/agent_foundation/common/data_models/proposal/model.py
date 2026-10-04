@@ -4,6 +4,7 @@ Inspired by RankEvolve's ``StructuredProposal``/``ProposalSelectionData`` but
 trimmed to framework-level generics. Domain-specific fields (probability, slots,
 batches) go in ``Proposal.metadata`` or in subclasses.
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,6 +94,45 @@ class Proposal:
 
 
 @dataclass
+class Batch:
+    """A batch of proposals within an implementation phase.
+
+    Container-level grouping the Experiment Hub uses to queue selected
+    proposals batch-by-batch (e.g. "Batch 1A: Loss & Training"). IDs are
+    canonical AF **proposal ids** (``proposal_ids``); ``from_dict`` also
+    accepts the hub-shaped ``hypothesis_ids`` alias so an externally produced
+    payload still parses at this boundary (see correction #16).
+    """
+
+    id: str
+    label: str = ""
+    timeline: str = ""
+    proposal_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id}
+        if self.label:
+            d["label"] = self.label
+        if self.timeline:
+            d["timeline"] = self.timeline
+        if self.proposal_ids:
+            d["proposal_ids"] = list(self.proposal_ids)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Batch:
+        # Tolerate the hub dialect: ``hypothesis_ids`` is the H-id-shaped alias
+        # for the canonical ``proposal_ids``. Accept either so a hub-produced
+        # batch round-trips into the canonical AF shape.
+        return cls(
+            id=str(d.get("id", "")),
+            label=d.get("label", ""),
+            timeline=d.get("timeline", ""),
+            proposal_ids=_as_list(d.get("proposal_ids", d.get("hypothesis_ids"))),
+        )
+
+
+@dataclass
 class ProposalGroup:
     """Phase-based grouping of proposals (Quick Wins, Core, Exploration)."""
 
@@ -100,12 +140,15 @@ class ProposalGroup:
     label: str
     description: str = ""
     proposals: list[Proposal] = field(default_factory=list)
+    batches: list[Batch] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"phase": self.phase, "label": self.label}
         if self.description:
             d["description"] = self.description
         d["proposals"] = [p.to_dict() for p in self.proposals]
+        if self.batches:
+            d["batches"] = [b.to_dict() for b in self.batches]
         return d
 
     @classmethod
@@ -115,6 +158,7 @@ class ProposalGroup:
             label=d.get("label", ""),
             description=d.get("description", ""),
             proposals=[Proposal.from_dict(p) for p in d.get("proposals", [])],
+            batches=[Batch.from_dict(b) for b in d.get("batches", []) or []],
         )
 
 
@@ -126,6 +170,7 @@ class ProposalConstraint:
     kind: str
     proposal_ids: list[str] = field(default_factory=list)
     requires_ids: list[str] = field(default_factory=list)
+    requires_any_of: bool = False
     label: str = ""
     reason: str = ""
     severity: str = "error"
@@ -138,6 +183,11 @@ class ProposalConstraint:
         }
         if self.requires_ids:
             d["requires_ids"] = list(self.requires_ids)
+        # ``requires_any_of`` toggles ``requires_ids`` from ALL-of (default,
+        # the conjunctive AND) to ANY-of (disjunctive OR). Only serialised when
+        # True so existing proposals.json stays byte-identical (additive).
+        if self.requires_any_of:
+            d["requires_any_of"] = True
         if self.label:
             d["label"] = self.label
         if self.reason:
@@ -161,6 +211,7 @@ class ProposalConstraint:
             kind=str(d.get("kind", d.get("type", "unknown"))),
             proposal_ids=_as_list(d.get("proposal_ids", d.get("from"))),
             requires_ids=_as_list(d.get("requires_ids", d.get("to"))),
+            requires_any_of=bool(d.get("requires_any_of", False)),
             label=d.get("label", ""),
             reason=d.get("reason", d.get("rule", d.get("note", ""))),
             severity=d.get("severity", "error"),
@@ -177,6 +228,7 @@ class ProposalIndex:
     total_count: int = 0
     groups: list[ProposalGroup] = field(default_factory=list)
     constraints: list[ProposalConstraint] = field(default_factory=list)
+    themes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def all_proposals(self) -> list[Proposal]:
@@ -194,21 +246,25 @@ class ProposalIndex:
         missing = [i for i in ids if i not in by_id]
         if missing:
             valid = sorted(by_id.keys())
-            raise KeyError(
-                f"Unknown proposal IDs: {missing}. Valid IDs: {valid}"
-            )
+            raise KeyError(f"Unknown proposal IDs: {missing}. Valid IDs: {valid}")
         return [by_id[i] for i in ids]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "version": self.version,
             "created_at": self.created_at,
             "source_workspace": self.source_workspace,
             "total_count": self.total_count,
             "groups": [g.to_dict() for g in self.groups],
             "constraints": [c.to_dict() for c in self.constraints],
-            "warnings": list(self.warnings),
         }
+        # Container-level theme labels (e.g. "Multi-Task Architecture") the
+        # Experiment Hub uses for theme grouping. Emitted only when present so
+        # existing proposals.json without it stays byte-identical (additive).
+        if self.themes:
+            d["themes"] = list(self.themes)
+        d["warnings"] = list(self.warnings)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ProposalIndex:
@@ -220,9 +276,7 @@ class ProposalIndex:
             try:
                 constraints.append(ProposalConstraint.from_dict(c))
             except Exception as exc:  # noqa: BLE001 — defence-in-depth at parse boundary
-                _logger.warning(
-                    "Skipping malformed proposal constraint %r: %s", c, exc
-                )
+                _logger.warning("Skipping malformed proposal constraint %r: %s", c, exc)
         return cls(
             version=str(d.get("version", "1")),
             created_at=d.get("created_at", ""),
@@ -230,5 +284,6 @@ class ProposalIndex:
             total_count=int(d.get("total_count", 0)),
             groups=[ProposalGroup.from_dict(g) for g in d.get("groups", [])],
             constraints=constraints,
+            themes=[str(t) for t in d.get("themes", []) or []],
             warnings=list(d.get("warnings", [])),
         )

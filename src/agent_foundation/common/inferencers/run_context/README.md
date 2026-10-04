@@ -21,6 +21,71 @@ Implements the foundation of the design plan **`swift-launching-backus.md`**
 | **M7 (role-state)** | `switch_role` additively mirrors role changes into `ctx.node.call` as a `RoleState` (self-mutation kept as byte-identical fallback); the §2.6 **purity snapshot** is wired as the certification gate (`test_m7_role_state.py`) | ✅ done + 3 tests; mfdual byte-identical (3f/52p == baseline) |
 | **M10 (rebaseline)** | Consolidated edited-surface regression: **219 passed / 1 pre-existing fail** (the `multi_flow` `flow_0`-vs-`Flow 0` string assertion, unrelated to run_context). Zero regressions across orchestrators, leaves, recovery, mfdual. | ✅ rebaselined |
 
+## Invocation-scoped runtime (plan v8)
+
+The milestones below separated definition from run state with read-flips and compat
+fallbacks. Plan v8 (`AgentFoundation/invocation_scoped_runtime.plan.md`, inventory
+`invocation_scoped_runtime.P0_inventory.md`) finished the job: an inferencer instance
+is a definition, and every value a call produces lives somewhere scoped to that call.
+
+### Where state lives (the placement rule)
+
+| What | Where | API |
+|---|---|---|
+| Configuration | the instance (`__dict__`, attrs fields) | constructor; never written by a host call |
+| A value one call computes and reads back (a transport result, counters, a per-call path, a policy decision) | the call's **invocation frame** | a `RuntimeKey` declared as a ClassVar; `frame.put/get/has/require/get_or_create`, `invocation_of(self)` (strict) / `frame_for(self)` (lenient) |
+| A result a bare caller reads through a documented getter | the frame, projected onto the instance only by non-host calls | `publish_result` / `read_result`; the key's `compat={field: attr}` names the getter fields |
+| What a call tells its parent (task contract, run summary, final output) | the node's typed **outcome**, published once at successful close | `_outcome_for(frame)` returns a `NodeOutcomeState`; parents read `_task_contract_at` / `_summary_at` / `_final_output_at(child, child_ctx)` |
+| Per-run state persisted with the run | the ctx node (`NodeRunState`, Tier 1) | a registered state class in `state.py` (JSON-shaped fields) |
+| Conversation state that continues across calls of one branch (session ids, conversation ids, error streaks) | the **session policy**: this branch's slot under a host ctx, the instance otherwise | `LiveHandleField`, `_session_scoped_get` / `_set` |
+| Live connections (SDK clients, server processes) | Tier-3 handles, per connection branch | `_tier3_get` / `_tier3_set`; `adisconnect` drains every branch (`_iter_live_handle_sets`) |
+
+### `ALLOWED`
+
+A host call may leave only lazily built, idempotent definition residents on the
+instance, listed in `ALLOWED` in `test/.../run_context/test_template_purity_ratchet.py`:
+the extension-manager cache, the workspace-logger un-defer fields, the Tier-3 handle
+store and the lazy connect lock. They may appear on the first call (cold delta), never
+change on later ones, and an entry no fixture writes any more is deleted.
+
+### How to add runtime state
+
+1. Decide its lifetime with the table above. If one call writes it and the same call
+   reads it, it is a frame component: declare a `RuntimeKey` beside the class and use
+   the frame (a fresh value per attempt where retries must not see a previous one).
+2. Declare `compat` only when a documented bare getter reads it. Nothing else may
+   read the compat field (the source checks enforce it); inside a call read the frame.
+3. A parent that needs it after the call reads the child's outcome at the child's ctx,
+   never a getter (except in true no-ctx).
+4. Persisted state gets a registered state class whose fields are JSON-shaped; a field
+   typed `Any` must be listed in `test_runtime_source_checks.py` with why.
+5. The class stays certified only if the ratchet still measures it empty: run
+   `test_template_purity_ratchet.py`; a leaf needs a fixture in `_leaf_fixtures.py`.
+
+### The entry rule
+
+Public entries (`infer` / `ainfer` / the streaming templates / `_(a)infer_single`) open
+the invocation: they resolve the ctx (explicit, then active, then a legacy root),
+claim its path, run the provider hooks (`_prepare_call`, `_(a)conclude_call`) inside
+the frame, publish the outcome and flush the compat fields at close. Code that calls a
+private hook directly (`_ainfer`, `construct_command`, ...) wraps it in
+`open_invocation(inst)` / `aopen_invocation(inst)`. A parent passes each child its own
+slot, `run_context=self._rc_child("<slot>")`, so two calls never share a path.
+
+### Guards
+
+* **Path claims**: two overlapping invocations on one `(store, path)` are rejected.
+* **Single-flight guard**: in host mode an instance whose class does not declare
+  `_HOST_PURE_CERTIFIED = True` (read through `vars(type(owner))`, never inherited) runs
+  one invocation at a time; a second overlapping one raises
+  `UncertifiedConcurrentUseError`. Certified: the bases, BTA, MFI, Dual, MFDual, LWI,
+  PTI and 14 provider leaves.
+* **Purity ratchet** (I1–I3): every certified class is measured by a fixture; its host
+  calls write nothing outside `ALLOWED`, no declared compat field, and nothing live
+  into the store; certification matches the measured debt in both directions.
+* **Source checks** (`test_runtime_source_checks.py`): compat fields are written only
+  by the flush and read only by their getters; typed node state holds JSON values.
+
 ### Post-audit fix-list progress
 
 After a full plan-vs-code audit (8 agents + direct verification), these gaps were closed:
@@ -38,10 +103,20 @@ After a full plan-vs-code audit (8 agents + direct verification), these gaps wer
 * **`merge_reviews` (§3 Part B)** — deterministic union / dedup by `(location, normalized desc)` /
   never-downgrade-severity / `agreement_count`. `flow_parsers.py`; `test_merge_reviews.py` (5).
 
-**Still open (deeper/riskier, honestly):** full write-purity (base `switch_role` + Dual/BTA workspace
-still mutate the instance — read-virtualized only); Tier-3 conversion for the other ~8 leaves;
-`_iter_child_slots` lifecycle helper + slot-aware reset; resume *rehydrate* (`.load` + pause-state
-re-point — only `.save` is wired); HITL→`ctx.node.checkpoints`; §9.2 layer-2 forwarder fix.
+**Formerly open, status after plan v8:**
+* full write-purity — done: no certified class writes per-call state on the instance
+  (`KNOWN_DEBT` is empty; `switch_role` and the Dual / BTA / LWI / PTI workspaces are
+  per call since P5, P6 and P9);
+* Tier-3 for the other leaves — done (P10): every provider leaf keeps its connection in
+  Tier-3 handles and its sessions behind the session policy;
+* `_iter_child_slots` — done (`InferencerBase._iter_child_slots`);
+* HITL → `ctx.node.checkpoints` — done (`_record_hitl_checkpoint`);
+* §9.2 layer-2 forwarder — done (`TemplatedInferencer` threads its base call as a
+  `base` child);
+* conversation resume *rehydrate* — wired (`_rehydrate_from_resumed_store`), but its
+  regression test `test_m9_conversation_resume.py::test_rehydrate_from_resumed_store_
+  wires_restore_into_the_run` still fails; Conversational has its own follow-up plan
+  (plan v8 O2).
 
 ### Host wiring (§9.4) — DONE
 

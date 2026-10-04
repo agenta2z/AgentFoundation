@@ -1,5 +1,3 @@
-
-
 """Conversation tool data models.
 
 Defines the structured types for conversation tools that the LLM can invoke
@@ -174,15 +172,15 @@ class InputFieldSpec:
     (see ``conversation_tool_runtime.finalize_input_value``).
     """
 
-    name: str = ""                          # output variable for the entered value
+    name: str = ""  # output variable for the entered value
     expected_input_type: str = "free_text"  # "free_text" | "path" | "url"
-    prefix: str = ""                        # base dir for path inputs (autocomplete root)
-    allow_multiple_input: bool = False      # collect one-or-more values
+    prefix: str = ""  # base dir for path inputs (autocomplete root)
+    allow_multiple_input: bool = False  # collect one-or-more values
     required: bool = False
     placeholder: str = ""
     label: str = ""
     description: str = ""
-    serialization: str = "auto"             # auto | scalar | json | comma
+    serialization: str = "auto"  # auto | scalar | json | comma
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -277,14 +275,16 @@ class ConversationTool:
     allow_custom: bool = True
     expected_input_type: str = "free_text"  # "free_text" | "path" | "url"
     prefix: str = ""  # Path prefix for path input mode
-    allow_multiple_input: bool = False  # Standalone multi-value (e.g. multi-path clarification)
+    allow_multiple_input: bool = (
+        False  # Standalone multi-value (e.g. multi-path clarification)
+    )
     serialization: str = "auto"  # auto | scalar | json | comma (publication format)
     tool_name: str = ""  # For tool_argument_form: which tool
     fields: list[dict[str, Any]] = field(default_factory=list)  # For tool_argument_form
     output_vars: list[str] = field(default_factory=list)  # Variable names to capture
     metadata: dict[str, Any] = field(default_factory=dict)
     # Multiple-choice "Select All" control — passed through to InputModeConfig
-    show_select_all: bool = True        # show "All of above" toggle (default: True)
+    show_select_all: bool = True  # show "All of above" toggle (default: True)
     select_all_text: str = "All of above"  # customisable label
     # Parallel-execution group id (round-lifecycle core). Tools sharing the same
     # non-None value form one group; None = ungrouped. Lenient-parsed (never
@@ -328,9 +328,7 @@ class ConversationTool:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ConversationTool:
         data = canonicalize_tool_data(data)
-        choices = [
-            ChoiceItem.from_dict(c) for c in data.get("choices", [])
-        ]
+        choices = [ChoiceItem.from_dict(c) for c in data.get("choices", [])]
         # Lenient parallel_group parse (never raises): bad value → None, with a
         # structured marker recorded in metadata for diagnosis.
         metadata = dict(data.get("metadata", {}) or {})

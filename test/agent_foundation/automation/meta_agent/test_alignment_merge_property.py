@@ -13,14 +13,13 @@ from __future__ import annotations
 
 from typing import List
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.aligner import TraceAligner
 from agent_foundation.automation.meta_agent.models import (
     AlignedTraceSet,
     ExecutionTrace,
     TraceStep,
 )
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +144,7 @@ class TestAlignmentMergeProperty:
         for pos in merged.positions:
             pos_keys = set(pos.steps.keys())
             assert pos_keys == expected_ids, (
-                f"Position {pos.index}: expected keys {expected_ids}, "
-                f"got {pos_keys}"
+                f"Position {pos.index}: expected keys {expected_ids}, got {pos_keys}"
             )
 
     @given(existing_traces=existing_traces_st())
@@ -194,7 +192,8 @@ class TestAlignmentMergeProperty:
 
         for trace in existing_traces:
             non_none_count = sum(
-                1 for pos in merged.positions
+                1
+                for pos in merged.positions
                 if pos.steps.get(trace.trace_id) is not None
             )
             assert non_none_count == len(trace.steps), (

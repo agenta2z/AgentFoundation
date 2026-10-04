@@ -14,7 +14,6 @@ import asyncio
 import time
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -151,6 +150,8 @@ async def test_bta_concurrency_workaround_with_aggregator(tmp_workspace):
         checkpoint_dir=str(tmp_workspace["checkpoint"]),
     )
 
-    result = await asyncio.wait_for(bta.ainfer(BREAKDOWN_PROMPT), timeout=DEFAULT_TIMEOUT * 3)
+    result = await asyncio.wait_for(
+        bta.ainfer(BREAKDOWN_PROMPT), timeout=DEFAULT_TIMEOUT * 3
+    )
     assert result is not None
     assert str(result).strip() != ""

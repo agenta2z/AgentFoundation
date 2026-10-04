@@ -1,0 +1,327 @@
+{
+  "bare": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/planner",
+        "ctx_workspace": null,
+        "label": "plan",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      },
+      {
+        "ctx_path": "/executor",
+        "ctx_workspace": null,
+        "label": "impl",
+        "legacy_mint": true,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": null
+      }
+    ],
+    "result": {
+      "str": "impl:task-1\n\n## Approved Plan",
+      "type": "PlanThenImplementResponse"
+    }
+  },
+  "host1": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/planner",
+        "ctx_workspace": "<WS>/host1/children/planner",
+        "label": "plan",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/planner"
+      },
+      {
+        "ctx_path": "/executor",
+        "ctx_workspace": "<WS>/host1/children/executor",
+        "label": "impl",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/executor"
+      }
+    ],
+    "result": {
+      "str": "impl:task-2\n\n## Approved Plan",
+      "type": "PlanThenImplementResponse"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "host2": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/planner",
+        "ctx_workspace": "<WS>/host2/children/planner",
+        "label": "plan",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/planner"
+      },
+      {
+        "ctx_path": "/executor",
+        "ctx_workspace": "<WS>/host2/children/executor",
+        "label": "impl",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/executor"
+      }
+    ],
+    "result": {
+      "str": "impl:task-3\n\n## Approved Plan",
+      "type": "PlanThenImplementResponse"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "tree": {
+    "host1/artifacts/.analysis_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"analysis\"\n}",
+    "host1/artifacts/.approval_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"approval\"\n}",
+    "host1/artifacts/.impl_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"impl\"\n}",
+    "host1/artifacts/.implement_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"implement\"\n}",
+    "host1/artifacts/.plan_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"plan\"\n}",
+    "host1/artifacts/request.txt": "task-2",
+    "host1/checkpoints/final_result.json": {
+      "json": {
+        "_executor_response": "impl:task-2\n\n## Approved Plan",
+        "_iter_config": {
+          "analysis_config": {
+            "output_path": "<WS>/host1/analysis/iteration_1_analysis.md"
+          }
+        },
+        "_plan_response": "plan:task-2",
+        "_prev_iteration": 1,
+        "current_input": "task-2",
+        "executor_output_text": "impl:task-2\n\n## Approved Plan",
+        "iteration": 1,
+        "iteration_records": [
+          {
+            "analysis_doc_path": null,
+            "analysis_output": null,
+            "analysis_response": null,
+            "error": null,
+            "executor_output": "impl:task-2\n\n## Approved Plan",
+            "executor_response": null,
+            "iteration": 1,
+            "plan_approved": true,
+            "plan_file_path": null,
+            "plan_output": "plan:task-2",
+            "plan_response": null,
+            "resumed_from_phase": null,
+            "should_continue": false,
+            "test_results_found": false,
+            "workspace_path": "<WS>/host1"
+          }
+        ],
+        "next_iteration_request": "",
+        "original_request": "task-2",
+        "plan_approved": true,
+        "plan_path": null,
+        "plan_text": "plan:task-2",
+        "should_continue": false
+      }
+    },
+    "host1/checkpoints/pti/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 4,
+        "loop_counts": {},
+        "next_step_index": 4,
+        "result_id": "analysis___seq4",
+        "state": {
+          "_executor_response": "impl:task-2\n\n## Approved Plan",
+          "_iter_config": {
+            "analysis_config": {
+              "output_path": "<WS>/host1/analysis/iteration_1_analysis.md"
+            }
+          },
+          "_plan_response": "plan:task-2",
+          "_prev_iteration": 1,
+          "current_input": "task-2",
+          "executor_output_text": "impl:task-2\n\n## Approved Plan",
+          "iteration": 1,
+          "iteration_records": [
+            {
+              "analysis_doc_path": null,
+              "analysis_output": null,
+              "analysis_response": null,
+              "error": null,
+              "executor_output": "impl:task-2\n\n## Approved Plan",
+              "executor_response": null,
+              "iteration": 1,
+              "plan_approved": true,
+              "plan_file_path": null,
+              "plan_output": "plan:task-2",
+              "plan_response": null,
+              "resumed_from_phase": null,
+              "should_continue": false,
+              "test_results_found": false,
+              "workspace_path": "<WS>/host1"
+            }
+          ],
+          "next_iteration_request": "",
+          "original_request": "task-2",
+          "plan_approved": true,
+          "plan_path": null,
+          "plan_text": "plan:task-2",
+          "should_continue": false
+        },
+        "step_index": 3,
+        "version": 1
+      }
+    },
+    "host1/checkpoints/pti/step_analysis___seq4.json": {
+      "json": "impl:task-2\n\n## Approved Plan"
+    },
+    "host1/checkpoints/pti/step_approval___seq2.json": {
+      "json": "plan:task-2"
+    },
+    "host1/checkpoints/pti/step_implement___seq3.json": {
+      "json": "impl:task-2\n\n## Approved Plan"
+    },
+    "host1/checkpoints/pti/step_plan___seq1.json": {
+      "json": "plan:task-2"
+    },
+    "host1/children/executor/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host1/children/executor/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/children/planner/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host1/children/planner/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host1/logs/session/PlanThenImplementInferencer-<ID3>.jsonl": "<present>",
+    "host1/logs/session/PlanThenImplementInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/artifacts/.analysis_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"analysis\"\n}",
+    "host2/artifacts/.approval_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"approval\"\n}",
+    "host2/artifacts/.impl_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"impl\"\n}",
+    "host2/artifacts/.implement_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"implement\"\n}",
+    "host2/artifacts/.plan_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"plan\"\n}",
+    "host2/artifacts/request.txt": "task-3",
+    "host2/checkpoints/final_result.json": {
+      "json": {
+        "_executor_response": "impl:task-3\n\n## Approved Plan",
+        "_iter_config": {
+          "analysis_config": {
+            "output_path": "<WS>/host2/analysis/iteration_1_analysis.md"
+          }
+        },
+        "_plan_response": "plan:task-3",
+        "_prev_iteration": 1,
+        "current_input": "task-3",
+        "executor_output_text": "impl:task-3\n\n## Approved Plan",
+        "iteration": 1,
+        "iteration_records": [
+          {
+            "analysis_doc_path": null,
+            "analysis_output": null,
+            "analysis_response": null,
+            "error": null,
+            "executor_output": "impl:task-3\n\n## Approved Plan",
+            "executor_response": null,
+            "iteration": 1,
+            "plan_approved": true,
+            "plan_file_path": null,
+            "plan_output": "plan:task-3",
+            "plan_response": null,
+            "resumed_from_phase": null,
+            "should_continue": false,
+            "test_results_found": false,
+            "workspace_path": "<WS>/host2"
+          }
+        ],
+        "next_iteration_request": "",
+        "original_request": "task-3",
+        "plan_approved": true,
+        "plan_path": null,
+        "plan_text": "plan:task-3",
+        "should_continue": false
+      }
+    },
+    "host2/checkpoints/pti/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 4,
+        "loop_counts": {},
+        "next_step_index": 4,
+        "result_id": "analysis___seq4",
+        "state": {
+          "_executor_response": "impl:task-3\n\n## Approved Plan",
+          "_iter_config": {
+            "analysis_config": {
+              "output_path": "<WS>/host2/analysis/iteration_1_analysis.md"
+            }
+          },
+          "_plan_response": "plan:task-3",
+          "_prev_iteration": 1,
+          "current_input": "task-3",
+          "executor_output_text": "impl:task-3\n\n## Approved Plan",
+          "iteration": 1,
+          "iteration_records": [
+            {
+              "analysis_doc_path": null,
+              "analysis_output": null,
+              "analysis_response": null,
+              "error": null,
+              "executor_output": "impl:task-3\n\n## Approved Plan",
+              "executor_response": null,
+              "iteration": 1,
+              "plan_approved": true,
+              "plan_file_path": null,
+              "plan_output": "plan:task-3",
+              "plan_response": null,
+              "resumed_from_phase": null,
+              "should_continue": false,
+              "test_results_found": false,
+              "workspace_path": "<WS>/host2"
+            }
+          ],
+          "next_iteration_request": "",
+          "original_request": "task-3",
+          "plan_approved": true,
+          "plan_path": null,
+          "plan_text": "plan:task-3",
+          "should_continue": false
+        },
+        "step_index": 3,
+        "version": 1
+      }
+    },
+    "host2/checkpoints/pti/step_analysis___seq4.json": {
+      "json": "impl:task-3\n\n## Approved Plan"
+    },
+    "host2/checkpoints/pti/step_approval___seq2.json": {
+      "json": "plan:task-3"
+    },
+    "host2/checkpoints/pti/step_implement___seq3.json": {
+      "json": "impl:task-3\n\n## Approved Plan"
+    },
+    "host2/checkpoints/pti/step_plan___seq1.json": {
+      "json": "plan:task-3"
+    },
+    "host2/children/executor/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host2/children/executor/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/children/planner/logs/session/_Probe-<ID2>.jsonl": "<present>",
+    "host2/children/planner/logs/session/_Probe-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/logs/session/PlanThenImplementInferencer-<ID3>.jsonl": "<present>",
+    "host2/logs/session/PlanThenImplementInferencer-<ID3>.jsonl.parts/InferenceInput/<TS>.txt": "<present>"
+  }
+}

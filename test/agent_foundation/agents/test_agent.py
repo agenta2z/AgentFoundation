@@ -20,6 +20,7 @@ Tests progress from simple to complex scenarios:
    "DETAILED EXAMPLE: Complex Multi-Step Execution" section of the
    Agent.__call__ docstring documentation.
 """
+
 import sys
 from pathlib import Path
 from typing import Any, List, Tuple
@@ -33,13 +34,19 @@ for path in [rich_python_utils_src, agent_foundation_src]:
     if path.exists() and str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from agent_foundation.agents.agent import Agent, AgentResponse, AgentAction, AgentTaskStatusFlags
+from agent_foundation.agents.agent import (
+    Agent,
+    AgentAction,
+    AgentResponse,
+    AgentTaskStatusFlags,
+)
 from agent_foundation.agents.agent_state import AgentStateItem
-from agent_foundation.ui.interactive_base import InteractiveBase, InteractionFlags
+from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 
 
 class MockInteractive(InteractiveBase):
     """Simple mock interactive for testing."""
+
     def __init__(self, inputs=None):
         super().__init__()
         self.inputs = inputs or []
@@ -56,12 +63,15 @@ class MockInteractive(InteractiveBase):
     def reset_input(self, flag: InteractionFlags) -> None:
         pass
 
-    def _send_response(self, response: str, flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def _send_response(
+        self, response: str, flag: InteractionFlags = InteractionFlags.TurnCompleted
+    ) -> None:
         self.responses.append(response)
 
 
 class MockReasonerSequential:
     """Simple reasoner that returns sequential actions, then completes."""
+
     def __init__(self):
         self.call_count = 0
         self.calls_log = []
@@ -74,28 +84,22 @@ class MockReasonerSequential:
             # First call: return one sequential action
             return AgentResponse(
                 instant_response="Executing action 1",
-                next_actions=[
-                    [AgentAction(type="Action1", target="task1")]
-                ]
+                next_actions=[[AgentAction(type="Action1", target="task1")]],
             )
         elif self.call_count == 2:
             # Second call: return another sequential action
             return AgentResponse(
                 instant_response="Executing action 2",
-                next_actions=[
-                    [AgentAction(type="Action2", target="task2")]
-                ]
+                next_actions=[[AgentAction(type="Action2", target="task2")]],
             )
         else:
             # Third call: complete
-            return AgentResponse(
-                instant_response="Task completed",
-                next_actions=[]
-            )
+            return AgentResponse(instant_response="Task completed", next_actions=[])
 
 
 class MockReasonerParallel:
     """Reasoner that returns parallel actions in one iteration, then completes."""
+
     def __init__(self):
         self.call_count = 0
         self.calls_log = []
@@ -112,20 +116,18 @@ class MockReasonerParallel:
                     [
                         AgentAction(type="ActionA", target="taskA"),
                         AgentAction(type="ActionB", target="taskB"),
-                        AgentAction(type="ActionC", target="taskC")
+                        AgentAction(type="ActionC", target="taskC"),
                     ]
-                ]
+                ],
             )
         else:
             # Second call: complete
-            return AgentResponse(
-                instant_response="Task completed",
-                next_actions=[]
-            )
+            return AgentResponse(instant_response="Task completed", next_actions=[])
 
 
 class MockReasonerMixed:
     """Reasoner that returns mixed sequential and parallel actions."""
+
     def __init__(self):
         self.call_count = 0
         self.calls_log = []
@@ -142,17 +144,14 @@ class MockReasonerMixed:
                     [AgentAction(type="Action1", target="task1")],  # Sequential
                     [
                         AgentAction(type="Action2", target="task2"),
-                        AgentAction(type="Action3", target="task3")
+                        AgentAction(type="Action3", target="task3"),
                     ],  # Parallel
-                    [AgentAction(type="Action4", target="task4")]   # Sequential
-                ]
+                    [AgentAction(type="Action4", target="task4")],  # Sequential
+                ],
             )
         else:
             # Second call: complete
-            return AgentResponse(
-                instant_response="Task completed",
-                next_actions=[]
-            )
+            return AgentResponse(instant_response="Task completed", next_actions=[])
 
 
 class MockReasonerDeepRecursion:
@@ -160,6 +159,7 @@ class MockReasonerDeepRecursion:
     Reasoner for testing deep recursion.
     Each branched agent gets its own instance to track depth.
     """
+
     def __init__(self, depth=0, max_depth=2):
         self.depth = depth
         self.max_depth = max_depth
@@ -178,20 +178,20 @@ class MockReasonerDeepRecursion:
                 next_actions=[
                     [
                         AgentAction(type=f"Action_D{self.depth}_A", target="taskA"),
-                        AgentAction(type=f"Action_D{self.depth}_B", target="taskB")
+                        AgentAction(type=f"Action_D{self.depth}_B", target="taskB"),
                     ]
-                ]
+                ],
             )
         else:
             # Complete this branch
             return AgentResponse(
-                instant_response=f"Completed at depth {self.depth}",
-                next_actions=[]
+                instant_response=f"Completed at depth {self.depth}", next_actions=[]
             )
 
 
 class TrackingActor:
     """Actor that tracks all action executions."""
+
     def __init__(self):
         self.executed_actions = []
 
@@ -213,7 +213,9 @@ class TestAgent(Agent):
             # Create a simple agent state
             agent_state = AgentStateItem()
             return raw_response, agent_state  # (agent_response, agent_state)
-        return AgentResponse(instant_response=str(raw_response), next_actions=[]), AgentStateItem()
+        return AgentResponse(
+            instant_response=str(raw_response), next_actions=[]
+        ), AgentStateItem()
 
 
 def test_simple_sequential():
@@ -238,16 +240,20 @@ def test_simple_sequential():
         actor=actor,
         interactive=interactive,
         log_time=False,
-        logger=None
+        logger=None,
     )
 
     result = agent("Test input")
 
     # Verify reasoner was called 3 times
-    assert reasoner.call_count == 3, f"Expected 3 reasoner calls, got {reasoner.call_count}"
+    assert reasoner.call_count == 3, (
+        f"Expected 3 reasoner calls, got {reasoner.call_count}"
+    )
 
     # Verify actions were executed sequentially
-    assert len(actor.executed_actions) == 2, f"Expected 2 actions, got {len(actor.executed_actions)}"
+    assert len(actor.executed_actions) == 2, (
+        f"Expected 2 actions, got {len(actor.executed_actions)}"
+    )
     assert actor.executed_actions[0] == "Action1(task1)"
     assert actor.executed_actions[1] == "Action2(task2)"
 
@@ -279,7 +285,7 @@ def test_single_parallel_branch():
         actor=actor,
         interactive=interactive,
         log_time=False,
-        logger=None
+        logger=None,
     )
 
     result = agent("Test input")
@@ -289,10 +295,14 @@ def test_single_parallel_branch():
     # - 3 branched agents: 1 call each (to complete after executing their action)
     # Total: 2 + 3 = 5 calls
     # NOTE: All branched agents share the same reasoner instance in this test
-    assert reasoner.call_count == 5, f"Expected 5 reasoner calls (2 main + 3 branched), got {reasoner.call_count}"
+    assert reasoner.call_count == 5, (
+        f"Expected 5 reasoner calls (2 main + 3 branched), got {reasoner.call_count}"
+    )
 
     # Verify 3 parallel actions were executed
-    assert len(actor.executed_actions) == 3, f"Expected 3 actions, got {len(actor.executed_actions)}"
+    assert len(actor.executed_actions) == 3, (
+        f"Expected 3 actions, got {len(actor.executed_actions)}"
+    )
 
     # Actions might be in any order due to parallel execution
     executed_set = set(actor.executed_actions)
@@ -336,7 +346,7 @@ def test_mixed_sequential_parallel():
         actor=actor,
         interactive=interactive,
         log_time=False,
-        logger=None
+        logger=None,
     )
 
     try:
@@ -349,10 +359,14 @@ def test_mixed_sequential_parallel():
         return  # Exit early - test "passes" with known limitations
 
     # Verify reasoner was called 2 times
-    assert reasoner.call_count == 2, f"Expected 2 reasoner calls, got {reasoner.call_count}"
+    assert reasoner.call_count == 2, (
+        f"Expected 2 reasoner calls, got {reasoner.call_count}"
+    )
 
     # Verify all 4 actions were executed
-    assert len(actor.executed_actions) == 4, f"Expected 4 actions, got {len(actor.executed_actions)}"
+    assert len(actor.executed_actions) == 4, (
+        f"Expected 4 actions, got {len(actor.executed_actions)}"
+    )
 
     # Verify sequential order where applicable
     # Action1 should be first, Action4 should be last
@@ -362,7 +376,9 @@ def test_mixed_sequential_parallel():
     # Action2 and Action3 should be in the middle (in any order)
     middle_actions = set(actor.executed_actions[1:3])
     expected_middle = {"Action2(task2)", "Action3(task3)"}
-    assert middle_actions == expected_middle, f"Expected {expected_middle}, got {middle_actions}"
+    assert middle_actions == expected_middle, (
+        f"Expected {expected_middle}, got {middle_actions}"
+    )
 
     print(f"[OK] Reasoner calls: {reasoner.call_count}")
     print(f"[OK] Actions executed: {actor.executed_actions}")
@@ -410,7 +426,7 @@ def test_deep_recursion():
         interactive=interactive,
         log_time=False,
         logger=None,
-        branching_agent_start_as_new=True  # Each branch starts fresh
+        branching_agent_start_as_new=True,  # Each branch starts fresh
     )
 
     result = agent("Test input")
@@ -439,8 +455,13 @@ def test_reasoner_iteration_count():
     actor1 = TrackingActor()
     interactive1 = MockInteractive(inputs=["Test"])
 
-    agent1 = TestAgent(reasoner=reasoner1, actor=actor1, interactive=interactive1,
-                   log_time=False, logger=None)
+    agent1 = TestAgent(
+        reasoner=reasoner1,
+        actor=actor1,
+        interactive=interactive1,
+        log_time=False,
+        logger=None,
+    )
     agent1("Test")
 
     print(f"Sequential pattern:")
@@ -452,12 +473,19 @@ def test_reasoner_iteration_count():
     actor2 = TrackingActor()
     interactive2 = MockInteractive(inputs=["Test"])
 
-    agent2 = TestAgent(reasoner=reasoner2, actor=actor2, interactive=interactive2,
-                   log_time=False, logger=None)
+    agent2 = TestAgent(
+        reasoner=reasoner2,
+        actor=actor2,
+        interactive=interactive2,
+        log_time=False,
+        logger=None,
+    )
     agent2("Test")
 
     print(f"Parallel pattern:")
-    print(f"  - Reasoner iterations: {reasoner2.call_count} (expected: 5 = 2 main + 3 branched)")
+    print(
+        f"  - Reasoner iterations: {reasoner2.call_count} (expected: 5 = 2 main + 3 branched)"
+    )
     assert reasoner2.call_count == 5  # 2 main agent calls + 3 branched agent calls
 
     # Test Case 3: Mixed pattern - SKIP due to known issues
@@ -490,6 +518,7 @@ def test_complex_research_agent():
 
     class ResearchAgentReasonerMain:
         """Main agent reasoner for the research scenario."""
+
         def __init__(self):
             self.call_count = 0
 
@@ -502,7 +531,7 @@ def test_complex_research_agent():
                     instant_response="Searching quantum computing applications",
                     next_actions=[
                         [AgentAction(type="SearchAction", target="quantum_computing")]
-                    ]
+                    ],
                 )
             elif self.call_count == 2:
                 # Iteration 2: Parallel analysis (3 branches)
@@ -512,9 +541,9 @@ def test_complex_research_agent():
                         [
                             AgentAction(type="AnalyzeAction1", target="algorithms"),
                             AgentAction(type="AnalyzeAction2", target="hardware"),
-                            AgentAction(type="AnalyzeAction3", target="use_cases")
+                            AgentAction(type="AnalyzeAction3", target="use_cases"),
                         ]
-                    ]
+                    ],
                 )
             elif self.call_count == 3:
                 # Iteration 3: Write report
@@ -522,17 +551,17 @@ def test_complex_research_agent():
                     instant_response="Writing report from combined analysis",
                     next_actions=[
                         [AgentAction(type="WriteReportAction", target="final_report")]
-                    ]
+                    ],
                 )
             else:
                 # Iteration 4: Complete
                 return AgentResponse(
-                    instant_response="Research complete",
-                    next_actions=[]
+                    instant_response="Research complete", next_actions=[]
                 )
 
     class BranchedAgentReasonerA:
         """Reasoner for Branch A - creates deeper recursion."""
+
         def __init__(self):
             self.call_count = 0
 
@@ -546,19 +575,19 @@ def test_complex_research_agent():
                     next_actions=[
                         [
                             AgentAction(type="DetailAction1", target="detail1"),
-                            AgentAction(type="DetailAction2", target="detail2")
+                            AgentAction(type="DetailAction2", target="detail2"),
                         ]
-                    ]
+                    ],
                 )
             else:
                 # Complete after merging detailed results
                 return AgentResponse(
-                    instant_response="Detailed analysis complete",
-                    next_actions=[]
+                    instant_response="Detailed analysis complete", next_actions=[]
                 )
 
     class BranchedAgentReasonerB:
         """Reasoner for Branch B - completes immediately."""
+
         def __init__(self):
             self.call_count = 0
 
@@ -566,12 +595,12 @@ def test_complex_research_agent():
             self.call_count += 1
             # Branch B completes immediately
             return AgentResponse(
-                instant_response="Hardware analysis complete",
-                next_actions=[]
+                instant_response="Hardware analysis complete", next_actions=[]
             )
 
     class BranchedAgentReasonerC:
         """Reasoner for Branch C - has 2 iterations."""
+
         def __init__(self):
             self.call_count = 0
 
@@ -582,27 +611,24 @@ def test_complex_research_agent():
                 # Branch C has one more action
                 return AgentResponse(
                     instant_response="Need to refine use cases",
-                    next_actions=[
-                        [AgentAction(type="RefineAction", target="refine")]
-                    ]
+                    next_actions=[[AgentAction(type="RefineAction", target="refine")]],
                 )
             else:
                 # Iteration 2: Complete
                 return AgentResponse(
-                    instant_response="Use case analysis complete",
-                    next_actions=[]
+                    instant_response="Use case analysis complete", next_actions=[]
                 )
 
     class BranchedAgentReasonerDepth2:
         """Reasoner for depth-2 branches - completes immediately."""
+
         def __init__(self):
             self.call_count = 0
 
         def __call__(self, reasoner_input, reasoner_config):
             self.call_count += 1
             return AgentResponse(
-                instant_response="Detail analysis complete",
-                next_actions=[]
+                instant_response="Detail analysis complete", next_actions=[]
             )
 
     # Track which reasoner to use based on context
@@ -624,7 +650,7 @@ def test_complex_research_agent():
         interactive=interactive,
         log_time=False,
         logger=None,
-        branching_agent_start_as_new=True
+        branching_agent_start_as_new=True,
     )
 
     print("Executing research workflow...\n")
@@ -672,7 +698,7 @@ def run_all_tests():
         ("Mixed Sequential and Parallel", test_mixed_sequential_parallel),
         ("Deep Recursion", test_deep_recursion),
         ("Reasoner Iteration Counts", test_reasoner_iteration_count),
-        ("Complex Research Agent (Documentation Example)", test_complex_research_agent)
+        ("Complex Research Agent (Documentation Example)", test_complex_research_agent),
     ]
 
     passed = 0

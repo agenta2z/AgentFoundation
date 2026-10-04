@@ -4,17 +4,18 @@ import asyncio
 import unittest
 from pathlib import Path
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.workflow.sop_state import SOPState
+from attr import attrs
 from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
 
 
-OPENTEAM_SOPS = Path("/Users/tchen7/MyProjects/CoreProjects/OpenStartup/src/openteam/server/resources/sops")
+OPENTEAM_SOPS = Path(
+    "/Users/tchen7/MyProjects/CoreProjects/OpenStartup/src/openteam/server/resources/sops"
+)
 
 
 @attrs(slots=False)
@@ -86,7 +87,9 @@ class TestSOPState(unittest.TestCase):
         assert s.phase_status == PhaseStatus.IDLE
 
     def test_suspension_fields_roundtrip(self):
-        s = SOPState(sop_name="x", suspension_reason="paused", suspended_at="2026-01-01")
+        s = SOPState(
+            sop_name="x", suspension_reason="paused", suspended_at="2026-01-01"
+        )
         restored = SOPState.from_dict(s.to_dict())
         assert restored.suspension_reason == "paused"
         assert restored.suspended_at == "2026-01-01"
@@ -377,8 +380,8 @@ class TestSopCommandEntry(unittest.TestCase):
         _run(ci._commands.dispatch("/sop role_creation --fresh"))
         assert ci.sop_state is not None
         assert ci.sop_state.instance_id != first_id
-        # the previously exited instance remains suspended
-        assert len(ci._suspended_sops) == 1
+        # starting over discards the exited instance: it is no longer resumable
+        assert ci._suspended_sops == []
 
 
 class TestSuspendedSerialization(unittest.TestCase):
@@ -432,8 +435,8 @@ class TestLifecyclePromptRendering(unittest.TestCase):
         # Both stored as paused; rendering must not mutate that.
         assert all(s.suspension_reason == "paused" for s in ci._suspended_sops)
         paused_sop, inprogress = ci._format_suspended_sops()
-        assert "code_optimization" in paused_sop      # most recent = the nudge
-        assert "role_creation" in inprogress          # older paused = passive
+        assert "code_optimization" in paused_sop  # most recent = the nudge
+        assert "role_creation" in inprogress  # older paused = passive
         assert "role_creation" not in paused_sop
 
 

@@ -1,6 +1,12 @@
 """AI Employee framework — data models."""
 
-from agent_foundation.employees.models.enums import AutonomyLevel, EmployeeStatus, RoleStatus
+from agent_foundation.employees.models.employee import AIEmployee
+from agent_foundation.employees.models.enums import (
+    AutonomyLevel,
+    EmployeeStatus,
+    RoleStatus,
+)
+from agent_foundation.employees.models.role import AIEmployeeRole
 from agent_foundation.employees.models.skill import (
     CommunicationPolicy,
     GuardrailConfig,
@@ -9,9 +15,7 @@ from agent_foundation.employees.models.skill import (
     SOPDefinition,
     ToolConfig,
 )
-from agent_foundation.employees.models.role import AIEmployeeRole
 from agent_foundation.employees.models.team_context import TeamContext
-from agent_foundation.employees.models.employee import AIEmployee
 
 __all__ = [
     "AIEmployee",

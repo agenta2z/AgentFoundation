@@ -10,17 +10,16 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Callable, Optional
-
-from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
-    SOPManager,
-)
 
 from agent_foundation.common.workflow.definition import WorkflowDefinition
 from agent_foundation.common.workflow.instance import WorkflowInstance
 from agent_foundation.common.workflow.registry import WorkflowRegistry
+from rich_python_utils.string_utils.formatting.template_manager.sop_manager import (
+    SOPManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,10 @@ class WorkflowManager:
             instance_id=instance_id,
             definition_id=definition_id,
             yolo_mode=yolo_mode,
-            workspace=self.session_workspace / "workflows" / definition_id / instance_id,
+            workspace=self.session_workspace
+            / "workflows"
+            / definition_id
+            / instance_id,
             created_at=datetime.now(UTC),
             last_active_at=datetime.now(UTC),
         )
@@ -118,7 +120,11 @@ class WorkflowManager:
 
         # Available SOPs (from SOPRegistry if available, else legacy WorkflowRegistry)
         try:
-            from agent_foundation.resources.sops.registry import format_all_sops, load_all_sops
+            from agent_foundation.resources.sops.registry import (
+                format_all_sops,
+                load_all_sops,
+            )
+
             sops = load_all_sops(extra_dirs=getattr(self, "_extra_sop_dirs", None))
             if sops:
                 sections["available_sops"] = format_all_sops(sops)

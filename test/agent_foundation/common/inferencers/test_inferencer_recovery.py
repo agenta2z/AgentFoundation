@@ -21,11 +21,9 @@ and always raises, then verifying:
 import asyncio
 import unittest
 
-from attr import attrib, attrs
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from attr import attrib, attrs
+from hypothesis import given, settings, strategies as st
 from rich_python_utils.common_utils.function_helper import FallbackMode
 
 
@@ -54,7 +52,6 @@ class CountingInferencer(InferencerBase):
         self.last_ainfer_input = inference_input
         self.last_ainfer_config = inference_config
         raise RuntimeError(f"Deliberate async failure #{self.ainfer_call_count}")
-
 
 
 @attrs
@@ -313,8 +310,14 @@ class AsyncOnlyRecoveryInferencer(InferencerBase):
     def _infer(self, inference_input, inference_config=None, **_inference_args):
         return "ok"
 
-    async def _ainfer_recovery(self, inference_input, last_exception, last_partial_output,
-                                inference_config=None, **kwargs):
+    async def _ainfer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         return await self._ainfer(inference_input, inference_config, **kwargs)
 
 
@@ -325,8 +328,14 @@ class SyncOnlyRecoveryInferencer(InferencerBase):
     def _infer(self, inference_input, inference_config=None, **_inference_args):
         return "ok"
 
-    def _infer_recovery(self, inference_input, last_exception, last_partial_output,
-                         inference_config=None, **kwargs):
+    def _infer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         return self._infer(inference_input, inference_config, **kwargs)
 
 
@@ -337,12 +346,24 @@ class BothRecoveryInferencer(InferencerBase):
     def _infer(self, inference_input, inference_config=None, **_inference_args):
         return "ok"
 
-    def _infer_recovery(self, inference_input, last_exception, last_partial_output,
-                         inference_config=None, **kwargs):
+    def _infer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         return self._infer(inference_input, inference_config, **kwargs)
 
-    async def _ainfer_recovery(self, inference_input, last_exception, last_partial_output,
-                                inference_config=None, **kwargs):
+    async def _ainfer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         return await self._ainfer(inference_input, inference_config, **kwargs)
 
 
@@ -356,8 +377,11 @@ class TestPairedOverrideWarning(unittest.TestCase):
     def test_async_only_override_warns(self):
         """Overriding only _ainfer_recovery should emit a warning."""
         import logging
-        with self.assertLogs(logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
-                             level="WARNING") as cm:
+
+        with self.assertLogs(
+            logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
+            level="WARNING",
+        ) as cm:
             AsyncOnlyRecoveryInferencer()
         self.assertTrue(any("AsyncOnlyRecoveryInferencer" in msg for msg in cm.output))
         self.assertTrue(any("_ainfer_recovery" in msg for msg in cm.output))
@@ -366,8 +390,11 @@ class TestPairedOverrideWarning(unittest.TestCase):
     def test_sync_only_override_warns(self):
         """Overriding only _infer_recovery should emit a warning."""
         import logging
-        with self.assertLogs(logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
-                             level="WARNING") as cm:
+
+        with self.assertLogs(
+            logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
+            level="WARNING",
+        ) as cm:
             SyncOnlyRecoveryInferencer()
         self.assertTrue(any("SyncOnlyRecoveryInferencer" in msg for msg in cm.output))
         self.assertTrue(any("_infer_recovery" in msg for msg in cm.output))
@@ -375,7 +402,10 @@ class TestPairedOverrideWarning(unittest.TestCase):
     def test_both_override_no_warning(self):
         """Overriding both recovery methods should NOT emit a warning."""
         import logging
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         with self.assertRaises(AssertionError):
             # assertLogs raises AssertionError if no logs are emitted at WARNING
             with self.assertLogs(logger, level="WARNING"):
@@ -384,7 +414,10 @@ class TestPairedOverrideWarning(unittest.TestCase):
     def test_no_override_no_warning(self):
         """Not overriding either recovery method should NOT emit a warning."""
         import logging
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         with self.assertRaises(AssertionError):
             with self.assertLogs(logger, level="WARNING"):
                 CountingInferencer()
@@ -392,7 +425,10 @@ class TestPairedOverrideWarning(unittest.TestCase):
     def test_fire_once_per_class(self):
         """Warning should fire only once per class name."""
         import logging
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         with self.assertLogs(logger, level="WARNING") as cm:
             AsyncOnlyRecoveryInferencer()
         first_count = len([m for m in cm.output if "AsyncOnlyRecoveryInferencer" in m])
@@ -414,9 +450,12 @@ class TestNestedRetryWarning(unittest.TestCase):
     def test_fallback_with_high_max_retry_warns(self):
         """fallback_inferencer with max_retry > 1 should emit a warning."""
         import logging
+
         fallback = SuccessCountingInferencer(max_retry=3)
-        with self.assertLogs(logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
-                             level="WARNING") as cm:
+        with self.assertLogs(
+            logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
+            level="WARNING",
+        ) as cm:
             SuccessCountingInferencer(fallback_inferencer=fallback)
         self.assertTrue(any("max_retry=3" in msg for msg in cm.output))
         self.assertTrue(any("multiplicative" in msg for msg in cm.output))
@@ -424,8 +463,11 @@ class TestNestedRetryWarning(unittest.TestCase):
     def test_fallback_with_max_retry_1_no_warning(self):
         """fallback_inferencer with max_retry=1 should NOT emit a warning."""
         import logging
+
         fallback = SuccessCountingInferencer(max_retry=1)
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         with self.assertRaises(AssertionError):
             with self.assertLogs(logger, level="WARNING"):
                 SuccessCountingInferencer(fallback_inferencer=fallback)
@@ -433,17 +475,23 @@ class TestNestedRetryWarning(unittest.TestCase):
     def test_fallback_list_warns_on_first_high_retry(self):
         """A list of fallbacks should warn on the first one with max_retry > 1."""
         import logging
+
         fb1 = SuccessCountingInferencer(max_retry=1)
         fb2 = SuccessCountingInferencer(max_retry=5)
-        with self.assertLogs(logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
-                             level="WARNING") as cm:
+        with self.assertLogs(
+            logging.getLogger("agent_foundation.common.inferencers.inferencer_base"),
+            level="WARNING",
+        ) as cm:
             SuccessCountingInferencer(fallback_inferencer=[fb1, fb2])
         self.assertTrue(any("max_retry=5" in msg for msg in cm.output))
 
     def test_no_fallback_no_warning(self):
         """No fallback_inferencer should NOT emit a nested-retry warning."""
         import logging
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         with self.assertRaises(AssertionError):
             with self.assertLogs(logger, level="WARNING"):
                 SuccessCountingInferencer()
@@ -451,7 +499,10 @@ class TestNestedRetryWarning(unittest.TestCase):
     def test_fire_once_per_outer_class(self):
         """Warning should fire only once per outer class name."""
         import logging
-        logger = logging.getLogger("agent_foundation.common.inferencers.inferencer_base")
+
+        logger = logging.getLogger(
+            "agent_foundation.common.inferencers.inferencer_base"
+        )
         fallback = SuccessCountingInferencer(max_retry=3)
         with self.assertLogs(logger, level="WARNING") as cm:
             SuccessCountingInferencer(fallback_inferencer=fallback)
@@ -492,20 +543,31 @@ class FallbackStateRecordingInferencer(InferencerBase):
         await asyncio.sleep(0)
         raise RuntimeError(f"fail-{inference_input}")
 
-    async def _ainfer_recovery(self, inference_input, last_exception, last_partial_output,
-                                inference_config=None, **kwargs):
+    async def _ainfer_recovery(
+        self,
+        inference_input,
+        last_exception,
+        last_partial_output,
+        inference_config=None,
+        **kwargs,
+    ):
         # Read the ContextVar to verify it holds THIS call's state
-        from agent_foundation.common.inferencers.inferencer_base import _current_fallback_state
+        from agent_foundation.common.inferencers.inferencer_base import (
+            _current_fallback_state,
+        )
+
         state = _current_fallback_state.get(None)
 
         # Snapshot the state dict (copy to avoid later mutation)
         snapshot = dict(state) if state is not None else None
 
-        self.recorded_states.append({
-            "call_id": inference_input,
-            "fallback_state": snapshot,
-            "last_exception_str": str(last_exception) if last_exception else None,
-        })
+        self.recorded_states.append(
+            {
+                "call_id": inference_input,
+                "fallback_state": snapshot,
+                "last_exception_str": str(last_exception) if last_exception else None,
+            }
+        )
 
         # Return success so _ainfer_single completes
         return f"recovered-{inference_input}"
@@ -542,10 +604,7 @@ class TestFallbackStateIsolation(unittest.IsolatedAsyncioTestCase):
         )
 
         # Run concurrent _ainfer_single calls via asyncio.gather
-        tasks = [
-            inf._ainfer_single(f"call-{i}")
-            for i in range(num_concurrent)
-        ]
+        tasks = [inf._ainfer_single(f"call-{i}") for i in range(num_concurrent)]
         results = await asyncio.gather(*tasks)
 
         # All calls should have recovered successfully
@@ -642,21 +701,34 @@ class TestFallbackStateIsolation(unittest.IsolatedAsyncioTestCase):
         Uses a subclass that writes to the fallback_state during recovery
         to confirm the dict is truly per-call.
         """
+
         @attrs
         class MutatingRecoveryInferencer(InferencerBase):
             """Writes a marker into _fallback_state during recovery."""
+
             recorded_states: list = attrib(factory=list, init=False)
 
             def _infer(self, inference_input, inference_config=None, **_inference_args):
                 raise RuntimeError(f"fail-{inference_input}")
 
-            async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
+            async def _ainfer(
+                self, inference_input, inference_config=None, **_inference_args
+            ):
                 await asyncio.sleep(0)
                 raise RuntimeError(f"fail-{inference_input}")
 
-            async def _ainfer_recovery(self, inference_input, last_exception,
-                                        last_partial_output, inference_config=None, **kwargs):
-                from agent_foundation.common.inferencers.inferencer_base import _current_fallback_state
+            async def _ainfer_recovery(
+                self,
+                inference_input,
+                last_exception,
+                last_partial_output,
+                inference_config=None,
+                **kwargs,
+            ):
+                from agent_foundation.common.inferencers.inferencer_base import (
+                    _current_fallback_state,
+                )
+
                 state = _current_fallback_state.get(None)
 
                 # Write a call-specific marker into the state dict
@@ -669,10 +741,12 @@ class TestFallbackStateIsolation(unittest.IsolatedAsyncioTestCase):
                 # Re-read and snapshot
                 state_after = _current_fallback_state.get(None)
                 snapshot = dict(state_after) if state_after is not None else None
-                self.recorded_states.append({
-                    "call_id": inference_input,
-                    "state_snapshot": snapshot,
-                })
+                self.recorded_states.append(
+                    {
+                        "call_id": inference_input,
+                        "state_snapshot": snapshot,
+                    }
+                )
                 return f"ok-{inference_input}"
 
         num_concurrent = 6

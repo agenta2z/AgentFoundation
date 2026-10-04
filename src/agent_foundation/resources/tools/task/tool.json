@@ -146,9 +146,20 @@
       "description": "Path to proposals.json from a research-propose run. Selected proposals are formatted into a plan and fed to implementation. Mutually exclusive with --use-plan."
     },
     {
+      "name": "--proposals-path",
+      "type": "path",
+      "description": "Alias for --use-proposal, matching the SOP tool-output convention {{ research_propose__proposals_path }}. Path to proposals.json produced by research-propose."
+    },
+    {
       "name": "--proposal-ids",
       "type": "string",
-      "description": "Comma-separated proposal IDs to pick (e.g., 'P1,P3'). Used with --use-proposal. Omit to pick all (or use --top-k for the top-ranked subset)."
+      "description": "Comma-separated proposal IDs to pick (e.g., 'P1,P3'). Used with --use-proposal / --proposals-path. Omit to pick all (or use --top-k for the top-ranked subset)."
+    },
+    {
+      "name": "--experiment-hub",
+      "type": "flag",
+      "default": false,
+      "description": "Route this task's execution into the active Experiment Hub dashboard (rendered in the Hub's Implementation tab) instead of creating a separate task subtab in the main conversation. If no hub is active, open one and route into it. Same convention as proposal_selection --experiment-hub."
     },
     {
       "name": "--top-k",

@@ -29,11 +29,11 @@ class TeamContext:
 
     team_id: str
     team_name: str
-    domain: str = ""            # e.g. "Platform Engineering"
+    domain: str = ""  # e.g. "Platform Engineering"
 
     # Concrete integration points (discovered via Phase 3)
-    jira_projects: list[str] = field(default_factory=list)      # e.g. ["CTSC", "PLAT"]
-    slack_channels: list[str] = field(default_factory=list)     # e.g. ["#platform-team"]
+    jira_projects: list[str] = field(default_factory=list)  # e.g. ["CTSC", "PLAT"]
+    slack_channels: list[str] = field(default_factory=list)  # e.g. ["#platform-team"]
     confluence_spaces: list[str] = field(default_factory=list)  # e.g. ["Platform"]
 
     # Team-specific specializations of the generic role

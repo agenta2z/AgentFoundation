@@ -8,16 +8,16 @@ context, the handle lives in THIS instance's connection-scoped store keyed by
 backing, so cold reads resolve to None (connect fresh) — not a sibling's handle.
 """
 
-from attr import attrs
-
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    LiveHandleStore,
+    RunContext,
+)
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
-from agent_foundation.common.inferencers.run_context import (
-    RunContext,
-    enter_run,
-    exit_run,
-)
+from attr import attrs
 
 
 @attrs
@@ -66,19 +66,41 @@ def test_branch_write_does_not_pollute_instance_backing():
     assert leaf.__dict__.get("_client_backing") is None  # base untouched
 
 
-def test_v7_continuity_survives_across_distinct_root_turns():
+def test_v7_continuity_survives_across_turn_roots_on_one_handle_store():
     """The connection-scoped store is owned by the INSTANCE, so the same logical
-    path keeps its handle across DIFFERENT per-turn roots (V7)."""
+    path keeps its handle across per-turn roots that a host builds on ONE handle
+    store (V7, README Note B)."""
     leaf = _Leaf()
-    tok = enter_run(RunContext.root(workspace=None).child("agent"))
+    handles = LiveHandleStore()
+    tok = enter_run(
+        RunContext.root(workspace=None, handle_store=handles).child("agent")
+    )
     try:
         leaf.client = "persistent-conn"
     finally:
         exit_run(tok)
-    # A brand-new root (next turn), same path -> handle still resolves.
-    tok = enter_run(RunContext.root(workspace=None).child("agent"))
+    # A brand-new root (next turn) on the same handle store, same path.
+    tok = enter_run(
+        RunContext.root(workspace=None, handle_store=handles).child("agent")
+    )
     try:
         assert leaf.client == "persistent-conn"
+    finally:
+        exit_run(tok)
+
+
+def test_independent_roots_never_share_a_branch_handle():
+    """B32: two independent host roots (both at ``"/"``) are distinct handle
+    scopes, so one never sees the other's connection at the same path."""
+    leaf = _Leaf()
+    tok = enter_run(RunContext.root(workspace=None).child("agent"))
+    try:
+        leaf.client = "root-a-conn"
+    finally:
+        exit_run(tok)
+    tok = enter_run(RunContext.root(workspace=None).child("agent"))
+    try:
+        assert leaf.client is None
     finally:
         exit_run(tok)
 

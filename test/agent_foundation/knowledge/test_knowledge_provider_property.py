@@ -7,6 +7,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 9.2, 9.4**
 """
+
 import sys
 from pathlib import Path
 
@@ -19,8 +20,6 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.knowledge_provider import (
     BudgetAwareKnowledgeProvider,
     CONTEXT_BUDGET,
@@ -28,6 +27,7 @@ from agent_foundation.knowledge.retrieval.knowledge_provider import (
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import KnowledgePiece
 from agent_foundation.knowledge.retrieval.models.results import ScoredPiece
 from agent_foundation.knowledge.retrieval.utils import count_tokens
+from hypothesis import assume, given, settings, strategies as st
 
 
 # ── Strategies ────────────────────────────────────────────────────────────────
@@ -55,7 +55,9 @@ def scored_piece_strategy(draw, info_type=None):
         updated_at=updated_at,
         summary=summary,
     )
-    score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
     return ScoredPiece(piece=piece, score=score, normalized_score=score)
 
 
@@ -78,7 +80,9 @@ def episodic_scored_piece(draw):
         info_type="episodic",
         updated_at=updated_at,
     )
-    score = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
+    score = draw(
+        st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+    )
     return ScoredPiece(piece=piece, score=score, normalized_score=score)
 
 
@@ -167,7 +171,9 @@ class TestBudgetAwareTokenEnforcement:
         available_tokens=st.integers(min_value=100, max_value=10000),
     )
     @settings(max_examples=100)
-    def test_each_formatted_section_respects_per_type_budget(self, pieces, available_tokens):
+    def test_each_formatted_section_respects_per_type_budget(
+        self, pieces, available_tokens
+    ):
         """Each info_type formatted individually respects its CONTEXT_BUDGET cap.
 
         Uses a minimum budget of 100 tokens to account for section headers
@@ -179,6 +185,7 @@ class TestBudgetAwareTokenEnforcement:
 
         # Group pieces by info_type and format each type individually
         from collections import defaultdict
+
         by_type = defaultdict(list)
         for p in pieces:
             by_type[p.info_type or "context"].append(p)

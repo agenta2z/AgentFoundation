@@ -1,0 +1,123 @@
+{
+  "body": [
+    {
+      "active_session_id": null,
+      "active_session_id_after_getter": "<UUID1>",
+      "cli": [
+        {
+          "TMPDIR": "/tmp/devmate-<UID>",
+          "argv": [
+            "-p",
+            "--agent-harness",
+            "native",
+            "--auto-run-mode",
+            "autoRunAll",
+            "-m",
+            "claude-opus-4.7-long",
+            "FAIL please"
+          ],
+          "cwd": "<TMP>/repo",
+          "stdin": ""
+        }
+      ],
+      "consecutive_error_count": 0,
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "dump_output": true,
+          "input": {
+            "prompt": "FAIL please"
+          },
+          "kwargs": {
+            "dump_output": false,
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "dump_output_after": true,
+      "get_streaming_result": {
+        "error": "Command failed with code 3",
+        "output": "ANSWER(FAIL please)\ncontinuation line",
+        "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ FAIL please\n\n● ANSWER(FAIL please)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+        "return_code": 3,
+        "session_id": "<UUID1>",
+        "stderr": "",
+        "success": false,
+        "type": "dict"
+      },
+      "observed": [],
+      "output": [
+        "● ANSWER(FAIL please)\n",
+        "  continuation line\n"
+      ],
+      "raised": null
+    },
+    {
+      "active_session_id": "<UUID1>",
+      "active_session_id_after_getter": "<UUID1>",
+      "cli": [
+        {
+          "TMPDIR": "/tmp/devmate-<UID>",
+          "argv": [
+            "-p",
+            "--agent-harness",
+            "native",
+            "--auto-run-mode",
+            "autoRunAll",
+            "-m",
+            "claude-opus-4.7-long",
+            "--resume",
+            "<UUID1>",
+            "after failure"
+          ],
+          "cwd": "<TMP>/repo",
+          "stdin": ""
+        }
+      ],
+      "consecutive_error_count": 0,
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "dump_output": true,
+          "input": {
+            "prompt": "after failure"
+          },
+          "kwargs": {
+            "dump_output": false,
+            "resume": true,
+            "session_id": "<UUID1>"
+          }
+        }
+      ],
+      "dump_output_after": true,
+      "get_streaming_result": {
+        "output": "ANSWER(after failure)\ncontinuation line",
+        "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ after failure\n\n● ANSWER(after failure)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+        "return_code": 0,
+        "session_id": "<UUID1>",
+        "stderr": "",
+        "success": true,
+        "type": "dict"
+      },
+      "observed": [],
+      "output": [
+        "● ANSWER(after failure)\n",
+        "  continuation line\n"
+      ],
+      "raised": null
+    }
+  ],
+  "session_logs": {},
+  "tree": {
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_992b5f9a.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ FAIL please\n\n● ANSWER(FAIL please)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_e33109c9.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ after failure\n\n● ANSWER(after failure)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cli/fake_dm.py": "<present>"
+  }
+}

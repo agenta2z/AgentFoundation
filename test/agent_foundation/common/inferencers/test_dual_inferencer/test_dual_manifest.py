@@ -18,9 +18,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
-from agent_foundation.common.inferencers.inferencer_workspace import (
-    InferencerWorkspace,
-)
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -40,11 +38,13 @@ def _make_mock_inferencer(response=None):
 
 
 def _make_workspace(tmpdir):
-    """Create an InferencerWorkspace with the standard layout."""
-    ws = InferencerWorkspace(
-        root=tmpdir,
-        use_final_deliverables_folder=True,
-    )
+    """Create an InferencerWorkspace with the standard layout.
+
+    Part 2: the retired ``use_final_deliverables_folder`` flag is gone —
+    deliverables (and DualInferencer's ``output_manifest.json``) live directly
+    in ``outputs/``.
+    """
+    ws = InferencerWorkspace(root=tmpdir)
     ws.ensure_dirs()
     return ws
 
@@ -200,8 +200,16 @@ class TestFinalizeResponseEmitsManifest(unittest.TestCase):
         dual._state = {
             "attempt_record": {
                 "iterations": [
-                    {"proposal": "v1", "review": {"approved": False}, "counter_feedback": None},
-                    {"proposal": "v2", "review": {"approved": False}, "counter_feedback": None},
+                    {
+                        "proposal": "v1",
+                        "review": {"approved": False},
+                        "counter_feedback": None,
+                    },
+                    {
+                        "proposal": "v2",
+                        "review": {"approved": False},
+                        "counter_feedback": None,
+                    },
                 ],
             },
             "consensus_reached": False,

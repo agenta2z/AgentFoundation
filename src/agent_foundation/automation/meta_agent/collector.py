@@ -32,15 +32,14 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from rich_python_utils.service_utils.session_management.session_logger import (
-    SessionLogReader,
-)
-
 from agent_foundation.automation.meta_agent.errors import TraceCollectionError
 from agent_foundation.automation.meta_agent.models import (
     ExecutionTrace,
     TraceActionResult,
     TraceStep,
+)
+from rich_python_utils.service_utils.session_management.session_logger import (
+    SessionLogReader,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,9 +111,7 @@ class TraceCollector:
             If *run_count* < 1.
         """
         if run_count < 1:
-            raise ValueError(
-                f"run_count must be >= 1, got {run_count}"
-            )
+            raise ValueError(f"run_count must be >= 1, got {run_count}")
 
         # Resolve per-run data
         data_per_run = self._resolve_input_data(run_count, input_data)
@@ -125,9 +122,7 @@ class TraceCollector:
             try:
                 trace = self._run_single(task_description, data, idx)
             except Exception as exc:
-                logger.warning(
-                    "Agent run %d failed: %s", idx, exc, exc_info=True
-                )
+                logger.warning("Agent run %d failed: %s", idx, exc, exc_info=True)
                 # Capture partial trace with error status
                 trace = ExecutionTrace(
                     trace_id=str(uuid4()),
@@ -213,9 +208,7 @@ class TraceCollector:
         try:
             reader = SessionLogReader(session_dir, resolve_parts=True)
         except (OSError, KeyError, ValueError) as exc:
-            logger.warning(
-                "Could not read session logs from %s: %s", session_dir, exc
-            )
+            logger.warning("Could not read session logs from %s: %s", session_dir, exc)
             return []
 
         steps: List[TraceStep] = []
@@ -418,10 +411,14 @@ class TraceCollector:
             return ts
         if isinstance(ts, str):
             # Try ISO format
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            for fmt in (
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ",
+                "%Y-%m-%dT%H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S",
+            ):
                 try:
                     return datetime.strptime(ts, fmt)
                 except ValueError:
                     continue
         return None
-

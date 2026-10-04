@@ -87,9 +87,7 @@ class SyntheticDataProvider:
         if self._parameter_schema is not None:
             return self._generate_from_schema(count)
 
-        raise ValueError(
-            "Either parameter_schema or custom_generator must be provided"
-        )
+        raise ValueError("Either parameter_schema or custom_generator must be provided")
 
     # ------------------------------------------------------------------
     # Schema-based generation

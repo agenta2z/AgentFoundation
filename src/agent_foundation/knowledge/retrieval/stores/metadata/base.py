@@ -9,6 +9,7 @@ has an EntityMetadata object containing properties, timestamps, and type informa
 
 Requirements: 2.1
 """
+
 from abc import ABC, abstractmethod
 from typing import List, Optional
 

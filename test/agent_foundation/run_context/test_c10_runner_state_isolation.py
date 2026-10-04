@@ -27,21 +27,20 @@ Covers both carrier shapes:
 import asyncio
 
 import attrs
-
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (  # noqa: E501
+    LinearWorkflowInferencer,
+    WorkflowStepConfig,
+)
 from agent_foundation.common.inferencers.run_context import (
-    InferencerStateBase,
-    RunContext,
     active_run_context,
     enter_run,
     exit_run,
+    InferencerStateBase,
+    RunContext,
 )
 from agent_foundation.common.inferencers.run_context.state import (
     LinearWorkflowState,
     register_state,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (  # noqa: E501
-    LinearWorkflowInferencer,
-    WorkflowStepConfig,
 )
 
 
@@ -109,9 +108,7 @@ def _runner_carrier_for(ctx: RunContext) -> LinearWorkflowState | None:
     runner = getattr(call, "runner", None)
     if isinstance(call, InferencerStateBase) and runner is not None:
         return runner
-    return ctx.node().scratch.get(
-        LinearWorkflowInferencer._RUNNER_SCRATCH_KEY
-    )
+    return ctx.node().scratch.get(LinearWorkflowInferencer._RUNNER_SCRATCH_KEY)
 
 
 def test_shared_lwi_two_concurrent_ctxs_isolate_runner_state():

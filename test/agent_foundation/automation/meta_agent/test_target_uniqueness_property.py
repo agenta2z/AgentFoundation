@@ -12,12 +12,11 @@ matching zero or multiple elements SHALL be discarded.
 
 from __future__ import annotations
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.automation.meta_agent.models import TraceStep
 from agent_foundation.automation.meta_agent.target_converter import (
     TargetStrategyConverter,
 )
+from hypothesis import given, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +82,11 @@ def html_page_with_target(draw):
     target_attrs = draw(html_element_attrs())
     target_text = draw(st.text(alphabet=_ATTR_CHARS, min_size=1, max_size=30))
     framework_id = "target_" + draw(
-        st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=10)
+        st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")),
+            min_size=1,
+            max_size=10,
+        )
     )
 
     target_el = _build_element(target_tag, target_attrs, framework_id, target_text)

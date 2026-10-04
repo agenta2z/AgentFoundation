@@ -4,6 +4,7 @@ Property-based tests for EntityMetadata serialization round-trip.
 # Feature: agent-knowledge-base, Property 1: Data model serialization round-trip
 # **Validates: Requirements 1.6**
 """
+
 import sys
 from pathlib import Path
 
@@ -16,9 +17,8 @@ _src_dir = _current_path.parent / "src"
 if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from hypothesis import given, settings, strategies as st
-
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
+from hypothesis import given, settings, strategies as st
 
 # Import strategies from conftest (same directory, added to sys.path)
 _test_dir = Path(__file__).resolve().parent
@@ -88,7 +88,9 @@ class TestEntityMetadataKeyValueRoundTrip:
                 st.none(),
                 st.booleans(),
                 st.integers(min_value=-1000, max_value=1000),
-                st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6),
+                st.floats(
+                    allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6
+                ),
                 st.text(max_size=50),
             ),
             lambda children: st.one_of(
@@ -99,7 +101,9 @@ class TestEntityMetadataKeyValueRoundTrip:
         ),
     )
     @settings(max_examples=200)
-    def test_set_then_get_returns_original_value(self, metadata: EntityMetadata, key: str, value):
+    def test_set_then_get_returns_original_value(
+        self, metadata: EntityMetadata, key: str, value
+    ):
         """set(key, value) followed by get(key) returns the original value.
 
         **Validates: Requirements 1.6**

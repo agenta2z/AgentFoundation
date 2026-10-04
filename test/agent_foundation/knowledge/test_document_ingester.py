@@ -5,19 +5,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
 import pytest
-
-from agent_foundation.knowledge.ingestion.document_ingester import (
-    DocumentIngester,
-    IngesterConfig,
-    IngestionResult,
-    ProgressCallback,
-    ingest_markdown_files,
-    ingest_directory,
-)
 from agent_foundation.knowledge.ingestion.chunker import ChunkerConfig
 from agent_foundation.knowledge.ingestion.deduplicator import (
     DedupConfig,
     ThreeTierDeduplicator,
+)
+from agent_foundation.knowledge.ingestion.document_ingester import (
+    DocumentIngester,
+    ingest_directory,
+    ingest_markdown_files,
+    IngesterConfig,
+    IngestionResult,
+    ProgressCallback,
 )
 from agent_foundation.knowledge.ingestion.merge_strategy import (
     MergeStrategyConfig,
@@ -27,10 +26,7 @@ from agent_foundation.knowledge.ingestion.validator import (
     KnowledgeValidator,
     ValidationConfig,
 )
-from agent_foundation.knowledge.retrieval.models.enums import (
-    DedupAction,
-    MergeAction,
-)
+from agent_foundation.knowledge.retrieval.models.enums import DedupAction, MergeAction
 from agent_foundation.knowledge.retrieval.models.knowledge_piece import (
     KnowledgePiece,
     KnowledgeType,
@@ -79,11 +75,13 @@ class InMemoryPieceStore(KnowledgePieceStore):
 
 def _make_llm_response(pieces: List[Dict[str, Any]]) -> str:
     """Create a valid LLM JSON response with the given pieces."""
-    return json.dumps({
-        "metadata": {},
-        "pieces": pieces,
-        "graph": {"nodes": [], "edges": []},
-    })
+    return json.dumps(
+        {
+            "metadata": {},
+            "pieces": pieces,
+            "graph": {"nodes": [], "edges": []},
+        }
+    )
 
 
 def _simple_piece_dict(
@@ -104,8 +102,10 @@ def _simple_piece_dict(
 
 def _make_inferencer(response: str):
     """Create a simple inferencer that returns a fixed response."""
+
     def inferencer(prompt: str) -> str:
         return response
+
     return inferencer
 
 
@@ -184,6 +184,7 @@ class TestCallLlm:
 
     def test_inferencer_response_protocol(self):
         """Test duck-typed InferencerResponse handling."""
+
         class MockResponse:
             def select_response(self):
                 return MagicMock(response="structured response")
@@ -223,11 +224,13 @@ class TestParseAndValidate:
 
     def test_missing_piece_fields_raises(self):
         ingester = DocumentIngester(inferencer=lambda p: "")
-        response = json.dumps({
-            "metadata": {},
-            "pieces": [{"content": "no id"}],
-            "graph": {"nodes": [], "edges": []},
-        })
+        response = json.dumps(
+            {
+                "metadata": {},
+                "pieces": [{"content": "no id"}],
+                "graph": {"nodes": [], "edges": []},
+            }
+        )
         with pytest.raises(ValueError, match="missing required fields"):
             ingester._parse_and_validate(response)
 
@@ -297,7 +300,9 @@ class TestMergeResults:
             "pieces": [],
             "graph": {
                 "nodes": [{"node_id": "n1", "node_type": "concept"}],
-                "edges": [{"source_id": "n1", "target_id": "n2", "edge_type": "RELATES"}],
+                "edges": [
+                    {"source_id": "n1", "target_id": "n2", "edge_type": "RELATES"}
+                ],
             },
         }
         data2 = {
@@ -309,7 +314,11 @@ class TestMergeResults:
                     {"node_id": "n2", "node_type": "concept"},
                 ],
                 "edges": [
-                    {"source_id": "n1", "target_id": "n2", "edge_type": "RELATES"},  # duplicate
+                    {
+                        "source_id": "n1",
+                        "target_id": "n2",
+                        "edge_type": "RELATES",
+                    },  # duplicate
                 ],
             },
         }
@@ -327,7 +336,12 @@ class TestApplyEnhancements:
         data = {"pieces": [_simple_piece_dict()]}
         result_data, counts, deactivate = ingester._apply_enhancements(data)
         assert len(result_data["pieces"]) == 1
-        assert counts == {"deduped": 0, "failed_validation": 0, "updated": 0, "merged": 0}
+        assert counts == {
+            "deduped": 0,
+            "failed_validation": 0,
+            "updated": 0,
+            "merged": 0,
+        }
         assert deactivate == []
 
     def test_failed_validation_moves_to_developmental(self):
@@ -515,9 +529,7 @@ class TestIngestText:
 
         ingester = DocumentIngester(inferencer=mock_inferencer)
         kb = _make_mock_kb()
-        result = ingester.ingest_text(
-            "# Test\n\nContent.", kb, source_file="test.md"
-        )
+        result = ingester.ingest_text("# Test\n\nContent.", kb, source_file="test.md")
         assert result.source_file == "test.md"
 
     def test_llm_failure_records_error(self):
@@ -525,9 +537,7 @@ class TestIngestText:
             raise RuntimeError("LLM down")
 
         config = IngesterConfig(max_retries=1)
-        ingester = DocumentIngester(
-            inferencer=failing_inferencer, config=config
-        )
+        ingester = DocumentIngester(inferencer=failing_inferencer, config=config)
         kb = _make_mock_kb()
         result = ingester.ingest_text("# Test\n\nContent.", kb)
         assert result.success is False
@@ -713,22 +723,24 @@ class TestSpaceClassifierIntegration:
 
     def test_suggestion_mode_stores_pending_suggestions(self):
         """Suggestion-mode rules store suggestions on the piece (Req 7.6)."""
-        classifier = SpaceClassifier(rules=[
-            SpaceRule(
-                name="suggest_personal",
-                space="personal",
-                condition=lambda _: True,
-                priority=10,
-                mode="suggestion",
-            ),
-            SpaceRule(
-                name="main_default",
-                space="main",
-                condition=lambda _: True,
-                priority=0,
-                mode="auto",
-            ),
-        ])
+        classifier = SpaceClassifier(
+            rules=[
+                SpaceRule(
+                    name="suggest_personal",
+                    space="personal",
+                    condition=lambda _: True,
+                    priority=10,
+                    mode="suggestion",
+                ),
+                SpaceRule(
+                    name="main_default",
+                    space="main",
+                    condition=lambda _: True,
+                    priority=0,
+                    mode="auto",
+                ),
+            ]
+        )
 
         ingester = DocumentIngester(
             inferencer=lambda p: "",
@@ -755,15 +767,17 @@ class TestSpaceClassifierIntegration:
 
     def test_custom_classifier_injected(self):
         """Custom SpaceClassifier can be injected (Req 7.1)."""
-        custom_classifier = SpaceClassifier(rules=[
-            SpaceRule(
-                name="always_personal",
-                space="personal",
-                condition=lambda _: True,
-                priority=10,
-                mode="auto",
-            ),
-        ])
+        custom_classifier = SpaceClassifier(
+            rules=[
+                SpaceRule(
+                    name="always_personal",
+                    space="personal",
+                    condition=lambda _: True,
+                    priority=10,
+                    mode="auto",
+                ),
+            ]
+        )
 
         ingester = DocumentIngester(
             inferencer=lambda p: "",

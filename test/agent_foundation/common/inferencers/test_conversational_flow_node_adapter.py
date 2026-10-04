@@ -10,19 +10,19 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from hypothesis import given, settings, HealthCheck
-from hypothesis import strategies as st
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
     AgenticDynamicContext,
     CompletedAction,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 from agent_foundation.ui.interactive_base import InteractiveBase
+from hypothesis import given, HealthCheck, settings, strategies as st
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_conversational_inferencer(**kwargs):
     """Create a ConversationalInferencer with mocked base_inferencer."""
@@ -44,10 +44,12 @@ def _make_conversational_inferencer(**kwargs):
 # Strategies
 # ---------------------------------------------------------------------------
 
-message_strategy = st.fixed_dictionaries({
-    "role": st.sampled_from(["user", "assistant", "system"]),
-    "content": st.text(min_size=1, max_size=100),
-})
+message_strategy = st.fixed_dictionaries(
+    {
+        "role": st.sampled_from(["user", "assistant", "system"]),
+        "content": st.text(min_size=1, max_size=100),
+    }
+)
 
 completed_action_strategy = st.builds(
     CompletedAction,
@@ -78,7 +80,10 @@ class TestStateResetCompleteness:
     )
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     def test_reset_clears_all_state(self, messages, actions, history):
         """reset_for_flow_invocation() clears _messages, _dynamic_context,
@@ -121,7 +126,10 @@ class TestStateResetCompleteness:
     )
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     def test_reset_session_alias_works_identically(self, messages, actions, history):
         """reset_session (alias) produces the same result as
@@ -148,6 +156,7 @@ class TestStateResetCompleteness:
 # ===========================================================================
 # Adapter helpers and strategies
 # ===========================================================================
+
 
 def _make_adapter(**kwargs):
     """Create a ConversationalFlowNodeAdapter with a mocked ConversationalInferencer."""
@@ -201,7 +210,10 @@ class TestAdapterRoutingCorrectness:
     @given(content=content_strategy)
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @pytest.mark.asyncio
     async def test_content_forwarded_to_run_agentic_loop(self, content):
@@ -243,7 +255,10 @@ class TestOutputExtractionCorrectness:
     @given(text=st.text(min_size=1, max_size=200).filter(lambda s: s.strip()))
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @pytest.mark.asyncio
     async def test_default_extractor_returns_text(self, text):
@@ -261,7 +276,10 @@ class TestOutputExtractionCorrectness:
     @given(text=st.text(min_size=1, max_size=200).filter(lambda s: s.strip()))
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @pytest.mark.asyncio
     async def test_custom_extractor_is_applied(self, text):
@@ -374,7 +392,10 @@ class TestFallbackActivation:
     @given(text=st.text(min_size=1, max_size=200).filter(lambda s: s.strip()))
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @pytest.mark.asyncio
     async def test_no_fallback_on_valid_output(self, text):
@@ -424,11 +445,20 @@ class TestFallbackActivation:
 # ===========================================================================
 
 
+async def _ainfer_with_call_keywords(adapter, inference_input, **call_keywords):
+    """Run the private ``_ainfer`` inside an invocation carrying the per-call
+    keywords, as a public entry pops them (``interactive`` is an invocation
+    keyword of the adapter, plan v8 §5.9)."""
+    async with aopen_invocation(adapter) as frame:
+        adapter._pop_invocation_keywords(frame, call_keywords)
+        return await adapter._ainfer(inference_input, **call_keywords)
+
+
 class TestInteractiveContextPropagation:
     """**Validates: Requirements 4.1, 4.2**
 
-    Verify kwargs["interactive"] wins over self.interactive.
-    Verify fallback to self.interactive when not in kwargs.
+    Verify the per-call ``interactive`` keyword wins over self.interactive.
+    Verify fallback to self.interactive when not passed.
     """
 
     @pytest.mark.asyncio
@@ -446,7 +476,9 @@ class TestInteractiveContextPropagation:
 
         adapter.conversational_inferencer.run_agentic_loop = mock_run
 
-        await adapter._ainfer("task", interactive=kwargs_interactive)
+        await _ainfer_with_call_keywords(
+            adapter, "task", interactive=kwargs_interactive
+        )
         assert captured["interactive"] is kwargs_interactive
 
     @pytest.mark.asyncio
@@ -487,7 +519,10 @@ class TestInteractiveContextPropagation:
     )
     @settings(
         max_examples=50,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @pytest.mark.asyncio
     async def test_interactive_resolution_property(self, use_kwargs, use_self):
@@ -508,7 +543,7 @@ class TestInteractiveContextPropagation:
         if kwargs_interactive is not None:
             call_kwargs["interactive"] = kwargs_interactive
 
-        await adapter._ainfer("task", **call_kwargs)
+        await _ainfer_with_call_keywords(adapter, "task", **call_kwargs)
 
         expected = kwargs_interactive or self_interactive
         assert captured["interactive"] is expected
@@ -556,8 +591,8 @@ class TestExtractResponseTextWithAgenticResult:
     def test_inferencer_response_still_works(self):
         """InferencerResponse still dispatches via select_response()."""
         from agent_foundation.common.inferencers.agentic_inferencers.common import (
-            InferencerResponse,
             extract_response_text,
+            InferencerResponse,
         )
 
         resp = InferencerResponse(
@@ -585,8 +620,8 @@ class TestExtractResponseTextWithAgenticResult:
         (since it inherits from InferencerResponse)."""
         from agent_foundation.common.inferencers.agentic_inferencers.common import (
             DualInferencerResponse,
-            InferencerResponse,
             extract_response_text,
+            InferencerResponse,
         )
 
         dual = DualInferencerResponse(
@@ -601,8 +636,8 @@ class TestExtractResponseTextWithAgenticResult:
     def test_dispatch_order_inferencer_before_agentic(self):
         """InferencerResponse is checked before AgenticResult."""
         from agent_foundation.common.inferencers.agentic_inferencers.common import (
-            InferencerResponse,
             extract_response_text,
+            InferencerResponse,
         )
 
         # InferencerResponse should NOT fall through to AgenticResult branch
@@ -674,10 +709,10 @@ class TestPolymorphicCompatibility:
 
     def test_adapter_overrides_ainfer(self):
         """Adapter overrides _ainfer (not just inherits the default)."""
-        from agent_foundation.common.inferencers.inferencer_base import InferencerBase
         from agent_foundation.common.inferencers.agentic_inferencers.conversational.flow_node_adapter import (
             ConversationalFlowNodeAdapter,
         )
+        from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
         # The adapter's _ainfer should be different from the base class default
         assert ConversationalFlowNodeAdapter._ainfer is not InferencerBase._ainfer, (
@@ -728,7 +763,7 @@ class TestBackwardCompatibility:
         flow inferencer children that are plain LLM inferencers.
         """
         from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-        from attr import attrs, attrib
+        from attr import attrib, attrs
 
         @attrs(slots=False, kw_only=True)
         class PlainInferencer(InferencerBase):
@@ -753,8 +788,8 @@ class TestBackwardCompatibility:
     def test_extract_response_text_inferencer_response_unchanged(self):
         """extract_response_text still handles InferencerResponse identically."""
         from agent_foundation.common.inferencers.agentic_inferencers.common import (
-            InferencerResponse,
             extract_response_text,
+            InferencerResponse,
         )
 
         resp = InferencerResponse(
@@ -1151,7 +1186,9 @@ class TestSessionLevelResume:
 
         result = await adapter._ainfer("original task")
         assert result == "cached final answer"
-        assert call_count == 0, "run_agentic_loop should not be called for completed sessions"
+        assert call_count == 0, (
+            "run_agentic_loop should not be called for completed sessions"
+        )
 
     @pytest.mark.asyncio
     async def test_mid_conversation_crash_resumes_from_last_turn(self, tmp_path):
@@ -1168,9 +1205,15 @@ class TestSessionLevelResume:
         saved_messages = [
             {"role": "user", "content": "original task"},
             {"role": "assistant", "content": "I need to use a tool"},
-            {"role": "user", "content": "[Tool execution results]\n[Tool Result: search]\nresult data"},
+            {
+                "role": "user",
+                "content": "[Tool execution results]\n[Tool Result: search]\nresult data",
+            },
             {"role": "assistant", "content": "Based on the results..."},
-            {"role": "user", "content": "Continue based on the tool execution results above."},
+            {
+                "role": "user",
+                "content": "Continue based on the tool execution results above.",
+            },
         ]
         checkpoint = {
             "schema_version": 1,
@@ -1211,14 +1254,22 @@ class TestSessionLevelResume:
 
         assert result == "resumed answer"
         # Content should be the last user message, not the original task
-        assert captured["content"] == "Continue based on the tool execution results above."
+        assert (
+            captured["content"] == "Continue based on the tool execution results above."
+        )
         # Turn number should be restored from checkpoint
         assert captured["turn_number"] == 2
         # Messages should be populated from checkpoint
         assert len(adapter.conversational_inferencer._messages) == len(saved_messages)
         # Dynamic context should be restored
-        assert adapter.conversational_inferencer._dynamic_context._compressed_history == "prior compressed context"
-        assert len(adapter.conversational_inferencer._dynamic_context.completed_actions) == 1
+        assert (
+            adapter.conversational_inferencer._dynamic_context._compressed_history
+            == "prior compressed context"
+        )
+        assert (
+            len(adapter.conversational_inferencer._dynamic_context.completed_actions)
+            == 1
+        )
 
     @pytest.mark.asyncio
     async def test_on_turn_complete_fires_after_every_iteration(self):
@@ -1274,7 +1325,9 @@ class TestSessionLevelResume:
         )
 
         # Should have fired at least once (after the tool execution iteration)
-        assert len(turn_numbers) >= 1, f"on_turn_complete should fire, got {turn_numbers}"
+        assert len(turn_numbers) >= 1, (
+            f"on_turn_complete should fire, got {turn_numbers}"
+        )
         # Turn numbers should be sequential starting from 1
         for i, tn in enumerate(turn_numbers):
             assert tn == i + 1, f"Expected turn {i + 1}, got {tn}"
@@ -1294,13 +1347,16 @@ class TestSessionLevelResume:
         session_dir = os.path.join(str(tmp_path), session_id)
 
         # Write a checkpoint
-        adapter._write_checkpoint_atomic(session_dir, {
-            "schema_version": 1,
-            "session_id": session_id,
-            "status": "in_progress",
-            "turn_number": 1,
-            "messages": [{"role": "user", "content": "hello"}],
-        })
+        adapter._write_checkpoint_atomic(
+            session_dir,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "status": "in_progress",
+                "turn_number": 1,
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
 
         # Verify the file exists and is valid JSON
         checkpoint_path = os.path.join(session_dir, "checkpoint.json")
@@ -1320,14 +1376,17 @@ class TestSessionLevelResume:
         assert len(tmp_files) == 0, f"Temp files should be cleaned up: {tmp_files}"
 
         # Overwrite with a new checkpoint — should replace atomically
-        adapter._write_checkpoint_atomic(session_dir, {
-            "schema_version": 1,
-            "session_id": session_id,
-            "status": "completed",
-            "turn_number": 3,
-            "messages": [],
-            "completion_result": "done",
-        })
+        adapter._write_checkpoint_atomic(
+            session_dir,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "status": "completed",
+                "turn_number": 3,
+                "messages": [],
+                "completion_result": "done",
+            },
+        )
 
         with open(checkpoint_path, "r") as f:
             data = json.load(f)
@@ -1446,3 +1505,191 @@ class TestSessionLevelResume:
 
         await adapter._ainfer("task")
         assert len(reset_calls) == 0, "reset should NOT be called when resuming"
+
+
+# ===========================================================================
+# Host-protocol typing (plan §9.4, D14)
+# ===========================================================================
+
+
+class _ProtocolHost:
+    """A conversational host that is not a ConversationalInferencer: only
+    the ``ConversationalHost`` and ``SupportsFlowNode`` members."""
+
+    supports_widget_recovery = False
+    supports_round_resume = False
+    supports_inbox = False
+    supports_prompt_manifest = False
+    supports_flow_node = True
+    supports_rewind = False
+
+    def __init__(self, reply: str = "host answer") -> None:
+        self.prior_context: dict = {}
+        self.tool_registry: dict = {}
+        self.interactive = None
+        self.sop_controller = None
+        self.sop_state = None
+        self.suspended_sops: list = []
+        self.extra_sop_dirs: list = []
+        self.tool_dispatcher = None
+        self.cache_folder = None
+        self.dynamic_context = AgenticDynamicContext()
+        self.messages: list = []
+        self.resets = 0
+        self.calls: list = []
+        self.reply = reply
+
+    async def run_agentic_loop(
+        self,
+        content,
+        *,
+        run_context=None,
+        interactive=None,
+        session_id="",
+        turn_number=0,
+        origin="user",
+        on_new_turn=None,
+        on_prompt_rendered=None,
+        on_turn_complete=None,
+        on_round_start=None,
+        on_round_complete=None,
+    ):
+        self.calls.append({"content": content, "turn_number": turn_number})
+        self.add_message("user", content)
+        self.add_message("assistant", self.reply)
+        if on_turn_complete is not None:
+            await on_turn_complete(turn_number + 1)
+        return _make_agentic_result(text=self.reply)
+
+    def accepts_command(self, text):
+        return False
+
+    def set_prior_context(self, ctx):
+        self.prior_context = dict(ctx)
+
+    def update_prior_context(self, **kwargs):
+        self.prior_context.update(kwargs)
+
+    def set_session_variables(self, variables, *, tool_type=None):
+        self.prior_context.update(variables)
+
+    def get_messages(self):
+        return list(self.messages)
+
+    def set_messages(self, messages):
+        self.messages = list(messages)
+
+    def add_message(self, role, content):
+        self.messages.append({"role": role, "content": content})
+
+    def next_required_tools(self):
+        return set()
+
+    def check_phase_completion(self, tool_name=""):
+        pass
+
+    def export_state(self, *, turn_number=0, iteration=0):
+        return {"messages": self.get_messages()}
+
+    def restore_state(self, state, *, reattach_sop=True):
+        self.set_messages(state["messages"])
+
+    @property
+    def effective_cwd(self):
+        return "/tmp"
+
+    def enable_debug_mode(self):
+        pass
+
+    def reset_for_flow_invocation(self):
+        self.resets += 1
+        self.messages = []
+        self.dynamic_context = AgenticDynamicContext()
+
+    async def aclose(self):
+        pass
+
+
+def _flow_adapter_class():
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.flow_node_adapter import (
+        ConversationalFlowNodeAdapter,
+    )
+
+    return ConversationalFlowNodeAdapter
+
+
+class TestHostProtocolTyping:
+    """The adapter wraps any ``ConversationalHost`` that supports flow nodes,
+    not only ``ConversationalInferencer``; a host that declares it cannot run
+    as a flow node, or lacks the protocol, is rejected at configuration time."""
+
+    @pytest.mark.asyncio
+    async def test_a_protocol_host_runs_as_a_flow_node(self):
+        host = _ProtocolHost()
+        adapter = _flow_adapter_class()(conversational_inferencer=host)
+
+        result = await adapter.ainfer("the task")
+
+        assert result == "host answer"
+        assert host.calls == [{"content": "the task", "turn_number": 0}]
+        assert host.resets == 1
+
+    @pytest.mark.asyncio
+    async def test_a_protocol_host_resumes_through_its_public_state(self, tmp_path):
+        import json
+        import os
+
+        session_dir = os.path.join(str(tmp_path), "resume")
+        os.makedirs(session_dir)
+        saved = [
+            {"role": "user", "content": "original task"},
+            {"role": "assistant", "content": "working"},
+            {"role": "user", "content": "the follow-up"},
+        ]
+        with open(os.path.join(session_dir, "checkpoint.json"), "w") as f:
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "session_id": "resume",
+                    "initial_content": "original task",
+                    "status": "in_progress",
+                    "turn_number": 2,
+                    "messages": saved,
+                    "completion_result": None,
+                },
+                f,
+            )
+        with open(os.path.join(session_dir, "dynamic_context.json"), "w") as f:
+            json.dump(
+                {"completed_actions": [], "compressed_history": "earlier work"}, f
+            )
+        host = _ProtocolHost()
+        adapter = _flow_adapter_class()(
+            conversational_inferencer=host,
+            checkpoint_dir=str(tmp_path),
+            session_id="resume",
+        )
+
+        result = await adapter._ainfer("original task")
+
+        assert result == "host answer"
+        assert host.resets == 0
+        assert host.calls == [{"content": "the follow-up", "turn_number": 2}]
+        assert host.get_messages()[: len(saved)] == saved
+        assert host.dynamic_context._compressed_history == "earlier work"
+
+    def test_an_object_without_the_host_protocol_is_rejected(self):
+        with pytest.raises(TypeError, match="ConversationalHost"):
+            _flow_adapter_class()(conversational_inferencer=object())
+
+    def test_a_host_declaring_no_flow_node_support_is_rejected(self):
+        host = _ProtocolHost()
+        host.supports_flow_node = False
+        with pytest.raises(TypeError, match="cannot be used as a flow node"):
+            _flow_adapter_class()(conversational_inferencer=host)
+
+    def test_a_host_without_a_settable_dynamic_context_is_rejected(self):
+        host = _ProtocolHost()
+        del host.dynamic_context
+        with pytest.raises(TypeError, match="SupportsFlowNode"):
+            _flow_adapter_class()(conversational_inferencer=host)

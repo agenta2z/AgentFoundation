@@ -45,7 +45,7 @@ class MetamateCliInferencer(TerminalSessionInferencerBase):
     Inherits from TerminalSessionInferencerBase which provides:
     - ``_ainfer_streaming()`` → streams subprocess stdout line-by-line
     - ``ainfer_streaming()`` / ``infer_streaming()`` with idle timeout
-    - ``_infer()`` via ``subprocess.run()`` (already implemented)
+    - ``_infer()`` via ``_execute_command()`` (already implemented)
     - Session management (inherited from StreamingInferencerBase)
 
     This class implements the three abstract methods:
@@ -74,6 +74,10 @@ class MetamateCliInferencer(TerminalSessionInferencerBase):
         timeout_seconds: Timeout for the CLI request.
         extra_cli_args: Additional CLI arguments to pass.
     """
+
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
 
     api_key: str = attrib(default=DEFAULT_API_KEY)
     agent_name: Optional[str] = attrib(default=None)

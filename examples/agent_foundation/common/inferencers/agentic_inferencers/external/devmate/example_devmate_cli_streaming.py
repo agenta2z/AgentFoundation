@@ -50,10 +50,13 @@ def create_inferencer(args):
         max_tokens=args.max_tokens,
         no_create_commit=True,
         config_name=args.config_name,
+        cli_binary="dm",
+        cli_mode="dm",
     )
 
 
 # ── Demo 1: Non-streaming (sync with parsed metadata) ────────────────────
+
 
 def demo_sync(inferencer, query: str) -> None:
     """Sync mode: sends query, waits for full response with metadata."""
@@ -91,6 +94,7 @@ def demo_sync(inferencer, query: str) -> None:
 
 
 # ── Demo 2: Async streaming (real-time line output) ──────────────────────
+
 
 async def demo_async_streaming(inferencer, query: str) -> None:
     """Async streaming: prints text line-by-line as Devmate generates."""
@@ -143,6 +147,7 @@ async def demo_async_streaming(inferencer, query: str) -> None:
 
 # ── Demo 3: Sync streaming (for non-async code) ─────────────────────────
 
+
 def demo_sync_streaming(inferencer, query: str) -> None:
     """Sync streaming: same real-time output from synchronous code."""
     print("=" * 70)
@@ -172,22 +177,24 @@ def demo_sync_streaming(inferencer, query: str) -> None:
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Devmate CLI — Streaming vs Sync Demo"
-    )
+    parser = argparse.ArgumentParser(description="Devmate CLI — Streaming vs Sync Demo")
     parser.add_argument(
-        "-q", "--query",
+        "-q",
+        "--query",
         default="Explain what a Python decorator is in 3 bullet points.",
         help="Query to send to Devmate",
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="claude-sonnet-4.5",
         help="Devmate model name (default: claude-sonnet-4.5)",
     )
     parser.add_argument(
-        "-t", "--target-path",
+        "-t",
+        "--target-path",
         default=os.path.expanduser("~/fbsource"),
         help="Target path — the agent's operating directory (default: ~/fbsource)",
     )
@@ -203,7 +210,8 @@ def main():
         help="Maximum tokens for response (default: 4096 — keep small for demo)",
     )
     parser.add_argument(
-        "-e", "--examples",
+        "-e",
+        "--examples",
         type=int,
         default=3,
         choices=[1, 2, 3],

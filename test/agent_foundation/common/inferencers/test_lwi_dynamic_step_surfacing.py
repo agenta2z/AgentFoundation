@@ -4,7 +4,8 @@ the flow's outputs/ — under a live run-context.
 Root cause this guards against: M7 dispatches each dynamic step under ctx node
 `step_{N}` (path-mirrored on-disk workspace children/step_N), but _finalize_output
 (+ propagation) address children/initial|round{NN}. The naming diverged, so the
-flow surfaced a non-existent path and its outputs/final_deliverables stayed empty,
+flow surfaced a non-existent path and its outputs/ stayed empty (Part 2 retired
+the former final_deliverables/ subfolder — outputs/ IS the deliverable set),
 which in turn made the parent aggregator embed raw <Response> text instead of a
 clean (See file: <path>) reference.
 
@@ -16,14 +17,17 @@ ctx-resolved workspace and the divergence is exercised end-to-end.
 import asyncio
 import os
 
-from attr import attrs, attrib
-
-from agent_foundation.common.inferencers.inferencer_base import InferencerBase
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
-from agent_foundation.common.inferencers.run_context import RunContext, enter_run, exit_run
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
     LinearWorkflowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
+from attr import attrib, attrs
 
 
 @attrs
@@ -58,8 +62,12 @@ def _run_two_step_dynamic_flow(flow_root):
     # step_N path-mirror that diverges from _finalize_output's round{NN}.
     lwi = LinearWorkflowInferencer(
         dynamic_mode=True,
-        default_initial_inferencer=_StepMock(scripted_response="<Response>INITIAL artifact</Response>"),
-        default_followup_inferencer=_StepMock(scripted_response="<Response>ROUND01 artifact</Response>"),
+        default_initial_inferencer=_StepMock(
+            scripted_response="<Response>INITIAL artifact</Response>"
+        ),
+        default_followup_inferencer=_StepMock(
+            scripted_response="<Response>ROUND01 artifact</Response>"
+        ),
         end_condition=lambda s, r: len(s.get("dynamic_step_results", [])) >= 2,
         max_dynamic_steps=2,
         output_path="output.md",
@@ -83,7 +91,9 @@ def test_dynamic_flow_surfaces_last_step_output(tmp_path):
         "flow did NOT surface its last step's output to outputs/output.md — the "
         "dynamic-step workspace naming (step_N) diverged from _finalize_output (round{NN})"
     )
-    assert "ROUND01" in open(own).read(), "must surface the LAST step (round01), not an earlier one"
+    assert "ROUND01" in open(own).read(), (
+        "must surface the LAST step (round01), not an earlier one"
+    )
 
 
 def test_dynamic_step_writes_under_canonical_round_dir(tmp_path):

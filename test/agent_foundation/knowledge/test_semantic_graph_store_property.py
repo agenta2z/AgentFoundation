@@ -18,6 +18,7 @@ Feature: graph-semantic-retrieval
 
 **Validates: Requirements 3.3, 2.2, 2.3, 4.1, 4.2, 4.3, 4.4, 4.5, 1.4, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3, 9.2, 5.2, 5.3**
 """
+
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,22 +42,23 @@ _test_dir = str(Path(__file__).resolve().parent)
 if _test_dir not in sys.path:
     sys.path.insert(0, _test_dir)
 
-from hypothesis import given, settings, strategies as st, assume
-
-from rich_python_utils.service_utils.graph_service.graph_node import GraphNode, GraphEdge
+from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
+from agent_foundation.knowledge.retrieval.stores.graph.node_text_builder import (
+    default_node_text_builder,
+)
+from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
+from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
+    SemanticGraphStore,
+)
+from hypothesis import assume, given, settings, strategies as st
+from rich_python_utils.service_utils.graph_service.graph_node import (
+    GraphEdge,
+    GraphNode,
+)
 from rich_python_utils.service_utils.retrieval_service.document import Document
 from rich_python_utils.service_utils.retrieval_service.retrieval_service_base import (
     RetrievalServiceBase,
 )
-
-from agent_foundation.knowledge.retrieval.stores.graph.semantic_graph_store import (
-    SemanticGraphStore,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.search_mode import SearchMode
-from agent_foundation.knowledge.retrieval.stores.graph.node_text_builder import (
-    default_node_text_builder,
-)
-from agent_foundation.knowledge.retrieval.stores.graph.base import EntityGraphStore
 
 
 # ── Hypothesis strategies ────────────────────────────────────────────────────
@@ -91,7 +93,9 @@ _properties_strategy = st.dictionaries(
     max_size=5,
 )
 
-_node_type_strategy = st.sampled_from(["service", "person", "product", "location", "concept"])
+_node_type_strategy = st.sampled_from(
+    ["service", "person", "product", "location", "concept"]
+)
 
 
 @st.composite
@@ -123,7 +127,9 @@ def ranked_list_strategy(draw, min_size=0, max_size=5):
     nodes = draw(st.lists(graph_node_strategy(), min_size=min_size, max_size=max_size))
     scores = draw(
         st.lists(
-            st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+            st.floats(
+                min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+            ),
             min_size=len(nodes),
             max_size=len(nodes),
         )
@@ -230,7 +236,9 @@ class TestEmbeddingTextOverride:
 
     @given(node=graph_node_strategy(), embed_text=st.text(min_size=1, max_size=100))
     @settings(max_examples=100)
-    def test_embedding_text_property_overrides_doc_embedding_text(self, node: GraphNode, embed_text: str):
+    def test_embedding_text_property_overrides_doc_embedding_text(
+        self, node: GraphNode, embed_text: str
+    ):
         """When properties has embedding_text key, Document.embedding_text uses that value.
 
         **Validates: Requirements 2.3**
@@ -341,11 +349,15 @@ class TestRemoveNodeSyncsSidecarIndex:
             search_mode=SearchMode.SIDECAR,
         )
         store.add_node(node)
-        assert retrieval.get_by_id(node.node_id, namespace=store.index_namespace) is not None
+        assert (
+            retrieval.get_by_id(node.node_id, namespace=store.index_namespace)
+            is not None
+        )
 
         store.remove_node(node.node_id)
-        assert retrieval.get_by_id(node.node_id, namespace=store.index_namespace) is None
-
+        assert (
+            retrieval.get_by_id(node.node_id, namespace=store.index_namespace) is None
+        )
 
 
 # ── Property 6: Edge Operations Do Not Modify Sidecar Index ─────────────────
@@ -508,7 +520,6 @@ class TestNodeTypeFilterReturnsOnlyMatchingTypes:
             assert result_node.node_type == filter_type
 
 
-
 # ── Property 9: RRF Fusion Produces Correct Scores and Ordering ─────────────
 # Feature: graph-semantic-retrieval, Property 9: RRF Fusion Produces Correct Scores and Ordering
 
@@ -558,10 +569,14 @@ class TestRRFFusionProducesCorrectScoresAndOrdering:
         expected_scores: Dict[str, float] = {}
         for rank, (node, _) in enumerate(list_a):
             rrf_score = 1.0 / (rrf_k + rank + 1)
-            expected_scores[node.node_id] = expected_scores.get(node.node_id, 0) + rrf_score
+            expected_scores[node.node_id] = (
+                expected_scores.get(node.node_id, 0) + rrf_score
+            )
         for rank, (node, _) in enumerate(list_b):
             rrf_score = 1.0 / (rrf_k + rank + 1)
-            expected_scores[node.node_id] = expected_scores.get(node.node_id, 0) + rrf_score
+            expected_scores[node.node_id] = (
+                expected_scores.get(node.node_id, 0) + rrf_score
+            )
 
         # Verify scores match
         for node, score in result:
@@ -706,8 +721,12 @@ class TestNonSearchCRUDBehavesIdenticallyToWrappedStore:
         assert len(direct_neighbors) == len(wrapped_neighbors)
 
         # remove_relation
-        direct_removed = direct.remove_relation(node_a.node_id, node_b.node_id, edge_type)
-        wrapped_removed = store.remove_relation(node_a.node_id, node_b.node_id, edge_type)
+        direct_removed = direct.remove_relation(
+            node_a.node_id, node_b.node_id, edge_type
+        )
+        wrapped_removed = store.remove_relation(
+            node_a.node_id, node_b.node_id, edge_type
+        )
         assert direct_removed == wrapped_removed
 
         # remove_node
@@ -718,7 +737,6 @@ class TestNonSearchCRUDBehavesIdenticallyToWrappedStore:
         # get_node after removal
         assert direct.get_node(node_a.node_id) is None
         assert store.get_node(node_a.node_id) is None
-
 
 
 # ── Property 15: kwargs Passthrough Preserves Extended Parameters ────────────
@@ -739,7 +757,9 @@ class TestKwargsPassthroughPreservesExtendedParameters:
         operation_id=_identifier_text,
     )
     @settings(max_examples=100)
-    def test_add_node_passes_kwargs_to_wrapped_store(self, node: GraphNode, operation_id: str):
+    def test_add_node_passes_kwargs_to_wrapped_store(
+        self, node: GraphNode, operation_id: str
+    ):
         """add_node passes **kwargs through to the wrapped store.
 
         **Validates: Requirements 9.2**
@@ -761,7 +781,9 @@ class TestKwargsPassthroughPreservesExtendedParameters:
         include_inactive=st.booleans(),
     )
     @settings(max_examples=100)
-    def test_get_node_passes_kwargs_to_wrapped_store(self, node_id: str, include_inactive: bool):
+    def test_get_node_passes_kwargs_to_wrapped_store(
+        self, node_id: str, include_inactive: bool
+    ):
         """get_node passes **kwargs through to the wrapped store.
 
         **Validates: Requirements 9.2**
@@ -777,14 +799,18 @@ class TestKwargsPassthroughPreservesExtendedParameters:
         )
         store.get_node(node_id, include_inactive=include_inactive)
 
-        mock_graph.get_node.assert_called_once_with(node_id, include_inactive=include_inactive)
+        mock_graph.get_node.assert_called_once_with(
+            node_id, include_inactive=include_inactive
+        )
 
     @given(
         node_id=_identifier_text,
         operation_id=_identifier_text,
     )
     @settings(max_examples=100)
-    def test_remove_node_passes_kwargs_to_wrapped_store(self, node_id: str, operation_id: str):
+    def test_remove_node_passes_kwargs_to_wrapped_store(
+        self, node_id: str, operation_id: str
+    ):
         """remove_node passes **kwargs through to the wrapped store.
 
         **Validates: Requirements 9.2**
@@ -800,11 +826,15 @@ class TestKwargsPassthroughPreservesExtendedParameters:
         )
         store.remove_node(node_id, operation_id=operation_id)
 
-        mock_graph.remove_node.assert_called_once_with(node_id, operation_id=operation_id)
+        mock_graph.remove_node.assert_called_once_with(
+            node_id, operation_id=operation_id
+        )
 
     @given(edge_type=_identifier_text, operation_id=_identifier_text)
     @settings(max_examples=100)
-    def test_add_relation_passes_kwargs_to_wrapped_store(self, edge_type: str, operation_id: str):
+    def test_add_relation_passes_kwargs_to_wrapped_store(
+        self, edge_type: str, operation_id: str
+    ):
         """add_relation passes **kwargs through to the wrapped store.
 
         **Validates: Requirements 9.2**
@@ -824,7 +854,9 @@ class TestKwargsPassthroughPreservesExtendedParameters:
 
     @given(node_id=_identifier_text, operation_id=_identifier_text)
     @settings(max_examples=100)
-    def test_get_neighbors_passes_kwargs_to_wrapped_store(self, node_id: str, operation_id: str):
+    def test_get_neighbors_passes_kwargs_to_wrapped_store(
+        self, node_id: str, operation_id: str
+    ):
         """get_neighbors passes **kwargs through to the wrapped store.
 
         **Validates: Requirements 9.2**
@@ -883,8 +915,10 @@ class TestSearchNodeFullFidelity:
 
         # Patch search to return this doc
         original_search = retrieval.search
+
         def mock_search(query, filters=None, namespace=None, top_k=5):
             return [(doc, 0.9)]
+
         retrieval.search = mock_search
 
         results = store.search_nodes("test query", top_k=5)

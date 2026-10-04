@@ -1,4 +1,3 @@
-
 # pyre-strict
 
 """Simple delimiter-based response parser.

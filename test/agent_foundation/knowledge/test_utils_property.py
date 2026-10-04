@@ -10,6 +10,7 @@ Feature: knowledge-module-migration
 
 **Validates: Requirements 3.1, 3.2, 3.4**
 """
+
 import math
 import sys
 from pathlib import Path
@@ -24,14 +25,13 @@ if _src_dir.exists() and str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 import pytest
-from hypothesis import given, settings, assume, strategies as st
-
 from agent_foundation.knowledge.retrieval.utils import (
     cosine_similarity,
     count_tokens,
     sanitize_id,
     unsanitize_id,
 )
+from hypothesis import assume, given, settings, strategies as st
 
 
 # Feature: agent-knowledge-base, Property 25: Entity ID sanitization round-trip
@@ -90,12 +90,12 @@ _bounded_float = st.floats(
 # Generate non-zero floats with magnitude large enough that squaring won't
 # underflow to 0.0 (which would make the vector appear zero-magnitude).
 # sqrt(sys.float_info.min) ≈ 1.5e-154, so 1e-150 is a safe lower bound.
-_nonzero_bounded_float = (
-    st.floats(min_value=1e-150, max_value=1e10, allow_nan=False, allow_infinity=False)
-    | st.floats(min_value=-1e10, max_value=-1e-150, allow_nan=False, allow_infinity=False)
-)
+_nonzero_bounded_float = st.floats(
+    min_value=1e-150, max_value=1e10, allow_nan=False, allow_infinity=False
+) | st.floats(min_value=-1e10, max_value=-1e-150, allow_nan=False, allow_infinity=False)
 
 _vector_strategy = st.lists(_bounded_float, min_size=1, max_size=50)
+
 
 # Build a non-zero vector by ensuring at least one element is non-zero:
 # draw one guaranteed non-zero float, then fill the rest with bounded floats.
@@ -149,12 +149,8 @@ class TestCosineSimilarityMathematicalProperties:
         **Validates: Requirements 3.1**
         """
         dim = data.draw(st.integers(min_value=1, max_value=50), label="dim")
-        a = data.draw(
-            st.lists(_bounded_float, min_size=dim, max_size=dim), label="a"
-        )
-        b = data.draw(
-            st.lists(_bounded_float, min_size=dim, max_size=dim), label="b"
-        )
+        a = data.draw(st.lists(_bounded_float, min_size=dim, max_size=dim), label="a")
+        b = data.draw(st.lists(_bounded_float, min_size=dim, max_size=dim), label="b")
 
         result_ab = cosine_similarity(a, b)
         result_ba = cosine_similarity(b, a)

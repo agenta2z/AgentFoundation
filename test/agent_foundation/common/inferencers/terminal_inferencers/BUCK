@@ -1,96 +1,19 @@
+load("@fbcode_macros//build_defs:python_pytest.bzl", "python_pytest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
 
+oncall("ml_oncall")
 
-load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
-load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
-
-python_library(
-    name = "resolve_path",
-    srcs = ["resolve_path.py"],
-    base_module = "",
-    typing = False,
-)
-
-python_library(
-    name = "test_terminal_inferencer_base_lib",
-    srcs = ["test_terminal_inferencer_base.py"],
-    base_module = "",
+python_pytest(
+    name = "terminal_inferencers",
+    srcs = glob(["test_*.py"]),
+    network_access = network_access_utils.none(),
     typing = False,
     deps = [
         "fbsource//third-party/pypi/attrs:attrs",
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_binary(
-    name = "test_terminal_inferencer_base",
-    srcs = ["test_terminal_inferencer_base.py"],
-    base_module = "",
-    main_function = "test_terminal_inferencer_base.print_test_results",
-    typing = False,
-    deps = [
-        "fbsource//third-party/pypi/attrs:attrs",
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_library(
-    name = "test_terminal_session_inferencer_base_lib",
-    srcs = ["test_terminal_session_inferencer_base.py"],
-    base_module = "",
-    typing = False,
-    deps = [
-        "fbsource//third-party/pypi/attrs:attrs",
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_binary(
-    name = "test_terminal_session_inferencer_base",
-    srcs = ["test_terminal_session_inferencer_base.py"],
-    base_module = "",
-    main_function = "test_terminal_session_inferencer_base.print_test_results",
-    typing = False,
-    deps = [
-        "fbsource//third-party/pypi/attrs:attrs",
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_library(
-    name = "test_devmate_inferencer_lib",
-    srcs = ["test_devmate_inferencer.py"],
-    base_module = "",
-    typing = False,
-    deps = [
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_binary(
-    name = "test_devmate_inferencer",
-    srcs = ["test_devmate_inferencer.py"],
-    base_module = "",
-    main_function = "test_devmate_inferencer.print_test_results",
-    typing = False,
-    deps = [
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
-    ],
-)
-
-python_binary(
-    name = "test_devmate_inferencer_live",
-    srcs = ["test_devmate_inferencer_live.py"],
-    base_module = "",
-    main_function = "test_devmate_inferencer_live.main",
-    typing = False,
-    deps = [
-        ":resolve_path",
-        "//_tony_dev/ScienceModelingTools/src:agent_foundation",
+        "fbsource//third-party/pypi/pytest:pytest",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        "//later:lib",
     ],
 )

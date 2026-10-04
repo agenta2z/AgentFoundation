@@ -31,11 +31,10 @@ import logging
 import os
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from attr import attrib, attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
+from agent_foundation.common.inferencers.inferencer_base import MissingDependencyError
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
     EmptyLineMode,
     StreamingInferencerBase,
@@ -43,6 +42,7 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,14 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     and the sync bridge are inherited from the base chain.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    _FANOUT_SINGLE_CALL_ARGS = StreamingInferencerBase._FANOUT_SINGLE_CALL_ARGS + (
+        "return_sdk_response",
+    )
+
     has_local_access: bool = attrib(default=True)
 
     # Streaming / timeout knobs (override base defaults).
@@ -90,8 +98,19 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # Codex SDK configuration.
     # ``None`` -> the model configured for your Codex login; else passed to thread_start.
     model_name: Optional[str] = attrib(default=None)
-    # ``-s`` sandbox policy: read-only | workspace-write | full-access.
-    sandbox_mode: Optional[str] = attrib(default="workspace-write")
+    # ``-s`` sandbox policy: read-only | workspace-write | full-access
+    # (``danger-full-access`` is accepted as an alias for full-access).
+    #
+    # Default ``danger-full-access`` (NO codex-internal sandbox), for the same
+    # reason as CodexCliInferencer: align with the sibling no-sandbox CLIs
+    # (ClaudeCode ``bypassPermissions`` / Devmate ``autoRunAll``) and the
+    # machine's ``danger-full-access`` Codex config ("Meta sandboxes
+    # externally"). ``workspace-write`` re-imposed a redundant sandbox rooted at
+    # the read-target cwd, so the agent could not write its own ``output.md``
+    # (a sibling subtree). SECURITY: no OS-level FS confinement; correct only
+    # inside an outer sandbox / trusted context. Pass a stricter ``sandbox_mode``
+    # explicitly if confinement is required.
+    sandbox_mode: Optional[str] = attrib(default="danger-full-access")
     # Codex ApprovalMode: auto_review (default) | deny_all. ``None`` -> SDK default.
     approval_mode: Optional[str] = attrib(default=None)
     # Codex thread instructions (system-prompt analogs).
@@ -112,8 +131,6 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
     # Per-run internal state (not per-branch; plain attribs).
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
-    _last_tool_use_count: int = attrib(default=0, init=False, repr=False)
-    _last_usage: Any = attrib(default=None, init=False, repr=False)
 
     # === Tier-3 connection handles (per-branch, V8-isolated; NOT attribs) ===
 
@@ -202,10 +219,13 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
         try:
             from openai_codex import AsyncCodex
-        except ImportError as e:  # pragma: no cover - soft dependency
-            raise RuntimeError(
-                f"openai-codex SDK not available: {e}. Install it with "
-                "`pip install openai-codex`."
+        except ImportError as e:
+            # Typed so the retry runner fails fast (a missing module never
+            # reappears on retry). fbsource does not vendor this SDK:
+            # third-party/pypi/openai-codex-sdk is a different package.
+            raise MissingDependencyError(
+                f"openai-codex SDK (module `openai_codex`) not available: {e}. "
+                "Install it with `pip install openai-codex`."
             ) from e
 
         # Apply extra env for the SDK runtime (auth is reused from `codex login`).
@@ -238,10 +258,42 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         self._thread = thread
         self._connected_loop = asyncio.get_running_loop()
         if getattr(thread, "id", None):
-            # Property -> per-branch store (correctness under fan-out); backing ->
-            # reset authority (so reset_session()/new_session start fresh).
             self.active_session_id = thread.id
-            self._session_id = thread.id
+
+    async def _aclose_client(self, client: Any) -> None:
+        """Close one Codex client, best effort (teardown)."""
+        if client is None:
+            return
+        try:
+            await client.close()
+        except Exception as e:  # pragma: no cover - best-effort teardown
+            logger.debug(
+                "[%s] codex client.close() failed: %s",
+                self.__class__.__name__,
+                e,
+            )
+
+    async def _adisconnect_branch(self) -> None:
+        """Close the active branch's client only: the one this call used. Other
+        branches' clients may be bound to other loops."""
+        await self._aclose_client(self._client)
+        self._client = None
+        self._thread = None
+        self._connected_loop = None
+
+    async def _areset_branch_conversation(self) -> None:
+        """A connected client keeps its thread, and a cold connect resumes the
+        branch's session id, so the branch's own client is closed (not a
+        sibling's, nor the client opened outside any context that branches
+        without one share) and its session forgotten: the branch's next call
+        starts a new thread."""
+        handles = self._tier3_own_handles()
+        client = handles.get("client")
+        for name in ("client", "thread", "connected_loop"):
+            handles.set(name, None)
+        self._tier3_detach_from_backing()
+        await super()._areset_branch_conversation()
+        await self._aclose_client(client)
 
     async def adisconnect(self) -> None:
         """Close EVERY per-branch Codex client (drain all stored branches + backing).
@@ -251,22 +303,14 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         to reclaim every connection a context opened during ``_ainfer`` (V7/V8).
         """
         for h in self._iter_live_handle_sets():
-            client = h.get("client")
-            if client is not None:
-                try:
-                    await client.close()
-                except Exception as e:  # pragma: no cover - best-effort teardown
-                    logger.debug("[%s] codex client.close() failed: %s",
-                                 self.__class__.__name__, e)
+            await self._aclose_client(h.get("client"))
             h.set("client", None)
             h.set("thread", None)
             h.set("connected_loop", None)
 
     # === Streaming primitive ===
 
-    async def _ainfer_streaming(
-        self, prompt: str, **kwargs: Any
-    ) -> AsyncIterator[str]:
+    async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         """Stream text from a Codex thread turn.
 
         Yields ``item/agentMessage/delta`` text; every other notification yields
@@ -274,6 +318,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         ``tool_use_idle_timeout`` while Codex reasons / runs tools. Captures the
         thread id (session) and token usage along the way.
         """
+        stats = self._stream_stats()
         # Thread-safe lazy connect (resume the saved session when appropriate).
         if self._client is None:
             if self._connect_lock is None:
@@ -281,8 +326,8 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             async with self._connect_lock:
                 if self._client is None:
                     sid = kwargs.get("session_id")
-                    if sid is None and self.auto_resume and self._session_id:
-                        sid = self._session_id
+                    if sid is None and self.auto_resume:
+                        sid = self.active_session_id
                     await self.aconnect(session_id=sid)
 
         thread = self._thread
@@ -298,7 +343,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             elif method == "turn/started":
                 tid = getattr(payload, "thread_id", None)
                 if tid:
-                    self._session_id = tid
+                    self.active_session_id = tid
                 yield ""
             elif method == "item/completed":
                 item = getattr(payload, "item", None)
@@ -307,7 +352,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 # Count tool-ish items (command runs, file changes, web searches),
                 # not the assistant message / user echo / reasoning.
                 if itype not in (None, "agentMessage", "userMessage", "reasoning"):
-                    self._last_tool_use_count += 1
+                    stats.tool_uses += 1
                 yield ""
             elif method in ("turn/completed", "thread/tokenUsage/updated"):
                 usage = getattr(payload, "token_usage", None)
@@ -315,7 +360,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                     turn = getattr(payload, "turn", None)
                     usage = getattr(turn, "usage", None)
                 if usage is not None:
-                    self._last_usage = usage
+                    stats.usage = usage
                 yield ""
             else:
                 # item/started, reasoning deltas, plan updates, etc.
@@ -327,8 +372,7 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
         """Override to support ``SDKInferencerResponse`` + tool-use counting."""
-        self._last_tool_use_count = 0
-        self._last_usage = None
+        stats = self._reset_stream_stats()
         response_text = await super()._ainfer(
             inference_input, inference_config, **kwargs
         )
@@ -336,9 +380,9 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             return SDKInferencerResponse(
                 content=response_text,
                 session_id=self.active_session_id,
-                tool_uses=self._last_tool_use_count,
-                tokens_received=self._extract_output_tokens(self._last_usage),
-                raw_response=self._last_usage,
+                tool_uses=stats.tool_uses,
+                tokens_received=self._extract_output_tokens(stats.usage),
+                raw_response=stats.usage,
             )
         return response_text
 
@@ -379,16 +423,14 @@ class CodexSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
         async def _run_and_close():
             try:
-                return await self._ainfer(
-                    inference_input, inference_config, **kwargs
-                )
+                return await self._ainfer(inference_input, inference_config, **kwargs)
             finally:
                 # The sync bridge runs on a throwaway event loop, so the per-call
                 # connection can't be reused — close it to avoid leaking app-server
                 # connections. Multi-turn continuity is preserved across sync calls
-                # via auto_resume + the persisted session id (adisconnect clears the
+                # via auto_resume + the persisted session id (closing clears the
                 # live handles but not the session backing).
-                await self.adisconnect()
+                await self._adisconnect_branch()
 
         return _run_async(_run_and_close())
 

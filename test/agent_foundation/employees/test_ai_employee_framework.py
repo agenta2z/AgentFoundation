@@ -37,6 +37,7 @@ from agent_foundation.employees import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_role(**overrides) -> AIEmployeeRole:
     defaults = dict(
         id="program_manager",
@@ -113,6 +114,7 @@ def _make_employee(role: AIEmployeeRole, **overrides) -> AIEmployee:
 # Phase A: Model Tests
 # ===========================================================================
 
+
 class TestEnums:
     def test_role_status_values(self):
         assert RoleStatus.draft == "draft"
@@ -153,7 +155,8 @@ class TestSkillConfig:
 
     def test_to_dict_roundtrip(self):
         skill = SkillConfig(
-            id="s1", display_name="S1",
+            id="s1",
+            display_name="S1",
             skill_md_path=Path("skills/s1/SKILL.md"),
             description="A skill",
         )
@@ -338,7 +341,9 @@ class TestAIEmployee:
 
     def test_resolve_role_wrong_id_raises(self):
         role = _make_role()
-        emp = AIEmployee(id="e1", persona_name="E", display_name="E", role_id="wrong_role")
+        emp = AIEmployee(
+            id="e1", persona_name="E", display_name="E", role_id="wrong_role"
+        )
         with pytest.raises(ValueError, match="Role id mismatch"):
             emp.resolve_role(role)
 
@@ -379,6 +384,7 @@ class TestAIEmployee:
 # ===========================================================================
 # Phase B: Registry Tests
 # ===========================================================================
+
 
 class TestRoleRegistry:
     def test_empty_dir(self, tmp_path):
@@ -538,6 +544,7 @@ class TestEmployeeRegistry:
 # Phase D: StateManager Tests
 # ===========================================================================
 
+
 class TestStateManager:
     def test_load_returns_default_if_missing(self, tmp_path):
         sm = StateManager(tmp_path)
@@ -560,8 +567,11 @@ class TestStateManager:
 
     def test_update_status(self, tmp_path):
         sm = StateManager(tmp_path)
-        sm.update_status("alice_pm", EmployeeStatus.blocked,
-                         pending_reason={"reason": "awaiting_decision"})
+        sm.update_status(
+            "alice_pm",
+            EmployeeStatus.blocked,
+            pending_reason={"reason": "awaiting_decision"},
+        )
         state = sm.load("alice_pm")
         assert state.status == EmployeeStatus.blocked
         assert state.pending_reason["reason"] == "awaiting_decision"
@@ -598,6 +608,7 @@ class TestStateManager:
 # Integration: role_configs.json compatibility
 # ===========================================================================
 
+
 class TestRoleConfigCompatibility:
     """Verify that AIEmployeeRole.to_role_config() produces output compatible
     with the existing role_configs.json fixture format consumed by the UI."""
@@ -616,7 +627,7 @@ class TestRoleConfigCompatibility:
         role = _make_role()
         rc = role.to_role_config()
         g = rc["guardrails"]
-        assert "max_autonomy" in g       # UI expects max_autonomy not max_autonomy_level
+        assert "max_autonomy" in g  # UI expects max_autonomy not max_autonomy_level
         assert "max_concurrent_tasks" in g
         assert "approval_required" in g
 

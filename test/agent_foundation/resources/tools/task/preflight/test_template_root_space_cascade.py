@@ -21,33 +21,51 @@ import pytest
 
 
 _HERE = Path(__file__).resolve().parent
-YAML_PATH = _HERE.parents[5] / "src" / "agent_foundation" / "resources" / "tools" / "task" / "configs" / "default.yaml"
+YAML_PATH = (
+    _HERE.parents[5]
+    / "src"
+    / "agent_foundation"
+    / "resources"
+    / "tools"
+    / "task"
+    / "configs"
+    / "default.yaml"
+)
 OPENSTARTUP_PATH = Path(os.environ.get("OPENSTARTUP_PATH", str(_HERE.parents[4])))
-TEMPLATES_DIR = OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+TEMPLATES_DIR = (
+    OPENSTARTUP_PATH / "src" / "openteam" / "server" / "resources" / "prompt_templates"
+)
 
 
 def _instantiate(tmp_path):
     import agent_foundation.common.configs.registered_targets  # noqa: F401
-    from rich_python_utils.config_utils import load_config, instantiate
+    from rich_python_utils.config_utils import instantiate, load_config
 
-    cfg = load_config(str(YAML_PATH), overrides={
-        "_target_path": str(OPENSTARTUP_PATH),
-        "templates_dir": str(TEMPLATES_DIR),
-        "_params.workspace_root": str(tmp_path / "ws"),
-    })
+    cfg = load_config(
+        str(YAML_PATH),
+        overrides={
+            "_target_path": str(OPENSTARTUP_PATH),
+            "templates_dir": str(TEMPLATES_DIR),
+            "_params.workspace_root": str(tmp_path / "ws"),
+        },
+    )
     return instantiate(cfg)
 
 
 def test_outer_review_has_implementation_space(tmp_path):
     """Outer review inferencer inherits 'implementation' from outer Dual cascade."""
     root = _instantiate(tmp_path)
-    assert getattr(root.review_inferencer, "template_root_space", None) == "implementation"
+    assert (
+        getattr(root.review_inferencer, "template_root_space", None) == "implementation"
+    )
 
 
 def test_outer_fixer_has_implementation_space(tmp_path):
     """Outer fixer inferencer inherits 'implementation' from outer Dual cascade."""
     root = _instantiate(tmp_path)
-    assert getattr(root.fixer_inferencer, "template_root_space", None) == "implementation"
+    assert (
+        getattr(root.fixer_inferencer, "template_root_space", None) == "implementation"
+    )
 
 
 def test_planner_review_leaf_has_plan_space(tmp_path):
@@ -67,7 +85,10 @@ def test_exec_breakdown_has_task_breakdown_from_slot_defaults(tmp_path):
     overriding the 'implementation' cascade."""
     root = _instantiate(tmp_path)
     exec_bta = root.base_inferencer.executor_inferencer
-    assert getattr(exec_bta.breakdown_inferencer, "template_root_space", None) == "task_breakdown"
+    assert (
+        getattr(exec_bta.breakdown_inferencer, "template_root_space", None)
+        == "task_breakdown"
+    )
 
 
 def test_plan_breakdown_has_task_breakdown_from_slot_defaults(tmp_path):
@@ -75,7 +96,10 @@ def test_plan_breakdown_has_task_breakdown_from_slot_defaults(tmp_path):
     overriding the 'plan' cascade."""
     root = _instantiate(tmp_path)
     plan_bta = root.base_inferencer.planner_inferencer.base_inferencer
-    assert getattr(plan_bta.breakdown_inferencer, "template_root_space", None) == "task_breakdown"
+    assert (
+        getattr(plan_bta.breakdown_inferencer, "template_root_space", None)
+        == "task_breakdown"
+    )
 
 
 def test_exec_worker_review_has_implementation_space(tmp_path):
@@ -83,7 +107,10 @@ def test_exec_worker_review_has_implementation_space(tmp_path):
     root = _instantiate(tmp_path)
     exec_bta = root.base_inferencer.executor_inferencer
     sample_worker = exec_bta.worker_inferencers["__default__"]()
-    assert getattr(sample_worker.review_inferencer, "template_root_space", None) == "implementation"
+    assert (
+        getattr(sample_worker.review_inferencer, "template_root_space", None)
+        == "implementation"
+    )
 
 
 def test_outer_dual_no_prompt_formatter(tmp_path):

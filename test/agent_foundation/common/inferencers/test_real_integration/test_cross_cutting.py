@@ -13,7 +13,6 @@ import glob
 import os
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
@@ -31,10 +30,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementResponse,
 )
 
-from .conftest import (
-    DEFAULT_TIMEOUT,
-    skip_claude,
-)
+from .conftest import DEFAULT_TIMEOUT, skip_claude
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -174,9 +170,9 @@ async def test_three_level_nesting(tmp_workspace):
     )
 
     # base_response should contain meaningful content
-    assert result.base_response is not None and str(result.base_response).strip() != "", (
-        "base_response should contain the final output after three-level resume"
-    )
+    assert (
+        result.base_response is not None and str(result.base_response).strip() != ""
+    ), "base_response should contain the final output after three-level resume"
 
 
 # ===========================================================================
@@ -247,9 +243,9 @@ async def test_pti_with_bta_composition(tmp_workspace):
     )
 
     # base_response should contain meaningful content
-    assert result.base_response is not None and str(result.base_response).strip() != "", (
-        "base_response should contain the final aggregated output from PTI+BTA"
-    )
+    assert (
+        result.base_response is not None and str(result.base_response).strip() != ""
+    ), "base_response should contain the final aggregated output from PTI+BTA"
 
 
 # ===========================================================================
@@ -372,6 +368,4 @@ async def test_mixed_checkpoint_modes(tmp_workspace):
     assert result.plan_output is not None and result.plan_output != "", (
         "plan_output should be populated"
     )
-    assert result.executor_output is not None, (
-        "executor_output should be populated"
-    )
+    assert result.executor_output is not None, "executor_output should be populated"

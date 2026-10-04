@@ -6,7 +6,8 @@ including text areas and send buttons.
 """
 
 from typing import Optional
-from dash import html, dcc
+
+from dash import dcc, html
 
 
 def create_chat_input_area(
@@ -38,7 +39,7 @@ def create_chat_input_area(
     container_padding: str = "15px 20px",
     container_bg_color: str = "#343541",
     border_top_color: str = "#565869",
-    container_gap: str = "10px"
+    container_gap: str = "10px",
 ) -> html.Div:
     """
     Create a chat input area with text box and send button.
@@ -100,64 +101,64 @@ def create_chat_input_area(
                     dcc.Textarea(
                         id=input_id,
                         placeholder=placeholder,
-                        value='',
+                        value="",
                         style={
-                            'width': input_width,
-                            'height': input_height,
-                            'minHeight': input_min_height,
-                            'maxHeight': input_max_height,
-                            'padding': input_padding,
-                            'backgroundColor': input_bg_color,
-                            'color': input_text_color,
-                            'border': f'1px solid {input_border_color}',
-                            'borderRadius': input_border_radius,
-                            'fontSize': input_font_size,
-                            'resize': 'none',
-                            'fontFamily': 'inherit',
-                            'outline': 'none',
-                            'boxSizing': 'border-box'
-                        }
+                            "width": input_width,
+                            "height": input_height,
+                            "minHeight": input_min_height,
+                            "maxHeight": input_max_height,
+                            "padding": input_padding,
+                            "backgroundColor": input_bg_color,
+                            "color": input_text_color,
+                            "border": f"1px solid {input_border_color}",
+                            "borderRadius": input_border_radius,
+                            "fontSize": input_font_size,
+                            "resize": "none",
+                            "fontFamily": "inherit",
+                            "outline": "none",
+                            "boxSizing": "border-box",
+                        },
                     ),
                     html.Button(
                         send_button_icon,
                         id=send_button_id,
                         n_clicks=0,
                         style={
-                            'position': 'absolute',
-                            'right': send_button_position_right,
-                            'bottom': send_button_position_bottom,
-                            'width': send_button_size,
-                            'height': send_button_size,
-                            'backgroundColor': send_button_bg_color,
-                            'color': send_button_text_color,
-                            'border': 'none',
-                            'borderRadius': send_button_border_radius,
-                            'fontSize': send_button_font_size,
-                            'cursor': 'pointer',
-                            'display': 'flex',
-                            'alignItems': 'center',
-                            'justifyContent': 'center',
-                            'transition': 'background-color 0.2s',
-                            'flexShrink': '0'
-                        }
-                    )
+                            "position": "absolute",
+                            "right": send_button_position_right,
+                            "bottom": send_button_position_bottom,
+                            "width": send_button_size,
+                            "height": send_button_size,
+                            "backgroundColor": send_button_bg_color,
+                            "color": send_button_text_color,
+                            "border": "none",
+                            "borderRadius": send_button_border_radius,
+                            "fontSize": send_button_font_size,
+                            "cursor": "pointer",
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "center",
+                            "transition": "background-color 0.2s",
+                            "flexShrink": "0",
+                        },
+                    ),
                 ],
                 style={
-                    'position': 'relative',
-                    'padding': container_padding,
-                    'maxWidth': container_max_width,
-                    'margin': '0 auto',
-                    'width': '100%',
-                    'display': 'flex',
-                    'alignItems': 'flex-end',
-                    'gap': container_gap,
-                    'boxSizing': 'border-box'
-                }
+                    "position": "relative",
+                    "padding": container_padding,
+                    "maxWidth": container_max_width,
+                    "margin": "0 auto",
+                    "width": "100%",
+                    "display": "flex",
+                    "alignItems": "flex-end",
+                    "gap": container_gap,
+                    "boxSizing": "border-box",
+                },
             )
         ],
         style={
-            'borderTop': f'1px solid {border_top_color}',
-            'backgroundColor': container_bg_color,
-            'flexShrink': '0'
-        }
+            "borderTop": f"1px solid {border_top_color}",
+            "backgroundColor": container_bg_color,
+            "flexShrink": "0",
+        },
     )

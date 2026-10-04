@@ -13,13 +13,12 @@ the concrete goal instead of merely entering and idling. Two invocation paths:
 import types
 
 import pytest
-from attr import attrs
-
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
     ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.workflow.sop_state import SOPState
+from attr import attrs
 
 
 _FINAL_ANSWER = "Here is my final answer."
@@ -52,7 +51,6 @@ def _make_ci(**kw):
 
 
 class TestArgParsing:
-
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "args",
@@ -113,7 +111,6 @@ class TestArgParsing:
 
 
 class TestConsumeOnce:
-
     def test_followup_popped_once_then_none(self):
         ci = _make_ci()
         ci._pending_followup = "do the thing"

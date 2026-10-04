@@ -1,11 +1,17 @@
 from abc import ABC
-from typing import Optional, Any, Union, Dict
+from typing import Any, Dict, Optional, Union
 
-from attr import attrs, attrib
-from agent_foundation.ui.interactive_base import LOG_TYPE_USER_INPUT, LOG_TYPE_SYSTEM_RESPONSE, \
-    InteractionFlags
+from agent_foundation.ui.interactive_base import (
+    InteractionFlags,
+    LOG_TYPE_SYSTEM_RESPONSE,
+    LOG_TYPE_USER_INPUT,
+)
 from agent_foundation.ui.rich_interactive_base import RichInteractiveBase
-from rich_python_utils.service_utils.queue_service.queue_service_base import QueueServiceBase
+from attr import attrib, attrs
+from rich_python_utils.service_utils.queue_service.queue_service_base import (
+    QueueServiceBase,
+)
+
 
 @attrs
 class QueueInteractive(RichInteractiveBase, ABC):
@@ -67,10 +73,14 @@ class QueueInteractive(RichInteractiveBase, ABC):
     """
 
     # Queue service attributes (keyword-only to work with base class defaults)
-    input_queue: Union[QueueServiceBase, Any] = attrib(kw_only=True)  # QueueServiceBase instance
-    response_queue: Union[QueueServiceBase, Any] = attrib(kw_only=True)  # QueueServiceBase instance
-    input_queue_id: str = attrib(default='input', kw_only=True)
-    response_queue_id: str = attrib(default='response', kw_only=True)
+    input_queue: Union[QueueServiceBase, Any] = attrib(
+        kw_only=True
+    )  # QueueServiceBase instance
+    response_queue: Union[QueueServiceBase, Any] = attrib(
+        kw_only=True
+    )  # QueueServiceBase instance
+    input_queue_id: str = attrib(default="input", kw_only=True)
+    response_queue_id: str = attrib(default="response", kw_only=True)
     blocking: bool = attrib(default=True, kw_only=True)
     timeout: Optional[float] = attrib(default=None, kw_only=True)
     pending_message: str = attrib(default="Awaiting further input ...", kw_only=True)
@@ -89,13 +99,11 @@ class QueueInteractive(RichInteractiveBase, ABC):
         """
         self.log_debug(
             f"Getting input from queue '{self.input_queue_id}'",
-            log_type=LOG_TYPE_USER_INPUT
+            log_type=LOG_TYPE_USER_INPUT,
         )
 
         return self.input_queue.get(
-            queue_id=self.input_queue_id,
-            blocking=self.blocking,
-            timeout=self.timeout
+            queue_id=self.input_queue_id, blocking=self.blocking, timeout=self.timeout
         )
 
     def reset_input(self, flag: InteractionFlags) -> None:
@@ -112,7 +120,11 @@ class QueueInteractive(RichInteractiveBase, ABC):
         """
         pass
 
-    def _send_response(self, response: Union[str, Dict[str, Any]], flag: InteractionFlags = InteractionFlags.TurnCompleted) -> None:
+    def _send_response(
+        self,
+        response: Union[str, Dict[str, Any]],
+        flag: InteractionFlags = InteractionFlags.TurnCompleted,
+    ) -> None:
         """
         Sends the response to the user via the response queue service.
 
@@ -132,29 +144,25 @@ class QueueInteractive(RichInteractiveBase, ABC):
             RuntimeError: If the queue service is closed or unavailable.
         """
         self.log_debug(
-            f"Sending response to queue '{self.response_queue_id}', "
-            f"flag={flag.value}",
-            log_type=LOG_TYPE_SYSTEM_RESPONSE
+            f"Sending response to queue '{self.response_queue_id}', flag={flag.value}",
+            log_type=LOG_TYPE_SYSTEM_RESPONSE,
         )
 
         # Ensure response is always a dict with flag
         if isinstance(response, dict):
-            response_message = {**response, 'flag': flag}
+            response_message = {**response, "flag": flag}
         else:
-            response_message = {'response': response, 'flag': flag}
+            response_message = {"response": response, "flag": flag}
 
         # Serialize input_mode from instance state (set by RichInteractiveBase.send_response)
         input_mode = self._current_input_mode
         if input_mode is not None:
-            if hasattr(input_mode, 'to_dict'):
-                response_message['input_mode'] = input_mode.to_dict()
+            if hasattr(input_mode, "to_dict"):
+                response_message["input_mode"] = input_mode.to_dict()
             elif isinstance(input_mode, dict):
-                response_message['input_mode'] = input_mode
+                response_message["input_mode"] = input_mode
 
-        self.response_queue.put(
-            queue_id=self.response_queue_id,
-            obj=response_message
-        )
+        self.response_queue.put(queue_id=self.response_queue_id, obj=response_message)
 
         # if is_html_element_string(response):
         #     import tempfile

@@ -8,7 +8,6 @@ import os
 import time
 
 import pytest
-
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.claude_code_cli_inferencer import (
     ClaudeCodeCliInferencer,
 )
@@ -17,10 +16,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 )
 
 from .conftest import (
-    DEFAULT_TIMEOUT,
     assert_cached_skip,
     assert_real_call,
     count_cache_files,
+    DEFAULT_TIMEOUT,
     read_latest_cache,
     skip_both,
     skip_claude,
@@ -169,7 +168,9 @@ async def test_multi_prompt_cache_matching(tmp_workspace):
     await inf.ainfer(CHEAP_PROMPT_ALT)
 
     assert count_cache_files(cache_dir, CHEAP_PROMPT, "ClaudeCodeCliInferencer") >= 1
-    assert count_cache_files(cache_dir, CHEAP_PROMPT_ALT, "ClaudeCodeCliInferencer") >= 1
+    assert (
+        count_cache_files(cache_dir, CHEAP_PROMPT_ALT, "ClaudeCodeCliInferencer") >= 1
+    )
 
     # New instance — each prompt should hit its own cache
     inf2 = _make_claude(tmp_workspace)

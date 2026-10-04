@@ -7,6 +7,7 @@ entity type filtering, round-trip serialization, and close delegation.
 
 Requirements: 11.1, 11.2, 11.3, 11.4, 11.5
 """
+
 import sys
 from pathlib import Path
 
@@ -25,7 +26,6 @@ if _spu_src.exists() and str(_spu_src) not in sys.path:
     sys.path.insert(0, str(_spu_src))
 
 import pytest
-
 from agent_foundation.knowledge.retrieval.models.entity_metadata import EntityMetadata
 from agent_foundation.knowledge.retrieval.stores.metadata.base import MetadataStore
 from agent_foundation.knowledge.retrieval.stores.metadata.keyvalue_adapter import (
@@ -189,12 +189,8 @@ class TestListEntities:
 
     def test_list_entities_returns_all_ids(self, store):
         """list_entities() without filter should return all entity IDs."""
-        store.save_metadata(
-            EntityMetadata(entity_id="user:alice", entity_type="user")
-        )
-        store.save_metadata(
-            EntityMetadata(entity_id="user:bob", entity_type="user")
-        )
+        store.save_metadata(EntityMetadata(entity_id="user:alice", entity_type="user"))
+        store.save_metadata(EntityMetadata(entity_id="user:bob", entity_type="user"))
         store.save_metadata(
             EntityMetadata(entity_id="store:costco", entity_type="store")
         )
@@ -204,12 +200,8 @@ class TestListEntities:
 
     def test_list_entities_with_type_filter(self, store):
         """list_entities(entity_type=...) should return only matching entities."""
-        store.save_metadata(
-            EntityMetadata(entity_id="user:alice", entity_type="user")
-        )
-        store.save_metadata(
-            EntityMetadata(entity_id="user:bob", entity_type="user")
-        )
+        store.save_metadata(EntityMetadata(entity_id="user:alice", entity_type="user"))
+        store.save_metadata(EntityMetadata(entity_id="user:bob", entity_type="user"))
         store.save_metadata(
             EntityMetadata(entity_id="store:costco", entity_type="store")
         )
@@ -226,19 +218,13 @@ class TestListEntities:
 
     def test_list_entities_nonexistent_type(self, store):
         """list_entities() with a type that has no entities should return empty."""
-        store.save_metadata(
-            EntityMetadata(entity_id="user:alice", entity_type="user")
-        )
+        store.save_metadata(EntityMetadata(entity_id="user:alice", entity_type="user"))
         assert store.list_entities(entity_type="tool") == []
 
     def test_list_entities_after_delete(self, store):
         """list_entities should not include deleted entities."""
-        store.save_metadata(
-            EntityMetadata(entity_id="user:alice", entity_type="user")
-        )
-        store.save_metadata(
-            EntityMetadata(entity_id="user:bob", entity_type="user")
-        )
+        store.save_metadata(EntityMetadata(entity_id="user:alice", entity_type="user"))
+        store.save_metadata(EntityMetadata(entity_id="user:bob", entity_type="user"))
         store.delete_metadata("user:alice")
 
         result = store.list_entities(entity_type="user")

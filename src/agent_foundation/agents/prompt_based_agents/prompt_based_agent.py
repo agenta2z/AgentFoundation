@@ -2,40 +2,55 @@ import json
 from collections.abc import Callable
 from enum import StrEnum
 from functools import partial
-from typing import Tuple, Any, Union, Dict, Mapping, Iterable, Optional, Sequence
-
-from attr import attrs, attrib
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 from agent_foundation.agents.agent import Agent
-from agent_foundation.agents.agent_response import AgentAction, AgentResponse, AgentResponseFormat
-from agent_foundation.agents.agent_state import AgentTaskStatusFlags, AgentStateItem
-from agent_foundation.agents.prompt_based_agents.constants import DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT, \
-    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_INPUT, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONVERSATIONAL_INPUT, \
-    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT, \
-    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_RESULT, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_MEMORY, \
-    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CURRENT_STATE, DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_PREVIOUS_STATES, \
-    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ATTACHMENTS
-from agent_foundation.common.inferencers.agentic_inferencers.common import InferencerResponse
-from rich_python_utils.common_utils import iter_, get_relevant_named_args, get_
-from rich_python_utils.string_utils import join_, extract_between, add_prefix
-from rich_python_utils.string_utils.formatting.common import format_key_value, KeyValueStringFormat
+from agent_foundation.agents.agent_response import (
+    AgentAction,
+    AgentResponse,
+    AgentResponseFormat,
+)
+from agent_foundation.agents.agent_state import AgentStateItem, AgentTaskStatusFlags
+from agent_foundation.agents.prompt_based_agents.constants import (
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_MEMORY,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_RESULT,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ATTACHMENTS,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONVERSATIONAL_INPUT,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CURRENT_STATE,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_PREVIOUS_STATES,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_INPUT,
+    DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE,
+)
+from agent_foundation.common.inferencers.agentic_inferencers.common import (
+    InferencerResponse,
+)
+from attr import attrib, attrs
+from rich_python_utils.common_utils import get_, get_relevant_named_args, iter_
+from rich_python_utils.string_utils import add_prefix, extract_between, join_
+from rich_python_utils.string_utils.formatting.common import (
+    format_key_value,
+    KeyValueStringFormat,
+)
 from rich_python_utils.string_utils.formatting.template_manager import TemplateManager
 from rich_python_utils.string_utils.xml_helpers import mapping_to_xml, xml_to_dict
 
-DEFAULT_USER_TURN_IDENTIFYING_STRING = 'User'
-DEFAULT_AGENT_TURN_IDENTIFYING_STRING = 'Agent'
+DEFAULT_USER_TURN_IDENTIFYING_STRING = "User"
+DEFAULT_AGENT_TURN_IDENTIFYING_STRING = "Agent"
 
-DEFAULT_RESPONSE_FIELD_INSTANT_RESPONSE = 'InstantResponse'
-DEFAULT_RESPONSE_FIELD_NEW_TASK_FLAG = 'NewTask'
-DEFAULT_RESPONSE_FIELD_TASK_STATUS_FLAG = 'TaskStatus'
-DEFAULT_RESPONSE_FIELD_TASK_STATUS_DESCRIPTION = 'TaskStatusDescription'
+DEFAULT_RESPONSE_FIELD_INSTANT_RESPONSE = "InstantResponse"
+DEFAULT_RESPONSE_FIELD_NEW_TASK_FLAG = "NewTask"
+DEFAULT_RESPONSE_FIELD_TASK_STATUS_FLAG = "TaskStatus"
+DEFAULT_RESPONSE_FIELD_TASK_STATUS_DESCRIPTION = "TaskStatusDescription"
 
 
 class FeedConflictResolution(StrEnum):
     """Strategy for resolving conflicts when knowledge dict keys overlap with prompt feed keys."""
-    ATTRIBUTE_ONLY = 'attribute_only'
-    FEED_ONLY = 'feed_only'
-    MERGE = 'merge'
+
+    ATTRIBUTE_ONLY = "attribute_only"
+    FEED_ONLY = "feed_only"
+    MERGE = "merge"
 
 
 @attrs
@@ -67,12 +82,17 @@ class PromptBasedAgent(Agent):
             generated feed data. If `prompt_formatter` is specified, it is used for formatting; otherwise,
             Python’s default `str.format()` is applied.
     """
-    default_prompt_template: str = attrib(default='')
+
+    default_prompt_template: str = attrib(default="")
     prompt_templates: Union[str, Dict[Any, str]] = attrib(default=None)
     prompt_formatter: Callable = attrib(default=None)
     prompt_template_version: str = attrib(default="")
-    input_string_formatter: Union[str, KeyValueStringFormat, Callable[[str], str]] = attrib(default=None)
-    response_string_formatter: Union[str, KeyValueStringFormat, Callable[[str], str]] = attrib(default=None)
+    input_string_formatter: Union[str, KeyValueStringFormat, Callable[[str], str]] = (
+        attrib(default=None)
+    )
+    response_string_formatter: Union[
+        str, KeyValueStringFormat, Callable[[str], str]
+    ] = attrib(default=None)
     direct_response_start_delimiter: str = attrib(default=None)
     direct_response_end_delimiter: str = attrib(default=None)
     raw_response_start_delimiter: str = attrib(default=None)
@@ -82,24 +102,54 @@ class PromptBasedAgent(Agent):
 
     prompt_placeholder_user_input: str = attrib(default=None)
     use_conversational_user_input: bool = attrib(default=False)
-    user_turn_identifying_string: str = attrib(default=DEFAULT_USER_TURN_IDENTIFYING_STRING)
-    agent_turn_identifying_string: str = attrib(default=DEFAULT_AGENT_TURN_IDENTIFYING_STRING)
-    prompt_placeholder_task_input: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT)
-    prompt_placeholder_user_profile: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE)
-    prompt_placeholder_context: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT)
-    prompt_placeholder_action_result: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_RESULT)
-    prompt_placeholder_action_memory: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_MEMORY)
-    prompt_placeholder_current_state: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CURRENT_STATE)
-    prompt_placeholder_previous_states: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_PREVIOUS_STATES)
-    prompt_placeholder_attachments: str = attrib(default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ATTACHMENTS)
+    user_turn_identifying_string: str = attrib(
+        default=DEFAULT_USER_TURN_IDENTIFYING_STRING
+    )
+    agent_turn_identifying_string: str = attrib(
+        default=DEFAULT_AGENT_TURN_IDENTIFYING_STRING
+    )
+    prompt_placeholder_task_input: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_TASK_INPUT
+    )
+    prompt_placeholder_user_profile: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE
+    )
+    prompt_placeholder_context: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT
+    )
+    prompt_placeholder_action_result: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_RESULT
+    )
+    prompt_placeholder_action_memory: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ACTION_MEMORY
+    )
+    prompt_placeholder_current_state: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CURRENT_STATE
+    )
+    prompt_placeholder_previous_states: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_PREVIOUS_STATES
+    )
+    prompt_placeholder_attachments: str = attrib(
+        default=DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_ATTACHMENTS
+    )
 
-    response_field_instant_response: str = attrib(default=DEFAULT_RESPONSE_FIELD_INSTANT_RESPONSE)
-    response_field_new_task_flag: str = attrib(default=DEFAULT_RESPONSE_FIELD_NEW_TASK_FLAG)
-    response_field_task_status_flag: str = attrib(default=DEFAULT_RESPONSE_FIELD_TASK_STATUS_FLAG)
-    response_field_task_status_description: str = attrib(default=DEFAULT_RESPONSE_FIELD_TASK_STATUS_DESCRIPTION)
-    response_fields_force_interpreted_as_list : Iterable[str] = attrib(default=None)
-    response_fields_force_interpreted_as_string : Iterable[str] = attrib(default=None)
-    feed_conflict_resolution: FeedConflictResolution = attrib(default=FeedConflictResolution.FEED_ONLY)
+    response_field_instant_response: str = attrib(
+        default=DEFAULT_RESPONSE_FIELD_INSTANT_RESPONSE
+    )
+    response_field_new_task_flag: str = attrib(
+        default=DEFAULT_RESPONSE_FIELD_NEW_TASK_FLAG
+    )
+    response_field_task_status_flag: str = attrib(
+        default=DEFAULT_RESPONSE_FIELD_TASK_STATUS_FLAG
+    )
+    response_field_task_status_description: str = attrib(
+        default=DEFAULT_RESPONSE_FIELD_TASK_STATUS_DESCRIPTION
+    )
+    response_fields_force_interpreted_as_list: Iterable[str] = attrib(default=None)
+    response_fields_force_interpreted_as_string: Iterable[str] = attrib(default=None)
+    feed_conflict_resolution: FeedConflictResolution = attrib(
+        default=FeedConflictResolution.FEED_ONLY
+    )
 
     def __attrs_post_init__(self):
         super(PromptBasedAgent, self).__attrs_post_init__()
@@ -110,7 +160,7 @@ class PromptBasedAgent(Agent):
                 default_template=self.default_prompt_template,
                 templates=self.prompt_templates,
                 template_formatter=self.prompt_formatter,
-                template_version=self.prompt_template_version
+                template_version=self.prompt_template_version,
             )
 
         # endregion
@@ -118,30 +168,35 @@ class PromptBasedAgent(Agent):
         # region STEP2: processes input/response string formatter
         if not self.input_string_formatter:
             self.input_string_formatter = partial(
-                format_key_value,
-                key=self.user_turn_identifying_string
+                format_key_value, key=self.user_turn_identifying_string
             )
         elif isinstance(self.input_string_formatter, KeyValueStringFormat):
             self.input_string_formatter = partial(
                 format_key_value,
                 key=self.user_turn_identifying_string,
-                format_type=self.input_string_formatter
+                format_type=self.input_string_formatter,
             )
 
         if not isinstance(self.input_string_formatter, (str, Callable)):
-            raise ValueError("'input_string_formatter' must be a string template or a callable")
+            raise ValueError(
+                "'input_string_formatter' must be a string template or a callable"
+            )
 
         if not self.response_string_formatter:
-            self.response_string_formatter = partial(format_key_value, key=self.agent_turn_identifying_string)
+            self.response_string_formatter = partial(
+                format_key_value, key=self.agent_turn_identifying_string
+            )
         elif isinstance(self.response_string_formatter, KeyValueStringFormat):
             self.response_string_formatter = partial(
                 format_key_value,
                 key=self.agent_turn_identifying_string,
-                format_type=self.response_string_formatter
+                format_type=self.response_string_formatter,
             )
 
         if not isinstance(self.response_string_formatter, (str, Callable)):
-            raise ValueError("'response_string_formatter' must be a string template or a callable")
+            raise ValueError(
+                "'response_string_formatter' must be a string template or a callable"
+            )
         # endregion
 
         # region STEP3: assigns default prompt placeholders
@@ -153,10 +208,14 @@ class PromptBasedAgent(Agent):
             )
 
         if not self.prompt_placeholder_user_profile:
-            self.prompt_placeholder_user_profile = DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE
+            self.prompt_placeholder_user_profile = (
+                DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_USER_PROFILE
+            )
 
         if not self.prompt_placeholder_context:
-            self.prompt_placeholder_context = DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT
+            self.prompt_placeholder_context = (
+                DEFAULT_PROMPT_TEMPLATE_PLACEHOLDER_CONTEXT
+            )
         # endregion
 
         # region STEP4: handles other arguments
@@ -170,7 +229,7 @@ class PromptBasedAgent(Agent):
         if isinstance(self.input_string_formatter, str):
             return self.input_string_formatter.format(input_string)
         else:
-            return '\n'.join(
+            return "\n".join(
                 self.input_string_formatter(_input_string)
                 for _input_string in iter_(input_string)
             )
@@ -179,7 +238,7 @@ class PromptBasedAgent(Agent):
         if isinstance(self.response_string_formatter, str):
             return self.response_string_formatter.format(response_string)
         else:
-            return '\n'.join(
+            return "\n".join(
                 self.response_string_formatter(_response_string)
                 for _response_string in iter_(response_string)
             )
@@ -189,14 +248,18 @@ class PromptBasedAgent(Agent):
             conversation = []
             for agent_state in self.states:
                 if isinstance(agent_state, AgentStateItem):
-                    for _user_input in iter_(agent_state.user_input, non_atom_types=(list, tuple)):
+                    for _user_input in iter_(
+                        agent_state.user_input, non_atom_types=(list, tuple)
+                    ):
                         conversation.append(self._format_input_string(_user_input))
                     agent_response = agent_state.response.instant_response
                     if agent_response:
-                        conversation.append(self._format_response_string(agent_response))
+                        conversation.append(
+                            self._format_response_string(agent_response)
+                        )
             if user_input:
                 conversation.append(self._format_input_string(user_input))
-            return join_(conversation, sep='\n')
+            return join_(conversation, sep="\n")
         elif user_input:
             return self._format_input_string(user_input)
 
@@ -218,19 +281,21 @@ class PromptBasedAgent(Agent):
             if isinstance(_action_result, AgentAction):
                 _action_results.append(
                     {
-                        'ActionType': _action_result.type,
-                        'ActionResult': str(_action_result.result)
+                        "ActionType": _action_result.type,
+                        "ActionResult": str(_action_result.result),
                     }
                 )
             else:
-                _action_results.append({'ActionResult': str(_action_result)})
-        return mapping_to_xml(_action_results, root_tag='ActionResults', include_root=True, unescape=True)
+                _action_results.append({"ActionResult": str(_action_result)})
+        return mapping_to_xml(
+            _action_results, root_tag="ActionResults", include_root=True, unescape=True
+        )
 
     def _get_action_memory_string(self, action_results: Any) -> Optional[str]:
         if isinstance(action_results, AgentAction):
             action_results = action_results.result
 
-        action_memory = get_(get_(action_results, 'action_memory'), 'memory')
+        action_memory = get_(get_(action_results, "action_memory"), "memory")
         # TODO: introduce some genric formatting util
         if action_memory:
             return action_memory
@@ -258,8 +323,8 @@ class PromptBasedAgent(Agent):
             current_state_string = add_prefix(
                 state.task_status_description_extended,
                 prefix=state.task_status_description,
-                sep='\n',
-                avoid_repeat=True
+                sep="\n",
+                avoid_repeat=True,
             )
 
             if i == 0:
@@ -276,26 +341,28 @@ class PromptBasedAgent(Agent):
                                 add_prefix(
                                     state.task_status_description_extended,
                                     prefix=state.task_status_description,
-                                    sep='\n',
-                                    avoid_repeat=True
+                                    sep="\n",
+                                    avoid_repeat=True,
                                 )
                             )
                     i -= 1
                 if previous_stats_string:
-                    previous_stats_string = join_(*previous_stats_string, sep='\n\n', ignore_none_or_empty=True)
+                    previous_stats_string = join_(
+                        *previous_stats_string, sep="\n\n", ignore_none_or_empty=True
+                    )
                 else:
                     previous_stats_string = None
 
         return current_state_string, previous_stats_string
 
     def _construct_prompt_feed(
-            self,
-            task_input: Any,
-            user_input: Any,
-            user_profile: Any = None,
-            context: Any = None,
-            action_results: Any = None,
-            attachments: Sequence[Any] = None
+        self,
+        task_input: Any,
+        user_input: Any,
+        user_profile: Any = None,
+        context: Any = None,
+        action_results: Any = None,
+        attachments: Sequence[Any] = None,
     ) -> Dict[str, str]:
         """
         Generates a dictionary with user input, user profile, context, and action result for prompt formatting.
@@ -311,10 +378,9 @@ class PromptBasedAgent(Agent):
             containing string representations of the corresponding data.
         """
         feed = {
-            self.prompt_placeholder_user_input:
-                self._get_user_input_string(
-                    user_input, conversational=self.use_conversational_user_input
-                )
+            self.prompt_placeholder_user_input: self._get_user_input_string(
+                user_input, conversational=self.use_conversational_user_input
+            )
         }
 
         if isinstance(task_input, Mapping):
@@ -323,14 +389,18 @@ class PromptBasedAgent(Agent):
             feed[self.prompt_placeholder_task_input] = task_input
 
         if user_profile:
-            feed[self.prompt_placeholder_user_profile] = self._get_user_profile_string(user_profile)
+            feed[self.prompt_placeholder_user_profile] = self._get_user_profile_string(
+                user_profile
+            )
 
         if context:
             feed[self.prompt_placeholder_context] = self._get_context_string(context)
 
         if action_results:
             try:
-                feed[self.prompt_placeholder_action_result] = self._get_action_result_string(action_results)
+                feed[self.prompt_placeholder_action_result] = (
+                    self._get_action_result_string(action_results)
+                )
             except Exception as e:
                 print(e)
             action_memory = self._get_action_memory_string(action_results)
@@ -344,19 +414,21 @@ class PromptBasedAgent(Agent):
             feed[self.prompt_placeholder_previous_states] = previous_stats_string
 
         if attachments:
-            feed[self.prompt_placeholder_attachments] = '\n'.join((str(attachment) for attachment in attachments))
+            feed[self.prompt_placeholder_attachments] = "\n".join(
+                (str(attachment) for attachment in attachments)
+            )
 
         return feed
 
     def _construct_reasoner_input(
-            self,
-            task_input: Any,
-            user_input: Any,
-            user_profile: Any = None,
-            context: Any = None,
-            action_results: Any = None,
-            attachments: Sequence[Any] = None,
-            knowledge: Dict[str, str] = None
+        self,
+        task_input: Any,
+        user_input: Any,
+        user_profile: Any = None,
+        context: Any = None,
+        action_results: Any = None,
+        attachments: Sequence[Any] = None,
+        knowledge: Dict[str, str] = None,
     ) -> Any:
         """
         Constructs the formatted input for the reasoning function by applying the resolved prompt template
@@ -385,7 +457,7 @@ class PromptBasedAgent(Agent):
             user_profile=user_profile,
             context=context,
             action_results=action_results,
-            attachments=attachments
+            attachments=attachments,
         )
 
         # Merge knowledge dict into feed using the configured conflict resolution strategy
@@ -419,7 +491,10 @@ class PromptBasedAgent(Agent):
         """
         for k, v in extra.items():
             if k in feed and feed[k]:
-                if self.feed_conflict_resolution == FeedConflictResolution.ATTRIBUTE_ONLY:
+                if (
+                    self.feed_conflict_resolution
+                    == FeedConflictResolution.ATTRIBUTE_ONLY
+                ):
                     pass  # keep existing value
                 elif self.feed_conflict_resolution == FeedConflictResolution.MERGE:
                     feed[k] = f"{feed[k]}\n\n{v}"
@@ -434,21 +509,27 @@ class PromptBasedAgent(Agent):
                 TemplateManager.ARG_NAME_ACTIVE_TEMPLATE_ROOT_SPACE: self.prompt_formatter.active_template_root_space
             }
             if self.states.last_anchor_action_type:
-                config[TemplateManager.ARG_NAME_TEMPLATE_KEY] = self.states.last_anchor_action_type
+                config[TemplateManager.ARG_NAME_TEMPLATE_KEY] = (
+                    self.states.last_anchor_action_type
+                )
             return config
 
     # endregion
 
     # region Response Parsing Methods
-    def _extract_from_raw_response_parse(self, raw_response_parse: Mapping) -> Tuple[
+    def _extract_from_raw_response_parse(
+        self, raw_response_parse: Mapping
+    ) -> Tuple[
         Union[str, Mapping, AgentResponse],
-        Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
+        Union[AgentTaskStatusFlags, str, AgentStateItem, Any],
     ]:
         return raw_response_parse, AgentTaskStatusFlags.Completed
 
-    def _parse_raw_response(self, raw_response: Union[str, InferencerResponse, Any]) -> Tuple[
+    def _parse_raw_response(
+        self, raw_response: Union[str, InferencerResponse, Any]
+    ) -> Tuple[
         Union[str, Mapping, AgentResponse],
-        Union[AgentTaskStatusFlags, str, AgentStateItem, Any]
+        Union[AgentTaskStatusFlags, str, AgentStateItem, Any],
     ]:
         if isinstance(raw_response, InferencerResponse):
             raw_response_string = raw_response.select_response().response
@@ -459,15 +540,21 @@ class PromptBasedAgent(Agent):
 
         raw_response_string, matching_search1_index = extract_between(
             raw_response_string,
-            search1=(self.direct_response_start_delimiter, self.raw_response_start_delimiter),
-            search2=(self.direct_response_end_delimiter, self.raw_response_end_delimiter),
+            search1=(
+                self.direct_response_start_delimiter,
+                self.raw_response_start_delimiter,
+            ),
+            search2=(
+                self.direct_response_end_delimiter,
+                self.raw_response_end_delimiter,
+            ),
             keep_search1=False,
             keep_search2=False,
             allow_search1_not_found=False,
             allow_search2_not_found=False,
             return_matching_search1_index=True,
             search1_use_last_occurrence=True,
-            search2_use_last_occurrence=True
+            search2_use_last_occurrence=True,
         )
 
         if matching_search1_index == 0:
@@ -483,17 +570,23 @@ class PromptBasedAgent(Agent):
                         always_interpret_children_as_string=self.response_fields_force_interpreted_as_string,
                         use_lxml_parser=False,
                         lenient_parsing=True,
-                        **get_relevant_named_args(xml_to_dict, **self.raw_response_parsing_args)
+                        **get_relevant_named_args(
+                            xml_to_dict, **self.raw_response_parsing_args
+                        ),
                     )
                 elif self.raw_response_format == AgentResponseFormat.JSON:
                     raw_response_parse = json.loads(
                         raw_response_string,
-                        **get_relevant_named_args(json.loads, **self.raw_response_parsing_args)
+                        **get_relevant_named_args(
+                            json.loads, **self.raw_response_parsing_args
+                        ),
                     )
                 else:
                     raw_response_parse = raw_response_string.strip()
             except Exception as err:
-                if isinstance(raw_response, InferencerResponse) or hasattr(raw_response, 'base_response'):
+                if isinstance(raw_response, InferencerResponse) or hasattr(
+                    raw_response, "base_response"
+                ):
                     # The inferencer sometimes does not want to change the base response, and produced invalid format;
                     # In this case, the base response is good.
                     self.log_debug(
@@ -504,8 +597,13 @@ class PromptBasedAgent(Agent):
                 else:
                     raise err
 
-            agent_response, agent_state = self._extract_from_raw_response_parse(raw_response_parse)
-            if isinstance(agent_response, AgentResponse) or hasattr(agent_response, 'raw_response'):
+            agent_response, agent_state = self._extract_from_raw_response_parse(
+                raw_response_parse
+            )
+            if isinstance(agent_response, AgentResponse) or hasattr(
+                agent_response, "raw_response"
+            ):
                 agent_response.raw_response = raw_response_string
             return agent_response, agent_state
+
     # endregion

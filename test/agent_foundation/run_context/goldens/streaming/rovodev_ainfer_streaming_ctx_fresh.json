@@ -1,0 +1,53 @@
+{
+  "calls": [
+    {
+      "active_session_id": null,
+      "active_session_id_under_ctx": null,
+      "cli": [
+        {
+          "argv": [
+            "rovodev",
+            "legacy",
+            "turn 1",
+            "--yolo",
+            "--output-file",
+            "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "--config-override",
+            "{\"agent\": {\"modelId\": \"anthropic:claude-opus-4-7\"}}"
+          ],
+          "cwd": "<TMP>/ws"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": false,
+            "path": "/leaf"
+          },
+          "kwargs": {
+            "output_file": "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "final_output_under_ctx": "clean answer to 'turn 1' in session <UUID1>",
+      "get_final_output": null,
+      "last_clean_output": null,
+      "live_store": {},
+      "output": "TUI thinking\nTUI done\n",
+      "session_backing": null
+    }
+  ],
+  "host_ctx": {
+    "legacy_mint": false,
+    "path": "/leaf"
+  },
+  "sessions_dir": {
+    "<UUID1>/session_context.json": {
+      "json": {
+        "workspace_path": "<TMP>/ws"
+      }
+    }
+  }
+}

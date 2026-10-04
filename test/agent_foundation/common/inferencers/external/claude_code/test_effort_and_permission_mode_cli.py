@@ -69,7 +69,8 @@ class EffortFlagEmissionTest(unittest.TestCase):
             with self.subTest(level=level):
                 cmd = _make_inferencer(effort=level).construct_command("hi")
                 self.assertEqual(
-                    cmd.count("--effort"), 1,
+                    cmd.count("--effort"),
+                    1,
                     f"expected exactly one --effort, got {cmd.count('--effort')}: {cmd}",
                 )
 
@@ -86,7 +87,9 @@ class PermissionModeFlagEmissionTest(unittest.TestCase):
         self.assertEqual(_make_inferencer().permission_mode, "bypassPermissions")
 
     def test_bypass_permissions_emits_legacy_flag(self):
-        cmd = _make_inferencer(permission_mode="bypassPermissions").construct_command("hi")
+        cmd = _make_inferencer(permission_mode="bypassPermissions").construct_command(
+            "hi"
+        )
         self.assertIn("--dangerously-skip-permissions", cmd)
         self.assertNotIn("--permission-mode bypassPermissions", cmd)
 
@@ -148,14 +151,16 @@ class FlagOrderingTest(unittest.TestCase):
     """``--effort`` is emitted near ``--model`` (after model, before permission)."""
 
     def test_effort_appears_after_model_and_before_permission(self):
-        cmd = _make_inferencer(
-            permission_mode="plan", effort="high"
-        ).construct_command("hi")
+        cmd = _make_inferencer(permission_mode="plan", effort="high").construct_command(
+            "hi"
+        )
         idx_model = cmd.index("--model")
         idx_effort = cmd.index("--effort")
         idx_perm = cmd.index("--permission-mode")
         self.assertLess(idx_model, idx_effort, "expected --effort after --model")
-        self.assertLess(idx_effort, idx_perm, "expected --effort before --permission-mode")
+        self.assertLess(
+            idx_effort, idx_perm, "expected --effort before --permission-mode"
+        )
 
 
 if __name__ == "__main__":

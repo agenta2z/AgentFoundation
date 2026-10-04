@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "a",
+      "what": "yield",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": "a",
+      "what": "received",
+      "where": "consumer"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_break",
+      "where": "consumer"
+    },
+    {
+      "ctx": "<stream ctx, or none if asyncio closed it first>",
+      "value": "GeneratorExit",
+      "what": "raised",
+      "where": "leaf"
+    },
+    {
+      "ctx": "<stream ctx, or none if asyncio closed it first>",
+      "value": null,
+      "what": "finally",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_run",
+      "where": "test_thread"
+    }
+  ],
+  "loop_errors": [],
+  "unraisable": []
+}

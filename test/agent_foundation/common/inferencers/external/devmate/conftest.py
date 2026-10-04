@@ -41,7 +41,10 @@ def _has_devai_sdk() -> bool:
     missing (rather than returning ``None``), so we catch that explicitly.
     """
     try:
-        return importlib.util.find_spec("devai.devmate_sdk.python.devmate_client") is not None
+        return (
+            importlib.util.find_spec("devai.devmate_sdk.python.devmate_client")
+            is not None
+        )
     except ModuleNotFoundError:
         return False
 
@@ -63,9 +66,7 @@ _REAL_DEVMATE_TESTS: tuple[str, ...] = (
 )
 
 # Test names that hit a real Claude Code CLI; skipped unless CLAUDE_RUN_REAL is set.
-_REAL_CLAUDE_TESTS: tuple[str, ...] = (
-    "test_cross_session_claude",
-)
+_REAL_CLAUDE_TESTS: tuple[str, ...] = ("test_cross_session_claude",)
 
 
 def pytest_collection_modifyitems(config, items):
@@ -90,12 +91,16 @@ def pytest_collection_modifyitems(config, items):
         is_sdk_real_file = "test_devmate_sdk_inferencer_real.py" in nodeid
 
         # Skip devai-dependent SDK tests when the package isn't importable.
-        if (item.name == "test_cross_session_sdk" or is_sdk_real_file) and not devai_available:
+        if (
+            item.name == "test_cross_session_sdk" or is_sdk_real_file
+        ) and not devai_available:
             item.add_marker(skip_devai)
             continue
 
         # Skip real-devmate tests unless opted in (whole-file or named).
-        if (in_real_devmate_file or item.name in _REAL_DEVMATE_TESTS) and not run_real_devmate:
+        if (
+            in_real_devmate_file or item.name in _REAL_DEVMATE_TESTS
+        ) and not run_real_devmate:
             item.add_marker(skip_real_devmate)
 
         # Skip real-claude tests unless opted in.

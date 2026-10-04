@@ -67,6 +67,7 @@ class TestResolveFlowOutputPath(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_returns_deliverable_path_when_has_deliverables_true(self):
@@ -140,11 +141,16 @@ class TestFormatFollowupInputInjectsPaths(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_mfi_with_real_paths(self):
-        ws_0 = _make_workspace_stub(has_deliverables=False, output_path=self.flow_0_path)
-        ws_1 = _make_workspace_stub(has_deliverables=False, output_path=self.flow_1_path)
+        ws_0 = _make_workspace_stub(
+            has_deliverables=False, output_path=self.flow_0_path
+        )
+        ws_1 = _make_workspace_stub(
+            has_deliverables=False, output_path=self.flow_1_path
+        )
         cfgs = [
             {"followup_inferencer": _make_inferencer_with_workspace(ws_0)},
             {"followup_inferencer": _make_inferencer_with_workspace(ws_1)},
@@ -247,12 +253,11 @@ class TestFollowupPathUnderCtxPublishedWorkspace(unittest.TestCase):
         import asyncio
         import re
 
-        from attr import attrib, attrs
-
         from agent_foundation.common.inferencers.inferencer_base import InferencerBase
         from agent_foundation.common.inferencers.inferencer_workspace import (
             InferencerWorkspace,
         )
+        from attr import attrib, attrs
 
         @attrs
         class _StepLeaf(InferencerBase):
@@ -312,7 +317,9 @@ class TestFollowupPathUnderCtxPublishedWorkspace(unittest.TestCase):
 
         asyncio.run(mfi.ainfer("build the plan"))
 
-        self.assertTrue(captured, "no followup input was built (the flow did not iterate)")
+        self.assertTrue(
+            captured, "no followup input was built (the flow did not iterate)"
+        )
         joined = "\n\n".join(captured)
         self.assertIn(
             "Your previous full artifact is on disk at",
@@ -322,7 +329,8 @@ class TestFollowupPathUnderCtxPublishedWorkspace(unittest.TestCase):
         )
         paths = re.findall(r"`([^`]*initial[/\\]outputs[/\\]output\.md)`", joined)
         self.assertTrue(
-            paths, f"no initial-step output path referenced in followup input:\n{joined[:600]}"
+            paths,
+            f"no initial-step output path referenced in followup input:\n{joined[:600]}",
         )
         self.assertTrue(
             os.path.isfile(paths[0]),

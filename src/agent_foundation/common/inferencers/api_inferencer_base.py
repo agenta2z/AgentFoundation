@@ -1,12 +1,10 @@
-from typing import Any, Union, Dict, Callable
-
-from attr import attrs, attrib
+import logging
+from typing import Any, Callable, Dict, Union
 
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
-
-import logging
+from attr import attrib, attrs
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +38,7 @@ class ApiInferencerBase(TemplatedInferencerBase):
         `InferencerBase` for complete descriptions. These attributes support configuring inference
         parameters and retry handling at the base level, enabling robust inference flows.
     """
+
     _inference_api: Callable[[Any, str, ...], Any] = attrib(default=None)
 
     def _parse_response(self, response: Any) -> Union[str, Dict, Any]:
@@ -59,7 +58,9 @@ class ApiInferencerBase(TemplatedInferencerBase):
         """
         return response
 
-    def _infer(self, inference_input: str, inference_config: Any = None, **_inference_args) -> str:
+    def _infer(
+        self, inference_input: str, inference_config: Any = None, **_inference_args
+    ) -> str:
         """
         Executes the full inference process by constructing, sending, and parsing a request to a remote service.
 

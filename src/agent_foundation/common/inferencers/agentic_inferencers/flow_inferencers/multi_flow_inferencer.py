@@ -40,19 +40,22 @@ import logging
 import os
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Union
 
-from attr import attrib, attrs
-
-from rich_python_utils.common_utils.async_utils import call_maybe_async
-
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+    align_worker_results,
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
     LinearWorkflowInferencer,
 )
+from agent_foundation.common.inferencers.run_context import frame_for
 from agent_foundation.common.inferencers.template_defaults import (
     FOLLOWUP_AGGREGATION_DEFAULTS,
 )
+from agent_foundation.common.inferencers.template_feed_scope import (
+    publish_child_template_feed,
+)
+from attr import attrib, attrs
+from rich_python_utils.common_utils.async_utils import call_maybe_async
 
 _logger = logging.getLogger(__name__)
 
@@ -60,12 +63,14 @@ _logger = logging.getLogger(__name__)
 # Keys characteristic of an LWI dynamic-mode workflow state dict. If a tuple
 # element has these (and no `output` field), it's a worker's state, not an
 # aggregator's response — filter it out of aggregator-output selection.
-_LWI_STATE_DICT_MARKERS = frozenset((
-    "dynamic_step_results",
-    "iteration_records",
-    "__expansion_count",
-    "_prev_iteration",
-))
+_LWI_STATE_DICT_MARKERS = frozenset(
+    (
+        "dynamic_step_results",
+        "iteration_records",
+        "__expansion_count",
+        "_prev_iteration",
+    )
+)
 
 
 def _looks_like_lwi_state(d: Dict[str, Any]) -> bool:
@@ -226,7 +231,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     """Parser for ``<Winner>flow_X</Winner>`` style tags in the aggregator's
     output. Returns the winning flow's index (0-based), or None if not found."""
 
-    reviewer_alias_parser: Optional[Callable[[str], Optional[str]]] = attrib(default=None)
+    reviewer_alias_parser: Optional[Callable[[str], Optional[str]]] = attrib(
+        default=None
+    )
     """Optional parser for ``<Reviewer>alias</Reviewer>`` style tags. When set,
     the LLM aggregator can choose a reviewer alias from a downstream pool.
     Returns the chosen alias name, or None when not present."""
@@ -239,9 +246,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     ordered best-to-worst, or None if not found."""
 
     # ----- Runtime input propagation (opt-in) -----
-    # When True, ``_ainfer`` / ``_infer`` mutate ``flow_configs[i]["input"]``
-    # and ``predefined_sub_queries`` from the runtime ``inference_input`` before
-    # delegating to BTA's worker spawning. Fixes the "predefined_sub_queries
+    # When True, every attempt (``_begin_attempt``) derives each flow's input from the
+    # runtime ``inference_input`` (``_BtaAttempt.effective_sub_queries``) before BTA
+    # spawns its workers. Fixes the "predefined_sub_queries
     # snapshotted at construction" problem that prevents MFDual from being used
     # as a PTI planner (PTI calls ``planner.ainfer(state["current_input"])``;
     # without this flag, the runtime input is dropped and flows run against the
@@ -250,11 +257,10 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # Default False preserves existing behavior for callers (tests, configs)
     # that rely on static ``flow_configs[i]["input"]`` values.
     #
-    # Caveat: NOT compatible with checkpoint/resume — the mutation is per-call
-    # and resume reconstruction of ``_cached_sub_queries`` may use stale values.
-    # Acceptable for non-resume use cases (e.g. shallow real-CLI tests).
+    # Caveat: the inputs are derived per call, so a resume reproduces them only when
+    # it passes the same ``inference_input``.
     propagate_runtime_input: bool = attrib(default=False)
-    """Opt-in: rewrite each flow's input from runtime ``inference_input`` per call."""
+    """Opt-in: derive each flow's input from the runtime ``inference_input`` per call."""
 
     runtime_input_template: Optional[str] = attrib(default=None)
     """Optional Jinja template to wrap runtime input per-flow. Receives feed
@@ -318,6 +324,14 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # MFI node's ``scratch`` (ClassVar → ignored by attrs; never serialized).
     _RENDEZVOUS_SCRATCH_KEY: ClassVar[str] = "cross_flow_rendezvous"
 
+    # Dispatch and cross-flow state live in the call's node under a host ctx; the
+    # purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    # MFI builds ``worker_inferencers`` from ``flow_configs``; the identity counts
+    # the flows, not the derived factory.
+    _RESUME_IDENTITY_EXCLUDE = frozenset({"worker_inferencers"})
+
     # Internal state — reset at the top of each ainfer/infer call.
     # Declared as init=False so attrs doesn't include them in __init__.
     # M-AF1/Part B: the two per-ATTEMPT cross-flow buffers are now compat-PROPERTIES
@@ -334,7 +348,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # Per-flow output PATH backing — mirrors ``_latest_per_flow_backing`` (legacy/no-ctx
     # store); under a RunContext the live map is ``MultiFlowAttemptState.latest_per_flow_path``.
     _latest_per_flow_path_backing: Dict[int, Any] = attrib(factory=dict, init=False)
-    _all_judgments_backing: List[Tuple[int, int, str]] = attrib(factory=list, init=False)
+    _all_judgments_backing: List[Tuple[int, int, str]] = attrib(
+        factory=list, init=False
+    )
     # Transient cross-flow rendezvous (lock-step barrier) for the legacy/no-ctx path; under
     # a RunContext the live object lives on the MFI node's ``scratch`` (never serialized).
     _cross_flow_rendezvous_backing: Any = attrib(default=None, init=False)
@@ -347,9 +363,12 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     _last_fixer_alias_backing: Optional[str] = attrib(default=None, init=False)
     _last_ranking_backing: Optional[list] = attrib(default=None, init=False)
 
-    # ------------------------------------------------------------------
-    # Initialization
-    # ------------------------------------------------------------------
+    # K-of-N quorum for MultiFlow workers, so one dead flow does not fail the
+    # whole worker. Default 0 = disabled (any flow failure raises). N>=1 is
+    # bridged to BTA's ``min_successful_workers`` in ``__attrs_post_init__``;
+    # BTA then records failed flows by index, excludes their output from the
+    # aggregator input, and raises ``RuntimeError`` if fewer than N flows survived.
+    min_successful_flows: int = attrib(default=0)
 
     def __attrs_post_init__(self):
         if not self.flow_configs:
@@ -362,9 +381,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     f"flow_configs[{i}] must be a dict (got {type(cfg).__name__})"
                 )
             if "input" not in cfg:
-                # When ``propagate_runtime_input=True``, ``cfg["input"]`` is
-                # overwritten per call by ``_apply_runtime_input_propagation``,
-                # so the YAML value is dead weight — author can omit it and
+                # When ``propagate_runtime_input=True``, each call derives the
+                # flow inputs from its runtime input (``_flow_input``), so the
+                # YAML value is dead weight — author can omit it and
                 # we fill in an empty placeholder. When the flag is False,
                 # the input IS the per-flow query and must be supplied.
                 if self.propagate_runtime_input:
@@ -387,6 +406,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 from agent_foundation.common.inferencers.flow_parsers import (
                     parse_decision_stop,
                 )
+
                 cfg.setdefault("end_condition", parse_decision_stop)
                 followup = cfg.get("followup_inferencer")
                 if followup is not None and hasattr(followup, "template_extra_feed"):
@@ -413,7 +433,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         # with no active ctx, so seed the backings directly (and the compat-property
         # getter resolves them fresh each read — no by-reference capture needed).
         self._latest_per_flow_backing = {i: None for i in range(len(self.flow_configs))}
-        self._latest_per_flow_path_backing = {i: None for i in range(len(self.flow_configs))}
+        self._latest_per_flow_path_backing = {
+            i: None for i in range(len(self.flow_configs))
+        }
         self._all_judgments_backing = []
 
         # Wire BTA fields from flow_configs. The flow-builder closure is an
@@ -437,9 +459,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         # aggregator step would run with an empty / unset prompt and emit
         # garbage) into an actionable error at construction time.
         if not self.disable_aggregator:
-            has_prompt_str     = self.aggregator_prompt is not None
+            has_prompt_str = self.aggregator_prompt is not None
             has_prompt_builder = self.aggregator_prompt_builder is not None
-            has_inferencer     = self.aggregator_inferencer is not None
+            has_inferencer = self.aggregator_inferencer is not None
             if not (has_prompt_str or has_prompt_builder or has_inferencer):
                 raise ValueError(
                     "MultiFlowInferencer aggregator is enabled but no prompt "
@@ -459,13 +481,22 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             and self.aggregator_prompt_builder is None
             and not self.disable_aggregator
         ):
-            self.aggregator_prompt_builder = self._make_default_aggregator_prompt_builder()
+            self.aggregator_prompt_builder = (
+                self._make_default_aggregator_prompt_builder()
+            )
+
+        # Bridge the flow quorum to BTA's worker quorum: with
+        # min_successful_workers > 0 BTA's workers return index-tagged failure
+        # outcomes instead of raising, and both BTA aggregation paths enforce
+        # the quorum. min_successful_flows == 0 leaves BTA fail-fast.
+        if self.min_successful_flows > 0 and self.min_successful_workers == 0:
+            self.min_successful_workers = self.min_successful_flows
 
         # Defer to BTA for workspace, subgraph_registry, and the rest.
         super().__attrs_post_init__()
 
         # M-AF1: per-run dispatch state lives in a typed ``MultiFlowState`` at
-        # ``ctx.node().call`` (seeded once per call by ``_init_call_state``); default the
+        # ``ctx.node().call`` (seeded per invocation by ``_init_call_state``); default the
         # factory so the dispatch compat-properties resolve against a typed node. An
         # explicit caller-supplied ``state_factory`` wins.
         if self.state_factory is None:
@@ -518,9 +549,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
 
         # Empty-string output fields → return empty rather than repr().
         # An InferencerResponse with output="" really means "no text".
-        if (
-            isinstance(value, dict) and "output" in value
-        ) or hasattr(value, "output"):
+        if (isinstance(value, dict) and "output" in value) or hasattr(value, "output"):
             return ""
         return str(value)
 
@@ -537,7 +566,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 # Permit a generic callable that accepts (template, feed).
                 return self.prompt_formatter(template, feed)
 
-        from jinja2 import Template  # imported lazily; jinja2 is already a transitive dep
+        from jinja2 import (  # imported lazily; jinja2 is already a transitive dep
+            Template,
+        )
 
         return Template(template).render(**feed)
 
@@ -569,14 +600,17 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             ├── flow_1/
             └── aggregator/
         """
-        from agent_foundation.common.inferencers.inferencer_workspace import indexed_child_name
+        from agent_foundation.common.inferencers.inferencer_workspace import (
+            indexed_child_name,
+        )
+
         return indexed_child_name("flow", index)
 
     def _is_worker_child_name(self, name: str) -> bool:
         """Match ``flow_NN`` names produced by the override above."""
         if not name.startswith("flow_"):
             return False
-        return name[len("flow_"):].isdigit()
+        return name[len("flow_") :].isdigit()
 
     # ------------------------------------------------------------------
     # Per-flow visibility resolution
@@ -622,7 +656,11 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         # Under cross-flow coordination a FROZEN round N-1 snapshot is passed in so peer
         # paths are lock-step consistent (not a fast peer's already-advanced round N path);
         # otherwise read the live per-run map.
-        source = path_snapshot if path_snapshot is not None else (self._latest_per_flow_path or {})
+        source = (
+            path_snapshot
+            if path_snapshot is not None
+            else (self._latest_per_flow_path or {})
+        )
         tracked = source.get(flow_idx)
         if tracked and os.path.exists(tracked):
             return tracked
@@ -680,9 +718,13 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         # the full artifact, not just the (possibly summarized) text excerpt.
         # For flows WITH local access: pass a file path (the CLI reads it).
         # For flows WITHOUT local access: inline the full file content.
-        own_path = self._resolve_flow_output_path(flow_idx, path_snapshot=peer_path_snapshot)
+        own_path = self._resolve_flow_output_path(
+            flow_idx, path_snapshot=peer_path_snapshot
+        )
         flow_inf = self.flow_configs[flow_idx].get("followup_inferencer")
-        flow_has_local = getattr(flow_inf, "has_local_access", False) if flow_inf else False
+        flow_has_local = (
+            getattr(flow_inf, "has_local_access", False) if flow_inf else False
+        )
 
         own_prev_text = your_prev
         if own_path and not flow_has_local and os.path.isfile(own_path):
@@ -706,7 +748,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         if visible_plans:
             peer_segments = []
             for idx, plan in visible_plans.items():
-                peer_path = self._resolve_flow_output_path(idx, path_snapshot=peer_path_snapshot)
+                peer_path = self._resolve_flow_output_path(
+                    idx, path_snapshot=peer_path_snapshot
+                )
                 # For non-local flows: inline the full peer artifact content
                 # instead of a useless path reference.
                 peer_text = plan or _FOLLOWUP_PEER_EMPTY_PLACEHOLDER
@@ -715,14 +759,10 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                         peer_text = open(peer_path, encoding="utf-8").read()
                     except (OSError, UnicodeDecodeError):
                         pass
-                segment = (
-                    f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n"
-                    f"{peer_text}"
-                )
+                segment = f"{_FOLLOWUP_PEER_BLOCK_HEADER.format(idx=idx)}\n{peer_text}"
                 if peer_path and flow_has_local:
                     segment += (
-                        f"\n\nThe full peer artifact is available at:\n"
-                        f"  `{peer_path}`"
+                        f"\n\nThe full peer artifact is available at:\n  `{peer_path}`"
                     )
                 peer_segments.append(segment)
             peer_blocks = "\n\n".join(peer_segments)
@@ -737,57 +777,24 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # ------------------------------------------------------------------
 
     def _publish_child_template_feed(
-        self, child_inf: Any, child_slot: str, feed: Dict[str, Any]
+        self, child_inf: Any, child_slot: Optional[str], feed: Dict[str, Any]
     ) -> bool:
         """Pass per-call/per-flow data (e.g. ``upstream_artifacts``) into a SHARED
         child leaf's wrapper template WITHOUT mutating the child's instance
-        ``template_extra_feed`` — the Decision-5 / state-separation requirement.
-
-        Under an active RunContext: publish ``feed`` into the child's run-context
-        handle (the leaf merges it at render time via the ctx walk-up in
-        :func:`TemplatedInferencerBase._resolve_ctx_feed_override`). The instance
-        ``template_extra_feed`` is left untouched, so a single shared MFI across N
-        concurrent ctxs — or a single followup/aggregator child reused across N
-        flows — never clobbers a concurrent call's feed.
-
-        Legacy / no active ctx: fall back to writing the child instance's
-        ``template_extra_feed`` exactly as before — **byte-identical** with the
-        pre-virtualization behavior.
+        ``template_extra_feed`` under an active RunContext (Decision 5); see
+        :func:`~agent_foundation.common.inferencers.template_feed_scope.publish_child_template_feed`.
 
         ``child_slot`` is the deterministic ctx slot the orchestrator threads as
         ``run_context=`` into the child's own ``ainfer`` (e.g. ``"aggregator"``).
         For children whose exact child-ctx slot the publisher cannot know (the
-        per-flow followup runs under LWI's ``step_{i}`` node), pass the orchestrator's
-        OWN active path by using ``child_slot=None`` — the value is published at the
-        active node and the descendant leaf finds it by walking up.
+        per-flow followup runs under LWI's ``step_{i}`` node), pass ``None`` — the
+        value is published at the active node and the descendant leaf finds it by
+        walking up.
 
         Returns ``True`` when published via the ctx channel (no instance write),
         ``False`` when it fell back to the legacy instance write.
         """
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-        )
-        from agent_foundation.common.inferencers.templated_inferencer_base import (
-            TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
-        )
-
-        ctx = active_run_context()
-        if ctx is not None:
-            target_ctx = ctx.child(child_slot) if child_slot else ctx
-            existing = target_ctx.handles.get(
-                TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE, None
-            )
-            merged = dict(existing) if isinstance(existing, dict) else {}
-            merged.update(feed)
-            target_ctx.handles.set(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE, merged)
-            return True
-
-        # Legacy / no-ctx: byte-identical instance write.
-        if child_inf is not None and hasattr(child_inf, "template_extra_feed"):
-            if child_inf.template_extra_feed is None:
-                child_inf.template_extra_feed = {}
-            child_inf.template_extra_feed.update(feed)
-        return False
+        return publish_child_template_feed(child_inf, child_slot, feed)
 
     # ------------------------------------------------------------------
     # Aggregator prompt builder (default, installed when aggregator_prompt is set)
@@ -804,19 +811,21 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             original_query: str = "",
             worker_output_paths=None,
             bta=None,  # noqa: ARG001 — accepted for BTA's call signature
+            worker_failures=None,
         ) -> str:
             n = len(outer.flow_configs)
             # Prefer _latest_per_flow (keyed by declaration index, populated
-            # by each worker's final response_builder) over BTA's positional
-            # worker_results — BTA orders results by completion, which scrambles
-            # per-flow labels when one flow fails fast.
+            # by each worker's final response_builder). BTA passes only the
+            # surviving results; ``worker_failures`` re-aligns them by index. A
+            # failed flow renders empty, never its last intermediate output.
+            failures = worker_failures or {}
             worker_plans = {}
-            results_list = list(worker_results) if worker_results is not None else []
+            results_list = align_worker_results(list(worker_results or []), failures)
             for i in range(n):
-                text = outer._latest_per_flow.get(i)
+                text = None if i in failures else outer._latest_per_flow.get(i)
                 if text is None:
-                    # Fallback: positional worker_result (legacy / when a
-                    # flow's response_builder didn't publish to _latest_per_flow)
+                    # Fallback: the flow's own worker_result (when its
+                    # response_builder didn't publish to _latest_per_flow)
                     fallback = results_list[i] if i < len(results_list) else None
                     text = outer._coerce_to_text(fallback)
                 worker_plans[i] = text
@@ -854,7 +863,10 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             #
             # Without this flag, the entire rendered string is the
             # ``inference_input`` and ``{{ upstream_artifacts }}`` is undefined.
-            if outer.inject_upstream_artifacts and outer.aggregator_inferencer is not None:
+            if (
+                outer.inject_upstream_artifacts
+                and outer.aggregator_inferencer is not None
+            ):
                 # Decision 5: pass the per-call upstream artifacts to the
                 # aggregator's wrapper template via the CALL-SCOPED ctx channel
                 # (published into the aggregator's child run-context handle), NOT
@@ -871,7 +883,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 # ``worker_output_paths`` variable is injected because no
                 # MFI aggregator template currently consumes it.
                 outer._publish_child_template_feed(
-                    outer.aggregator_inferencer,
+                    outer.build_aggregator(),
                     "aggregator",
                     {"upstream_artifacts": rendered},
                 )
@@ -895,7 +907,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             visible = outer._resolve_flow_visibility(index)
             user_dynamic_builder = cfg.get("dynamic_input_builder")
             initial_template = cfg.get("initial_prompt")
-            followup_template = cfg.get("followup_prompt") or outer.multiflow_followup_prompt
+            followup_template = (
+                cfg.get("followup_prompt") or outer.multiflow_followup_prompt
+            )
 
             # Wrapped dynamic_input_builder for steps ≥ 1.
             #
@@ -919,21 +933,24 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 # NOT the surfaced flow deliverable (written only at flow completion).
                 _step_idx_now = state.get("dynamic_step_count", 0)
                 if _step_idx_now >= 1:
-                    from agent_foundation.common.inferencers.run_context import (
-                        active_run_context,
-                    )
                     from agent_foundation.common.inferencers.inferencer_workspace import (
                         resolve_canonical_output_path,
                     )
+                    from agent_foundation.common.inferencers.run_context import (
+                        active_run_context,
+                    )
+
                     _ctx_now = active_run_context()
                     if _ctx_now is not None and _ctx_now.workspace is not None:
                         _prev_name = LinearWorkflowInferencer._dynamic_child_name(
                             _step_idx_now - 1,
                             (state or {}).get("consensus_iteration_id", 0),
                         )
-                        outer._latest_per_flow_path[index] = resolve_canonical_output_path(
-                            _ctx_now.workspace.child(_prev_name),
-                            deliverables_fallback="none",
+                        outer._latest_per_flow_path[index] = (
+                            resolve_canonical_output_path(
+                                _ctx_now.workspace.child(_prev_name),
+                                deliverables_fallback="none",
+                            )
                         )
                 # --- Cross-flow step barrier (lock-step coordination) ---------------
                 # This flow has now PUBLISHED its prior-round output (text @
@@ -962,9 +979,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                         )
                         if _snap is not None:
                             _peer_text, _peer_path_snapshot = _snap
-                visible_plans = {
-                    i: _peer_text.get(i) for i in visible if i != index
-                }
+                visible_plans = {i: _peer_text.get(i) for i in visible if i != index}
                 state["visible_flow_outputs"] = visible_plans
 
                 if outer.judgment_parser is not None:
@@ -986,7 +1001,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     # call_maybe_async: a sync user builder runs inline; a future async one
                     # is awaited (the wrapper is async now, so a bare call would leak an
                     # un-awaited coroutine).
-                    return await call_maybe_async(user_dynamic_builder, state, prev_result)
+                    return await call_maybe_async(
+                        user_dynamic_builder, state, prev_result
+                    )
 
                 step_idx = state.get("dynamic_step_count", 0)
 
@@ -1002,7 +1019,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 #      configure neither.
                 if followup_template is not None:
                     feed = {
-                        "input": cfg.get("input", ""),
+                        "input": outer._flow_input(index, cfg),
                         "your_prev": prev_text,
                         "visible_plans": visible_plans,
                         "all_plans": {
@@ -1050,7 +1067,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                         None,
                         {"upstream_artifacts": upstream_text},
                     )
-                    return cfg.get("input", "")
+                    return outer._flow_input(index, cfg)
 
                 return upstream_text
 
@@ -1061,6 +1078,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             # input via ``{{ input }}``.
             initial_state_factory: Optional[Callable] = None
             if initial_template is not None:
+
                 def _initial_state_factory(
                     inference_input,
                     _cfg=cfg,
@@ -1083,6 +1101,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             # per flow. Per-flow override via cfg["response_builder"] wins.
             cfg_response_builder = cfg.get("response_builder")
             if cfg_response_builder is None:
+
                 def _last_dynamic_step_text(
                     state,
                     _idx=index,
@@ -1105,12 +1124,13 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                     # disk), mirroring the own-flow prior-step capture.
                     _n_steps = len((state or {}).get("dynamic_step_results") or [])
                     if _n_steps >= 1:
-                        from agent_foundation.common.inferencers.run_context import (
-                            active_run_context,
-                        )
                         from agent_foundation.common.inferencers.inferencer_workspace import (
                             resolve_canonical_output_path,
                         )
+                        from agent_foundation.common.inferencers.run_context import (
+                            active_run_context,
+                        )
+
                         _ctx_done = active_run_context()
                         if _ctx_done is not None and _ctx_done.workspace is not None:
                             _last_name = LinearWorkflowInferencer._dynamic_child_name(
@@ -1124,6 +1144,7 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                                 )
                             )
                     return text
+
                 cfg_response_builder = _last_dynamic_step_text
 
             _initial = cfg.get("initial_inferencer")
@@ -1177,8 +1198,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # ------------------------------------------------------------------
 
     def _reset_cross_flow_state(self) -> None:
-        """Reset PER-ATTEMPT cross-flow worker state. Called at the top of
-        ``_ainfer`` / ``_infer``, so it runs on every retry attempt.
+        """Reset PER-ATTEMPT cross-flow worker state. Called from ``_begin_attempt``,
+        so it runs on every attempt (retries and interactive reruns).
 
         Note: dispatch state (``_last_winner_idx``, ``_last_reviewer_alias``,
         ``_last_fixer_alias``) is NOT reset here — see
@@ -1194,8 +1215,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         backings as before (byte-identical).
         """
         from agent_foundation.common.inferencers.run_context import (
-            MultiFlowAttemptState,
             active_run_context,
+            MultiFlowAttemptState,
         )
 
         fresh_latest = {i: None for i in range(len(self.flow_configs))}
@@ -1262,8 +1283,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         to the backing.
         """
         from agent_foundation.common.inferencers.run_context import (
-            MultiFlowState,
             active_run_context,
+            MultiFlowState,
         )
 
         ctx = active_run_context()
@@ -1281,8 +1302,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         Never writes the backing under a real (non-legacy) ctx -> concurrency-isolated.
         """
         from agent_foundation.common.inferencers.run_context import (
-            MultiFlowState,
             active_run_context,
+            MultiFlowState,
         )
 
         ctx = active_run_context()
@@ -1347,8 +1368,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         ancestor carries one (legacy / pre-reset) — callers then use the instance backing.
         """
         from agent_foundation.common.inferencers.run_context import (
-            MultiFlowAttemptState,
             active_run_context,
+            MultiFlowAttemptState,
         )
 
         ctx = active_run_context()
@@ -1472,10 +1493,10 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
 
     def _init_call_state(self, inference_input):
         """M-AF1: seed the per-run ``MultiFlowState`` (via ``state_factory``) THEN reset the
-        per-call dispatch fields. Runs AFTER ``enter_run`` (the base calls it post-bridge),
-        once per call — so the reset clears THIS call's node (``state_factory`` is
-        populate-once, so a *reused* node is not otherwise reset). Replaces the old
-        ``ainfer``/``infer`` overrides that reset *before* the ctx was active.
+        per-call dispatch fields. The base runs it inside the invocation frame (seam step
+        5), once per invocation — including each ``parallel_infer`` and iterator item — so
+        the reset clears THIS invocation's node (``state_factory`` is populate-once, so a
+        *reused* node is not otherwise reset), and a claim-rejected call resets nothing.
         """
         super()._init_call_state(inference_input)
         self._reset_dispatch_state_for_call()
@@ -1560,8 +1581,9 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             try:
                 ranking = self.ranking_parser(raw)
                 if ranking is not None and isinstance(ranking, list):
-                    valid = [int(i) for i in ranking
-                             if 0 <= int(i) < len(self.flow_configs)]
+                    valid = [
+                        int(i) for i in ranking if 0 <= int(i) < len(self.flow_configs)
+                    ]
                     valid = list(dict.fromkeys(valid))
                     if valid:
                         self._last_ranking = valid
@@ -1588,6 +1610,49 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         if 0 <= self._last_winner_idx < len(self.flow_configs):
             return self.flow_configs[self._last_winner_idx].get("initial_inferencer")
         return None
+
+    def _proposer_task_instructions(self) -> str:
+        """Contract rendered by a FLOW (this node's input side), never the aggregator,
+        for a parent in true no-ctx (under a ctx a parent reads this node's
+        published outcome, ``_select_contract``).
+
+        Any flow is a valid source: ``task_instructions`` carries the task *contract*,
+        which is identical across flows — the per-subtask text lives in ``{{ input }}``
+        — so flows differ only in embedded actor-scoped values. Prefers the winner, as
+        the closest author of the artifact that will be reviewed. The aggregator is
+        deliberately excluded: it renders the OUTPUT-side "aggregating/integrating the
+        upstream outcomes" variant, not the contract this node was asked to fulfil.
+        """
+        candidates = []
+        winner = self.get_winner_inferencer()
+        if winner is not None:
+            candidates.append(winner)
+        for cfg in self.flow_configs or []:
+            leaf = cfg.get("initial_inferencer") if isinstance(cfg, dict) else None
+            if leaf is not None:
+                candidates.append(leaf)
+        for leaf in candidates:
+            snapshot = BreakdownThenAggregateInferencer._task_contract_at(leaf, None)
+            if snapshot:
+                return snapshot
+        return ""
+
+    def _select_contract(self, attempt):
+        """Contract published by a FLOW (this node's input side), never the
+        aggregator.
+
+        Any flow is a valid source: ``task_instructions`` carries the task *contract*,
+        which is identical across flows — the per-subtask text lives in ``{{ input }}``
+        — so flows differ only in embedded actor-scoped values. Prefers the winner, as
+        the closest author of the artifact that will be reviewed, then ascending flow
+        index. The aggregator is deliberately excluded: it renders the OUTPUT-side
+        "aggregating/integrating the upstream outcomes" variant, not the contract this
+        node was asked to fulfil.
+        """
+        winner = self._last_winner_idx
+        if winner is not None and winner in attempt.worker_contracts:
+            return winner, attempt.worker_contracts[winner]
+        return super()._select_contract(attempt)
 
     def get_chosen_reviewer_alias(self) -> Optional[str]:
         """The alias the aggregator chose for the reviewer (LLM-driven dispatch),
@@ -1679,17 +1744,21 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                             summary.append(f"[{i}]=dict(keys={list(x.keys())[:6]})")
                         elif hasattr(x, "output"):
                             out = getattr(x, "output", "")
-                            summary.append(f"[{i}]={type(x).__name__}(output={out[:40]!r})")
+                            summary.append(
+                                f"[{i}]={type(x).__name__}(output={out[:40]!r})"
+                            )
                         else:
                             summary.append(f"[{i}]={type(x).__name__}")
                     _logger.debug(
                         "_normalize_aggregator_output: raw shape=tuple[%d] elements=%s",
-                        len(raw), " | ".join(summary),
+                        len(raw),
+                        " | ".join(summary),
                     )
                 else:
                     _logger.debug(
                         "_normalize_aggregator_output: raw type=%s repr=%r",
-                        type(raw).__name__, str(raw)[:200],
+                        type(raw).__name__,
+                        str(raw)[:200],
                     )
             except Exception as exc:  # noqa: BLE001
                 _logger.debug(
@@ -1725,11 +1794,18 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
             elif len(non_none) == 1:
                 raw = non_none[0]
             else:
-                tier1 = [x for x in non_none
-                         if hasattr(x, "output") and not isinstance(x, str)]
-                tier2 = [x for x in non_none
-                         if isinstance(x, dict) and "output" in x
-                         and not _looks_like_lwi_state(x)]
+                tier1 = [
+                    x
+                    for x in non_none
+                    if hasattr(x, "output") and not isinstance(x, str)
+                ]
+                tier2 = [
+                    x
+                    for x in non_none
+                    if isinstance(x, dict)
+                    and "output" in x
+                    and not _looks_like_lwi_state(x)
+                ]
                 tier3 = [x for x in non_none if isinstance(x, str)]
                 if tier1:
                     raw = tier1[-1]
@@ -1766,16 +1842,18 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
     # NOTE (M-AF1): the former ``ainfer``/``infer`` overrides only existed to call
     # ``_reset_dispatch_state_for_call()`` *before* ``super()`` — i.e. before the bridge
     # activated this call's RunContext, which would clear the wrong place. The per-call
-    # reset now runs in ``_init_call_state`` (invoked by the base AFTER ``enter_run``),
-    # so these pass-through overrides are removed.
+    # reset now runs in ``_init_call_state`` (invoked by the base inside the invocation
+    # frame), so these pass-through overrides are removed.
 
-    def _apply_runtime_input_propagation(self, inference_input: Any) -> None:
-        """Rewrite each flow's input from the runtime ``inference_input``.
+    def _apply_runtime_input_propagation(self, attempt, inference_input: Any) -> None:
+        """Derive each flow's input for this attempt from the runtime
+        ``inference_input``.
 
-        No-op unless ``propagate_runtime_input=True``. When enabled, mutates
-        ``flow_configs[i]["input"]`` and ``predefined_sub_queries`` so the
-        downstream BTA worker spawning (which reads ``predefined_sub_queries``)
-        sees the runtime input rather than the static YAML placeholder.
+        No-op unless ``propagate_runtime_input=True``. When enabled, the attempt's
+        ``effective_sub_queries`` replace ``predefined_sub_queries`` for the
+        worker spawning, and the flows' followup builders read their own entry
+        (``_flow_input``); ``flow_configs`` and ``predefined_sub_queries`` are never
+        written (B20).
 
         If ``runtime_input_template`` is set, each flow's input is rendered
         through it with feed ``{input, flow_idx, n_flows}`` — useful for
@@ -1786,9 +1864,8 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
         if not self.propagate_runtime_input:
             return
         n_flows = len(self.flow_configs)
-        # Compute the effective per-flow inputs WITHOUT mutating the definition.
         effective = []
-        for i, cfg in enumerate(self.flow_configs):
+        for i in range(n_flows):
             if self.runtime_input_template is not None:
                 effective.append(
                     self._render_template(
@@ -1798,50 +1875,30 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 )
             else:
                 effective.append(inference_input)
+        attempt.effective_sub_queries = effective
 
-        from agent_foundation.common.inferencers.run_context import (
-            MultiFlowState,
-            active_run_context,
-        )
+    def _flow_input(self, index: int, cfg: dict) -> Any:
+        """Flow ``index``'s input in the current attempt: the propagated runtime
+        input when there is one, else the configured ``input``."""
+        frame = frame_for(self)
+        attempt = None if frame is None else frame.get(self._BTA_ATTEMPT)
+        if attempt is not None and attempt.effective_sub_queries is not None:
+            return attempt.effective_sub_queries[index]
+        return cfg.get("input", "")
 
-        _ctx = active_run_context()
-        if _ctx is not None:
-            # M5 read-flip: under a RunContext, publish the runtime sub-queries to
-            # the context node and DO NOT mutate ``flow_configs[i]["input"]`` /
-            # ``self.predefined_sub_queries`` — the definition stays immutable
-            # (the §2.4 invariant). BTA reads them via
-            # ``_get_effective_predefined_sub_queries`` (ctx-preferring).
-            _node = _ctx.node(creator=(type(self).__qualname__, _ctx.path))
-            if isinstance(_node.call, MultiFlowState):
-                # M-AF1/G9: ``state_factory`` made ``call`` a typed ``MultiFlowState`` —
-                # set the typed fields (the inherited BTA reader reads
-                # ``effective_sub_queries`` on its typed branch); the old dict-guard
-                # would have silently skipped this.
-                _node.call.effective_sub_queries = effective
-                _node.call.flow_inputs = effective
-            elif _node.call is None or isinstance(_node.call, dict):
-                _node.call = dict(_node.call or {})
-                _node.call["predefined_sub_queries"] = effective
-                _node.call["flow_inputs"] = effective
-        else:
-            # Legacy path (no context): mutate as before — byte-identical.
-            for i, cfg in enumerate(self.flow_configs):
-                cfg["input"] = effective[i]
-            self.predefined_sub_queries = effective
-
-    async def _ainfer(self, inference_input, inference_config=None, **_inference_args):
+    def _begin_attempt(self, attempt, inference_input) -> None:
         # Part C — cross-flow step coordination. When enabled (``cross_flow_sync`` or its
         # ``coordinated_stop`` alias), the lock-step barrier is installed transparently:
         # ``_reset_cross_flow_state`` seeds the rendezvous and the per-flow input builders
         # arrive at it each round (publish -> barrier -> read). No special-casing here —
         # the async fan-out (BTA WorkGraph ``asyncio.gather``) is exactly the single-loop
         # context the rendezvous needs. See the INTEGRATED plan.
-        self._apply_runtime_input_propagation(inference_input)
+        super()._begin_attempt(attempt, inference_input)
+        self._apply_runtime_input_propagation(attempt, inference_input)
         self._reset_cross_flow_state()
-        raw = await BreakdownThenAggregateInferencer._ainfer(
-            self, inference_input, inference_config=inference_config, **_inference_args
-        )
-        raw = self._normalize_aggregator_output(raw)
+
+    def _conclude_attempt(self, result):
+        raw = self._normalize_aggregator_output(super()._conclude_attempt(result))
         # Round 7: best-effort extract dispatch state BEFORE response_parser
         # strips structured tags — parsers operate on the raw aggregator output.
         self._extract_dispatch_state(raw)
@@ -1859,11 +1916,6 @@ class MultiFlowInferencer(BreakdownThenAggregateInferencer):
                 "The step barrier is an awaitable rendezvous and needs the single-event-loop "
                 "context of BTA's async fan-out."
             )
-        self._apply_runtime_input_propagation(inference_input)
-        self._reset_cross_flow_state()
-        raw = BreakdownThenAggregateInferencer._infer(
-            self, inference_input, inference_config=inference_config, **_inference_args
+        return super()._infer(
+            inference_input, inference_config=inference_config, **_inference_args
         )
-        raw = self._normalize_aggregator_output(raw)
-        self._extract_dispatch_state(raw)
-        return self._maybe_strip_response(raw)

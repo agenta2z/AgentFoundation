@@ -1,0 +1,104 @@
+{
+  "calls": [
+    {
+      "active_session_id": "<UUID1>",
+      "cli": [
+        {
+          "argv": [
+            "rovodev",
+            "legacy",
+            "turn 1",
+            "--yolo",
+            "--output-file",
+            "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "--config-override",
+            "{\"agent\": {\"modelId\": \"anthropic:claude-opus-4-7\"}}"
+          ],
+          "cwd": "<TMP>/ws"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": null,
+          "kwargs": {
+            "output_file": "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "get_final_output": "clean answer to 'turn 1' in session <UUID1>",
+      "last_clean_output": "clean answer to 'turn 1' in session <UUID1>",
+      "live_store": null,
+      "output": {
+        "output": "clean answer to 'turn 1' in session <UUID1>",
+        "raw_output": "TUI thinking\n   \nTUI done",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "session_backing": "<UUID1>"
+    },
+    {
+      "active_session_id": "<UUID1>",
+      "cli": [
+        {
+          "argv": [
+            "rovodev",
+            "legacy",
+            "turn 2",
+            "--yolo",
+            "--restore",
+            "<UUID1>",
+            "--output-file",
+            "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "--config-override",
+            "{\"agent\": {\"modelId\": \"anthropic:claude-opus-4-7\"}}"
+          ],
+          "cwd": "<TMP>/ws"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": null,
+          "kwargs": {
+            "output_file": "<TMP>/tmp/rovodev_output_<RAND>.md",
+            "resume": true,
+            "session_id": "<UUID1>"
+          }
+        }
+      ],
+      "get_final_output": "clean answer to 'turn 2' in session <UUID1>",
+      "last_clean_output": "clean answer to 'turn 2' in session <UUID1>",
+      "live_store": null,
+      "output": {
+        "output": "clean answer to 'turn 2' in session <UUID1>",
+        "raw_output": "TUI thinking\n   \nTUI done",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "session_backing": "<UUID1>"
+    }
+  ],
+  "sessions_dir": {
+    "<UUID1>/metadata.json": {
+      "json": {
+        "bookmarks": [],
+        "fork_data": null,
+        "is_manual_title": false,
+        "title": null,
+        "workspace_path": "<TMP>/ws"
+      }
+    },
+    "<UUID1>/session_context.json": {
+      "json": {
+        "workspace_path": "<TMP>/ws"
+      }
+    }
+  }
+}

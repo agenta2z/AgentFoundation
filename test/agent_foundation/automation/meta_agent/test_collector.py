@@ -17,21 +17,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
-
 from agent_foundation.automation.meta_agent.collector import TraceCollector
-from agent_foundation.automation.meta_agent.models import (
-    ExecutionTrace,
-    TraceStep,
-)
+from agent_foundation.automation.meta_agent.models import ExecutionTrace, TraceStep
 
 
 # ---------------------------------------------------------------------------
 # Mock agent and helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MockAgentResult:
     """Simulates an agent run result with a session directory."""
+
     session_dir: Optional[str] = None
 
 
@@ -70,13 +68,15 @@ def _create_manifest(session_dir: Path, num_turns: int = 1) -> None:
     """Create a manifest.json for a session directory with the given number of turns."""
     turns = []
     for i in range(1, num_turns + 1):
-        turns.append({
-            "turn_number": i,
-            "start_timestamp": "2024-01-01T10:00:00",
-            "log_file": f"turn_{i:03d}",
-            "artifacts": [],
-            "end_timestamp": "2024-01-01T10:05:00",
-        })
+        turns.append(
+            {
+                "turn_number": i,
+                "start_timestamp": "2024-01-01T10:00:00",
+                "log_file": f"turn_{i:03d}",
+                "artifacts": [],
+                "end_timestamp": "2024-01-01T10:05:00",
+            }
+        )
     manifest = {
         "session_id": "test_session",
         "creation_timestamp": "2024-01-01T10:00:00",
@@ -86,14 +86,13 @@ def _create_manifest(session_dir: Path, num_turns: int = 1) -> None:
         "session_log_file": "session.jsonl",
         "turns": turns,
     }
-    (session_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2)
-    )
+    (session_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
 
 # ---------------------------------------------------------------------------
 # ValueError on invalid run_count (Req 1.5)
 # ---------------------------------------------------------------------------
+
 
 class TestRunCountValidation:
     def test_run_count_zero_raises_value_error(self):
@@ -112,6 +111,7 @@ class TestRunCountValidation:
 # ---------------------------------------------------------------------------
 # Basic collection (Req 1.1)
 # ---------------------------------------------------------------------------
+
 
 class TestBasicCollection:
     def test_single_run_produces_one_trace(self):
@@ -159,6 +159,7 @@ class TestBasicCollection:
 # Failure handling (Req 1.4)
 # ---------------------------------------------------------------------------
 
+
 class TestFailureHandling:
     def test_failed_run_produces_trace_with_success_false(self):
         agent = MockAgent(fail_on_indices={0})
@@ -194,6 +195,7 @@ class TestFailureHandling:
 # ---------------------------------------------------------------------------
 # Synthetic data provider (Req 1.3)
 # ---------------------------------------------------------------------------
+
 
 class TestSyntheticDataProvider:
     def test_synthetic_data_supplied_to_each_run(self):
@@ -236,6 +238,7 @@ class TestSyntheticDataProvider:
 # Session directory parsing (Req 1.2)
 # ---------------------------------------------------------------------------
 
+
 class TestSessionDirectoryParsing:
     def test_parses_jsonl_entries_into_steps(self, tmp_path):
         """Create a minimal session directory and verify parsing."""
@@ -248,8 +251,17 @@ class TestSessionDirectoryParsing:
         # Write a flat JSONL file
         jsonl_file = turn_dir / "session.jsonl"
         entries = [
-            {"action_type": "click", "target": "#btn", "args": {}, "timestamp": "2024-01-01T10:00:00Z"},
-            {"action_type": "input_text", "target": "#input", "args": {"text": "hello"}},
+            {
+                "action_type": "click",
+                "target": "#btn",
+                "args": {},
+                "timestamp": "2024-01-01T10:00:00Z",
+            },
+            {
+                "action_type": "input_text",
+                "target": "#input",
+                "args": {"text": "hello"},
+            },
         ]
         with open(jsonl_file, "w") as f:
             for entry in entries:
@@ -300,6 +312,7 @@ class TestSessionDirectoryParsing:
 # ---------------------------------------------------------------------------
 # HTML artifact loading and chaining
 # ---------------------------------------------------------------------------
+
 
 class TestHtmlArtifacts:
     def test_html_before_chaining(self, tmp_path):
@@ -403,9 +416,11 @@ class TestHtmlArtifacts:
 # Agent result extraction
 # ---------------------------------------------------------------------------
 
+
 class TestAgentResultExtraction:
     def test_dict_result_with_session_dir(self):
         """Agent returning a dict with session_dir key."""
+
         class DictAgent:
             def run(self, task, data=None):
                 return {"session_dir": "/tmp/session"}
@@ -416,6 +431,7 @@ class TestAgentResultExtraction:
 
     def test_none_result(self):
         """Agent returning None."""
+
         class NoneAgent:
             def run(self, task, data=None):
                 return None
@@ -430,6 +446,7 @@ class TestAgentResultExtraction:
 # JSONL entry parsing
 # ---------------------------------------------------------------------------
 
+
 class TestJsonlParsing:
     def test_agent_response_entry(self, tmp_path):
         """AgentResponse entries with next_actions are parsed."""
@@ -442,11 +459,7 @@ class TestJsonlParsing:
         jsonl_file = turn_dir / "session.jsonl"
         entry = {
             "type": "AgentResponse",
-            "data": {
-                "next_actions": [
-                    [{"action_type": "click", "target": "#btn"}]
-                ]
-            }
+            "data": {"next_actions": [[{"action_type": "click", "target": "#btn"}]]},
         }
         jsonl_file.write_text(json.dumps(entry) + "\n")
 
@@ -471,7 +484,7 @@ class TestJsonlParsing:
                 "action_type": "input_text",
                 "target": "#input",
                 "result": {"success": True, "value": "typed"},
-            }
+            },
         }
         jsonl_file.write_text(json.dumps(entry) + "\n")
 

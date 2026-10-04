@@ -7,14 +7,14 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ReflectionStyles,
     ResponseSelectors,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
+    LinearWorkflowInferencer,
+    WorkflowStepConfig,
+)
 from agent_foundation.common.inferencers.constants import (
     DEFAULT_PLACEHOLDER_INFERENCE_PROMPT,
     DEFAULT_PLACEHOLDER_INFERENCE_RESPONSE,
     DEFAULT_SELF_REFLECTION_PROMPT_TEMPLATE,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.linear_workflow_inferencer import (
-    LinearWorkflowInferencer,
-    WorkflowStepConfig,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from attr import attrib, attrs
@@ -220,9 +220,11 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
     def _collect_all_responses(self, input_val, state):
         """Collect all base responses for IntegrateAll mode."""
         return self._concat_base_responses(
-            *(self.base_inferencer.iter_infer(
-                state["original_input"], run_context=self._rc_child("base")
-            ))
+            *(
+                self.base_inferencer.iter_infer(
+                    state["original_input"], run_context=self._rc_child("base")
+                )
+            )
         )
 
     def _build_reflective_response(self, state):
@@ -305,16 +307,22 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
 
         if self.reflection_style == ReflectionStyles.IntegrateAll:
             reflection_input = self._concat_base_responses(
-                *(self.base_inferencer.iter_infer(
-                    inference_input, run_context=self._rc_child("base"), **_inference_args
-                ))
+                *(
+                    self.base_inferencer.iter_infer(
+                        inference_input,
+                        run_context=self._rc_child("base"),
+                        **_inference_args,
+                    )
+                )
             )
             processed_reflection_input = self._process_reflection_input(
                 inference_input=inference_input,
                 reflection_input=reflection_input,
                 inference_config=inference_config,
             )
-            reflection_response = self.reflection_inferencer(processed_reflection_input)
+            reflection_response = self.reflection_inferencer(
+                processed_reflection_input, run_context=self._rc_child("reflect")
+            )
             inference_response = InferencerResponse(
                 base_response=inference_input,
                 reflection_response=InputAndResponse(
@@ -364,7 +372,8 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
                             inference_config=inference_config,
                         )
                         reflection_response = self.reflection_inferencer(
-                            processed_reflection_input
+                            processed_reflection_input,
+                            run_context=self._rc_child("reflect"),
                         )
                         self.log_debug(processed_reflection_input, "ReflectionPrompt")
                         self.log_debug(reflection_response, "ReflectionResponse")

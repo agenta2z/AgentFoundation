@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock, MagicMock
 from agent_foundation.common.inferencers.agentic_inferencers.common import (
     ConsensusConfig,
 )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
+    ConversationalInferencer,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.reflective_inferencer import (
     ReflectiveInferencer,
-)
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-    ConversationalInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 
@@ -31,6 +31,7 @@ from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_inferencer(response="response"):
     """Create a mock InferencerBase whose ainfer/infer return `response`."""
@@ -58,6 +59,7 @@ def _make_approved_review():
 # InferencerBase.supports_prompt_rendering
 # ---------------------------------------------------------------------------
 
+
 class TestInferencerBaseProperty(unittest.TestCase):
     """Base class property returns True iff template_manager is set."""
 
@@ -84,6 +86,7 @@ class TestInferencerBaseProperty(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # DualInferencer: crash fix + supports_prompt_rendering
 # ---------------------------------------------------------------------------
+
 
 class TestDualInferencerCrashFix(unittest.TestCase):
     """After renaming _render_prompt → _render_role_prompt, the standard
@@ -145,8 +148,8 @@ class TestDualInferencerCrashFix(unittest.TestCase):
 # ReflectiveInferencer: supports_prompt_rendering
 # ---------------------------------------------------------------------------
 
-class TestReflectiveInferencerSupportsPromptRendering(unittest.TestCase):
 
+class TestReflectiveInferencerSupportsPromptRendering(unittest.TestCase):
     def test_always_true_after_init(self):
         """ReflectiveInferencer always wraps reflection_prompt_formatter into
         a TemplateManager in __attrs_post_init__, so it's always True."""
@@ -170,8 +173,8 @@ class TestReflectiveInferencerSupportsPromptRendering(unittest.TestCase):
 # ConversationalInferencer: supports_prompt_rendering
 # ---------------------------------------------------------------------------
 
-class TestConversationalInferencerSupportsPromptRendering(unittest.TestCase):
 
+class TestConversationalInferencerSupportsPromptRendering(unittest.TestCase):
     def test_false_without_renderer(self):
         c = ConversationalInferencer(
             base_inferencer=_make_mock_inferencer(),
@@ -193,6 +196,7 @@ class TestConversationalInferencerSupportsPromptRendering(unittest.TestCase):
 # Flow inferencers: inherit base property
 # ---------------------------------------------------------------------------
 
+
 class TestFlowInferencersInheritProperty(unittest.TestCase):
     """BreakdownThenAggregateInferencer and PlanThenImplementInferencer
     should inherit supports_prompt_rendering from InferencerBase."""
@@ -201,13 +205,19 @@ class TestFlowInferencersInheritProperty(unittest.TestCase):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
             BreakdownThenAggregateInferencer,
         )
-        self.assertTrue(hasattr(BreakdownThenAggregateInferencer, "supports_prompt_rendering"))
+
+        self.assertTrue(
+            hasattr(BreakdownThenAggregateInferencer, "supports_prompt_rendering")
+        )
 
     def test_pti_has_property(self):
         from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
             PlanThenImplementInferencer,
         )
-        self.assertTrue(hasattr(PlanThenImplementInferencer, "supports_prompt_rendering"))
+
+        self.assertTrue(
+            hasattr(PlanThenImplementInferencer, "supports_prompt_rendering")
+        )
 
 
 if __name__ == "__main__":

@@ -13,15 +13,14 @@ mutating the (possibly shared) logger.
 import glob
 import os
 
-from attr import attrs
-
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.run_context import (
-    RunContext,
     enter_run,
     exit_run,
+    RunContext,
 )
+from attr import attrs
 
 
 @attrs
@@ -34,7 +33,9 @@ class _Mock(InferencerBase):
 
 
 def _session_jsonls(root):
-    return sorted(glob.glob(os.path.join(root, "logs", "**", "*.jsonl"), recursive=True))
+    return sorted(
+        glob.glob(os.path.join(root, "logs", "**", "*.jsonl"), recursive=True)
+    )
 
 
 def _ctx_with_workspace(ws):
@@ -80,7 +81,9 @@ def test_two_ctxs_isolated_on_one_shared_instance(tmp_path):
 
     assert _session_jsonls(A), "ctx A must get its own session log"
     assert _session_jsonls(B), "ctx B must get its own session log"
-    assert not _session_jsonls(base), "nothing should land at the shared baked workspace"
+    assert not _session_jsonls(base), (
+        "nothing should land at the shared baked workspace"
+    )
 
 
 def test_legacy_no_ctx_is_byte_identical(tmp_path):
@@ -101,7 +104,9 @@ def test_setter_redirect_then_override_suppressed(tmp_path):
     # switch_role-style: set the instance workspace via the real setter.
     m._workspace = InferencerWorkspace(root=R)
     wl = m.logger["_workspace"]
-    assert wl.file_path == os.path.join(R, "logs", "session.jsonl"), "setter re-bases the logger"
+    assert wl.file_path == os.path.join(R, "logs", "session.jsonl"), (
+        "setter re-bases the logger"
+    )
 
     # Under a ctx whose effective workspace equals the instance workspace (R), the
     # override resolves to the same path -> suppressed (None).
@@ -136,9 +141,13 @@ def test_two_distinct_tagged_loggers_both_follow_ctx(tmp_path):
     finally:
         exit_run(tok)
 
-    assert os.path.exists(os.path.join(B, "logs", "audit.jsonl")), "audit logger follows ctx (relpath, not hardcoded)"
+    assert os.path.exists(os.path.join(B, "logs", "audit.jsonl")), (
+        "audit logger follows ctx (relpath, not hardcoded)"
+    )
     assert _session_jsonls(B), "session logger follows ctx too"
-    assert not os.path.exists(os.path.join(A, "logs", "audit.jsonl")), "audit did not write at baked A"
+    assert not os.path.exists(os.path.join(A, "logs", "audit.jsonl")), (
+        "audit did not write at baked A"
+    )
 
 
 def test_redirect_leaves_untagged_user_logger_untouched(tmp_path):
@@ -154,8 +163,12 @@ def test_redirect_leaves_untagged_user_logger_untouched(tmp_path):
 
     m._workspace = InferencerWorkspace(root=B)  # real setter -> redirect
 
-    assert m.logger["_workspace"].file_path == os.path.join(B, "logs", "session.jsonl"), "tagged logger re-based"
-    assert m.logger["_user"].file_path == user_path, "untagged user logger left untouched (no clobber)"
+    assert m.logger["_workspace"].file_path == os.path.join(
+        B, "logs", "session.jsonl"
+    ), "tagged logger re-based"
+    assert m.logger["_user"].file_path == user_path, (
+        "untagged user logger left untouched (no clobber)"
+    )
 
 
 def test_deferred_logger_un_defers_under_ctx(tmp_path):
@@ -203,6 +216,7 @@ def test_deferred_logger_un_defers_via_bridge_entrypoint_override(tmp_path):
     converges at ``__ainfer_single_impl``, so a deferred logger un-defers there.
     This is the top-BTA-aggregator path."""
     import asyncio
+
     from agent_foundation.common.inferencers.run_context import bridge_entrypoint
 
     @attrs

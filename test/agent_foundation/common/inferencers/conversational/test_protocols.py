@@ -1,4 +1,5 @@
 """Commit 3 (D3): HubAwareToolExecutor capability-Protocol recognition."""
+
 from unittest.mock import MagicMock
 
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
