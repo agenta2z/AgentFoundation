@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -48,9 +50,17 @@ def main(argv: list[str] | None = None) -> int:
 
     session_context: dict[str, Any] = {}
 
-    from .executor import execute
+    from agent_foundation.resources.tools.registry import derived_tool_execute
 
-    result = asyncio.run(execute(arguments, session_context))
+    tool = json.loads((Path(__file__).parent / "tool.json").read_text(encoding="utf-8"))
+    result = asyncio.run(
+        derived_tool_execute(
+            arguments,
+            session_context,
+            derived_from=tool["derived_from"],
+            tool_name=tool["name"],
+        )
+    )
 
     if hasattr(result, "result"):
         print(result.result)

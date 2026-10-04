@@ -1,0 +1,159 @@
+{
+  "calls": [
+    {
+      "active_session_id_after": "sess-alpha",
+      "base_single_calls": [
+        "_ainfer_single"
+      ],
+      "call_kwargs": {
+        "session_id": "sess-alpha"
+      },
+      "entry": "ainfer",
+      "initialized_sessions_after": [
+        "sess-alpha"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": false,
+          "session_id": "sess-alpha"
+        }
+      ],
+      "output": "answer 2 to: sess-alpha question",
+      "prompt": "sess-alpha question",
+      "streaming_entry_kwargs": [],
+      "transport": [
+        {
+          "method": "transcript_probe",
+          "result": "NEW",
+          "session_id": "sess-alpha"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID1>",
+            "timeout": 600
+          },
+          "prompt": "Session initialization. Respond with exactly one word: Ready.",
+          "session_id": "sess-alpha"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID2>",
+            "timeout": 600
+          },
+          "prompt": "sess-alpha question",
+          "session_id": "sess-alpha"
+        }
+      ]
+    },
+    {
+      "active_session_id_after": "sess-beta",
+      "base_single_calls": [
+        "_ainfer_single"
+      ],
+      "call_kwargs": {
+        "session_id": "sess-beta"
+      },
+      "entry": "ainfer",
+      "initialized_sessions_after": [
+        "sess-alpha",
+        "sess-beta"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": false,
+          "session_id": "sess-beta"
+        }
+      ],
+      "output": "answer 4 to: sess-beta question",
+      "prompt": "sess-beta question",
+      "streaming_entry_kwargs": [],
+      "transport": [
+        {
+          "method": "transcript_probe",
+          "result": "NEW",
+          "session_id": "sess-beta"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID3>",
+            "timeout": 600
+          },
+          "prompt": "Session initialization. Respond with exactly one word: Ready.",
+          "session_id": "sess-beta"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID4>",
+            "timeout": 600
+          },
+          "prompt": "sess-beta question",
+          "session_id": "sess-beta"
+        }
+      ]
+    },
+    {
+      "active_session_id_after": "sess-beta",
+      "base_single_calls": [
+        "_ainfer_single"
+      ],
+      "call_kwargs": {},
+      "entry": "ainfer",
+      "initialized_sessions_after": [
+        "sess-alpha",
+        "sess-beta"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": true,
+          "session_id": "sess-beta"
+        }
+      ],
+      "output": "answer 5 to: bare follow-up",
+      "prompt": "bare follow-up",
+      "streaming_entry_kwargs": [],
+      "transport": [
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID5>",
+            "timeout": 600
+          },
+          "prompt": "bare follow-up",
+          "session_id": "sess-beta"
+        }
+      ]
+    }
+  ]
+}

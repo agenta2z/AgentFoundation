@@ -21,7 +21,6 @@ def bta():
     obj = BreakdownThenAggregateInferencer.__new__(BreakdownThenAggregateInferencer)
     obj.worker_query_fields = ("description", "todos")
     obj.expand_todos_to_workers = False
-    obj._last_aggregation_guidance = None
     return obj
 
 
@@ -318,10 +317,10 @@ class TestMultipleSubtasks:
 
             </Response>
         """)
-        result = bta._parse_json_subtasks(raw)
+        result, guidance = bta._parse_json_breakdown(raw)
         assert len(result) == 5
-        assert bta._last_aggregation_guidance is not None
-        assert "synthesize" in bta._last_aggregation_guidance.lower()
+        assert guidance is not None
+        assert "synthesize" in guidance.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -448,13 +447,9 @@ class TestEdgeCases:
             ```
             </Response>
         """)
-        bta._last_aggregation_guidance = None
-        result = bta._parse_json_subtasks(raw)
+        result, guidance = bta._parse_json_breakdown(raw)
         assert len(result) == 1
-        assert (
-            bta._last_aggregation_guidance
-            == "Read all worker outputs and build a compatibility matrix"
-        )
+        assert guidance == "Read all worker outputs and build a compatibility matrix"
 
     def test_subtask_fields_mapped_to_query(self, bta):
         """Subtask description/todos/scope are composed into query string."""
@@ -487,3 +482,21 @@ class TestEdgeCases:
         assert len(result) == 1
         query = result[0]["query"]
         assert "Analyze performance metrics" in query
+
+
+# ---------------------------------------------------------------------------
+# Purity: the breakdown records the guidance on its attempt, never the parser
+# ---------------------------------------------------------------------------
+
+
+class TestPurity:
+    RAW = '```json\n{"subtasks": [{"description": "A"}], "aggregation_guidance": "g"}\n```'
+
+    def test_the_parsers_write_nothing_on_the_instance(self, bta):
+        before = dict(vars(bta))
+        assert bta._parse_json_breakdown(self.RAW)[1] == "g"
+        assert len(bta._parse_json_subtasks(self.RAW)) == 1
+        assert vars(bta) == before
+
+    def test_a_fallback_without_json_carries_no_guidance(self, bta):
+        assert bta._parse_json_breakdown("1. first\n2. second")[1] is None

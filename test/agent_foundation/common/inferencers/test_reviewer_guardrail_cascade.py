@@ -9,9 +9,9 @@ reviewer's critique. They are the integration counterparts to the unit tests in
 Root cause they guard against (see the reviewer-cascade investigation):
 - The reviewer leaf renders its prompt from ``state["inference_input"]`` (the
   bare seed / original task) + the review ``extra_feed`` (the artifact under
-  review). ``_last_inference_input`` stays the seed; the *rendered* prompt is the
-  review prompt.
-- PRE-fix, the judge read ``_last_inference_input`` (the seed) → it judged the
+  review). The raw input stays the seed; the *rendered* prompt is the review
+  prompt.
+- PRE-fix, the judge read the raw input (the seed) → it judged the
   critique against the *propose* task and false-RESTARTed valid critiques; and
   recovery re-sent the seed → the reviewer re-proposed (analysis) instead of
   reviewing.
@@ -49,8 +49,8 @@ class _ReviewerLeaf(InferencerBase):
     """A reviewer leaf that renders its prompt from the seed + review feed
     (``extra_feed``) and returns a structured JSON critique. It carries an
     output-guardrail judge, exactly like a real flow leaf promoted to reviewer.
-    ``_last_inference_input`` stays the bare seed; ``rendered_input`` becomes the
-    review prompt — so the two genuinely diverge (revert-sensitivity)."""
+    The bare seed and ``rendered_input`` (the review prompt) genuinely diverge
+    (revert-sensitivity)."""
 
     _critique = attrib(
         default=(
@@ -153,8 +153,8 @@ class TestReviewerGuardrailCascade(unittest.TestCase):
     def test_reviewer_judge_sees_rendered_review_prompt_not_seed(self):
         """Fix #1 end-to-end: the reviewer's guardrail judge is fed the rendered
         REVIEW prompt (review framing + the artifact feed), NOT the bare Dual
-        seed. Reverting Fix #1 (judge reads ``_last_inference_input`` = the
-        seed) drops all these markers → this test fails."""
+        seed. Reverting Fix #1 (judge reads the raw input = the seed) drops all
+        these markers → this test fails."""
         judge = _CapturingJudge(verdict="PASS")
         dual = _make_dual(judge)
         _drive_review(dual)

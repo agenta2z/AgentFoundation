@@ -11,6 +11,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.devmate.de
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 class DevmateSDKInferencerInitTest(unittest.TestCase):
@@ -108,7 +109,8 @@ class DevmateSDKInferencerAsyncTest(unittest.IsolatedAsyncioTestCase):
             {"devai.devmate_sdk.python.devmate_client": None},
         ):
             with self.assertRaises(RuntimeError) as context:
-                await inferencer._ainfer("test prompt")
+                async with aopen_invocation(inferencer):
+                    await inferencer._ainfer("test prompt")
 
             self.assertIn("Devmate SDK not available", str(context.exception))
 

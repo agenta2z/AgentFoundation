@@ -9,10 +9,11 @@ declared types.
 
 Today no production code path emits this type. This handler is forward-compat:
 - `build_input_mode` returns the same free-text widget as the legacy fallthrough.
-- `handle_response` interprets a structured response (`{"fields": {field_name: value, ...}}`)
-  into `SetPromptVariable` effects per field. Falls back to a single
-  `SetPromptVariable(tool.output_vars[0], scalar)` if the response is a plain
-  string. Without `output_vars`, returns the text without effects.
+- `handle_response` publishes a structured response's fields
+  (`{"fields": {field_name: value, ...}}`) as session variables, or a plain
+  answer to `tool.output_vars`, via `PublishSessionVariablesEffect` (tool_type
+  namespacing). Without fields or `output_vars`, returns the text without
+  effects.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.conv
     ConversationToolType,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.effects import (
-    SetPromptVariable,
+    PublishSessionVariablesEffect,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
     ConversationToolHandler,
@@ -51,22 +52,24 @@ class ToolArgumentFormHandler(ConversationToolHandler):
         response: dict[str, Any],
         ctx: HandlerContext,
     ) -> HandlerResult:
-        effects: list[InferencerEffect] = []
+        variables: dict[str, str] = {}
         text = ""
 
         if isinstance(response, dict):
             fields = response.get("fields")
             if isinstance(fields, dict):
-                for k, v in fields.items():
-                    effects.append(SetPromptVariable(str(k), str(v)))
+                variables = {str(k): str(v) for k, v in fields.items()}
                 text = ", ".join(f"{k}={v}" for k, v in fields.items())
             else:
                 text = response.get("content") or response.get("custom_text") or ""
-                if text and tool.output_vars:
-                    effects.append(SetPromptVariable(tool.output_vars[0], text))
         else:
             text = str(response)
-            if text and tool.output_vars:
-                effects.append(SetPromptVariable(tool.output_vars[0], text))
+        if not variables and text:
+            variables = {v: text for v in tool.output_vars}
 
+        effects: list[InferencerEffect] = []
+        if variables:
+            effects.append(
+                PublishSessionVariablesEffect(variables, tool_type=tool.tool_type)
+            )
         return HandlerResult(text=text, effects=effects)

@@ -13,6 +13,14 @@ from rich_python_utils.common_objects.feed_base import FeedBase
 from rich_python_utils.common_objects.workflow.common.phase_status import PhaseStatus
 
 
+def _phase_id(record: Any) -> str:
+    if hasattr(record, "phase"):
+        return record.phase
+    if isinstance(record, dict) and "phase" in record:
+        return record["phase"]
+    return str(record)
+
+
 @dataclass
 class SOPState(FeedBase):
     """Complete SOP runtime state."""
@@ -99,13 +107,7 @@ class SOPState(FeedBase):
         linear next; the current marker plus the ordered list convey it."""
         if not (self.sop and hasattr(self.sop, "phases") and self.sop.phases):
             return ""
-        completed_ids = set()
-        for r in self.completed_phases:
-            pid = getattr(r, "phase", None)
-            if pid is None and isinstance(r, dict):
-                pid = r.get("phase")
-            if pid is not None:
-                completed_ids.add(pid)
+        completed_ids = set(self.completed_phase_ids())
         lines = []
         for p in self.sop.phases:
             if p.id == self.current_phase:
@@ -121,14 +123,13 @@ class SOPState(FeedBase):
         """Normalized ids of completed phases.
 
         ``completed_phases`` entries may be phase-record objects (carrying a
-        ``.phase`` attr) or bare id strings. This is the single source of truth
-        for that id list — used by the phase-completion advancer AND the async
-        dispatch writer's forward-only guard so the two can never drift (the
-        normalization was previously duplicated inline at four call sites).
+        ``.phase`` attr), their ``to_dict()`` form (``{"phase": ...}``, what a
+        resumed state holds) or bare id strings (what every completion path
+        stores). This is the single source of truth for that id list — used by
+        the phase-completion advancer, the async dispatch writer's forward-only
+        guard and the prompt's phase outline, so they can never drift.
         """
-        return [
-            r.phase if hasattr(r, "phase") else str(r) for r in self.completed_phases
-        ]
+        return [_phase_id(r) for r in self.completed_phases]
 
     def to_feed(self) -> dict[str, Any]:
         """Template-visible keys only. Excludes sop (non-serializable)."""

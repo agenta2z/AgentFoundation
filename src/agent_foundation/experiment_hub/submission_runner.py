@@ -36,8 +36,10 @@ import asyncio
 import fnmatch
 import json
 import logging
+import os
 import re
 import shlex
+import signal
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -276,6 +278,21 @@ def _extract_flow_id(flow_uri: str | None) -> str:
     return flow_id_to_experiment_id(ident.flow_id)
 
 
+def _signal_tree(proc: asyncio.subprocess.Process, *, kill: bool) -> None:
+    """SIGTERM (or SIGKILL) ``proc`` and everything it spawned: each spawn
+    leads its own session, so its pid is the process group id. Where process
+    groups do not exist (Windows), only ``proc`` itself is signalled."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL if kill else signal.SIGTERM)
+        elif kill:
+            proc.kill()
+        else:
+            proc.terminate()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 class SubmissionRunner:
     """Run a generated submission script as a subprocess.
 
@@ -289,8 +306,8 @@ class SubmissionRunner:
          ``emit_event`` as soon as they appear, and writes the stream
          completion marker on exit.
       3. ``cancel()`` is invoked from outside (via the task-cancel WS
-         handler) and gives the subprocess 5s to terminate gracefully
-         before sending SIGKILL.
+         handler) and gives the subprocess and everything it spawned 5s to
+         terminate gracefully before sending SIGKILL.
 
     The ``emit_event`` callback is called twice during a normal run:
       - once when ``FLOW_URI:`` is parsed (status='running', includes
@@ -848,6 +865,7 @@ class SubmissionRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=_MAX_STREAM_LINE_BYTES,
+            start_new_session=True,
         )
 
         # Tail buffers (~4 KB each) for error-message construction. We
@@ -1000,6 +1018,7 @@ class SubmissionRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=_MAX_STREAM_LINE_BYTES,
+            start_new_session=True,
         )
 
         result: dict[str, Any] = {
@@ -1066,31 +1085,34 @@ class SubmissionRunner:
         return result
 
     async def cancel(self) -> None:
-        """Terminate any running subprocess (build or main spawn).
-        Idempotent. Both ``self._build_proc`` and ``self._proc`` are
-        candidates — at most one is alive at any moment because the
-        build phase runs to completion before the main spawn begins,
-        but cancel during either path must work.
+        """Terminate any running subprocess (build or main spawn) and every
+        process it spawned. Idempotent. Both ``self._build_proc`` and
+        ``self._proc`` are candidates — at most one is alive at any moment
+        because the build phase runs to completion before the main spawn
+        begins, but cancel during either path must work.
         """
         self._cancelled = True
+        # The current phase's subprocess may have exited while descendants
+        # still hold its pipes open; a build that finished earlier is done.
+        current = self._proc if self._proc is not None else self._build_proc
         for proc in (self._build_proc, self._proc):
-            if proc is None or proc.returncode is not None:
+            if proc is None:
                 continue
-            try:
-                proc.terminate()
-            except ProcessLookupError:
+            if proc.returncode is not None and proc is not current:
                 continue
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
+            if proc.returncode is None:
+                _signal_tree(proc, kill=False)
                 try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=2)
+                    await asyncio.wait_for(proc.wait(), timeout=5)
                 except asyncio.TimeoutError:
-                    logger.error(
-                        "SubmissionRunner.cancel: subprocess did not exit "
-                        "within 7s after SIGTERM+SIGKILL"
-                    )
+                    _signal_tree(proc, kill=True)
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=2)
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "SubmissionRunner.cancel: subprocess did not exit "
+                            "within 7s after SIGTERM+SIGKILL"
+                        )
+            if hasattr(os, "killpg"):
+                # Descendants that outlived the subprocess itself.
+                _signal_tree(proc, kill=True)

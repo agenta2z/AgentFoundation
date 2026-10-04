@@ -94,6 +94,15 @@ class SessionMode(Enum):
 
 _logger = logging.getLogger(__name__)
 
+# The devmate-core CLI looked up on ``PATH`` when no path is configured.
+DM_BINARY = "dm"
+
+
+def find_dm_binary(explicit: "str | None" = None) -> "str | None":
+    """The ``dm`` executable to run: ``explicit`` when set, else the one on
+    ``PATH``; ``None`` when neither (callers then use the bare name)."""
+    return explicit or shutil.which(DM_BINARY)
+
 
 def _detect_fbsource_root_for(cls) -> "str | None":
     """Detect the Sapling/Mercurial repo root containing ``cls``'s source file.
@@ -415,3 +424,73 @@ def resolve_model_tag(model_tag: str) -> str:
         return _KNOWN_ALIASES[result]
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# dm (devmate-core) model ids, as ``dm -m`` accepts them. dm names 1M-context
+# variants ``-long`` (not the Devmate Platform ``-1m``). Same tables as
+# ``DevmateCliInferencer._DM_MODEL_MAP`` / ``_DM_KNOWN_MODELS`` /
+# ``_DM_DEFAULT_MODEL`` (the classic dm path).
+# ---------------------------------------------------------------------------
+DM_MODEL_MAP: dict[str, str] = {
+    "claude-opus-4.7-1m": "claude-opus-4.7-long",
+    "claude-opus-4.7": "claude-opus-4.7-long",
+    "claude-opus-4.6-1m": "claude-opus-4.6-long",
+    "claude-opus-4.6": "claude-opus-4.6",
+    "claude-opus-4.8": "claude-opus-4.8",
+    "claude-sonnet-4.6-1m": "claude-sonnet-4.6-long",
+    "claude-sonnet-4.6": "claude-sonnet-4.6-long",
+    "claude-sonnet-4.5": "claude-sonnet-4.6-long",
+    "claude-haiku-4.5": "claude-haiku-4.5",
+    "opus": "claude-opus-4.7-long",
+    "sonnet": "claude-sonnet-4.6-long",
+    "haiku": "claude-haiku-4.5",
+}
+DM_KNOWN_MODELS: frozenset[str] = frozenset(
+    {
+        "avocado-code-internal-0529",
+        "claude-opus-4.8",
+        "claude-opus-4.7-long",
+        "claude-opus-4.6",
+        "claude-opus-4.6-long",
+        "claude-sonnet-4.6-long",
+        "claude-haiku-4.5",
+        "gpt-5-5",
+        "gemini-3-1-pro",
+        "opus",
+        "sonnet",
+        "haiku",
+        "gpt",
+        "codex",
+        "gemini",
+        "avocado",
+    }
+)
+DM_DEFAULT_MODEL: str = "claude-opus-4.7-long"
+
+
+def resolve_dm_model(model_tag: str) -> str:
+    """Map any model tag onto a dm model id, as the classic dm path does for a
+    ``model_id``: :func:`resolve_model_tag` first, then the dm tables.
+
+        opus[1m]                   → claude-opus-4.7-1m → claude-opus-4.7-long
+        claude-sonnet-4-6          → claude-sonnet-4.6  → claude-sonnet-4.6-long
+        claude-opus-4-6-20260204   → claude-opus-4.6
+
+    A tag dm already knows is kept as is (``gpt-5-5`` would otherwise become
+    ``gpt-5.5``). A tag neither table maps becomes ``DM_DEFAULT_MODEL``, like
+    the classic path.
+    """
+    if model_tag in DM_KNOWN_MODELS:
+        return model_tag
+    model = resolve_model_tag(model_tag)
+    if model in DM_KNOWN_MODELS:
+        return model
+    if model in DM_MODEL_MAP:
+        return DM_MODEL_MAP[model]
+    if model.endswith("-1m") and f"{model[:-3]}-long" in DM_KNOWN_MODELS:
+        return f"{model[:-3]}-long"
+    _logger.info(
+        "dm has no model for %r; using its default %s", model_tag, DM_DEFAULT_MODEL
+    )
+    return DM_DEFAULT_MODEL

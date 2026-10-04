@@ -1,0 +1,12 @@
+{
+  "name": "mini_research",
+  "display_name": "Mini Research",
+  "version": "1.0.0",
+  "description": "Test fixture: collect a topic, run the brief tool, confirm the result.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["clarification", "write_brief", "confirmation"],
+  "labels": ["test"],
+  "linear_only": true,
+  "max_goto_iterations": 2,
+  "max_total_nodes": 20
+}

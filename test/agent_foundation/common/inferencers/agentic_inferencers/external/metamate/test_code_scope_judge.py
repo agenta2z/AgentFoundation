@@ -44,6 +44,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.c
 from agent_foundation.common.inferencers.agentic_inferencers.external.metamate.metamate_sdk_inferencer import (
     MetamateSDKInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 _VALID_BLOCK: str = (
     "```json scope_decision\n"
@@ -138,7 +139,9 @@ class _CapturingMetamate(MetamateSDKInferencer):
 
     Overriding the streaming primitive lets the REAL ``_ainfer`` → ``super()._ainfer``
     → streaming-pipeline path run without a network call, so the test observes the
-    exact prompt that would reach ``engine_start_v2(prompt=...)``.
+    exact prompt that would reach ``engine_start_v2(prompt=...)``. Built with
+    ``tool_call_budget=None`` so the prompt holds only the scope directive and the
+    task (the work budget is covered in ``test_metamate_tool_call_budget``).
     """
 
     captured_prompt: Any = None
@@ -146,6 +149,16 @@ class _CapturingMetamate(MetamateSDKInferencer):
     async def _ainfer_streaming(self, prompt: str, **kwargs: Any) -> AsyncIterator[str]:
         self.captured_prompt = prompt
         yield "ok"
+
+
+def _direct_ainfer(inferencer: MetamateSDKInferencer, task: Any) -> Any:
+    """``inferencer._ainfer(task)`` inside an invocation, as the public entries run it."""
+
+    async def call() -> Any:
+        async with aopen_invocation(inferencer):
+            return await inferencer._ainfer(task)
+
+    return asyncio.run(call())
 
 
 class ParseCodeScopeJudgmentTest(unittest.TestCase):
@@ -427,15 +440,17 @@ class MetamateSdkScopeSeamTest(unittest.TestCase):
     """
 
     def _capture(self, inferencer: _CapturingMetamate, task: Any) -> Any:
-        result = asyncio.run(inferencer._ainfer(task))
+        result = _direct_ainfer(inferencer, task)
         self.assertEqual(result, "ok")
         return inferencer.captured_prompt
 
     def test_default_is_the_real_judge_and_explicit_none_disables(self) -> None:
         # On by default: an unscoped Metamate search is the failure this prevents.
-        self.assertIs(_CapturingMetamate().code_scope_judge, judge_code_scope)
+        self.assertIs(
+            _CapturingMetamate(tool_call_budget=None).code_scope_judge, judge_code_scope
+        )
         # Opting out stays possible — the prompt then reaches the wire untouched.
-        inf = _CapturingMetamate(code_scope_judge=None)
+        inf = _CapturingMetamate(tool_call_budget=None, code_scope_judge=None)
         self.assertEqual(
             self._capture(inf, "find the ranking model"), "find the ranking model"
         )
@@ -446,7 +461,7 @@ class MetamateSdkScopeSeamTest(unittest.TestCase):
                 CodeScopeJudgment(CodeSemanticScope.FBCODE, 0.9, "r")
             )
         )
-        inf = _CapturingMetamate(code_scope_judge=judge)
+        inf = _CapturingMetamate(tool_call_budget=None, code_scope_judge=judge)
         passed = self._capture(inf, "find the ranking model")
         self.assertEqual(judge.calls, 1)
         self.assertEqual(judge.seen_task, "find the ranking model")
@@ -461,7 +476,7 @@ class MetamateSdkScopeSeamTest(unittest.TestCase):
         # The faithful judge twin (real stage-1 + stage-2, fake transport) wired as
         # the field — proves the actual judge integrates end to end, offline.
         judge = _local_judge(_Fake(_VALID_BLOCK))
-        inf = _CapturingMetamate(code_scope_judge=judge)
+        inf = _CapturingMetamate(tool_call_budget=None, code_scope_judge=judge)
         passed = self._capture(inf, "where is the fbcode ranking model")
         self.assertIn("use corpus: fbcode", passed)  # judged FBCODE
         self.assertTrue(passed.endswith("\n\nwhere is the fbcode ranking model"))
@@ -471,7 +486,7 @@ class MetamateSdkScopeSeamTest(unittest.TestCase):
         # able to break it. A failure yields the default (fbsource) directive and
         # the host task still runs.
         judge = _FailingCodeScopeJudge()
-        inf = _CapturingMetamate(code_scope_judge=judge)
+        inf = _CapturingMetamate(tool_call_budget=None, code_scope_judge=judge)
         passed = self._capture(inf, "anything")
         self.assertEqual(judge.calls, 1)
         self.assertIn("use repo: fbsource", passed)
@@ -482,8 +497,8 @@ class MetamateSdkScopeSeamTest(unittest.TestCase):
         # Defensive guard: a non-str input skips the judge (the rendered prompt is
         # always a str in the real flow; this keeps a stray non-str from crashing).
         judge = _FakeCodeScopeJudge(CodeSearchScope.default())
-        inf = _CapturingMetamate(code_scope_judge=judge)
-        asyncio.run(inf._ainfer(12345))
+        inf = _CapturingMetamate(tool_call_budget=None, code_scope_judge=judge)
+        _direct_ainfer(inf, 12345)
         self.assertEqual(judge.calls, 0)
 
 

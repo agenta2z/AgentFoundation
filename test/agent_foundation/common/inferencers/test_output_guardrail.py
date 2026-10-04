@@ -27,6 +27,10 @@ from agent_foundation.common.inferencers.inferencer_base import (
     InferencerBase,
 )
 from attr import attrib, attrs
+from rich_python_utils.common_utils.function_helper import (
+    FallbackMode,
+    OutputValidationExhaustedError,
+)
 
 
 @attrs
@@ -66,6 +70,14 @@ def _run(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+def _render_under(inf, rendered_input, output):
+    token = _current_fallback_state.set({"rendered_input": rendered_input})
+    try:
+        return inf._render_guardrail_prompt(output)
+    finally:
+        _current_fallback_state.reset(token)
 
 
 class TestGuardrailDisabledByDefault(unittest.TestCase):
@@ -134,6 +146,63 @@ class TestGuardrailRejects(unittest.TestCase):
         result = inf.infer("input")
         self.assertEqual(str(result), "good complete plan")
         self.assertEqual(inf._call_count, 2)
+
+
+@attrs
+class _CountingJudge(_StubJudge):
+    calls = attrib(default=0, init=False)
+
+    def _infer(self, inference_input, inference_config=None, **kwargs):
+        self.calls += 1
+        return super()._infer(inference_input, inference_config, **kwargs)
+
+
+class TestGuardrailSingleAttempt(unittest.TestCase):
+    """``fallback_mode=NEVER`` with the default ``max_retry=1`` makes one
+    attempt; sync ``infer`` still judges it, as ``ainfer`` does."""
+
+    MODES = {
+        "sync": lambda inf: inf.infer("input"),
+        "async": lambda inf: _run(inf.ainfer("input")),
+    }
+
+    def _single_attempt(self, verdict):
+        judge = _CountingJudge(verdict=verdict)
+        inf = _StubInferencer(
+            output_guardrail_inferencer=judge, fallback_mode=FallbackMode.NEVER
+        )
+        inf.set_responses(["draft"])
+        return inf, judge
+
+    def test_pass_is_judged_once(self):
+        for mode, call in self.MODES.items():
+            with self.subTest(mode=mode):
+                inf, judge = self._single_attempt("PASS")
+                self.assertEqual(str(call(inf)), "draft")
+                self.assertEqual(judge.calls, 1)
+                self.assertEqual(inf._call_count, 1)
+
+    def test_retry_verdict_raises(self):
+        for mode, call in self.MODES.items():
+            with self.subTest(mode=mode):
+                inf, _ = self._single_attempt("RETRY: narration only")
+                with self.assertRaises(OutputValidationExhaustedError):
+                    call(inf)
+                self.assertEqual(inf._call_count, 1)
+
+    def test_update_verdict_is_published_degraded(self):
+        for mode, call in self.MODES.items():
+            with self.subTest(mode=mode):
+                inf, _ = self._single_attempt("UPDATE: expand it")
+                with patch.object(inf, "log_warning") as warned:
+                    self.assertEqual(str(call(inf)), "draft")
+                events = [
+                    c.args[0]
+                    for c in warned.call_args_list
+                    if isinstance(c.args[0], dict)
+                    and c.args[0].get("event") == "DEGRADED_OUTPUT"
+                ]
+                self.assertEqual(len(events), 1)
 
 
 class TestGuardrailReasoningFirstVerdict(unittest.TestCase):
@@ -495,8 +564,7 @@ class TestGuardrailOutputText(unittest.TestCase):
 class TestJudgePromptRendering(unittest.TestCase):
     def test_render_guardrail_prompt_contains_input_and_output(self):
         inf = _StubInferencer()
-        inf._last_inference_input = "original task request"
-        prompt = inf._render_guardrail_prompt("the agent's output text")
+        prompt = _render_under(inf, "original task request", "the agent's output text")
         self.assertIn("original task request", prompt)
         self.assertIn("the agent's output text", prompt)
         self.assertIn("PASS", prompt)
@@ -526,8 +594,9 @@ class TestGuardrailUnifiedRendering(unittest.TestCase):
         inf = ClaudeCodeCliInferencer(
             template_manager=tm, template_root_space="plan", template_key="initial"
         )
-        inf._last_inference_input = "the original task"
-        rendered = inf._render_guardrail_prompt({"output": "PARTIAL_OUTPUT_MARKER"})
+        rendered = _render_under(
+            inf, "the original task", {"output": "PARTIAL_OUTPUT_MARKER"}
+        )
 
         # Rendered the recovery/judge template (verdict contract present)…
         self.assertIn("sanity judge", rendered.lower())
@@ -545,36 +614,49 @@ class TestGuardrailNoDoubleWrap(unittest.TestCase):
     """The guardrail prompt is already fully rendered (recovery/judge). A judge
     that carries its own (planning) template must NOT wrap it a second time."""
 
-    def test_templated_judge_template_neutralized(self):
-        # A judge that "carries a template" — simulate via a truthy template_manager.
+    def _judge(self, **kwargs):
+        # A judge that "carries a template" — its _render_prompt would wrap the
+        # prompt in a planning template if the judge rendered its input.
         @attrs
         class _TemplatedJudge(InferencerBase):
             _seen_prompt = attrib(default=None, init=False)
+
+            def _render_prompt(self, inference_input, extra_feed=None):
+                return f"You are tasked with creating artifacts: [{inference_input}]"
 
             def _infer(self, inference_input, inference_config=None, **kwargs):
                 # Record the prompt the judge actually executes.
                 object.__setattr__(self, "_seen_prompt", str(inference_input))
                 return "PASS"
 
-        judge = _TemplatedJudge()
-        # Give it a non-None template_manager so the double-wrap path WOULD fire
-        # if we didn't neutralize it.
+        judge = _TemplatedJudge(**kwargs)
         judge.template_manager = object()
+        return judge
+
+    def test_templated_judge_runs_the_prerendered_prompt_unmodified(self):
+        judge = self._judge()
+        template_manager = judge.template_manager
 
         inf = _StubInferencer(output_guardrail_inferencer=judge)
-        inf._last_inference_input = "do the task"
         inf.set_responses(["the output"])
         result = inf.infer("input")
         self.assertEqual(str(result), "the output")
 
-        # The fix must have neutralized the judge's template_manager so it ran
-        # the pre-rendered guardrail prompt verbatim (no second wrap).
-        self.assertIsNone(judge.template_manager)
-        # And the prompt the judge executed is the fully-rendered judge prompt,
-        # containing the verdict contract — NOT a planning-template wrapper.
+        # The judge executed the fully-rendered judge prompt verbatim (no second
+        # wrap) — and its definition was not modified to achieve that (B22).
+        self.assertIs(judge.template_manager, template_manager)
         self.assertIsNotNone(judge._seen_prompt)
         self.assertIn("sanity judge", judge._seen_prompt.lower())
         self.assertNotIn("You are tasked with creating artifacts", judge._seen_prompt)
+
+    def test_judge_input_preprocessor_is_applied_once_before_the_call(self):
+        judge = self._judge(input_preprocessor=lambda prompt: f"PRE<{prompt}>")
+        inf = _StubInferencer(output_guardrail_inferencer=judge)
+        inf.set_responses(["the output"])
+        inf.infer("input")
+        self.assertTrue(judge._seen_prompt.startswith("PRE<"))
+        self.assertFalse(judge._seen_prompt.startswith("PRE<PRE<"))
+        self.assertIn("sanity judge", judge._seen_prompt.lower())
 
 
 # =============================================================================
@@ -584,37 +666,28 @@ class TestGuardrailNoDoubleWrap(unittest.TestCase):
 
 
 class TestGuardrailFix1_RenderedInputViaContextVar(unittest.TestCase):
-    def test_render_pulls_from_fallback_state_first(self):
-        """When ``_fallback_state`` is published, the rendered prompt wins
-        over the legacy ``_last_inference_input`` instance attribute."""
+    def test_render_pulls_from_fallback_state(self):
+        """The judge's input is the rendered prompt published in ``_fallback_state``."""
         inf = _StubInferencer()
-        # Legacy attribute is set — but ContextVar should take precedence.
-        inf._last_inference_input = "RAW_PRE_RENDER_SEED"
-        fs = {"rendered_input": "POST_RENDER_FULL_PROMPT"}
-        token = _current_fallback_state.set(fs)
-        try:
-            prompt = inf._render_guardrail_prompt("agent output here")
-        finally:
-            _current_fallback_state.reset(token)
+        prompt = _render_under(inf, "POST_RENDER_FULL_PROMPT", "agent output here")
         self.assertIn("POST_RENDER_FULL_PROMPT", prompt)
-        self.assertNotIn("RAW_PRE_RENDER_SEED", prompt)
         # Output still flows through.
         self.assertIn("agent output here", prompt)
 
-    def test_render_falls_back_to_last_inference_input(self):
-        """No ``_fallback_state`` active → legacy attribute is used (back-compat)."""
+    def test_render_never_uses_an_earlier_calls_input(self):
+        """With no ``_fallback_state`` active, a finished call's input must not
+        leak into the judge prompt."""
         inf = _StubInferencer()
-        inf._last_inference_input = "LEGACY_RAW_INPUT"
-        # Ensure ContextVar is genuinely unset for this test.
+        inf.set_responses(["earlier output"])
+        inf.infer("EARLIER_CALL_INPUT")
         self.assertIsNone(_current_fallback_state.get(None))
         prompt = inf._render_guardrail_prompt("agent output")
-        self.assertIn("LEGACY_RAW_INPUT", prompt)
+        self.assertNotIn("EARLIER_CALL_INPUT", prompt)
         self.assertIn("agent output", prompt)
 
     def test_render_falls_back_to_empty_when_nothing_set(self):
-        """Neither ContextVar nor instance attribute → empty input, no crash."""
+        """No ``_fallback_state`` active → empty input, no crash."""
         inf = _StubInferencer()
-        # Don't set _last_inference_input at all.
         self.assertIsNone(_current_fallback_state.get(None))
         prompt = inf._render_guardrail_prompt("only the output is set")
         self.assertIn("only the output is set", prompt)
@@ -1035,6 +1108,59 @@ class TestGuardrailFix5_HopelessTerminal(unittest.TestCase):
         )
 
 
+class TestGuardrailFailFastWindowPerCall(unittest.TestCase):
+    """B5 — the empty-fingerprint window spans the retries of one call and is
+    never carried into the next call on the same instance."""
+
+    def _leaf(self):
+        """Each call's empties stay below ``n``; two calls together reach it."""
+        inf = _StubInferencer(
+            output_guardrail_inferencer=_StubJudge(verdict="RESTART: empty"),
+            max_retry=2,
+            fallback_mode=FallbackMode.NEVER,
+            guardrail_empty_fail_fast_n=4,
+        )
+        inf.set_responses([""] * 8)
+        return inf
+
+    def test_previous_call_empty_not_counted_sync(self):
+        inf = self._leaf()
+        with self.assertRaises(OutputValidationExhaustedError):
+            inf.infer("input")
+        per_call = inf._call_count
+        self.assertLess(per_call, 4)
+        with self.assertRaises(OutputValidationExhaustedError):
+            inf.infer("input")
+        self.assertEqual(inf._call_count, 2 * per_call)
+
+    def test_previous_call_empty_not_counted_async(self):
+        inf = self._leaf()
+        with self.assertRaises(OutputValidationExhaustedError):
+            _run(inf.ainfer("input"))
+        per_call = inf._call_count
+        self.assertLess(per_call, 4)
+        with self.assertRaises(OutputValidationExhaustedError):
+            _run(inf.ainfer("input"))
+        self.assertEqual(inf._call_count, 2 * per_call)
+
+    def test_window_lives_in_fallback_state(self):
+        inf = _StubInferencer(
+            output_guardrail_inferencer=_StubJudge(verdict="RESTART: empty"),
+            guardrail_empty_fail_fast_n=2,
+        )
+        before = dict(vars(inf))
+        with patch.object(inf, "log_debug"):
+            for _ in range(2):
+                fs = {}
+                token = _current_fallback_state.set(fs)
+                try:
+                    self.assertEqual(inf._run_output_guardrail_sync(""), "retry")
+                    self.assertEqual(fs["guardrail_empty_fingerprints"], [""])
+                finally:
+                    _current_fallback_state.reset(token)
+        self.assertEqual(vars(inf).keys(), before.keys())
+
+
 # =============================================================================
 # v5 Fix #1 / #4 — REVIEWER-context coverage: the render seam's ``extra_feed``
 # branch (a reviewer renders its prompt from seed + extra_feed). The judge AND
@@ -1050,9 +1176,8 @@ class _ReviewRenderStub(_StubInferencer):
     """A leaf whose ``_render_prompt`` weaves BOTH the raw input and the
     ``extra_feed`` (the artifact under review) into a review prompt — mirroring
     how the real reviewer renders ``state["inference_input"]`` + the review
-    feed. ``_last_inference_input`` stays the bare seed; ``rendered_input``
-    becomes the full review prompt (they DIVERGE, which is what makes the
-    Fix #1/#4 assertions revert-sensitive)."""
+    feed. The bare seed and ``rendered_input`` (the full review prompt)
+    DIVERGE, which is what makes the Fix #1/#4 assertions revert-sensitive."""
 
     def _render_prompt(self, inference_input, extra_feed=None, **kwargs):
         artifact = ""
@@ -1096,8 +1221,8 @@ class TestGuardrailFix1_ReviewerExtraFeed(unittest.TestCase):
         self.assertEqual(str(result), "a structured critique")
         jp = seen["prompt"]
         # The judge saw the RENDERED review prompt: review framing + the
-        # extra_feed artifact. NEITHER is in ``_last_inference_input`` (the bare
-        # seed), so a revert to ``_last_inference_input`` fails these.
+        # extra_feed artifact. NEITHER is in the bare seed, so a revert to
+        # judging the seed fails these.
         self.assertIn("REVIEW_PREAMBLE", jp)
         self.assertIn("ARTIFACT_UNDER_REVIEW_MARKER", jp)
         self.assertIn("Now start your review", jp)
@@ -1489,6 +1614,103 @@ class TestBlockAccessors(unittest.TestCase):
             [a for a in vars(inf) if "block" in a.lower()],
             "block accessors must not cache state on the instance",
         )
+
+
+class TestPromoteExhaustedUpdate(unittest.TestCase):
+    """A terminal UPDATE publishes; a terminal RETRY still fails.
+
+    The judge contract defines UPDATE as "real, on-topic work is present but it
+    is incomplete … We preserve it", and PASS as content that "need not be
+    complete, deep, perfectly formatted" — so the two differ in degree, not in
+    kind. Before this, exhausting the retry budget on UPDATE raised and
+    ``_finalize_output`` never ran, making substantive work indistinguishable
+    from producing nothing. RETRY means "fundamentally unusable", so it is the
+    one verdict that must still be discarded.
+    """
+
+    # Bodies must differ (identical consecutive outputs trip the
+    # ``guardrail_empty_fail_fast_n`` hopeless-loop guard) but share a prefix, so
+    # the assertion holds whatever the recovery chain does to the attempt count.
+    PREFIX = "substantive but incomplete draft"
+
+    def _drafts(self):
+        return [f"{self.PREFIX} #{i}" for i in range(10)]
+
+    def test_terminal_update_is_published(self):
+        judge = _StubJudge(verdict="UPDATE: expand the dataset tracing section")
+        inf = _StubInferencer(output_guardrail_inferencer=judge, max_retry=2)
+        inf.set_responses(self._drafts())
+
+        result = inf.infer("input")
+
+        self.assertTrue(
+            str(result).startswith(self.PREFIX),
+            f"the UPDATE body should be published, not discarded; got {result!r}",
+        )
+        self.assertGreater(inf._call_count, 1, "retries should still be spent first")
+
+    def test_terminal_update_is_published_async(self):
+        judge = _StubJudge(verdict="UPDATE: expand the dataset tracing section")
+        inf = _StubInferencer(output_guardrail_inferencer=judge, max_retry=2)
+        inf.set_responses(self._drafts())
+
+        result = asyncio.run(inf.ainfer("input"))
+
+        self.assertTrue(str(result).startswith(self.PREFIX), f"got {result!r}")
+
+    def test_terminal_retry_still_raises(self):
+        """RETRY = "narration-only, nothing to preserve" — must stay terminal."""
+        judge = _StubJudge(verdict="RETRY: narration only, no actual work")
+        inf = _StubInferencer(output_guardrail_inferencer=judge, max_retry=2)
+        inf.set_responses(["narration", "more narration"])
+
+        with self.assertRaises(OutputValidationExhaustedError):
+            inf.infer("input")
+
+    def test_opt_out_restores_old_behaviour(self):
+        judge = _StubJudge(verdict="UPDATE: incomplete")
+        inf = _StubInferencer(
+            output_guardrail_inferencer=judge,
+            max_retry=2,
+            promote_exhausted_update=False,
+        )
+        inf.set_responses(["draft", "draft two"])
+
+        with self.assertRaises(OutputValidationExhaustedError):
+            inf.infer("input")
+
+    def test_update_then_pass_is_unaffected(self):
+        """The normal converge-to-PASS path must not change."""
+        calls = [0]
+
+        @attrs
+        class _FlipJudge(InferencerBase):
+            def _infer(self, inp, inference_config=None, **kw):
+                calls[0] += 1
+                return "UPDATE: expand it" if calls[0] == 1 else "PASS"
+
+        inf = _StubInferencer(output_guardrail_inferencer=_FlipJudge(), max_retry=3)
+        inf.set_responses(["partial", "complete"])
+
+        self.assertEqual(str(inf.infer("input")), "complete")
+
+    def test_degraded_output_is_logged(self):
+        """Promotion must never be silent."""
+        judge = _StubJudge(verdict="UPDATE: trace the remaining datasets")
+        inf = _StubInferencer(output_guardrail_inferencer=judge, max_retry=2)
+        inf.set_responses(["draft", "draft two"])
+
+        with patch.object(inf, "log_warning") as warned:
+            inf.infer("input")
+
+        events = [
+            c.args[0]
+            for c in warned.call_args_list
+            if isinstance(c.args[0], dict)
+            and c.args[0].get("event") == "DEGRADED_OUTPUT"
+        ]
+        self.assertEqual(len(events), 1, "expected exactly one DEGRADED_OUTPUT record")
+        self.assertIn("trace the remaining datasets", str(events[0]["outstanding"]))
 
 
 if __name__ == "__main__":

@@ -75,3 +75,12 @@ class TerminalInferencerResponse:
             dump_data=d.get("dump_data"),
             error=d.get("error"),
         )
+
+
+def session_id_of(result: Any) -> Optional[str]:
+    """The session id a CLI call's result reports: a response attribute, else a
+    dict key."""
+    session_id = getattr(result, "session_id", None)
+    if session_id is None and isinstance(result, dict):
+        session_id = result.get("session_id")
+    return session_id

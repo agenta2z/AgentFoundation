@@ -1,0 +1,258 @@
+{
+  "catalog": {
+    "active_session_id": {
+      "StreamingInferencerBase": [
+        "_session_id",
+        "_live_handle_store[ctx.path].live_session_id"
+      ]
+    },
+    "get_streaming_result": {
+      "ClaudeCodeCliInferencer": [
+        "_last_streaming_output",
+        "_last_streaming_return_code",
+        "_last_streaming_stderr"
+      ],
+      "DevmateCliInferencer": [
+        "_last_streaming_output",
+        "_last_streaming_return_code"
+      ]
+    }
+  },
+  "steps": {
+    "ainfer_bare": {
+      "ctx_seen": [
+        null
+      ],
+      "fields": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<p3>\n",
+        "_live_handle_store": null,
+        "_session_id": "sid-p3"
+      },
+      "getters": {
+        "active_session_id": "sid-p3",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<p3>\n",
+          "success": true
+        }
+      },
+      "result": {
+        "output": "stream<p3>",
+        "return_code": 0,
+        "session_id": "sid-p3",
+        "success": true
+      }
+    },
+    "ainfer_bare_fail": {
+      "ctx_seen": [
+        null
+      ],
+      "fields": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<fail p6>\n",
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": "sid-p4"
+          }
+        },
+        "_session_id": "sid-fail_p6"
+      },
+      "getters": {
+        "active_session_id": "sid-fail_p6",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<fail p6>\n",
+          "success": true
+        }
+      },
+      "result": {
+        "output": "stream<fail p6>",
+        "return_code": 0,
+        "session_id": "sid-fail_p6",
+        "success": true
+      }
+    },
+    "host_ainfer": {
+      "ctx_seen": [
+        {
+          "legacy_mint": false,
+          "path": "/"
+        }
+      ],
+      "fields_after": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<p3>\n",
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": "sid-p4"
+          }
+        },
+        "_session_id": "sid-p3"
+      },
+      "fields_before": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<p3>\n",
+        "_live_handle_store": null,
+        "_session_id": "sid-p3"
+      },
+      "getters_after": {
+        "active_session_id": "sid-p3",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<p3>\n",
+          "success": true
+        }
+      },
+      "getters_reentered": {
+        "active_session_id": "sid-p4",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<p3>\n",
+          "success": true
+        }
+      },
+      "result": {
+        "output": "stream<p4>",
+        "return_code": 0,
+        "session_id": "sid-p4",
+        "success": true
+      },
+      "store_paths": [],
+      "touched": [
+        "_live_handle_store"
+      ]
+    },
+    "infer_bare": {
+      "ctx_seen": [
+        null
+      ],
+      "fields": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<fail p6>\n",
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": "sid-p4"
+          }
+        },
+        "_session_id": "sid-fail_p6"
+      },
+      "getters": {
+        "active_session_id": "sid-fail_p6",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<fail p6>\n",
+          "success": true
+        }
+      },
+      "result": {
+        "output": "plain<p7>",
+        "return_code": 0,
+        "session_id": null,
+        "success": true
+      }
+    },
+    "infer_streaming1": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_streaming_output": "plain<p1>\n",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "",
+        "_live_handle_store": null,
+        "_session_id": null
+      },
+      "getters": {
+        "active_session_id": null,
+        "get_streaming_result": {
+          "output": "plain<p1>",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "",
+          "success": true
+        }
+      },
+      "result": "plain<p1>\n"
+    },
+    "infer_streaming2_fail": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_streaming_output": "plain<fail p2>\n",
+        "_last_streaming_return_code": 3,
+        "_last_streaming_stderr": "",
+        "_live_handle_store": null,
+        "_session_id": null
+      },
+      "getters": {
+        "active_session_id": null,
+        "get_streaming_result": {
+          "output": "plain<fail p2>",
+          "return_code": 3,
+          "session_id": null,
+          "stderr": "",
+          "success": false
+        }
+      },
+      "result": "plain<fail p2>\n"
+    },
+    "legacy_entered_ainfer": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_streaming_output": "",
+        "_last_streaming_return_code": 0,
+        "_last_streaming_stderr": "err<p5>\n",
+        "_live_handle_store": {
+          "<HEX1> /": {
+            "live_session_id": "sid-p4"
+          }
+        },
+        "_session_id": "sid-p5"
+      },
+      "getters": {
+        "active_session_id": "sid-p5",
+        "get_streaming_result": {
+          "output": "",
+          "return_code": 0,
+          "session_id": null,
+          "stderr": "err<p5>\n",
+          "success": true
+        }
+      },
+      "result": {
+        "output": "stream<p5>",
+        "return_code": 0,
+        "session_id": "sid-p5",
+        "success": true
+      }
+    }
+  }
+}

@@ -1,0 +1,170 @@
+{
+  "eager_merger_path": {
+    "events": [
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": {
+          "is_source_iterator": false,
+          "type": "str"
+        },
+        "what": "received",
+        "where": "state_factory"
+      },
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": "i1",
+        "what": "_infer",
+        "where": "plain"
+      },
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": "i2",
+        "what": "_infer",
+        "where": "plain"
+      },
+      {
+        "ctx": null,
+        "value": "i1|i2",
+        "what": "returned",
+        "where": "caller"
+      }
+    ],
+    "unraisable": []
+  },
+  "iter_infer_abandoned_after_one": {
+    "events": [
+      {
+        "ctx": null,
+        "value": "generator",
+        "what": "returned",
+        "where": "caller"
+      },
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": "i1",
+        "what": "_infer",
+        "where": "plain"
+      },
+      {
+        "ctx": null,
+        "value": "i1",
+        "what": "next",
+        "where": "caller"
+      },
+      {
+        "ctx": null,
+        "value": null,
+        "what": "after_close",
+        "where": "caller"
+      }
+    ],
+    "unraisable": []
+  },
+  "lazy_abandoned_after_one": {
+    "events": [
+      {
+        "ctx": null,
+        "value": null,
+        "what": "before",
+        "where": "caller"
+      },
+      {
+        "ctx": null,
+        "value": "generator",
+        "what": "returned",
+        "where": "caller"
+      },
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": {
+          "is_source_iterator": false,
+          "type": "str"
+        },
+        "what": "received",
+        "where": "state_factory"
+      },
+      {
+        "ctx": {
+          "id": "ctx1",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": "i1",
+        "what": "_infer",
+        "where": "plain"
+      },
+      {
+        "ctx": null,
+        "value": "i1",
+        "what": "next",
+        "where": "caller"
+      },
+      {
+        "ctx": {
+          "id": "ctx2",
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "value": "y",
+        "what": "_infer",
+        "where": "other"
+      },
+      {
+        "ctx": null,
+        "value": null,
+        "what": "after_other_infer",
+        "where": "caller"
+      },
+      {
+        "ctx": null,
+        "value": {
+          "source_remaining": [
+            "i2",
+            "i3"
+          ]
+        },
+        "what": "after_abandon",
+        "where": "caller"
+      }
+    ],
+    "unraisable": []
+  },
+  "lazy_unstarted_closed": {
+    "events": [
+      {
+        "ctx": null,
+        "value": "generator",
+        "what": "returned",
+        "where": "caller"
+      },
+      {
+        "ctx": null,
+        "value": null,
+        "what": "after_close",
+        "where": "caller"
+      }
+    ],
+    "unraisable": []
+  },
+  "test_thread_ctx_after": null
+}

@@ -18,13 +18,17 @@ context by the time the node reaches its recovery gate (the runtime-observed
 ``os.path.isabs`` check fails → the self-heal UPDATE is silently downgraded to a
 full restart, throwing away the partial deliverable.
 
-The fix binds each rebuilt NON-SHARED node (the single aggregator, per-subtask
-workers) durably at its ``_build_subgraph_spec`` dispatch site via
+The fix binds each rebuilt node the call OWNS (a factory-built aggregator, the
+per-subtask workers) durably at its ``_build_subgraph_spec`` dispatch site via
 ``_bind_rebuilt_child_ws`` — publishing into the child context AND setting the
 durable instance backing (tier-2), which resolves independently of whichever
 context is active. These tests reproduce the "flip" deterministically by
 building the spec under a context and then asserting the binding still resolves
-an ABSOLUTE output path after the context is exited.
+an ABSOLUTE output path after the context is exited. A BORROWED stage (a
+configured instance, shared by every call) gets only the child-context
+publication under a host context — a durable write would be a definition write
+racing other calls — and keeps the setter with no context or under a legacy root
+(plan v8 §5.7, P6 c5).
 
 The aggregator is deliberately excluded from construction-time propagation
 (``_workspace_propagation_skip``), and factory-built workers are not reached by
@@ -50,6 +54,7 @@ from agent_foundation.common.inferencers.inferencer_workspace import InferencerW
 from agent_foundation.common.inferencers.run_context import (
     enter_run,
     exit_run,
+    open_invocation,
     RunContext,
 )
 from attr import attrib, attrs
@@ -94,10 +99,11 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _make_bta_with_agg(self):
-        """A BTA wired with an aggregator + a worker factory that records the
-        exact worker instances it builds (so the tests can inspect their
-        bindings without reaching into WorkGraph node internals)."""
+    def _make_bta_with_agg(self, *, borrowed_aggregator=False):
+        """A BTA wired with an aggregator (factory-built, so owned, unless
+        ``borrowed_aggregator``) + a worker factory that records the exact worker
+        instances it builds (so the tests can inspect their bindings without
+        reaching into WorkGraph node internals)."""
         root_ws = InferencerWorkspace(root=self.tmpdir)
         workers: list[_MockInferencer] = []
 
@@ -106,10 +112,20 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
             workers.append(worker)
             return worker
 
+        self.aggregators: list[_MockInferencer] = []
+
+        def aggregator_factory():
+            self.aggregators.append(
+                _MockInferencer(response="<Response>agg</Response>")
+            )
+            return self.aggregators[-1]
+
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=_MockInferencer(response=_BREAKDOWN_JSON),
             worker_inferencers=worker_factory,
-            aggregator_inferencer=_MockInferencer(response="<Response>agg</Response>"),
+            aggregator_inferencer=(
+                aggregator_factory() if borrowed_aggregator else aggregator_factory
+            ),
             breakdown_format="json_subtasks",
             workspace=root_ws,
             output_path="output.md",
@@ -117,21 +133,24 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         )
         return bta, workers, root_ws
 
-    def _build_spec_under_ctx(self, bta, root_ws):
+    def _build_spec_under_ctx(self, bta, root_ws, use_async=False):
         """Run ``_build_subgraph_spec`` (the resume-rebuild entry) under an
         active run-context, then exit it — reproducing the resume "flip" where
         the dispatched child context is no longer active at the recovery gate."""
         root = RunContext.root(workspace=root_ws)
         tok = enter_run(root)
         try:
-            bta._build_subgraph_spec(["q1", "q2"], _original_query="req")
+            with open_invocation(bta):
+                bta._open_attempt("req", use_async=use_async)
+                bta._build_subgraph_spec(["q1", "q2"], _original_query="req")
         finally:
             exit_run(tok)
+        return root
 
     def test_build_subgraph_spec_durably_binds_aggregator_under_ctx(self):
-        """After a ctx-scoped rebuild, the aggregator STILL resolves an absolute
-        output path with no active context — the exact condition the recovery
-        gate's ``os.path.isabs`` check needs to honor UPDATE over restart.
+        """After a ctx-scoped rebuild, the owned aggregator STILL resolves an
+        absolute output path with no active context — the exact condition the
+        recovery gate's ``os.path.isabs`` check needs to honor UPDATE over restart.
 
         Pre-fix this fails: under a context the durable binding was skipped, so
         once the context is exited the getter resolves ``None`` and
@@ -140,7 +159,7 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         bta, _workers, root_ws = self._make_bta_with_agg()
         self._build_spec_under_ctx(bta, root_ws)
 
-        agg = bta.aggregator_inferencer
+        (agg,) = self.aggregators
         resolved = agg.resolve_output_path("output.md")
         self.assertTrue(
             os.path.isabs(resolved),
@@ -148,6 +167,19 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         )
         self.assertIsNotNone(agg._workspace)
         self.assertEqual(agg._workspace.root, root_ws.child("aggregator").root)
+
+    def test_a_borrowed_aggregator_is_bound_through_its_child_ctx_under_a_host_ctx(
+        self,
+    ):
+        bta, _workers, root_ws = self._make_bta_with_agg(borrowed_aggregator=True)
+        root = self._build_spec_under_ctx(bta, root_ws)
+
+        agg = bta.aggregator_inferencer
+        self.assertIsNone(agg.__dict__.get("_InferencerBase__workspace"))
+        self.assertEqual(
+            agg._workspace_under(root.child("aggregator")).root,
+            root_ws.child("aggregator").root,
+        )
 
     def test_build_subgraph_spec_durably_binds_workers_under_ctx(self):
         """Every rebuilt per-subtask worker is durably bound too (site (d))."""
@@ -170,10 +202,10 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         """The async-dispatch configuration binds the aggregator identically —
         research_propose resumes via ``ainfer`` (``use_async`` path)."""
         bta, _workers, root_ws = self._make_bta_with_agg()
-        bta.use_async = True
-        self._build_spec_under_ctx(bta, root_ws)
+        self._build_spec_under_ctx(bta, root_ws, use_async=True)
 
-        resolved = bta.aggregator_inferencer.resolve_output_path("output.md")
+        (agg,) = self.aggregators
+        resolved = agg.resolve_output_path("output.md")
         self.assertTrue(os.path.isabs(resolved), f"got {resolved!r}")
 
     def test_bind_rebuilt_child_ws_survives_ctx_exit(self):
@@ -186,7 +218,7 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         root = RunContext.root(workspace=root_ws)
         tok = enter_run(root)
         try:
-            bta._bind_rebuilt_child_ws(agg, "aggregator", agg_ws)
+            bta._bind_rebuilt_child_ws(agg, "aggregator", agg_ws, owned=True)
             self.assertTrue(os.path.isabs(agg.resolve_output_path("output.md")))
         finally:
             exit_run(tok)
@@ -200,12 +232,12 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
 
     def test_bind_rebuilt_child_ws_no_ctx_binds(self):
         """Backward-compat: with no active context the helper binds durably,
-        identical to the prior legacy (no-ctx) branch."""
+        identical to the prior legacy (no-ctx) branch, owned or borrowed."""
         bta, _workers, root_ws = self._make_bta_with_agg()
         agg = _MockInferencer()
         agg_ws = bta._workspace.child("aggregator")
 
-        bta._bind_rebuilt_child_ws(agg, "aggregator", agg_ws)
+        bta._bind_rebuilt_child_ws(agg, "aggregator", agg_ws, owned=False)
 
         self.assertIs(getattr(agg, "_InferencerBase__workspace", None), agg_ws)
         self.assertTrue(os.path.isabs(agg.resolve_output_path("output.md")))
@@ -227,7 +259,7 @@ class BtaResumeWorkspaceBindingTest(unittest.TestCase):
         root = RunContext.root(workspace=root_ws)
         tok = enter_run(root)
         try:
-            bta._bind_rebuilt_child_ws(plain, "aggregator", agg_ws)
+            bta._bind_rebuilt_child_ws(plain, "aggregator", agg_ws, owned=True)
         finally:
             exit_run(tok)
 

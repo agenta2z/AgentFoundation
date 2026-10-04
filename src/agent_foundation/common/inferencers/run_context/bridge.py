@@ -47,14 +47,12 @@ def mint_root(workspace: Any = None, **kwargs: Any) -> RunContext:
     return RunContext.root(workspace=workspace, **kwargs)
 
 
-def enter_run(
+def resolve_run(
     run_context: RunContext | None,
     *,
     default_workspace: Any = None,
-) -> contextvars.Token:
-    """Install the bridge for a public entrypoint; return the reset token.
-
-    Resolution (the mint policy):
+) -> RunContext:
+    """The context a public entrypoint runs under (the mint policy):
 
     * ``run_context`` provided          -> use it.
     * ``None`` and a ctx already active -> **reuse** the active ctx (nested call).
@@ -62,11 +60,21 @@ def enter_run(
       ``default_workspace`` (true root; byte-identical when the workspace matches).
     """
     if run_context is not None:
-        resolved = run_context
-    else:
-        active = _active_ctx.get()
-        resolved = active if active is not None else mint_root(default_workspace)
-    return _active_ctx.set(resolved)
+        return run_context
+    active = _active_ctx.get()
+    return active if active is not None else mint_root(default_workspace)
+
+
+def enter_run(
+    run_context: RunContext | None,
+    *,
+    default_workspace: Any = None,
+) -> contextvars.Token:
+    """Install the bridge for a public entrypoint (:func:`resolve_run`); return the
+    reset token."""
+    return _active_ctx.set(
+        resolve_run(run_context, default_workspace=default_workspace)
+    )
 
 
 def exit_run(token: contextvars.Token) -> None:

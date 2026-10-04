@@ -1,0 +1,235 @@
+{
+  "catalog": {
+    "_proposer_task_instructions": {
+      "BreakdownThenAggregateInferencer": [
+        "_worker_task_instructions"
+      ],
+      "DualInferencer": [
+        "_state['prior_task_instructions'] (node.call | _pending_state_backing)",
+        "base_inferencer._proposer_task_instructions()"
+      ],
+      "InferencerBase": [],
+      "MultiFlowInferencer": [
+        "MultiFlowState.winner_idx",
+        "_last_winner_idx_backing",
+        "flow_configs[*].initial_inferencer._proposer_task_instructions()"
+      ],
+      "TemplatedInferencerBase": [
+        "_last_rendered_task_instructions"
+      ]
+    },
+    "get_chosen_fixer_alias": {
+      "MultiFlowInferencer": [
+        "_last_fixer_alias_backing",
+        "MultiFlowState.fixer_alias"
+      ]
+    },
+    "get_chosen_reviewer_alias": {
+      "MultiFlowInferencer": [
+        "_last_reviewer_alias_backing",
+        "MultiFlowState.reviewer_alias"
+      ]
+    },
+    "get_first_non_winner_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_non_winner_inferencers": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_ranking": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_runner_up_flow_idx": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_runner_up_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_ranking_backing",
+        "MultiFlowState.ranking"
+      ]
+    },
+    "get_winner_flow_idx": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    },
+    "get_winner_inferencer": {
+      "MultiFlowInferencer": [
+        "_last_winner_idx_backing",
+        "MultiFlowState.winner_idx"
+      ]
+    }
+  },
+  "steps": {
+    "bare1": {
+      "fields": {
+        "_last_fixer_alias_backing": "fix1",
+        "_last_ranking_backing": [
+          1,
+          0
+        ],
+        "_last_reviewer_alias_backing": "rev1",
+        "_last_winner_idx_backing": 1,
+        "fa._last_rendered_task_instructions": "Contract<plan> for task-a",
+        "fb._last_rendered_task_instructions": "Contract<plan> for task-a"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for task-a",
+        "get_chosen_fixer_alias": "fix1",
+        "get_chosen_reviewer_alias": "rev1",
+        "get_first_non_winner_inferencer": "fa",
+        "get_non_winner_inferencers": [
+          "fa"
+        ],
+        "get_ranking": [
+          1,
+          0
+        ],
+        "get_runner_up_flow_idx": 0,
+        "get_runner_up_inferencer": "fa",
+        "get_winner_flow_idx": 1,
+        "get_winner_inferencer": "fb"
+      },
+      "result": "<W>1</W><R>rev1</R><F>fix1</F><K>1,0</K>"
+    },
+    "bare2": {
+      "fields": {
+        "_last_fixer_alias_backing": "fix0",
+        "_last_ranking_backing": [
+          0,
+          1
+        ],
+        "_last_reviewer_alias_backing": "rev0",
+        "_last_winner_idx_backing": 0,
+        "fa._last_rendered_task_instructions": "Contract<plan> for task-b",
+        "fb._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for task-b",
+        "get_chosen_fixer_alias": "fix0",
+        "get_chosen_reviewer_alias": "rev0",
+        "get_first_non_winner_inferencer": "fb",
+        "get_non_winner_inferencers": [
+          "fb"
+        ],
+        "get_ranking": [
+          0,
+          1
+        ],
+        "get_runner_up_flow_idx": 1,
+        "get_runner_up_inferencer": "fb",
+        "get_winner_flow_idx": 0,
+        "get_winner_inferencer": "fa"
+      },
+      "result": "<W>0</W><R>rev0</R><F>fix0</F><K>0,1</K>"
+    },
+    "bare3_fail": {
+      "fields": {
+        "_last_fixer_alias_backing": null,
+        "_last_ranking_backing": null,
+        "_last_reviewer_alias_backing": null,
+        "_last_winner_idx_backing": null,
+        "fa._last_rendered_task_instructions": "Contract<plan> for boom",
+        "fb._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for boom",
+        "get_chosen_fixer_alias": null,
+        "get_chosen_reviewer_alias": null,
+        "get_first_non_winner_inferencer": "fa",
+        "get_non_winner_inferencers": [
+          "fa",
+          "fb"
+        ],
+        "get_ranking": null,
+        "get_runner_up_flow_idx": null,
+        "get_runner_up_inferencer": null,
+        "get_winner_flow_idx": null,
+        "get_winner_inferencer": null
+      },
+      "result": {
+        "error": "RuntimeError"
+      }
+    },
+    "host": {
+      "fields_after": {
+        "_last_fixer_alias_backing": "fix0",
+        "_last_ranking_backing": [
+          0,
+          1
+        ],
+        "_last_reviewer_alias_backing": "rev0",
+        "_last_winner_idx_backing": 0,
+        "fa._last_rendered_task_instructions": "Contract<plan> for task-b",
+        "fb._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "fields_before": {
+        "_last_fixer_alias_backing": "fix0",
+        "_last_ranking_backing": [
+          0,
+          1
+        ],
+        "_last_reviewer_alias_backing": "rev0",
+        "_last_winner_idx_backing": 0,
+        "fa._last_rendered_task_instructions": "Contract<plan> for task-b",
+        "fb._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters_after": {
+        "_proposer_task_instructions": "Contract<plan> for task-b",
+        "get_chosen_fixer_alias": "fix0",
+        "get_chosen_reviewer_alias": "rev0",
+        "get_first_non_winner_inferencer": "fb",
+        "get_non_winner_inferencers": [
+          "fb"
+        ],
+        "get_ranking": [
+          0,
+          1
+        ],
+        "get_runner_up_flow_idx": 1,
+        "get_runner_up_inferencer": "fb",
+        "get_winner_flow_idx": 0,
+        "get_winner_inferencer": "fa"
+      },
+      "getters_reentered": {
+        "_proposer_task_instructions": "Contract<plan> for task-b",
+        "get_chosen_fixer_alias": "fix1",
+        "get_chosen_reviewer_alias": "rev1",
+        "get_first_non_winner_inferencer": "fa",
+        "get_non_winner_inferencers": [
+          "fa"
+        ],
+        "get_ranking": [
+          1,
+          0
+        ],
+        "get_runner_up_flow_idx": 0,
+        "get_runner_up_inferencer": "fa",
+        "get_winner_flow_idx": 1,
+        "get_winner_inferencer": "fb"
+      },
+      "result": "<W>1</W><R>rev1</R><F>fix1</F><K>1,0</K>",
+      "store_paths": [
+        "/",
+        "/flow_00",
+        "/flow_00/step_0",
+        "/flow_01",
+        "/flow_01/step_0"
+      ],
+      "touched": []
+    }
+  }
+}

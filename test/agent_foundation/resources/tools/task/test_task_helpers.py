@@ -194,6 +194,47 @@ def test_collapse_dual_no_duals_in_cfg_after_walk():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Unit: _disable_aggregation
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_disable_aggregation_marks_bta_and_mfdual_nodes():
+    cfg = {
+        "_target_": "BTA",
+        "worker_inferencers": {
+            "_target_": "MultiFlowDual",
+            "flow_configs": [{"initial_inferencer": {"_target_": "ClaudeCodeCLI"}}],
+        },
+    }
+    n = ex._disable_aggregation(cfg)
+    assert n == 2
+    assert cfg["disable_aggregator"] is True
+    assert cfg["worker_inferencers"]["multi_flow_disable_aggregator"] is True
+
+
+def test_disable_aggregation_skips_fanout_templates_and_params():
+    template = {
+        "_target_": "BTA",
+        "aggregator_inferencer": {"_target_": "ClaudeCodeCLI"},
+    }
+    cfg = {
+        "_params": {"metamate_fan_out": dict(template)},
+        "_target_": "BTA",
+        "worker_inferencers": {
+            "_target_": "MetamateSDK",
+            "bta_inferencer": {"own": dict(template), "fixer_inferencer": None},
+        },
+    }
+    n = ex._disable_aggregation(cfg)
+    assert n == 1
+    assert cfg["disable_aggregator"] is True
+    assert "disable_aggregator" not in cfg["_params"]["metamate_fan_out"]
+    assert (
+        "disable_aggregator" not in cfg["worker_inferencers"]["bta_inferencer"]["own"]
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Unit: _topology_is_pti (R3.5)
 # ──────────────────────────────────────────────────────────────────────
 

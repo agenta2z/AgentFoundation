@@ -7,6 +7,8 @@ duplicating the construction / tool-dispatch / force-synchronous logic.
 Public surface:
   - ``build_ci_from_config(...)``  — instantiate a Conversational CI from a YAML
     config and wire its tool_registry / tool_executor / interactive.
+  - ``build_native_from_config(...)`` — instantiate a NativeConversationalInferencer
+    (vendor agent owns the loop) from a YAML config plus a backend YAML.
   - ``force_tools_synchronous(registry)`` — make every tool run inline (no
     fire-and-forget), required when nesting tool calls inside a host CI.
   - ``make_tool_executor(session_context, ...)`` — an async dispatch closure that
@@ -67,8 +69,8 @@ def build_ci_from_config(
     ``_debug_mode`` cascade). ``backend`` and ``base_inferencer`` are mutually
     exclusive; passing both raises ``ValueError``.
 
-    ``extra_sop_dirs`` (optional): SOP discovery dirs for the CI (init kwarg
-    ``extra_sop_dirs`` → attr ``_extra_sop_dirs``).
+    ``extra_sop_dirs`` (optional): SOP discovery dirs for the CI; they seed its
+    SOP controller, which owns them (read or assign ``ci.extra_sop_dirs``).
 
     Raises ``ValueError`` for an unknown ``backend`` so callers can decide how to
     surface it (the SOP CLI prints + exits; the task router logs + falls back).
@@ -169,12 +171,88 @@ def build_ci_from_config(
     if prompt_renderer is not None and not inject_base:
         ci.prompt_renderer = prompt_renderer
     if extra_sop_dirs is not None and not inject_base:
-        ci._extra_sop_dirs = list(extra_sop_dirs)
+        ci.extra_sop_dirs = list(extra_sop_dirs)
     if allowed_sops is not None and not inject_base:
         ci.allowed_sops = list(allowed_sops)
     if disallowed_sops is not None and not inject_base:
         ci.disallowed_sops = list(disallowed_sops)
     return ci
+
+
+def build_native_from_config(
+    config_path: str | Path,
+    *,
+    backend: Optional[str] = None,
+    backend_dir: Optional[str | Path] = None,
+    backend_overrides: Optional[dict] = None,
+    tool_registry: Optional[dict] = None,
+    tool_executor: Any = None,
+    interactive: Any = None,
+    prompt_renderer: Any = None,
+    extra_sop_dirs: Optional[list] = None,
+    allowed_sops: Optional[list] = None,
+    disallowed_sops: Optional[list] = None,
+    runtime_manager: Any = None,
+    record_store: Any = None,
+    **overrides: Any,
+) -> Any:
+    """Instantiate a NativeConversationalInferencer from ``config_path``.
+
+    The native counterpart of :func:`build_ci_from_config`. ``backend`` selects
+    ``<backend_dir or config_dir/backend>/<backend>.yaml`` as the ``backend``
+    node (a ``NativeBackendSpec`` mapping); ``backend_overrides`` then updates
+    that node (e.g. ``{"cwd": ..., "model": ...}`` from the host).
+
+    The YAML owns the policy knobs; the host injects live objects —
+    ``tool_registry``, ``tool_executor``, ``interactive``, ``prompt_renderer``,
+    ``runtime_manager``, ``record_store`` — and any per-session ``overrides``
+    (``conversation_key``, ``native_session_dir``, ``rewind_on_repeat_turn``...)
+    as constructor kwargs of a Hydra partial: live objects cannot round-trip
+    through OmegaConf, and the inferencer's collaborators capture references to
+    them at construction time (same reason as ``build_ci_from_config``). There
+    is no response parser and no forced-synchronous tool mode: the vendor agent
+    runs the loop. Raises ``ValueError`` for an unknown ``backend``.
+    """
+    import agent_foundation.common.configs.registered_targets  # noqa: F401
+    from omegaconf import OmegaConf
+    from rich_python_utils.config_utils import instantiate, load_config
+
+    config_path = Path(config_path)
+    cfg = OmegaConf.to_container(load_config(str(config_path)), resolve=True)
+    if backend:
+        bdir = Path(backend_dir) if backend_dir else config_path.parent / "backend"
+        backend_path = bdir / f"{backend}.yaml"
+        if not backend_path.exists():
+            available = (
+                ", ".join(p.stem for p in bdir.glob("*.yaml"))
+                if bdir.is_dir()
+                else "(none)"
+            )
+            raise ValueError(
+                f"Unknown native backend '{backend}'. Available: {available}"
+            )
+        cfg["backend"] = OmegaConf.to_container(
+            OmegaConf.load(str(backend_path)), resolve=True
+        )
+    if backend_overrides:
+        cfg["backend"] = {**dict(cfg.get("backend") or {}), **backend_overrides}
+    cfg["_partial_"] = True
+    live = {
+        "tool_registry": tool_registry,
+        "tool_executor": tool_executor,
+        "interactive": interactive,
+        "prompt_renderer": prompt_renderer,
+        "extra_sop_dirs": list(extra_sop_dirs) if extra_sop_dirs is not None else None,
+        "allowed_sops": list(allowed_sops) if allowed_sops is not None else None,
+        "disallowed_sops": list(disallowed_sops)
+        if disallowed_sops is not None
+        else None,
+        "runtime_manager": runtime_manager,
+        "record_store": record_store,
+    }
+    kwargs = {k: v for k, v in live.items() if v is not None}
+    kwargs.update(overrides)
+    return instantiate(OmegaConf.create(cfg))(**kwargs)
 
 
 def force_tools_synchronous(tool_registry: dict) -> None:

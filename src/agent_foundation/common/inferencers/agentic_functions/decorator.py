@@ -58,7 +58,11 @@ from agent_foundation.common.inferencers.agentic_functions.trace import (
     AgenticFunctionTrace,
     new_trace_var,
 )
-from agent_foundation.common.inferencers.run_context.bridge import active_run_context
+from agent_foundation.common.inferencers.run_context.bridge import (
+    active_run_context,
+    enter_run,
+    exit_run,
+)
 from agent_foundation.common.response_parsers.result_text import extract_result_text
 from rich_python_utils.common_utils.async_utils import call_maybe_async
 
@@ -288,13 +292,12 @@ class _AgenticFunctionBase:
     def _resolve_run_context(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        caller_rc = self.infer_kwargs.get("run_context")
-        if caller_rc is not None:
-            return caller_rc
-        ctx = active_run_context()
-        if ctx is not None:
-            return ctx.child(self._slot(args, kwargs))
-        return None
+        parent = self.infer_kwargs.get("run_context")
+        if parent is None:
+            parent = active_run_context()
+        if parent is None:
+            return None
+        return parent.child(self._slot(args, kwargs))
 
     def _call_kwargs(self) -> Dict[str, Any]:
         return {k: v for k, v in self.infer_kwargs.items() if k != "run_context"}
@@ -373,8 +376,8 @@ class _AgenticFunctionBase:
             trace.attempts = attempt + 1
             prompt_i = prompt if attempt == 0 else self._repair(prompt, last_err)
             try:
-                inferencer = self.provider.get(feed)
-                _reset_session(inferencer)
+                inferencer = self.provider.for_call(feed, rc)
+                _reset_session(inferencer, rc)
                 raw = inferencer.infer(prompt_i, run_context=rc, **self._call_kwargs())
                 out = AgenticOutput(raw, extract_result_text(raw))
                 trace.raw_text = out.text
@@ -462,8 +465,8 @@ class _AgenticFunctionBase:
             trace.attempts = attempt + 1
             prompt_i = prompt if attempt == 0 else self._repair(prompt, last_err)
             try:
-                inferencer = self.provider.get(feed)
-                _reset_session(inferencer)
+                inferencer = self.provider.for_call(feed, rc)
+                _reset_session(inferencer, rc)
                 raw = await inferencer.ainfer(
                     prompt_i, run_context=rc, **self._call_kwargs()
                 )
@@ -631,6 +634,11 @@ class _AgenticFunctionBase:
             return self
         return functools.partial(self, obj)
 
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "_AgenticFunctionBase":
+        """Copy by reference, like the plain function it wraps: a decorated
+        function is a shared module-level definition (holding an uncopyable lock)."""
+        return self
+
 
 class _SyncAgenticFunction(_AgenticFunctionBase):
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -671,17 +679,29 @@ async def validate_agentic_function(wrapper: Any) -> None:
             )
 
 
-def _reset_session(inferencer: Any) -> None:
+def _reset_session(inferencer: Any, rc: Any) -> None:
     """Clear a session-bearing inferencer so a reused instance never resumes.
 
     ``StreamingInferencerBase`` defaults ``auto_resume=True`` and
     ``MetamateSDKInferencer`` mutates its conversation UUIDs; a cached, reused
     instance would otherwise resume the prior call's conversation and bleed
     across independent agentic-function calls.
+
+    Session state is keyed by the active run context, so the reset runs under
+    ``rc`` (the context the call itself runs at) to clear that call's slot
+    rather than the caller's.
     """
     reset = getattr(inferencer, "reset_session", None)
-    if callable(reset):
+    if not callable(reset):
+        return
+    if rc is None:
         reset()
+        return
+    token = enter_run(rc)
+    try:
+        reset()
+    finally:
+        exit_run(token)
 
 
 def _sanitize_slot(name: str) -> str:

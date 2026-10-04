@@ -40,6 +40,19 @@ def _now_iso_local() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@attrs(frozen=True, slots=True)
+class SopCommandWording:
+    """How SOP results name the ways to resume an SOP and to start it over;
+    ``{name}`` is the SOP's name. The default names the user's slash
+    commands; a host whose agent drives SOPs through tools names those."""
+
+    resume: str = attrib(default="/resume_sop {name}")
+    fresh: str = attrib(default="/sop {name} --fresh")
+
+
+SLASH_COMMAND_WORDING = SopCommandWording()
+
+
 @attrs(kw_only=True, slots=False)
 class SOPController:
     # Narrow init-time context.
@@ -122,7 +135,9 @@ class SOPController:
         if state.sop_name and state.sop is None:
             from agent_foundation.resources.sops.registry import load_sop
 
-            state.sop = load_sop(state.sop_name).sop
+            state.sop = load_sop(
+                state.sop_name, extra_dirs=self.extra_sop_dirs or None
+            ).sop
             state.phase_required_tools = state.sop.phase_required_tools
             state.tool_phase_map = state.sop.tool_to_phase_map
 
@@ -159,22 +174,34 @@ class SOPController:
     def consume_gate_for_no_tools_requires_input_phase(self) -> bool:
         """Phase J2: hoisted from `_render_prompt`.
 
-        When the user-input gate is open AND the next available SOP phase is
-        a "requires user input" phase with NO tools, consume the gate
-        (``user_input_gate_passed = False``) AND mark that phase completed
-        (append to ``completed_phases``). The persistent completion mirrors
-        what the pre-refactor render-body's local `tracker.completed_states.add`
-        achieved semantically — subsequent renders see the phase as done.
+        When the user-input gate is open AND an available SOP phase is a
+        "requires user input" phase with NO tools, complete that phase and
+        consume the gate (``user_input_gate_passed = False``). When it is the
+        current phase, the SOP advances exactly as ``check_phase_completion``
+        advances it; another available phase is only recorded as completed.
 
-        Called as an explicit pre-render step from CI's
-        ``_ensure_sop_state_for_render``. ``_render_prompt`` then only reads.
-        Returns True if the gate was consumed + phase advanced.
+        Called before every render / vendor turn by
+        ``sop_feed.prepare_sop_for_turn``; rendering then only reads.
+        Returns True if the gate was consumed + phase completed.
         """
         if not self.sop_state or not self.sop_state.sop:
             return False
         s = self.sop_state
         if not s.user_input_gate_passed:
             return False
+        phase_id = self._available_no_tools_input_phase()
+        if phase_id is None:
+            return False
+        if phase_id == s.current_phase:
+            self._complete_current_phase()
+        else:
+            s.completed_phases = [*s.completed_phase_ids(), phase_id]
+            s.user_input_gate_passed = False
+        return True
+
+    def _available_no_tools_input_phase(self) -> Optional[str]:
+        """Id of the first available "requires user input" phase with no tools."""
+        s = self.sop_state
         try:
             from rich_python_utils.common_objects.workflow.stategraph import (
                 StateGraphTracker,
@@ -183,12 +210,11 @@ class SOPController:
                 SOPPhase,
             )
 
-            completed = s.completed_phase_ids()
             tracker = StateGraphTracker(
                 graph=s.sop,
                 current_state=None,
                 state_status="idle",
-                completed_states=completed,
+                completed_states=s.completed_phase_ids(),
                 state_outputs=s.phase_outputs,
                 goto_counts=s.goto_counts,
             )
@@ -199,16 +225,13 @@ class SOPController:
                     sub.name.lower() in ("tools", "command")
                     for sub in getattr(node, "subsections", [])
                 )
-                if not has_tools and "requires user input" in " ".join(
+                if not has_tools and DIRECTIVE_REQUIRES_USER_INPUT_LOCAL in " ".join(
                     getattr(node, "directives", [])
                 ):
-                    completed.append(node.id)
-                    s.completed_phases = completed
-                    s.user_input_gate_passed = False
-                    return True
+                    return node.id
         except Exception as e:  # noqa: BLE001 — best-effort pre-render
             logger.debug("consume_gate_for_no_tools_requires_input_phase failed: %s", e)
-        return False
+        return None
 
     def consume_pending_followup(self) -> Optional[str]:
         """Return + clear ``_pending_followup`` (one-shot injection)."""
@@ -354,13 +377,6 @@ class SOPController:
         if not self.sop_state or not self.sop_state.sop:
             return
 
-        from rich_python_utils.common_objects.workflow.common.phase_status import (
-            PhaseStatus,
-        )
-        from rich_python_utils.common_objects.workflow.stategraph import (
-            StateGraphTracker,
-        )
-
         s = self.sop_state
         sop = s.sop
         current = s.current_phase
@@ -404,14 +420,28 @@ class SOPController:
                 if _required <= _executed:
                     detected = True
 
-        if not detected:
-            return
+        if detected:
+            self._complete_current_phase()
 
+    def _complete_current_phase(self) -> None:
+        """Record the current phase as completed, make the first available
+        next phase current (or complete the SOP) and consume the user-input
+        gate. Every phase completion of the current phase ends here."""
+        from rich_python_utils.common_objects.workflow.common.phase_status import (
+            PhaseStatus,
+        )
+        from rich_python_utils.common_objects.workflow.stategraph import (
+            StateGraphTracker,
+        )
+
+        s = self.sop_state
+        current = s.current_phase
+        completed_ids = s.completed_phase_ids()
         completed_ids.append(current)
         s.completed_phases = completed_ids
 
         tracker = StateGraphTracker(
-            graph=sop,
+            graph=s.sop,
             current_state=None,
             state_status=PhaseStatus.COMPLETED,
             completed_states=completed_ids,
@@ -461,97 +491,89 @@ class SOPController:
             f"Messages: {messages_count}. Paused: {self._paused}.{susp_note}"
         )
 
-    def cmd_sop(
+    def enter(
         self,
-        args: str = "",
+        name: str,
         *,
+        yolo: bool = False,
+        fresh: bool = False,
+        request: str = "",
+        build_state: Optional[Callable[..., tuple[Any, Optional[str]]]] = None,
         yolo_mode_setter: Optional[Callable[[bool], None]] = None,
+        wording: SopCommandWording = SLASH_COMMAND_WORDING,
     ) -> str:
-        """Enter an SOP; auto-pause active SOP if any. Returns confirmation text."""
-        tokens = args.split()
-        if not tokens:
-            return "Usage: /sop <name> [--yolo] [--fresh] [request...]"
-        name = tokens[0]
-        rest = tokens[1:]
-        _KNOWN_FLAGS = {"--yolo", "--fresh"}
-        yolo = "--yolo" in rest
-        fresh = "--fresh" in rest
-        request = " ".join(t for t in rest if t not in _KNOWN_FLAGS).strip()
+        """Enter SOP ``name``, pausing the active SOP (if any).
 
+        An SOP name has at most one instance, active or suspended: while
+        ``name`` has one, entry is refused unless ``fresh``, which discards
+        that instance (it is neither paused nor resumable) and starts over. A
+        non-blank ``request`` is taken as given and becomes the pending
+        follow-up the new SOP starts on. ``build_state`` replaces ``enter_sop``
+        (a host's ``_enter_sop`` seam); a refusal names resuming and starting
+        over as ``wording`` says. Returns the confirmation, refusal or error
+        text.
+        """
+        fresh_usage = wording.fresh.format(name=name)
+        active = self.sop_state
+        if active is not None and active.sop_name == name and not fresh:
+            return (
+                f"SOP '{name}' is already active ({active.sop_status}). "
+                f"Continue it, or use {fresh_usage} to start over."
+            )
         suspended = next((s for s in self._suspended_sops if s.sop_name == name), None)
         if suspended is not None and not fresh:
             return (
                 f"You have an in-progress '{name}' ({suspended.sop_status}, "
                 f"{suspended.suspension_label.lower()}). "
-                f"Use /resume_sop {name} to resume, or "
-                f"/sop {name} --fresh to start over."
+                f"Use {wording.resume.format(name=name)} to resume, or "
+                f"{fresh_usage} to start over."
             )
 
-        state, error = self.enter_sop(name, yolo=yolo)
+        state, error = (build_state or self.enter_sop)(name, yolo=yolo)
         if error:
             return error
-        if self.sop_state is not None:
-            self.sop_state.suspension_reason = "paused"
-            self.sop_state.suspended_at = _now_iso_local()
-            self._suspended_sops.insert(0, self.sop_state)
+        self._suspended_sops[:] = [
+            s for s in self._suspended_sops if s.sop_name != name
+        ]
+        if active is not None and active.sop_name != name:
+            self._suspend(active, "paused")
         self.sop_state = state
         if state.yolo_mode and yolo_mode_setter is not None:
             yolo_mode_setter(True)
+        request = request.strip()
         if request:
             self._pending_followup = request
             return f"Entered SOP '{name}'. Starting on: {request}"
         return f"Entered SOP '{name}'."
 
-    def cmd_pause_sop(self) -> str:
-        s = self.sop_state
-        s.suspension_reason = "paused"
-        s.suspended_at = _now_iso_local()
-        self._suspended_sops.insert(0, s)
-        self.sop_state = None
-        return (
-            f"SOP '{s.sop_name}' paused at {s.sop_status}. I'll remind you to resume."
-        )
-
-    def cmd_exit_sop(self) -> str:
-        s = self.sop_state
-        s.suspension_reason = "exited"
-        s.suspended_at = _now_iso_local()
-        self._suspended_sops.insert(0, s)
-        self.sop_state = None
-        return (
-            f"Exited SOP '{s.sop_name}' ({s.sop_status}). "
-            f"Resume anytime with /resume_sop {s.sop_name}."
-        )
-
-    def cmd_resume_sop(self, args: str = "") -> str:
+    def resume(
+        self,
+        name: str = "",
+        *,
+        request: str = "",
+        reload: Optional[Callable[[Any], None]] = None,
+    ) -> str:
+        """Resume suspended SOP ``name`` (the most recent one when empty),
+        pausing the active SOP (if any). A non-blank ``request`` becomes the
+        pending follow-up. ``reload`` replaces ``reload_sop_definition`` (a
+        host's ``_reload_sop_definition`` seam)."""
         if not self._suspended_sops:
             return "No suspended SOPs to resume."
-        tokens = args.split()
-        target = ""
-        request = ""
-        if tokens and any(s.sop_name == tokens[0] for s in self._suspended_sops):
-            target = tokens[0]
-            request = " ".join(tokens[1:]).strip()
-        else:
-            target = args.strip()
-        if target:
-            match = next(
-                (s for s in self._suspended_sops if s.sop_name == target), None
-            )
+        if name:
+            match = next((s for s in self._suspended_sops if s.sop_name == name), None)
             if match is None:
                 avail = ", ".join(s.sop_name for s in self._suspended_sops)
-                return f"No suspended SOP named '{target}'. In-progress: {avail}"
+                return f"No suspended SOP named '{name}'. In-progress: {avail}"
         else:
             match = self._suspended_sops[0]
         if self.sop_state is not None:
-            self.sop_state.suspension_reason = "paused"
-            self.sop_state.suspended_at = _now_iso_local()
-            self._suspended_sops.insert(0, self.sop_state)
+            self._suspend(self.sop_state, "paused")
         self._suspended_sops.remove(match)
         match.suspension_reason = ""
         match.suspended_at = ""
-        self.reload_sop_definition(match)
+        (reload or self.reload_sop_definition)(match)
         self.sop_state = match
+        request = request.strip()
         if request:
             self._pending_followup = request
             return (
@@ -559,3 +581,70 @@ class SOPController:
                 f"Continuing on: {request}"
             )
         return f"Resumed SOP '{match.sop_name}' at {match.sop_status}."
+
+    def _suspend(self, state: Any, reason: str) -> None:
+        state.suspension_reason = reason
+        state.suspended_at = _now_iso_local()
+        self._suspended_sops.insert(0, state)
+
+    def cmd_sop(
+        self,
+        args: str = "",
+        *,
+        build_state: Optional[Callable[..., tuple[Any, Optional[str]]]] = None,
+        yolo_mode_setter: Optional[Callable[[bool], None]] = None,
+    ) -> str:
+        """``/sop <name> [--yolo] [--fresh] [request...]`` → ``enter``."""
+        tokens = args.split()
+        if not tokens:
+            return "Usage: /sop <name> [--yolo] [--fresh] [request...]"
+        name = tokens[0]
+        rest = tokens[1:]
+        _KNOWN_FLAGS = {"--yolo", "--fresh"}
+        return self.enter(
+            name,
+            yolo="--yolo" in rest,
+            fresh="--fresh" in rest,
+            request=" ".join(t for t in rest if t not in _KNOWN_FLAGS),
+            build_state=build_state,
+            yolo_mode_setter=yolo_mode_setter,
+        )
+
+    def cmd_pause_sop(self) -> str:
+        s = self.sop_state
+        if s is None:
+            return "No active SOP to pause."
+        self._suspend(s, "paused")
+        self.sop_state = None
+        return (
+            f"SOP '{s.sop_name}' paused at {s.sop_status}. I'll remind you to resume."
+        )
+
+    def cmd_exit_sop(
+        self, *, wording: SopCommandWording = SLASH_COMMAND_WORDING
+    ) -> str:
+        s = self.sop_state
+        if s is None:
+            return "No active SOP to exit."
+        self._suspend(s, "exited")
+        self.sop_state = None
+        return (
+            f"Exited SOP '{s.sop_name}' ({s.sop_status}). "
+            f"Resume anytime with {wording.resume.format(name=s.sop_name)}."
+        )
+
+    def cmd_resume_sop(
+        self,
+        args: str = "",
+        *,
+        reload: Optional[Callable[[Any], None]] = None,
+    ) -> str:
+        """``/resume_sop [name] [request...]`` → ``resume``. The first token is
+        the name only when it names a suspended SOP; otherwise the whole
+        argument is the name (a clear error beats resuming the wrong SOP)."""
+        if not self._suspended_sops:
+            return "No suspended SOPs to resume."
+        tokens = args.split()
+        if tokens and any(s.sop_name == tokens[0] for s in self._suspended_sops):
+            return self.resume(tokens[0], request=" ".join(tokens[1:]), reload=reload)
+        return self.resume(args.strip(), reload=reload)

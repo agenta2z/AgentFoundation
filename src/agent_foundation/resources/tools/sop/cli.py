@@ -132,8 +132,8 @@ async def run_sop(
         turn_dir.mkdir(exist_ok=True)
         (turn_dir / "user_input.txt").write_text(user_input or "", encoding="utf-8")
         ci = _ci_ref[0]
-        if ci and hasattr(ci, "base_inferencer"):
-            ci.base_inferencer.cache_folder = str(turn_dir)
+        if ci:
+            ci.cache_folder = str(turn_dir)
         return _turn_counter[0]
 
     async def _on_prompt_rendered(ci_instance, raw_response):
@@ -143,11 +143,16 @@ async def run_sop(
         turn_dir = turns_dir / f"turn_{_turn_counter[0]:03d}"
         round_dir = turn_dir / f"round_{_round_counter[0]:03d}"
         round_dir.mkdir(parents=True, exist_ok=True)
-        rendered = getattr(ci_instance, "_last_rendered_prompt", "")
+        prompt = (
+            ci_instance.last_prompt_data()
+            if getattr(ci_instance, "supports_prompt_manifest", False)
+            else {}
+        )
+        rendered = prompt.get("rendered_prompt", "")
         (round_dir / "rendered_prompt.txt").write_text(rendered, encoding="utf-8")
-        tmpl_src = getattr(ci_instance, "_last_template_source", "")
+        tmpl_src = prompt.get("template_source", "")
         (round_dir / "template_source.txt").write_text(tmpl_src, encoding="utf-8")
-        feed = getattr(ci_instance, "_last_template_feed", {})
+        feed = prompt.get("template_feed", {})
         try:
             (round_dir / "template_feed.json").write_text(
                 _json.dumps(feed, indent=2, default=str),
@@ -155,7 +160,7 @@ async def run_sop(
             )
         except Exception:
             pass
-        config = getattr(ci_instance, "_last_template_config", {})
+        config = prompt.get("template_config", {})
         try:
             (round_dir / "template_config.json").write_text(
                 _json.dumps(config, indent=2, default=str),
@@ -177,7 +182,7 @@ async def run_sop(
 
             try:
                 (turn_dir / "messages.json").write_text(
-                    _json.dumps(ci._messages, indent=2, default=str),
+                    _json.dumps(ci.get_messages(), indent=2, default=str),
                     encoding="utf-8",
                 )
             except Exception:
@@ -201,7 +206,7 @@ async def run_sop(
     )
     # So the /sop command + Available-SOPs list discover the same SOPs the
     # executor sees via session_context (static config; set before any turn).
-    ci._extra_sop_dirs = session_context.get("extra_sop_dirs") or []
+    ci.extra_sop_dirs = session_context.get("extra_sop_dirs") or []
     _ci_ref[0] = ci
 
     result = await execute(
@@ -274,7 +279,7 @@ async def run_sop(
 
             run_task = _aio.create_task(ci.run(run_context=_sop_root))
             try:
-                while not ci._shutdown_requested:
+                while not ci.shutdown_requested:
                     try:
                         line = await _aio.to_thread(input, "\n> ")
                         ci.inbox_put_user(line)
@@ -283,7 +288,7 @@ async def run_sop(
                         ci.request_shutdown()
                         break
             finally:
-                if not ci._shutdown_requested:
+                if not ci.shutdown_requested:
                     ci.request_shutdown()
                 await run_task
 
@@ -294,7 +299,7 @@ async def run_sop(
         # resume — mirrors the task executor's outer-finally persistence. Best-effort.
         if _sop_root is not None:
             try:
-                _sop_root._store.save(str(_sop_store_path))
+                _sop_root.store.save(str(_sop_store_path))
             except Exception:  # pragma: no cover
                 pass
 

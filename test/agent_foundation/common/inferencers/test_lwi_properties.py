@@ -9,7 +9,6 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from hypothesis import given, HealthCheck, settings, strategies as st
 
 
@@ -52,7 +51,6 @@ def _make_lwi_with_workspace(step_configs, response_builder, workspace_root):
     lwi._workspace = InferencerWorkspace(root=workspace_root)
     # Prevent _auto_enable_checkpointing from enabling resume
     lwi._result_root_override = workspace_root
-    # Prevent _save_final_result from causing recursion on self-referential state
     lwi._save_final_result = lambda state: None
     return lwi
 
@@ -156,7 +154,7 @@ def test_iteration_workspace_directory_creation(n_iters):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: state.get("work_output", ""),
-        workspace=InferencerWorkspace(root=workspace),
+        workspace_root=workspace,
     )
 
     lwi.infer("start")
@@ -200,7 +198,7 @@ def test_step_completion_markers_written(n_steps):
     lwi = _make_lwi_with_workspace(
         step_configs=configs,
         response_builder=lambda state: "done",
-        workspace=InferencerWorkspace(root=workspace),
+        workspace_root=workspace,
     )
 
     lwi.infer("test_input")
@@ -352,7 +350,9 @@ def test_default_snapshot_excludes_private_keys(data):
         )
 
     # All non-underscore keys from state should be in the record
-    expected_keys = {k for k in state if not k.startswith("_")}
+    expected_keys = {
+        k for k in state if not k.startswith("_") and k != "iteration_records"
+    }
     assert set(record.keys()) == expected_keys
 
 

@@ -12,6 +12,7 @@
    ``BREAKDOWN_TEMPLATE_DEFAULTS``) rather than in each of ~12 topology YAMLs.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.br
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.run_context import open_invocation
 from agent_foundation.common.inferencers.template_defaults import (
     BREAKDOWN_TEMPLATE_DEFAULTS,
 )
@@ -40,13 +42,19 @@ def _bare_bta(**attrs_):
     obj = BreakdownThenAggregateInferencer.__new__(BreakdownThenAggregateInferencer)
     obj.worker_query_fields = ("description", "todos")
     obj.expand_todos_to_workers = False
-    obj._last_aggregation_guidance = None
-    obj._promoted_breakdown_cache = None
     obj.aggregator_inferencer = None
     obj.inject_upstream_artifacts_to_aggregator = True
     for k, v in attrs_.items():
         setattr(obj, k, v)
     return obj
+
+
+@contextlib.contextmanager
+def _in_attempt(bta):
+    """BTA's private hooks run inside an attempt of their owner's invocation;
+    yields the attempt."""
+    with open_invocation(bta):
+        yield bta._open_attempt("q", use_async=False)
 
 
 class TestAggregationGuidanceSurvivesResume(unittest.TestCase):
@@ -89,7 +97,8 @@ class TestAggregationGuidanceSurvivesResume(unittest.TestCase):
         loader = self._bta()
         self._write_promoted(loader, guidance="MERGE BY THEME")
 
-        sub_queries, guidance = loader._load_promoted_breakdown()
+        with _in_attempt(loader):
+            sub_queries, guidance = loader._load_promoted_breakdown()
         self.assertTrue(sub_queries)
         self.assertEqual(guidance, "MERGE BY THEME")
 
@@ -98,7 +107,8 @@ class TestAggregationGuidanceSurvivesResume(unittest.TestCase):
         loader = self._bta()
         self._write_promoted(loader, guidance=None)
 
-        sub_queries, guidance = loader._load_promoted_breakdown()
+        with _in_attempt(loader):
+            sub_queries, guidance = loader._load_promoted_breakdown()
         self.assertTrue(sub_queries)
         self.assertIsNone(guidance)
 
@@ -114,15 +124,16 @@ class TestAggregationGuidanceSurvivesResume(unittest.TestCase):
         return agg
 
     def test_guidance_reaches_the_aggregator_feed_after_resume(self):
-        # The point of the mechanism: after a resume (no in-process
-        # _last_aggregation_guidance) the aggregator prompt still gets its
-        # guidance, restored lazily from the promoted breakdown checkpoint.
+        # The point of the mechanism: after a resume (the attempt's breakdown
+        # never parsed, so it holds no guidance) the aggregator prompt still gets
+        # its guidance, restored lazily from the promoted breakdown checkpoint.
         loader = self._bta()
         self._write_promoted(loader, guidance="MERGE BY THEME")
         agg = self._wire_aggregator(loader)
-        self.assertIsNone(loader._last_aggregation_guidance)
 
-        loader._inject_aggregator_extra_feed(["r1"])
+        with _in_attempt(loader) as attempt:
+            self.assertIsNone(attempt.aggregation_guidance)
+            loader._inject_aggregator_extra_feed(["r1"])
 
         self.assertEqual(
             agg.template_extra_feed.get("aggregation_guidance"), "MERGE BY THEME"
@@ -134,8 +145,9 @@ class TestAggregationGuidanceSurvivesResume(unittest.TestCase):
         # POPPED from the feed (stale-guidance guard).
         bta = self._bta()  # workspace present, but no promoted file written
         agg = self._wire_aggregator(bta, feed={"aggregation_guidance": "STALE"})
-        self.assertIsNone(bta._last_aggregation_guidance)
-        bta._inject_aggregator_extra_feed(["r1"])
+        with _in_attempt(bta) as attempt:
+            self.assertIsNone(attempt.aggregation_guidance)
+            bta._inject_aggregator_extra_feed(["r1"])
         self.assertNotIn("aggregation_guidance", agg.template_extra_feed)
 
 
@@ -156,14 +168,16 @@ class TestSubtasksFromFenceDict(unittest.TestCase):
             + "\n```\n</Response>"
         )
         self.assertEqual(queries, _bare_bta()._parse_json_subtasks(text))
+        self.assertEqual(_bare_bta()._parse_json_breakdown(text), (queries, "GUIDE"))
         self.assertEqual(guidance, "GUIDE")
 
     def test_is_pure_wrt_instance_state(self):
-        # Must not write _last_aggregation_guidance — the caller owns that, so a
+        # Writes nothing on the instance — the caller records the guidance, so a
         # shared / re-roled inferencer cannot be polluted by a bare transform call.
         bta = _bare_bta()
+        before = dict(vars(bta))
         bta._subtasks_from_fence_dict(self.FENCE_DICT)
-        self.assertIsNone(bta._last_aggregation_guidance)
+        self.assertEqual(vars(bta), before)
 
     def test_no_subtasks_returns_none(self):
         self.assertIsNone(_bare_bta()._subtasks_from_fence_dict({"subtasks": []}))

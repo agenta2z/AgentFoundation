@@ -22,6 +22,14 @@ from typing import Any, Callable, Dict, List, Optional
 _logger = logging.getLogger(__name__)
 
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import (
+    frame_for,
+    invocation_of,
+    InvocationFrame,
+    NodeOutcomeState,
+    read_outcome,
+    RuntimeKey,
+)
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.serializable import SerializationMode
@@ -113,6 +121,49 @@ class _DynamicStepRegistry(dict):
         return super().__getitem__(key)
 
 
+def _policy_field(name: str) -> property:
+    """A configured checkpoint field an invocation may decide per call. While the
+    instance runs, its own decision (``_set_call_policy``) wins, then the setting
+    a parent workflow's host invocation handed it (``_configure_child_workflow``);
+    otherwise the configured value, kept under the same name in ``__dict__``."""
+
+    def get(self):
+        frame = frame_for(self)
+        if frame is not None:
+            own = frame.get(self._CALL_POLICY)
+            if own is not None and name in own:
+                return own[name]
+            handed = _handed_policy(self, frame)
+            if handed is not None and name in handed:
+                return handed[name]
+        try:
+            return self.__dict__[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def set(self, value):
+        self.__dict__[name] = value
+
+    return property(get, set)
+
+
+def _handed_policy(child, frame) -> Optional[dict]:
+    """The settings the nearest enclosing invocation handed ``child``, if any."""
+    ancestor = frame.parent
+    while ancestor is not None:
+        handed = ancestor.get(LinearWorkflowInferencer._CHILD_POLICIES)
+        if handed is not None and id(child) in handed:
+            return handed[id(child)][1]
+        ancestor = ancestor.parent
+    return None
+
+
+# The child settings a host invocation hands over instead of writing them.
+_HANDED_SETTINGS = frozenset(
+    {"enable_result_save", "resume_with_saved_results", "_result_root_override"}
+)
+
+
 @artifact_type(Workflow, type="json", group="workflows")
 @attrs(slots=False)
 class LinearWorkflowInferencer(InferencerBase, Workflow):
@@ -172,6 +223,44 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
     dynamic_input_builder: Optional[Callable[[dict, Any], Any]] = attrib(default=None)
 
     _DERIVED_FROM_WORKSPACE = ()
+
+    # A run keeps its runner state in its ctx node and its checkpoint policy,
+    # resume marker and iteration roots in its frame, so one instance serves
+    # overlapping host calls; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    # The checkpoint policy an invocation decides for itself — auto-enabled
+    # checkpointing, Dual's per-call policy, dynamic mode's expansion budget — is
+    # held in the invocation; the engine reads it through the configured fields.
+    _CALL_POLICY = RuntimeKey("LinearWorkflowInferencer.call_policy", factory=dict)
+    # The checkpoint settings a host invocation hands the child workflows it calls:
+    # {id(child): (child, settings)}, read by the child's invocations within it.
+    _CHILD_POLICIES = RuntimeKey(
+        "LinearWorkflowInferencer.child_policies", factory=dict
+    )
+    enable_result_save = _policy_field("enable_result_save")
+    resume_with_saved_results = _policy_field("resume_with_saved_results")
+    max_expansion_events = _policy_field("max_expansion_events")
+    _result_root_override = _policy_field("_result_root_override")
+
+    def _set_call_policy(self, **values) -> None:
+        invocation_of(self).get_or_create(self._CALL_POLICY).update(values)
+
+    def _configure_child_workflow(self, child, **settings) -> None:
+        """Under a host ctx an LWI child gets its checkpoint settings for the calls
+        it makes within this invocation, instead of having them written onto it;
+        a ``checkpoint_mode`` it already has is left alone. Otherwise each setting
+        is set on the child, as before."""
+        frame = invocation_of(self)
+        if frame.mode == "host" and isinstance(child, LinearWorkflowInferencer):
+            handed = {k: v for k, v in settings.items() if k in _HANDED_SETTINGS}
+            frame.get_or_create(self._CHILD_POLICIES)[id(child)] = (child, handed)
+            settings = {
+                k: v
+                for k, v in settings.items()
+                if k not in _HANDED_SETTINGS and getattr(child, k) != v
+            }
+        super()._configure_child_workflow(child, **settings)
 
     _workspace_propagation_skip: frozenset = frozenset(
         (
@@ -627,34 +716,35 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             return
         self.__dict__["_state_picklability_verified_backing"] = value
 
-    # NOTE: ``_step_was_previously_attempted`` / ``_previous_attempt_info`` are the
-    # resume-marker signals the runner sets in ``_arun`` and that **child step
-    # closures read across a child-ctx boundary** (e.g. PTI's
-    # ``_build_executor_input`` reads ``self._step_was_previously_attempted`` while
-    # the executor's own ``ainfer`` has a child ctx active —
-    # ``plan_then_implement_inferencer.py:571``).  Routing them through the *active*
-    # node's scratch would write them on the LWI node and read them on the child
-    # node -> the signal would be invisible to the consumer.  They are therefore
-    # kept on the **instance backing** (byte-identical to pre-virtualization, and
-    # readable from any ctx within the run).  Per-run isolation for a shared
-    # instance under concurrency would require a captured-run node (cf. Part B's
-    # parent-node write) and is out of scope for this commit (the concurrency
-    # acceptance covers ``state``/``loop_counts``/``exec_seq``).
+    # The resume-marker signals the workflow engine sets during a run. Step bodies
+    # read them across child invocations (PTI's executor input is built while the
+    # executor's own call is active), so they live in this invocation's frame,
+    # which every descendant of the run resolves, rather than in a ctx node.
+    _STEP_PREVIOUSLY_ATTEMPTED = RuntimeKey(
+        "LinearWorkflowInferencer.step_was_previously_attempted"
+    )
+    _PREVIOUS_ATTEMPT_INFO = RuntimeKey(
+        "LinearWorkflowInferencer.previous_attempt_info"
+    )
+
     @property
     def _step_was_previously_attempted(self):
-        return self.__dict__.get("_step_was_previously_attempted_backing", False)
+        frame = invocation_of(self)
+        if not frame.has(self._STEP_PREVIOUSLY_ATTEMPTED):
+            return False
+        return frame.get(self._STEP_PREVIOUSLY_ATTEMPTED)
 
     @_step_was_previously_attempted.setter
     def _step_was_previously_attempted(self, value):
-        self.__dict__["_step_was_previously_attempted_backing"] = value
+        invocation_of(self).put(self._STEP_PREVIOUSLY_ATTEMPTED, value)
 
     @property
     def _previous_attempt_info(self):
-        return self.__dict__.get("_previous_attempt_info_backing")
+        return invocation_of(self).get(self._PREVIOUS_ATTEMPT_INFO)
 
     @_previous_attempt_info.setter
     def _previous_attempt_info(self, value):
-        self.__dict__["_previous_attempt_info_backing"] = value
+        invocation_of(self).put(self._PREVIOUS_ATTEMPT_INFO, value)
 
     def __attrs_post_init__(self):
         super(LinearWorkflowInferencer, self).__attrs_post_init__()
@@ -908,14 +998,19 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
         iteration = state.get("iteration", 1)
 
-        # 1. Create iteration workspace (skip if no workspace configured)
+        # 1. Create iteration workspace (skip if no workspace configured). Every
+        # iteration derives from the workspace the call started in and re-roots
+        # this invocation only (B15). The LWI helper is named explicitly: a
+        # subclass may define its own two-argument ``_get_iteration_workspace``.
         if self._workspace is not None:
-            iter_path = self._get_iteration_workspace(
-                self._workspace.root, iteration, self.iteration_workspace_factory
+            iter_path = LinearWorkflowInferencer._get_iteration_workspace(
+                self._iteration_base_workspace().root,
+                iteration,
+                self.iteration_workspace_factory,
             )
             ws = InferencerWorkspace(root=iter_path)
             ws.ensure_dirs()
-            self._workspace = ws
+            self._set_call_workspace(ws)
 
         # 2. Update child Workflow _result_root_override
         self._setup_child_workflows(state)
@@ -938,6 +1033,32 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         # 4. Record the completed iteration
         self._record_iteration(state)
 
+    # The workspace this invocation was rooted at before its first iteration
+    # change; iteration workspaces derive from it.
+    _ITERATION_BASE = RuntimeKey("LinearWorkflowInferencer.iteration_base")
+
+    def _iteration_base_workspace(self):
+        frame = invocation_of(self)
+        if not frame.has(self._ITERATION_BASE):
+            frame.put(self._ITERATION_BASE, self._workspace)
+        return frame.get(self._ITERATION_BASE)
+
+    def _end_iterations(self) -> None:
+        """Once the steps have run, the rest of the invocation (response, final
+        result, output finalization) uses the workspace the call was rooted at."""
+        frame = frame_for(self)
+        if frame is not None and frame.has(self._ITERATION_BASE):
+            self._set_call_workspace(frame.get(self._ITERATION_BASE))
+
+    def _checkpoint_workspace(self):
+        """Where the workflow's own checkpoints live: the workspace the call was
+        rooted at, so the loop checkpoint, step results and final result stay put
+        while each iteration re-roots ``_workspace`` for its steps."""
+        frame = frame_for(self)
+        if frame is not None and frame.has(self._ITERATION_BASE):
+            return frame.get(self._ITERATION_BASE)
+        return self._workspace
+
     def _setup_child_workflows(self, state, *args, **kwargs):
         """Update child Workflow ``_result_root_override`` to the current
         iteration's checkpoint directory.
@@ -958,19 +1079,25 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
         children = self._find_child_workflows_in(self)
         for _attr_name, (child, _entry) in children.items():
-            child._result_root_override = ws.checkpoints_dir
+            self._configure_child_workflow(
+                child, _result_root_override=ws.checkpoints_dir
+            )
 
     def _record_iteration(self, state):
         """Append a snapshot of the current iteration to state["iteration_records"].
 
         Uses ``iteration_record_builder`` if provided, otherwise snapshots
-        all state keys that do NOT start with an underscore.
+        all state keys that do NOT start with an underscore, except
+        ``iteration_records`` itself (the record is appended to that list).
         """
         if self.iteration_record_builder is not None:
             record = self.iteration_record_builder(state)
         else:
-            # Default: snapshot all non-underscore keys
-            record = {k: v for k, v in state.items() if not k.startswith("_")}
+            record = {
+                k: v
+                for k, v in state.items()
+                if not k.startswith("_") and k != "iteration_records"
+            }
 
         records = state.get("iteration_records")
         if records is None:
@@ -1003,31 +1130,32 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
         Silently returns when no workspace is configured.
         """
-        if self._workspace is None:
+        ws = self._checkpoint_workspace()
+        if ws is None:
             return
         from rich_python_utils.common_utils.map_helper import dict__
         from rich_python_utils.io_utils.json_io import write_json
 
-        path = self._workspace.checkpoint_path("final_result.json")
+        path = ws.checkpoint_path("final_result.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_json(dict__(state, recursive=True), path, indent=2)
 
     def _auto_enable_checkpointing(self):
         """Enable checkpoint/resume when workspace is available and no override is set.
 
-        In dynamic mode, ``resume_with_saved_results`` is left disabled because
-        Workflow's backward resume scan iterates ``self._steps[i]`` in
-        ``range(resume_with_saved_results_int, -1, -1)``, which IndexErrors
-        when ``len(self._steps) == 1`` (the initial dynamic-mode step list).
-        Dynamic mode has its own resume path via ``expansion_step_registry``.
+        In dynamic mode, ``resume_with_saved_results`` is left disabled: the
+        initial single-step list does not describe the expanded steps, and
+        dynamic mode resumes through ``expansion_step_registry`` instead.
         """
         if self._result_root_override is None and self._workspace is not None:
             from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
                 StepResultSaveOptions,
             )
 
-            self.enable_result_save = StepResultSaveOptions.Always
-            self.resume_with_saved_results = not self.dynamic_mode
+            self._set_call_policy(
+                enable_result_save=StepResultSaveOptions.Always,
+                resume_with_saved_results=not self.dynamic_mode,
+            )
 
     def _load_final_result(self):
         """Load cached final result from ``final_result.json``.
@@ -1037,11 +1165,12 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         response.  Returns ``None`` when no workspace is configured,
         the file does not exist, or deserialization fails.
         """
-        if self._workspace is None:
+        ws = self._checkpoint_workspace()
+        if ws is None:
             return None
         from rich_python_utils.io_utils.json_io import read_json
 
-        path = self._workspace.checkpoint_path("final_result.json")
+        path = ws.checkpoint_path("final_result.json")
         if not os.path.exists(path):
             return None
         try:
@@ -1137,6 +1266,25 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             )
         return raw_result, self.default_followup_inferencer
 
+    # The ctx of this invocation's first step child (the first step that runs an
+    # inferencer); its published task contract is this workflow's own.
+    _FIRST_STEP_CTX = RuntimeKey("LinearWorkflowInferencer.first_step_ctx")
+
+    def _note_step_ctx(self, step_ctx) -> None:
+        frame = frame_for(self)
+        if frame is not None and frame.get(self._FIRST_STEP_CTX) is None:
+            frame.put(self._FIRST_STEP_CTX, step_ctx)
+
+    def _outcome_for(self, frame: InvocationFrame) -> Optional[NodeOutcomeState]:
+        """A workflow publishes the task contract its first step child published:
+        the input-side author, read at that child's exact ctx."""
+        step_ctx = frame.get(self._FIRST_STEP_CTX)
+        if step_ctx is None:
+            return None
+        child = read_outcome(step_ctx)
+        contract = None if child is None else child.task_contract
+        return None if contract is None else NodeOutcomeState(task_contract=contract)
+
     def _instantiate_inferencer(self, inferencer):
         """Return a ready-to-use inferencer instance.
 
@@ -1230,6 +1378,9 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             # Without this, a step instance with no workspace backing resolves to
             # the path-mirrored children/step_{N}, which _finalize_output never
             # finds -> empty flow deliverable -> aggregator embeds raw <Response>.
+            # It is also published as the step ctx's workspace_override: the
+            # followup instance serves every step>=1, and a legacy-propagated one
+            # is pinned to round01, which ctx.workspace alone never overrides.
             consensus_iter = state.get("consensus_iteration_id", 0) if state else 0
             _step_ws = (
                 self._workspace.child(
@@ -1262,10 +1413,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
                 extra_kwargs["inference_config"] = self._inference_config
             if self._inference_args:
                 extra_kwargs.update(self._inference_args)
+            step_rc = self._rc_child(f"step_{step_index}", workspace=_step_ws)
+            self._publish_workspace_to_ctx(step_rc, _step_ws)
+            self._note_step_ctx(step_rc)
             raw_result = await inf_instance.ainfer(
-                inp,
-                run_context=self._rc_child(f"step_{step_index}", workspace=_step_ws),
-                **extra_kwargs,
+                inp, run_context=step_rc, **extra_kwargs
             )
 
             # 3. Unpack result tuple
@@ -1362,7 +1514,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             wrapped in a :class:`StepWrapper`.
         """
         # Enable expansion on Workflow for up to max_dynamic_steps expansions
-        self.max_expansion_events = self.max_dynamic_steps
+        self._set_call_policy(max_expansion_events=self.max_dynamic_steps)
 
         # Build the step 0 closure using default_initial_inferencer
         step_fn = self._build_dynamic_step_wrapper(self.default_initial_inferencer, 0)
@@ -1473,11 +1625,11 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
 
                 # 3. Execute
                 if _sc.inferencer is not None:
+                    step_rc = self._rc_child(getattr(_sc, "name", None) or "step")
+                    self._note_step_ctx(step_rc)
                     result = await _sc.inferencer.ainfer(
                         step_input,
-                        run_context=self._rc_child(
-                            getattr(_sc, "name", None) or "step"
-                        ),
+                        run_context=step_rc,
                         **extra_kwargs,
                     )
                 elif _sc.step_fn is not None:
@@ -1733,7 +1885,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             self._steps = self._build_dynamic_initial_steps()
 
             # Enable expansion on Workflow
-            self.max_expansion_events = self.max_dynamic_steps
+            self._set_call_policy(max_expansion_events=self.max_dynamic_steps)
         else:
             # Existing static mode
             self._steps = self._build_steps()
@@ -1752,8 +1904,10 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
         try:
             await Workflow._arun(self, inference_input, **_inference_args)
         except BaseException as workflow_error:
+            self._end_iterations()
             self._publish_partial_output(workflow_error)
             raise
+        self._end_iterations()
 
         # v4 Phase 5.1 — final reconcile so any per-step status gaps are
         # corrected to the terminal "completed" state.
@@ -1792,7 +1946,7 @@ class LinearWorkflowInferencer(InferencerBase, Workflow):
             InferencerWorkspace,
         )
 
-        ws = getattr(self, "_workspace", None)
+        ws = self._checkpoint_workspace()
         if ws is not None:
             filename = f"step_{result_id}.json"
             if self.checkpoint_subdir:

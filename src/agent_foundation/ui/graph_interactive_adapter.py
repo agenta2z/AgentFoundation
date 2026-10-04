@@ -19,6 +19,7 @@ Usage in executor.py:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time as _time
 from typing import Any
@@ -74,14 +75,15 @@ class NodeStreamInteractive:
                     )
                 yield chunk, metadata
 
-        result = await self._ws.stream_token_batches(
-            _tagged_stream(),
-            session_id,
-            batch_interval_ms,
-            task_id,
-            send_stream_end,
-            turn_number,
-        )
+        async with contextlib.aclosing(_tagged_stream()) as tagged:
+            result = await self._ws.stream_token_batches(
+                tagged,
+                session_id,
+                batch_interval_ms,
+                task_id,
+                send_stream_end,
+                turn_number,
+            )
         try:
             await self._ws.send_graph_event(
                 NodeStreamEvent(node_id=self._node_id, content="", is_final=True),

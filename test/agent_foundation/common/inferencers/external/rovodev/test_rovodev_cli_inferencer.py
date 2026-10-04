@@ -231,7 +231,7 @@ class TestSessionManagement:
         with (
             patch.object(
                 inferencer,
-                "_ainfer_single",
+                "_ainfer",
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
@@ -250,7 +250,7 @@ class TestSessionManagement:
         mock_result.success = False
         with patch.object(
             inferencer,
-            "_ainfer_single",
+            "_ainfer",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
@@ -266,7 +266,7 @@ class TestSessionManagement:
         with (
             patch.object(
                 inferencer,
-                "_ainfer_single",
+                "_ainfer",
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
@@ -292,7 +292,7 @@ class TestSessionManagement:
             result.success = True
             return result
 
-        with patch.object(inferencer, "_ainfer_single", side_effect=capture_kwargs):
+        with patch.object(inferencer, "_ainfer", side_effect=capture_kwargs):
             await inferencer.ainfer("Hello")
 
         assert captured_kwargs.get("resume") is True
@@ -303,7 +303,7 @@ class TestSessionManagement:
         mock_result = MagicMock()
         mock_result.success = True
         with (
-            patch.object(inferencer, "_infer_single", return_value=mock_result),
+            patch.object(inferencer, "_infer", return_value=mock_result),
             patch(
                 "agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.rovodev_cli_inferencer.find_latest_session_id",
                 return_value="test-session-uuid",

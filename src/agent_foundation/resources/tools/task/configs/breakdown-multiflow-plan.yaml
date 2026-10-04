@@ -94,6 +94,70 @@ _params:
   enable_elegant_mode: true
   guardrail_model_tier: default       # output guardrail judge tier (max/default/lite)
   aggregator_max_retry: 3             # aggregator retry budget (guardrail RETRY/UPDATE consumes retries)
+  # Per-flow ``bta_inferencer`` for the flow leaves, positional like
+  # flow_inferencers; the ``[null]`` default pads to every flow (no fan-out).
+  # Enable for the flow at index 3 (initial + followup turns), e.g. a MetamateSDK:
+  # ``<PREFIX>__FLOW_BTA_INFERENCERS='[null,null,null,"${_params.metamate_fan_out_roles}"]'``.
+  # Followup-only kill switch: ``<PREFIX>__FLOW_FOLLOWUP_BTA_INFERENCERS=null``
+  # (NOT ``'[null]'``: this key defaults to an interpolation, so the loader keeps
+  # that as a raw string, which the leaf rejects with a TypeError).
+  flow_bta_inferencers: [null]
+  flow_followup_bta_inferencers: ${_params.flow_bta_inferencers}
+  # Fan-out template for a MetamateSDK flow leaf: the breakdown splits the leaf's
+  # rendered contract into self-contained shards, the workers are always the leaf
+  # itself (one Metamate request per shard), and the aggregator merges them in the
+  # leaf's response format. ``expected_parent_types`` fails a misaligned index
+  # before any model call.
+  metamate_fan_out:
+    _target_: BTA
+    expected_parent_types: [MetamateSDK]
+    breakdown_format: json_subtasks
+    worker_query_fields: [description, scope, todos]
+    max_worker_query_chars: 4096
+    max_breakdown: 3
+    min_successful_workers: 2
+    max_concurrency: 3
+    # Each worker is one MetaMate turn, cut at 120 s and at its per-request
+    # memory budget; a tool-call budget keeps a shard inside both (replaying the
+    # scoped fan-out gate's 24 shards: 23/24 substantive vs 8/24 without, no
+    # killed request vs 6). Writing the answer spends the same 120 s, so a format
+    # cap keeps it short (24/24 substantive vs 19/24 with the budget alone,
+    # median 40 s vs 70 s). Pinned to the values measured on shards, whatever the
+    # leaf's own defaults are.
+    worker_inference_args:
+      tool_call_budget: 6
+      max_answer_findings: 8
+    # Worker results are always checkpointed and reloaded by shard index, so a
+    # re-run on the same workspace must reuse the saved breakdown too, or it
+    # pairs saved outputs with re-generated shards. Each fan-out call owns its
+    # workspace, so saved results exist only when a resumed run repeats it.
+    enable_result_save: true
+    resume_with_saved_results: true
+    # Pinned so ``research_exploration`` resolves from
+    # ``task_instructions/research_propose/`` whichever tool loads this config:
+    # under a master version, variables resolve only from
+    # ``<name>/<master_version>/`` and an unresolved name silently renders as
+    # the literal string.
+    breakdown_inferencer:
+      _target_: ${_params.main_inferencer}
+      template_master_version: research_propose
+      template_variables:
+        task_instructions: research_exploration
+    # Plain aggregation framing: the research_propose task_instructions pin in
+    # tool.json belongs to the plan-level aggregator (proposal-index format).
+    aggregator_inferencer:
+      _target_: ${_params.main_inferencer}
+      max_retry: ${_params.aggregator_max_retry}
+      output_guardrail_inferencer:
+        _target_: ${_params.main_inferencer}
+        model_tier: ${_params.guardrail_model_tier}
+  # Roles that fan out: the leaf's own turns and MultiFlowDual's fixer; the
+  # reviewer role (``review_inferencer``) is unmapped and runs unfanned.
+  # Relative refs: a config that imports this file keeps this block under the
+  # importing node, where ``${_params.*}`` would resolve against its own root.
+  metamate_fan_out_roles:
+    own: ${..metamate_fan_out}
+    fixer_inferencer: ${..metamate_fan_out}
 
 # ---------------------------------------------------------------------------
 # CASCADES (standalone mode; redundant but harmless when imported)
@@ -192,6 +256,7 @@ base_inferencer:
           # aren't cut, but bounds a true hang. Applies to all flows via `_repeat_`.
           attempt_timeout_seconds: 7200
           max_retry: ${_params.aggregator_max_retry}
+          bta_inferencer: ${_params.flow_bta_inferencers}
           output_guardrail_inferencer:
             _target_: ${_params.main_inferencer}
             model_tier: ${_params.guardrail_model_tier}
@@ -199,6 +264,7 @@ base_inferencer:
           _target_: ${_params.flow_inferencers}
           attempt_timeout_seconds: 7200  # per-attempt hang cap (see initial_inferencer)
           max_retry: ${_params.aggregator_max_retry}
+          bta_inferencer: ${_params.flow_followup_bta_inferencers}
           output_guardrail_inferencer:
             _target_: ${_params.main_inferencer}
             model_tier: ${_params.guardrail_model_tier}

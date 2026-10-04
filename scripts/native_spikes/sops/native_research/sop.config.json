@@ -1,0 +1,12 @@
+{
+  "name": "native_research",
+  "display_name": "Native Research",
+  "version": "1.0.0",
+  "description": "Produce a short research brief: collect the topic, write the brief, then confirm it with the user.",
+  "available_modes": ["default", "yolo"],
+  "requires_tools": ["clarification", "write_brief", "confirmation"],
+  "labels": ["research", "test"],
+  "linear_only": true,
+  "max_goto_iterations": 2,
+  "max_total_nodes": 20
+}

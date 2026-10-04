@@ -1,0 +1,52 @@
+{
+  "calls": [
+    {
+      "active_session_id": null,
+      "active_session_id_under_ctx": null,
+      "cli": [
+        {
+          "argv": [
+            "-p",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "max",
+            "--dangerously-skip-permissions",
+            "turn 1"
+          ],
+          "cwd": "<TMP>/ws",
+          "stdin": null
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": false,
+            "path": "/leaf"
+          },
+          "kwargs": {
+            "resume": false,
+            "session_id": null
+          }
+        }
+      ],
+      "get_streaming_result": {
+        "error": null,
+        "output": "",
+        "raw_output": "",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "live_store": {},
+      "output": "plain reply to 'turn 1'\nsecond line\n",
+      "session_backing": null
+    }
+  ],
+  "host_ctx": {
+    "legacy_mint": false,
+    "path": "/leaf"
+  }
+}

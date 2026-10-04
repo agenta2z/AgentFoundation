@@ -1,0 +1,8 @@
+# Claude Code through the Claude Agent SDK: persistent session, in-process AF
+# tool server, Python hooks (L2 via UserPromptSubmit, PostToolUse turn stop).
+kind: claude_sdk
+model: opus[1m]
+permission_mode: bypassPermissions
+# inherit = the user's Claude setup (CLAUDE.md, skills, MCP servers);
+# hermetic = only AgentFoundation's settings and tools (tests/automation).
+environment: inherit

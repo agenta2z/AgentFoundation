@@ -65,6 +65,14 @@ register_alias(
         ".flow_node_adapter.ConversationalFlowNodeAdapter",
     ],
 )
+# The vendor agent (Claude Code / Devmate / Codex / Metamate) owns the
+# conversation; AgentFoundation contributes instructions, SOP state and tools.
+register_alias(
+    "ConversationalNative",
+    f"{_P}.common.inferencers.agentic_inferencers.conversational_native"
+    ".native_inferencer.NativeConversationalInferencer",
+    "inferencer",
+)
 register_alias(
     "Dual",
     f"{_P}.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer.DualInferencer",

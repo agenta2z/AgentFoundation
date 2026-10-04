@@ -1,0 +1,76 @@
+{
+  "events": [
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "a",
+      "what": "yield",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": "a",
+      "what": "received",
+      "where": "consumer"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_break",
+      "where": "consumer"
+    },
+    {
+      "ctx": {
+        "id": "ctx2",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "y",
+      "what": "_ainfer",
+      "where": "other"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_other_ainfer",
+      "where": "consumer"
+    },
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": "GeneratorExit",
+      "what": "raised",
+      "where": "leaf"
+    },
+    {
+      "ctx": {
+        "id": "ctx1",
+        "legacy_mint": true,
+        "path": "/"
+      },
+      "value": null,
+      "what": "finally",
+      "where": "leaf"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_finalize",
+      "where": "consumer"
+    },
+    {
+      "ctx": null,
+      "value": null,
+      "what": "after_run",
+      "where": "test_thread"
+    }
+  ],
+  "loop_errors": [],
+  "unraisable": []
+}

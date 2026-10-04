@@ -1,0 +1,76 @@
+{
+  "body": {
+    "active_session_id": "<UUID1>",
+    "active_session_id_after_getter": "<UUID1>",
+    "cli": [
+      {
+        "TMPDIR": "/tmp/devmate-<UID>",
+        "argv": [
+          "-p",
+          "--agent-harness",
+          "native",
+          "--auto-run-mode",
+          "autoRunAll",
+          "-m",
+          "claude-opus-4.7-long",
+          "inference config question"
+        ],
+        "cwd": "<TMP>/repo",
+        "stdin": ""
+      }
+    ],
+    "consecutive_error_count": 0,
+    "construct_command": [
+      {
+        "active_ctx": null,
+        "dump_output": true,
+        "input": {
+          "prompt": "inference config question"
+        },
+        "kwargs": {
+          "dump_output": false,
+          "resume": false,
+          "session_id": null
+        }
+      }
+    ],
+    "dump_output_after": true,
+    "get_streaming_result": {
+      "output": "ANSWER(inference config question)\ncontinuation line",
+      "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ inference config question\n\n● ANSWER(inference config question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+      "return_code": 0,
+      "session_id": "<UUID1>",
+      "stderr": "",
+      "success": true,
+      "type": "dict"
+    },
+    "observed": [
+      "Running non-interactively (dm -p)\n",
+      "Powered by dm-core\n",
+      "❯ inference config question\n",
+      "\n",
+      "● ANSWER(inference config question)\n",
+      "  continuation line\n",
+      "\n",
+      "Logs available at: <TMP>/repo/.dm/<UUID1>.log\n",
+      "Resume with: dm --resume <UUID1>\n"
+    ],
+    "output": {
+      "error": null,
+      "output": "ANSWER(inference config question)\ncontinuation line",
+      "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ inference config question\n\n● ANSWER(inference config question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+      "return_code": 0,
+      "session_id": "<UUID1>",
+      "stderr": "",
+      "success": true,
+      "trajectory_url": null,
+      "type": "TerminalInferencerResponse"
+    },
+    "raised": null
+  },
+  "session_logs": {},
+  "tree": {
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_c49dc3fe.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ inference config question\n\n● ANSWER(inference config question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cli/fake_dm.py": "<present>"
+  }
+}

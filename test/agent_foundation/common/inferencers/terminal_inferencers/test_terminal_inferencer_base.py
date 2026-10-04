@@ -5,7 +5,11 @@ import tempfile
 import unittest
 from typing import Any, Dict, List
 
-import resolve_path  # noqa: F401
+try:
+    import resolve_path  # noqa: F401
+except (ImportError, RuntimeError):
+    pass  # PYTHONPATH already set externally
+
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     TerminalInferencerBase,
 )

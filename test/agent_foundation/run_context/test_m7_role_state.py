@@ -1,4 +1,4 @@
-"""M7: switch_role mirrors role into ctx.node.call (RoleState); purity gate certifies."""
+"""M7: switch_role mirrors role into ctx.node.role_state (RoleState); purity gate certifies."""
 
 from agent_foundation.common.inferencers.run_context import (
     decode_state,
@@ -22,10 +22,38 @@ def test_role_state_round_trips_with_discriminator():
 
 def test_role_state_persists_in_store():
     s = RunStateStore()
-    s.node("/review").call = RoleState(new_role="reviewer", template_key="review")
+    s.node("/review").role_state = RoleState(new_role="reviewer", template_key="review")
     s2 = RunStateStore.from_json(s.to_json())
-    assert isinstance(s2.node("/review").call, RoleState)
-    assert s2.node("/review").call.new_role == "reviewer"
+    assert isinstance(s2.node("/review").role_state, RoleState)
+    assert s2.node("/review").role_state.new_role == "reviewer"
+    assert s2.node("/review").call is None
+
+
+def _legacy_save(role_state=None):
+    """A save written before ``role_state`` existed: the RoleState sits in ``call``."""
+    saved = RunStateStore()
+    saved.node("/review").call = RoleState(new_role="reviewer", template_key="review")
+    data = saved.to_json()
+    data["nodes"]["/review"]["role_state"] = encode_state(role_state)
+    return data
+
+
+def test_legacy_role_state_in_call_migrates_on_load():
+    s = RunStateStore.from_json(_legacy_save())
+    node = s.node("/review")
+    assert node.call is None
+    assert isinstance(node.role_state, RoleState)
+    assert node.role_state.template_key == "review"
+    resaved = s.to_json()["nodes"]["/review"]
+    assert resaved["call"] is None
+    assert resaved["role_state"]["_state_class"] == "RoleState"
+
+
+def test_legacy_migration_keeps_an_existing_role_state():
+    newer = RoleState(new_role="fixer", template_key="followup")
+    node = RunStateStore.from_json(_legacy_save(newer)).node("/review")
+    assert node.call is None
+    assert node.role_state.new_role == "fixer"
 
 
 def test_purity_snapshot_is_the_m7_gate_mechanism():
@@ -52,6 +80,8 @@ def test_purity_snapshot_is_the_m7_gate_mechanism():
     store = RunStateStore()
     obj2 = _Fake()
     with purity_snapshot(obj2) as holder2:
-        store.node("/x").call = RoleState(new_role="reviewer", template_key="review")
+        store.node("/x").role_state = RoleState(
+            new_role="reviewer", template_key="review"
+        )
     (delta2,) = holder2
     assert delta2.is_pure  # no self-mutation -> M7 goal certified

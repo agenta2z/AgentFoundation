@@ -14,6 +14,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.conversational.cont
     AgenticDynamicContext,
     CompletedAction,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 from agent_foundation.ui.interactive_base import InteractiveBase
 from hypothesis import given, HealthCheck, settings, strategies as st
 
@@ -444,11 +445,20 @@ class TestFallbackActivation:
 # ===========================================================================
 
 
+async def _ainfer_with_call_keywords(adapter, inference_input, **call_keywords):
+    """Run the private ``_ainfer`` inside an invocation carrying the per-call
+    keywords, as a public entry pops them (``interactive`` is an invocation
+    keyword of the adapter, plan v8 §5.9)."""
+    async with aopen_invocation(adapter) as frame:
+        adapter._pop_invocation_keywords(frame, call_keywords)
+        return await adapter._ainfer(inference_input, **call_keywords)
+
+
 class TestInteractiveContextPropagation:
     """**Validates: Requirements 4.1, 4.2**
 
-    Verify kwargs["interactive"] wins over self.interactive.
-    Verify fallback to self.interactive when not in kwargs.
+    Verify the per-call ``interactive`` keyword wins over self.interactive.
+    Verify fallback to self.interactive when not passed.
     """
 
     @pytest.mark.asyncio
@@ -466,7 +476,9 @@ class TestInteractiveContextPropagation:
 
         adapter.conversational_inferencer.run_agentic_loop = mock_run
 
-        await adapter._ainfer("task", interactive=kwargs_interactive)
+        await _ainfer_with_call_keywords(
+            adapter, "task", interactive=kwargs_interactive
+        )
         assert captured["interactive"] is kwargs_interactive
 
     @pytest.mark.asyncio
@@ -531,7 +543,7 @@ class TestInteractiveContextPropagation:
         if kwargs_interactive is not None:
             call_kwargs["interactive"] = kwargs_interactive
 
-        await adapter._ainfer("task", **call_kwargs)
+        await _ainfer_with_call_keywords(adapter, "task", **call_kwargs)
 
         expected = kwargs_interactive or self_interactive
         assert captured["interactive"] is expected
@@ -1493,3 +1505,191 @@ class TestSessionLevelResume:
 
         await adapter._ainfer("task")
         assert len(reset_calls) == 0, "reset should NOT be called when resuming"
+
+
+# ===========================================================================
+# Host-protocol typing (plan §9.4, D14)
+# ===========================================================================
+
+
+class _ProtocolHost:
+    """A conversational host that is not a ConversationalInferencer: only
+    the ``ConversationalHost`` and ``SupportsFlowNode`` members."""
+
+    supports_widget_recovery = False
+    supports_round_resume = False
+    supports_inbox = False
+    supports_prompt_manifest = False
+    supports_flow_node = True
+    supports_rewind = False
+
+    def __init__(self, reply: str = "host answer") -> None:
+        self.prior_context: dict = {}
+        self.tool_registry: dict = {}
+        self.interactive = None
+        self.sop_controller = None
+        self.sop_state = None
+        self.suspended_sops: list = []
+        self.extra_sop_dirs: list = []
+        self.tool_dispatcher = None
+        self.cache_folder = None
+        self.dynamic_context = AgenticDynamicContext()
+        self.messages: list = []
+        self.resets = 0
+        self.calls: list = []
+        self.reply = reply
+
+    async def run_agentic_loop(
+        self,
+        content,
+        *,
+        run_context=None,
+        interactive=None,
+        session_id="",
+        turn_number=0,
+        origin="user",
+        on_new_turn=None,
+        on_prompt_rendered=None,
+        on_turn_complete=None,
+        on_round_start=None,
+        on_round_complete=None,
+    ):
+        self.calls.append({"content": content, "turn_number": turn_number})
+        self.add_message("user", content)
+        self.add_message("assistant", self.reply)
+        if on_turn_complete is not None:
+            await on_turn_complete(turn_number + 1)
+        return _make_agentic_result(text=self.reply)
+
+    def accepts_command(self, text):
+        return False
+
+    def set_prior_context(self, ctx):
+        self.prior_context = dict(ctx)
+
+    def update_prior_context(self, **kwargs):
+        self.prior_context.update(kwargs)
+
+    def set_session_variables(self, variables, *, tool_type=None):
+        self.prior_context.update(variables)
+
+    def get_messages(self):
+        return list(self.messages)
+
+    def set_messages(self, messages):
+        self.messages = list(messages)
+
+    def add_message(self, role, content):
+        self.messages.append({"role": role, "content": content})
+
+    def next_required_tools(self):
+        return set()
+
+    def check_phase_completion(self, tool_name=""):
+        pass
+
+    def export_state(self, *, turn_number=0, iteration=0):
+        return {"messages": self.get_messages()}
+
+    def restore_state(self, state, *, reattach_sop=True):
+        self.set_messages(state["messages"])
+
+    @property
+    def effective_cwd(self):
+        return "/tmp"
+
+    def enable_debug_mode(self):
+        pass
+
+    def reset_for_flow_invocation(self):
+        self.resets += 1
+        self.messages = []
+        self.dynamic_context = AgenticDynamicContext()
+
+    async def aclose(self):
+        pass
+
+
+def _flow_adapter_class():
+    from agent_foundation.common.inferencers.agentic_inferencers.conversational.flow_node_adapter import (
+        ConversationalFlowNodeAdapter,
+    )
+
+    return ConversationalFlowNodeAdapter
+
+
+class TestHostProtocolTyping:
+    """The adapter wraps any ``ConversationalHost`` that supports flow nodes,
+    not only ``ConversationalInferencer``; a host that declares it cannot run
+    as a flow node, or lacks the protocol, is rejected at configuration time."""
+
+    @pytest.mark.asyncio
+    async def test_a_protocol_host_runs_as_a_flow_node(self):
+        host = _ProtocolHost()
+        adapter = _flow_adapter_class()(conversational_inferencer=host)
+
+        result = await adapter.ainfer("the task")
+
+        assert result == "host answer"
+        assert host.calls == [{"content": "the task", "turn_number": 0}]
+        assert host.resets == 1
+
+    @pytest.mark.asyncio
+    async def test_a_protocol_host_resumes_through_its_public_state(self, tmp_path):
+        import json
+        import os
+
+        session_dir = os.path.join(str(tmp_path), "resume")
+        os.makedirs(session_dir)
+        saved = [
+            {"role": "user", "content": "original task"},
+            {"role": "assistant", "content": "working"},
+            {"role": "user", "content": "the follow-up"},
+        ]
+        with open(os.path.join(session_dir, "checkpoint.json"), "w") as f:
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "session_id": "resume",
+                    "initial_content": "original task",
+                    "status": "in_progress",
+                    "turn_number": 2,
+                    "messages": saved,
+                    "completion_result": None,
+                },
+                f,
+            )
+        with open(os.path.join(session_dir, "dynamic_context.json"), "w") as f:
+            json.dump(
+                {"completed_actions": [], "compressed_history": "earlier work"}, f
+            )
+        host = _ProtocolHost()
+        adapter = _flow_adapter_class()(
+            conversational_inferencer=host,
+            checkpoint_dir=str(tmp_path),
+            session_id="resume",
+        )
+
+        result = await adapter._ainfer("original task")
+
+        assert result == "host answer"
+        assert host.resets == 0
+        assert host.calls == [{"content": "the follow-up", "turn_number": 2}]
+        assert host.get_messages()[: len(saved)] == saved
+        assert host.dynamic_context._compressed_history == "earlier work"
+
+    def test_an_object_without_the_host_protocol_is_rejected(self):
+        with pytest.raises(TypeError, match="ConversationalHost"):
+            _flow_adapter_class()(conversational_inferencer=object())
+
+    def test_a_host_declaring_no_flow_node_support_is_rejected(self):
+        host = _ProtocolHost()
+        host.supports_flow_node = False
+        with pytest.raises(TypeError, match="cannot be used as a flow node"):
+            _flow_adapter_class()(conversational_inferencer=host)
+
+    def test_a_host_without_a_settable_dynamic_context_is_rejected(self):
+        host = _ProtocolHost()
+        del host.dynamic_context
+        with pytest.raises(TypeError, match="SupportsFlowNode"):
+            _flow_adapter_class()(conversational_inferencer=host)

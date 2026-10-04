@@ -36,6 +36,11 @@ from agent_foundation.agents.constants import (
     DEFAULT_AGENT_TASK_INPUT_FIELD_USER_PROFILE,
 )
 from agent_foundation.automation.schema.action_executor import MultiActionExecutor
+from agent_foundation.common.inferencers.run_context.bridge import (
+    active_run_context,
+    enter_run,
+    exit_run,
+)
 from agent_foundation.ui.interactive_base import InteractionFlags, InteractiveBase
 from attr import attrib, attrs
 from rich_python_utils.common_objects.debuggable import Debuggable
@@ -724,6 +729,25 @@ class Agent(Debuggable):
             new_agent.actor = new_agent.actor.copy(clear_states=clear_states)
 
         return new_agent
+
+    def _call_reasoner(
+        self,
+        reasoner_input: ReasonerInput,
+        reasoner_inference_config: ReasonerInferenceConfig,
+    ) -> ReasonerResponse:
+        caller_rc = active_run_context()
+        token = (
+            enter_run(caller_rc.child("reasoner")) if caller_rc is not None else None
+        )
+        try:
+            return self.reasoner(
+                reasoner_input,
+                reasoner_inference_config,
+                **(self.reasoner_args or {}),
+            )
+        finally:
+            if token is not None:
+                exit_run(token)
 
     def _construct_reasoner_inference_config(self) -> ReasonerInferenceConfig:
         """
@@ -1609,10 +1633,8 @@ class Agent(Debuggable):
                 self.log_info(f"Start reasoning with reasoner '{self.reasoner}'")
 
                 # TODO: we need to retry the two steps
-                raw_response: ReasonerResponse = self.reasoner(
-                    reasoner_input,
-                    reasoner_inference_config,
-                    **(self.reasoner_args or {}),
+                raw_response: ReasonerResponse = self._call_reasoner(
+                    reasoner_input, reasoner_inference_config
                 )
                 self.log_info("End reasoning")
                 self.log_info(

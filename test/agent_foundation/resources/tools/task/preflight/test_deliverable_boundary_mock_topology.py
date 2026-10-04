@@ -245,6 +245,7 @@ def test_S9_BTA_post_step_extends_finalize(tmp_path):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
         BreakdownThenAggregateInferencer,
     )
+    from agent_foundation.common.inferencers.run_context import open_invocation
 
     # Construct a minimal BTA with workspace + simulated worker children
     bta = BreakdownThenAggregateInferencer(
@@ -261,7 +262,8 @@ def test_S9_BTA_post_step_extends_finalize(tmp_path):
         wc.ensure_dirs()
         with open(os.path.join(wc.outputs_dir, f"worker_{i}_plan.md"), "w") as f:
             f.write(f"plan {i}")
-    bta._finalize_response(result=None)
+    with open_invocation(bta):
+        bta._finalize_response(result=None)
 
     # Assert worker deliverables were surfaced under workers/
     assert os.path.isfile(
@@ -283,6 +285,7 @@ def test_S10_BTA_no_op_when_no_child_deliverables(tmp_path):
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
         BreakdownThenAggregateInferencer,
     )
+    from agent_foundation.common.inferencers.run_context import open_invocation
 
     bta = BreakdownThenAggregateInferencer(
         breakdown_inferencer=_make_stub("breakdown", "b.md"),
@@ -293,7 +296,8 @@ def test_S10_BTA_no_op_when_no_child_deliverables(tmp_path):
     bta._workspace = _ws(tmp_path / "bta")
     bta._workspace.ensure_dirs()
     # No child workspaces populated → nothing to surface.
-    bta._finalize_response(result=None)  # Should not crash
+    with open_invocation(bta):
+        bta._finalize_response(result=None)  # Should not crash
     assert not os.path.isdir(os.path.join(bta._workspace.outputs_dir, "workers"))
 
 

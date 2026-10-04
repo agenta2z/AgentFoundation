@@ -1,0 +1,10 @@
+# Devmate through `dm -p` (one process per turn). dm has no per-turn context
+# hook, so per-turn state rides a labelled envelope before the user message.
+# AF tools need dm's workflow mode, which requires explicit CAT credentials:
+# set extra.cats_file (or $DM_CATS_FILE); without them dm stalls tool turns.
+kind: devmate_dm
+model: ""
+permission_mode: bypassPermissions
+l2_envelope_allowed: true
+extra:
+  agent_harness: native

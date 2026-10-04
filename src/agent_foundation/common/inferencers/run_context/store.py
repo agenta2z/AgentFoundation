@@ -16,15 +16,28 @@ Per the plan (§2.1 / §2.7 / N-R4 / N-S2 / P-#7):
   **transient** (not serialized) — so resume is safe: rehydrated nodes carry no
   creator tag and are re-tagged as they are first re-entered.  A re-request by a
   *different* creator raises; re-entry by the same creator (retry) is a no-op.
+* ``claims`` (:class:`ActivePathClaims`) records which invocation currently holds
+  each path (plan v8 §5.1). It is strict: a second overlapping invocation at one
+  path raises, whatever its class or nesting. Claims are live runtime state: they
+  are never serialized, and a rehydrated or copied store starts with none.
+* ``outcome`` holds the typed :class:`NodeOutcomeState` an invocation published at
+  its successful close. The seam clears it when the next invocation opens at the
+  path; neither the clear nor a read creates or claims the node.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import threading
+import time
+from typing import Any, TYPE_CHECKING
 
 import attrs
 
-from .state import decode_state, encode_state
+from .errors import ConcurrentInvocationError, InvocationContractError
+from .state import decode_state, encode_state, RoleState
+
+if TYPE_CHECKING:
+    from .invocation import InvocationFrame
 
 # A stable, resume-safe creator signature: (class_qualname, slot).  Never id().
 CreatorKey = tuple[str, str]
@@ -48,6 +61,9 @@ class NodeRunState:
     # dispatch/runner state and a role switch can coexist on one node (GT#15).  Serialized
     # like ``call``/``attempt`` (a ``RoleState`` typed value or ``None``).
     role_state: Any = None
+    # typed ``NodeOutcomeState`` published at an invocation's successful close; ``None``
+    # until then, and again from the moment the next invocation opens at this path.
+    outcome: Any = None
     # Transient runtime metadata — NOT serialized (eq=False so it never affects equality).
     _creator: CreatorKey | None = attrs.field(default=None, eq=False)
     # Tier-1 **transient scratch** — non-picklable per-run working state (Part G/G2:
@@ -66,6 +82,7 @@ class NodeRunState:
             "call": encode_state(self.call),
             "attempt": encode_state(self.attempt),
             "role_state": encode_state(self.role_state),
+            "outcome": encode_state(self.outcome),
             "conversation": dict(self.conversation),
             "checkpoints": dict(self.checkpoints),
             "provenance": list(self.provenance),
@@ -73,11 +90,18 @@ class NodeRunState:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "NodeRunState":
+        call = decode_state(data.get("call"))
+        role_state = decode_state(data.get("role_state"))
+        # Older saves recorded ``switch_role`` in ``call``; lift it out (one-way).
+        if isinstance(call, RoleState):
+            role_state = call if role_state is None else role_state
+            call = None
         return cls(
             path=data["path"],
-            call=decode_state(data.get("call")),
+            call=call,
             attempt=decode_state(data.get("attempt")),
-            role_state=decode_state(data.get("role_state")),
+            role_state=role_state,
+            outcome=decode_state(data.get("outcome")),
             conversation=dict(data.get("conversation") or {}),
             checkpoints=dict(data.get("checkpoints") or {}),
             provenance=list(data.get("provenance") or []),
@@ -85,11 +109,81 @@ class NodeRunState:
         )
 
 
+def _describe(frame: InvocationFrame) -> str:
+    return f"{type(frame.owner).__name__}.{frame.entry}"
+
+
+def _concurrent_invocation_message(
+    path: str, holder: InvocationFrame, caller: InvocationFrame
+) -> str:
+    age = time.monotonic() - holder.opened_at
+    message = (
+        f"Path {path!r} is already in an open invocation: {_describe(holder)}, "
+        f"opened {age:.1f}s ago; refusing {_describe(caller)} at the same path. "
+        f"One path hosts one invocation at a time: nested or concurrent work runs "
+        f"at a child path (ctx.child(<slot>))."
+    )
+    if "streaming" in holder.entry:
+        message += (
+            " The holder is a stream that is still open: close it "
+            "(contextlib.aclosing / contextlib.closing) before calling again at "
+            "this path."
+        )
+    return message
+
+
+class ActivePathClaims:
+    """The open invocation holding each path of one :class:`RunStateStore`."""
+
+    def __init__(self, lock: threading.RLock) -> None:
+        self._lock = lock
+        self._holders: dict[str, InvocationFrame] = {}
+
+    def acquire(self, path: str, frame: InvocationFrame) -> None:
+        with self._lock:
+            holder = self._holders.get(path)
+            if holder is not None:
+                raise ConcurrentInvocationError(
+                    _concurrent_invocation_message(path, holder, frame)
+                )
+            self._holders[path] = frame
+
+    def release(self, path: str, frame: InvocationFrame) -> None:
+        with self._lock:
+            holder = self._holders.get(path)
+            if holder is not frame:
+                raise InvocationContractError(
+                    f"{_describe(frame)} cannot release path {path!r}: the claim is "
+                    f"held by {_describe(holder) if holder else 'no invocation'}."
+                )
+            del self._holders[path]
+
+    def holder(self, path: str) -> InvocationFrame | None:
+        with self._lock:
+            return self._holders.get(path)
+
+    def live_below(self, prefix: str) -> list[str]:
+        """The claimed paths strictly below ``prefix``, sorted."""
+        below = prefix.rstrip("/") + "/"
+        with self._lock:
+            return sorted(p for p in self._holders if p.startswith(below))
+
+
 class RunStateStore:
     """Tier-1, per-turn, path-keyed store.  Shared by reference down the ctx tree."""
 
     def __init__(self) -> None:
         self._nodes: dict[str, NodeRunState] = {}
+        self._lock = threading.RLock()
+        self.claims = ActivePathClaims(self._lock)
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {"_nodes": self._nodes}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self._nodes = state["_nodes"]
+        self._lock = threading.RLock()
+        self.claims = ActivePathClaims(self._lock)
 
     def node(self, path: str, creator: CreatorKey | None = None) -> NodeRunState:
         """Get-or-create the node at ``path`` with the resume-safe collision guard."""
@@ -126,6 +220,19 @@ class RunStateStore:
         """
         return self._nodes.get(path)
 
+    def clear_outcome(self, path: str) -> None:
+        """Drop the outcome at ``path`` without creating or claiming the node."""
+        with self._lock:
+            node = self._nodes.get(path)
+            if node is not None:
+                node.outcome = None
+
+    def publish_outcome(
+        self, path: str, creator: CreatorKey | None, outcome: Any
+    ) -> None:
+        with self._lock:
+            self.node(path, creator).outcome = outcome
+
     def evict_subtree(self, prefix: str) -> int:
         """Drop every node at or under ``prefix`` — release a subtree's path claims (U1).
 
@@ -137,16 +244,28 @@ class RunStateStore:
         ``prefix + '/'``); it NEVER clears the whole store, so sibling workers that
         share this per-turn store are untouched. An empty/``"/"`` prefix is a
         no-op (refuses to evict the root). Returns the number of nodes removed.
+
+        Raises :class:`InvocationContractError` if an invocation is still open
+        strictly below ``prefix``: children must finish before their subtree is
+        evicted. The caller's own claim at ``prefix`` is allowed.
         """
         boundary = (prefix or "").strip().rstrip("/")
         if not boundary:
             return 0  # refuse to evict the whole store (empty / root prefix)
-        victims = [
-            p for p in self._nodes if p == boundary or p.startswith(boundary + "/")
-        ]
-        for p in victims:
-            del self._nodes[p]
-        return len(victims)
+        with self._lock:
+            live = self.claims.live_below(boundary)
+            if live:
+                raise InvocationContractError(
+                    f"Cannot evict the subtree at {boundary!r}: invocations are "
+                    f"still open below it at {live}. Children must finish before "
+                    f"their subtree is evicted."
+                )
+            victims = [
+                p for p in self._nodes if p == boundary or p.startswith(boundary + "/")
+            ]
+            for p in victims:
+                del self._nodes[p]
+            return len(victims)
 
     def to_json(self) -> dict[str, Any]:
         return {"nodes": {p: n.to_json() for p, n in self._nodes.items()}}

@@ -24,6 +24,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 def _make_mock_inferencer(response=None, side_effect=None):
@@ -99,7 +100,8 @@ class TestTwoAgentMode(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
@@ -132,7 +134,8 @@ class TestSeverityThreshold(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         # Fixer should NOT have been invoked
@@ -158,7 +161,8 @@ class TestSeverityThreshold(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         # Fixer SHOULD have been invoked once
@@ -216,7 +220,8 @@ class TestCounterFeedbackPropagation(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         # Two review calls happened
         self.assertEqual(len(captured_review_inputs), 2)
@@ -266,7 +271,8 @@ class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         self.assertEqual(fixer.ainfer.call_count, 1)
@@ -298,7 +304,8 @@ class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         fixer.ainfer.assert_not_called()
@@ -318,7 +325,8 @@ class TestIssueLevelSeverityBlocking(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         fixer.ainfer.assert_not_called()
@@ -348,7 +356,8 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         fixer.ainfer.assert_not_called()
@@ -372,7 +381,8 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         self.assertEqual(fixer.ainfer.call_count, 1)
@@ -391,7 +401,8 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
 
@@ -422,7 +433,8 @@ class TestGenericSeverityLevels(unittest.IsolatedAsyncioTestCase):
             consensus_config=ConsensusConfig(max_iterations=3),
         )
 
-        result = await dual._ainfer("request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("request")
 
         self.assertTrue(result.consensus_achieved)
         self.assertEqual(fixer.ainfer.call_count, 1)

@@ -1,0 +1,3 @@
+<af_context nonce="{{ nonce }}" turn="{{ turn }}" generation="{{ generation }}" origin="{{ origin }}">
+{{ turn_state }}{% for notice in notices %}<notice type="{{ notice.type }}">{{ notice.text }}</notice>
+{% endfor %}</af_context>

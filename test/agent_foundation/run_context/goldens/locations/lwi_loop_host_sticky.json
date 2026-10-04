@@ -1,0 +1,244 @@
+{
+  "host1": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host1/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host1/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host1/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host1/children/probe"
+      }
+    ],
+    "result": {
+      "_prev_iteration": 3,
+      "iteration": 3,
+      "iteration_records": [
+        {
+          "iteration": 2
+        },
+        {
+          "iteration": 3
+        }
+      ],
+      "original_input": "task-1",
+      "work_output": "iter_3"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "host2": {
+    "after": {
+      "backing_workspace": null,
+      "output_path": null,
+      "resolved_output_path": null
+    },
+    "children": [
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host2/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host2/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/probe"
+      },
+      {
+        "ctx_path": "/probe",
+        "ctx_workspace": "<WS>/host2/children/probe",
+        "label": "p",
+        "legacy_mint": false,
+        "output_path": null,
+        "resolved_output_path": null,
+        "workspace": "<WS>/host2/children/probe"
+      }
+    ],
+    "result": {
+      "_prev_iteration": 3,
+      "iteration": 3,
+      "iteration_records": [
+        {
+          "iteration": 2
+        },
+        {
+          "iteration": 3
+        }
+      ],
+      "original_input": "task-2",
+      "work_output": "iter_3"
+    },
+    "store_paths": [
+      "/"
+    ]
+  },
+  "tree": {
+    "host1/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host1/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host1/checkpoints/final_result.json": {
+      "json": {
+        "_prev_iteration": 3,
+        "iteration": 3,
+        "iteration_records": [
+          {
+            "iteration": 2
+          },
+          {
+            "iteration": 3
+          }
+        ],
+        "original_input": "task-1",
+        "work_output": "iter_3"
+      }
+    },
+    "host1/checkpoints/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 3,
+        "loop_counts": {
+          "1": 2
+        },
+        "next_step_index": 2,
+        "result_id": "probe___seq3",
+        "state": {
+          "_prev_iteration": 3,
+          "iteration": 3,
+          "iteration_records": [
+            {
+              "iteration": 2
+            },
+            {
+              "iteration": 3
+            }
+          ],
+          "original_input": "task-1",
+          "work_output": "iter_3"
+        },
+        "step_index": 1,
+        "version": 1
+      }
+    },
+    "host1/checkpoints/step_probe___seq1.json": {
+      "json": "p:task-1"
+    },
+    "host1/checkpoints/step_probe___seq2.json": {
+      "json": "p:task-1"
+    },
+    "host1/checkpoints/step_probe___seq3.json": {
+      "json": "p:task-1"
+    },
+    "host1/children/probe/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host1/children/probe/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>",
+        "<present>"
+      ]
+    },
+    "host1/iteration_2/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host1/iteration_2/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host1/iteration_3/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host1/iteration_3/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host1/logs/session/LinearWorkflowInferencer-<ID2>.jsonl": "<present>",
+    "host1/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>",
+    "host2/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host2/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host2/checkpoints/final_result.json": {
+      "json": {
+        "_prev_iteration": 3,
+        "iteration": 3,
+        "iteration_records": [
+          {
+            "iteration": 2
+          },
+          {
+            "iteration": 3
+          }
+        ],
+        "original_input": "task-2",
+        "work_output": "iter_3"
+      }
+    },
+    "host2/checkpoints/step___wf_checkpoint__.json": {
+      "json": {
+        "exec_seq": 3,
+        "loop_counts": {
+          "1": 2
+        },
+        "next_step_index": 2,
+        "result_id": "probe___seq3",
+        "state": {
+          "_prev_iteration": 3,
+          "iteration": 3,
+          "iteration_records": [
+            {
+              "iteration": 2
+            },
+            {
+              "iteration": 3
+            }
+          ],
+          "original_input": "task-2",
+          "work_output": "iter_3"
+        },
+        "step_index": 1,
+        "version": 1
+      }
+    },
+    "host2/checkpoints/step_probe___seq1.json": {
+      "json": "p:task-2"
+    },
+    "host2/checkpoints/step_probe___seq2.json": {
+      "json": "p:task-2"
+    },
+    "host2/checkpoints/step_probe___seq3.json": {
+      "json": "p:task-2"
+    },
+    "host2/children/probe/logs/session/_Probe-<ID1>.jsonl": "<present>",
+    "host2/children/probe/logs/session/_Probe-<ID1>.jsonl.parts/InferenceInput/<TS>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>",
+        "<present>"
+      ]
+    },
+    "host2/iteration_2/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host2/iteration_2/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host2/iteration_3/artifacts/.probe_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"probe\"\n}",
+    "host2/iteration_3/artifacts/.work_completed": "{\n  \"completed_at\": \"<TS>\",\n  \"step\": \"work\"\n}",
+    "host2/logs/session/LinearWorkflowInferencer-<ID2>.jsonl": "<present>",
+    "host2/logs/session/LinearWorkflowInferencer-<ID2>.jsonl.parts/InferenceInput/<TS>.txt": "<present>"
+  }
+}

@@ -320,7 +320,9 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
                 reflection_input=reflection_input,
                 inference_config=inference_config,
             )
-            reflection_response = self.reflection_inferencer(processed_reflection_input)
+            reflection_response = self.reflection_inferencer(
+                processed_reflection_input, run_context=self._rc_child("reflect")
+            )
             inference_response = InferencerResponse(
                 base_response=inference_input,
                 reflection_response=InputAndResponse(
@@ -370,7 +372,8 @@ class ReflectiveInferencer(LinearWorkflowInferencer):
                             inference_config=inference_config,
                         )
                         reflection_response = self.reflection_inferencer(
-                            processed_reflection_input
+                            processed_reflection_input,
+                            run_context=self._rc_child("reflect"),
                         )
                         self.log_debug(processed_reflection_input, "ReflectionPrompt")
                         self.log_debug(reflection_response, "ReflectionResponse")

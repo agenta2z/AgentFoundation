@@ -27,6 +27,7 @@ from agent_foundation.common.inferencers.run_context import (
     enter_run,
     exit_run,
     mint_root,
+    open_invocation,
     RunContext,
 )
 from agent_foundation.common.inferencers.templated_inferencer_base import (
@@ -101,6 +102,12 @@ def _make_mfi(*, aggregator):
     )
 
 
+def _build_input(mfi, builder, plans, query):
+    """The builder runs inside MFI's invocation, as BTA's aggregator node calls it."""
+    with open_invocation(mfi):
+        return builder(plans, original_query=query)
+
+
 # ---------------------------------------------------------------------------
 # Aggregator path — feed goes to the ctx, not the shared aggregator instance
 # ---------------------------------------------------------------------------
@@ -116,7 +123,7 @@ def test_aggregator_feed_published_to_ctx_not_instance():
     try:
         # Builder runs under the MFI/BTA ctx; BTA later invokes the aggregator with
         # run_context=self._rc_child("aggregator"), so the feed must land there.
-        agg_input = builder(["plan_0"], original_query="master")
+        agg_input = _build_input(mfi, builder, ["plan_0"], "master")
     finally:
         exit_run(tok)
 
@@ -145,7 +152,7 @@ def test_aggregator_rendered_prompt_contains_upstream_content():
     ctx = RunContext.root(workspace=None)
     tok = enter_run(ctx)
     try:
-        agg_input = builder(["plan_0", "plan_1"], original_query="master")
+        agg_input = _build_input(mfi, builder, ["plan_0", "plan_1"], "master")
         # Simulate BTA invoking the aggregator under run_context=_rc_child("aggregator"):
         # the leaf renders under its own ctx and must see the published upstream feed.
         agg_ctx = ctx.child("aggregator")
@@ -249,13 +256,13 @@ def test_two_concurrent_ctxs_do_not_bleed_feed():
 
     tok = enter_run(ctx_a)
     try:
-        builder(["A_plan_0", "A_plan_1"], original_query="master_A")
+        _build_input(mfi, builder, ["A_plan_0", "A_plan_1"], "master_A")
     finally:
         exit_run(tok)
 
     tok = enter_run(ctx_b)
     try:
-        builder(["B_plan_0", "B_plan_1"], original_query="master_B")
+        _build_input(mfi, builder, ["B_plan_0", "B_plan_1"], "master_B")
     finally:
         exit_run(tok)
 

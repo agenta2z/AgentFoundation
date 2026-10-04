@@ -16,6 +16,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementResponse,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import (
+    aopen_invocation,
+    open_invocation,
+)
 from attr import attrib, attrs
 
 
@@ -285,7 +289,8 @@ class AnalysisOnlyModeTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             planner._ainfer.assert_not_called()
             executor._ainfer.assert_not_called()
@@ -316,7 +321,8 @@ class AnalysisOnlyModeTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored")
 
             mock_analyzer._ainfer.assert_not_called()
             self.assertIsInstance(result, PlanThenImplementResponse)
@@ -340,7 +346,8 @@ class BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             executor_inferencer=executor,
         )
 
-        result = await pti._ainfer("test request")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("test request")
 
         self.assertIsInstance(result, PlanThenImplementResponse)
         self.assertEqual(result.base_response, "impl text")
@@ -362,7 +369,8 @@ class BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(RuntimeError) as ctx:
-            await pti._ainfer("test request")
+            async with aopen_invocation(pti):
+                await pti._ainfer("test request")
 
         self.assertEqual(str(ctx.exception), "test error")
 
@@ -382,7 +390,8 @@ class BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             interactive=mock_interactive,
         )
 
-        result = await pti._ainfer("test request")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("test request")
 
         self.assertEqual(result.base_response, "plan text")
         self.assertFalse(result.plan_approved)
@@ -412,13 +421,14 @@ class BackwardCompatibilityTest(unittest.IsolatedAsyncioTestCase):
             executor_inferencer=executor,
         )
 
-        await pti._ainfer(
-            "test",
-            inference_config={
-                "plan_config": {"key": "plan_val"},
-                "implement_config": {"key": "impl_val"},
-            },
-        )
+        async with aopen_invocation(pti):
+            await pti._ainfer(
+                "test",
+                inference_config={
+                    "plan_config": {"key": "plan_val"},
+                    "implement_config": {"key": "impl_val"},
+                },
+            )
 
         self.assertEqual(captured_plan_config.get("key"), "plan_val")
         self.assertEqual(captured_impl_config.get("key"), "impl_val")
@@ -532,7 +542,8 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis on existing workspace")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis on existing workspace")
 
             # Core assertion: analyzer MUST be called
             self.assertTrue(
@@ -579,7 +590,8 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis on existing workspace")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis on existing workspace")
 
             self.assertTrue(
                 analyzer_called,
@@ -618,7 +630,8 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            await pti._ainfer("Run analysis on existing workspace")
+            async with aopen_invocation(pti):
+                await pti._ainfer("Run analysis on existing workspace")
 
             summary_path = os.path.join(ws, "results", "analysis_summary.json")
             self.assertTrue(os.path.isfile(summary_path))
@@ -664,7 +677,8 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis on existing workspace")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis on existing workspace")
 
             self.assertNotEqual(
                 str(result.base_response),
@@ -719,7 +733,8 @@ class StaleAnalysisArtifactsRegressionTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis on existing workspace")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis on existing workspace")
 
             self.assertTrue(
                 analyzer_called,
@@ -863,7 +878,8 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis")
 
             # ---- Phase isolation ----
             planner._ainfer.assert_not_called()
@@ -944,7 +960,8 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis")
 
             self.assertEqual(call_count, 1)
             self.assertEqual(result.total_meta_iterations, 1)
@@ -986,7 +1003,8 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis")
 
             # ---- Response type ----
             self.assertIsInstance(result, PlanThenImplementResponse)
@@ -1053,7 +1071,8 @@ class AnalysisOnlyResumeIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            result = await pti._ainfer("Run analysis")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Run analysis")
 
             self.assertEqual(captured_config.get("result_type"), "benchmarks")
             self.assertIn("round0", captured_config.get("result_path_latest", ""))
@@ -1190,7 +1209,8 @@ class InitialPlanFileTest(unittest.IsolatedAsyncioTestCase):
                 initial_plan_file=plan_file,
             )
 
-            result = await pti._ainfer("Build a REST API")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Build a REST API")
 
             self.assertIn(
                 "initial_response_override",
@@ -1230,7 +1250,8 @@ class InitialPlanFileTest(unittest.IsolatedAsyncioTestCase):
                 initial_plan_file=plan_file,
             )
 
-            result = await pti._ainfer("Review this plan")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Review this plan")
 
             self.assertIn("initial_response_override", captured_config)
             self.assertEqual(
@@ -1263,7 +1284,8 @@ class InitialPlanFileTest(unittest.IsolatedAsyncioTestCase):
                 initial_plan_file=plan_file,
             )
 
-            await pti._ainfer("Review this plan")
+            async with aopen_invocation(pti):
+                await pti._ainfer("Review this plan")
 
             self.assertTrue(len(call_configs) >= 1)
             self.assertIn(
@@ -1283,7 +1305,8 @@ class InitialPlanFileTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(FileNotFoundError):
-            await pti._ainfer("Review this plan")
+            async with aopen_invocation(pti):
+                await pti._ainfer("Review this plan")
 
 
 # =============================================================================
@@ -1327,7 +1350,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 executor_inferencer=executor,
                 workspace=ws,
             )
-            await pti._ainfer("test request")
+            async with aopen_invocation(pti):
+                await pti._ainfer("test request")
 
             self.assertTrue(
                 marker_seen_during_execution,
@@ -1344,7 +1368,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 executor_inferencer=MockInferencer(_response="impl"),
                 workspace=ws,
             )
-            await pti._ainfer("test request")
+            async with aopen_invocation(pti):
+                await pti._ainfer("test request")
 
             self.assertFalse(
                 os.path.isfile(marker_path),
@@ -1366,7 +1391,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             )
 
             with self.assertRaises(RuntimeError):
-                await pti._ainfer("test request")
+                async with aopen_invocation(pti):
+                    await pti._ainfer("test request")
 
             self.assertTrue(
                 os.path.isfile(marker_path),
@@ -1442,7 +1468,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            await pti._ainfer("test request")
+            async with aopen_invocation(pti):
+                await pti._ainfer("test request")
 
             self.assertTrue(
                 was_attempted,
@@ -1455,9 +1482,9 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             planner_inferencer=MockInferencer(),
             executor_inferencer=MockInferencer(),
         )
-        pti._step_was_previously_attempted = True
-
-        result = pti._build_executor_input("original task", "the plan")
+        with open_invocation(pti):
+            pti._step_was_previously_attempted = True
+            result = pti._build_executor_input("original task", "the plan")
 
         self.assertIn("Resume Context", result)
         self.assertIn("sl status", result)
@@ -1470,7 +1497,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             executor_inferencer=MockInferencer(),
         )
 
-        result = pti._build_executor_input("task", "plan")
+        with open_invocation(pti):
+            result = pti._build_executor_input("task", "plan")
 
         self.assertNotIn("Resume Context", result)
 
@@ -1491,7 +1519,8 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
             )
 
             with self.assertRaises(RuntimeError):
-                await pti._ainfer("test request")
+                async with aopen_invocation(pti):
+                    await pti._ainfer("test request")
 
             self.assertTrue(os.path.isfile(marker_path))
             with open(marker_path) as f:
@@ -1557,15 +1586,16 @@ class StepInProgressMarkerTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            await pti._ainfer("test request")
+            async with aopen_invocation(pti):
+                await pti._ainfer("test request")
 
-            self.assertFalse(
-                pti._step_was_previously_attempted,
-                "_step_was_previously_attempted must reset after successful "
-                "step completion to avoid false resume warnings on loop "
-                "iterations",
-            )
-            self.assertIsNone(pti._previous_attempt_info)
+                self.assertFalse(
+                    pti._step_was_previously_attempted,
+                    "_step_was_previously_attempted must reset after successful "
+                    "step completion to avoid false resume warnings on loop "
+                    "iterations",
+                )
+                self.assertIsNone(pti._previous_attempt_info)
 
 
 class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
@@ -1707,16 +1737,17 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            checkpoint = pti._synthesize_checkpoint_from_workspace()
+            with open_invocation(pti):
+                checkpoint = pti._synthesize_checkpoint_from_workspace()
 
-            self.assertIsNotNone(checkpoint)
-            # The flag is stored in the state dict (not on self) because
-            # _arun() resets self._step_was_previously_attempted.
-            self.assertTrue(
-                checkpoint["state"].get("_impl_was_partially_attempted"),
-                "impl_partial should set _impl_was_partially_attempted in state dict",
-            )
-            self.assertEqual(pti._step_attempt_counts.get(2), 1)
+                self.assertIsNotNone(checkpoint)
+                # The flag is stored in the state dict (not on self) because
+                # _arun() resets self._step_was_previously_attempted.
+                self.assertTrue(
+                    checkpoint["state"].get("_impl_was_partially_attempted"),
+                    "impl_partial should set _impl_was_partially_attempted in state dict",
+                )
+                self.assertEqual(pti._step_attempt_counts.get(2), 1)
 
     # ------------------------------------------------------------------
     # Test 6: Backward compatibility — workspace WITH markers works
@@ -1749,7 +1780,11 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
                 resume_workspace=ws,
             )
 
-            iteration, phase, state, _, _ = pti._detect_resume_point(ws)
+            with open_invocation(pti):
+                iteration, phase, state, _, _ = pti._detect_resume_point(ws)
+                # _step_was_previously_attempted should NOT be set for a
+                # fully-completed workspace
+                self.assertFalse(pti._step_was_previously_attempted)
 
             self.assertEqual(iteration, 1)
             self.assertEqual(phase, "complete")
@@ -1758,12 +1793,6 @@ class Tier2CompletionMarkerTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(state.impl_done)
             self.assertFalse(state.impl_partial)
             self.assertTrue(state.analysis_done)
-
-            # _step_was_previously_attempted should NOT be set for a
-            # fully-completed workspace
-            self.assertFalse(
-                getattr(pti, "_step_was_previously_attempted", False),
-            )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,10 @@ import unittest
 import attr
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.run_context import (
+    aopen_invocation,
+    open_invocation,
+)
 from attr import attrib, attrs
 
 
@@ -32,6 +36,14 @@ class _Mock(InferencerBase):
 
     async def _ainfer(self, inference_input, **kwargs):
         return self.scripted_response
+
+
+def _finalize_bta_run(bta, response):
+    """Finalize ``response`` as the end of a BTA run does: inside the BTA's
+    invocation, after the run's tail published its summary."""
+    with open_invocation(bta):
+        attempt = bta._open_attempt("task", use_async=False)
+        return bta._finalize_output(bta._conclude_run(attempt, response))
 
 
 class TestLWIFinalizeOutputSymlink(unittest.TestCase):
@@ -124,7 +136,7 @@ class TestBTAFinalizeOutputSymlink(unittest.TestCase):
                 f"Aggregator output.md should exist at {agg_out}",
             )
 
-            bta._finalize_output("<Response>BTA summary</Response>")
+            _finalize_bta_run(bta, "<Response>BTA summary</Response>")
 
             # BTA's outputs/output.md should exist (symlink/promote of aggregator's)
             own = bta._workspace.output_path("output.md")
@@ -212,7 +224,8 @@ class TestDualPerRoundWorkspace(unittest.TestCase):
 
             # Set tracker (normally done by _step_propose_impl)
             dual._last_output_child_ws = base_ws
-            dual._finalize_output("<Response>Proposal summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>Proposal summary</Response>")
 
             own = dual._workspace.output_path("output.md")
             self.assertTrue(os.path.exists(own))
@@ -248,7 +261,8 @@ class TestDualPerRoundWorkspace(unittest.TestCase):
 
             # Set tracker (normally done by _step_fix_impl)
             dual._last_output_child_ws = fix_ws
-            dual._finalize_output("<Response>Fix summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>Fix summary</Response>")
 
             own = dual._workspace.output_path("output.md")
             self.assertTrue(os.path.exists(own))
@@ -314,7 +328,8 @@ class TestDualMergesProposePhaseDel(unittest.TestCase):
             dual._propose_child_ws = propose_ws
             dual._last_output_child_ws = fix_ws
 
-            dual._finalize_output("<Response>summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>summary</Response>")
 
             own_fd = dual._workspace.outputs_dir
             # Fix's output.md takes precedence
@@ -364,7 +379,8 @@ class TestDualMergesProposePhaseDel(unittest.TestCase):
             dual._propose_child_ws = propose_ws
             dual._last_output_child_ws = fix_ws
 
-            dual._finalize_output("<Response>summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>summary</Response>")
 
             own_fd = dual._workspace.outputs_dir
             self.assertIn("FIX VERSION", open(os.path.join(own_fd, "output.md")).read())
@@ -397,7 +413,8 @@ class TestDualMergesProposePhaseDel(unittest.TestCase):
             dual._propose_child_ws = propose_ws
             dual._last_output_child_ws = propose_ws
 
-            dual._finalize_output("<Response>summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>summary</Response>")
 
             own_fd = dual._workspace.outputs_dir
             self.assertTrue(os.path.exists(os.path.join(own_fd, "output.md")))
@@ -430,7 +447,8 @@ class TestDualMergesProposePhaseDel(unittest.TestCase):
 
             dual._last_output_child_ws = fix_ws
             # _propose_child_ws not set — should not crash
-            dual._finalize_output("<Response>summary</Response>")
+            with open_invocation(dual):
+                dual._finalize_output("<Response>summary</Response>")
 
             own = dual._workspace.output_path("output.md")
             self.assertTrue(os.path.exists(own))
@@ -823,7 +841,7 @@ class TestFinalizeSurfacingUnderRunContext(unittest.TestCase):
                     bta._read_child_workspace(aggregator, "aggregator").root,
                     agg_ws.root,
                 )
-                bta._finalize_output("<Response>narration</Response>")
+                _finalize_bta_run(bta, "<Response>narration</Response>")
             finally:
                 exit_run(tok)
 
@@ -891,7 +909,8 @@ class TestFinalizeSurfacingUnderRunContext(unittest.TestCase):
 
                 # Drive the tracker exactly as Edit C does (bare → property → ctx scratch).
                 dual._last_output_child_ws = eff_propose
-                dual._finalize_output("<Response>narration</Response>")
+                with open_invocation(dual):
+                    dual._finalize_output("<Response>narration</Response>")
             finally:
                 exit_run(tok)
 
@@ -955,9 +974,13 @@ class TestLWIPartialOutputOnAbort(unittest.TestCase):
                     "Output validation failed", "update"
                 )
 
+            async def run():
+                async with aopen_invocation(lwi):
+                    await lwi._ainfer("task")
+
             with mock.patch.object(Workflow, "_arun", _abort_after_initial):
                 with self.assertRaises(OutputValidationExhaustedError):
-                    asyncio.run(lwi._ainfer("task"))
+                    asyncio.run(run())
 
             own = os.path.join(lwi._workspace.outputs_dir, "output.md")
             self.assertTrue(

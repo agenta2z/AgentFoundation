@@ -24,6 +24,9 @@ import signal
 from typing import Any, AsyncIterator, Optional
 
 import httpx
+from agent_foundation.common.inferencers.agentic_inferencers.external._httpx_streams import (
+    closing_lines,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.common import (
     ACLI_BINARY,
     find_acli_binary,
@@ -65,6 +68,10 @@ class RovoDevServeInferencer(StreamingInferencerBase):
             respect_configured_permissions: Respect config file permissions.
             agent_mode: Agent mode ("ask", "plan", or "default").
     """
+
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
 
     # RovoDevServe spawns ``acli rovodev serve`` which exposes file-edit /
     # write tools, so it HAS local file access. Override ``InferencerBase``'s
@@ -241,6 +248,17 @@ class RovoDevServeInferencer(StreamingInferencerBase):
             and self._http_client is not None
         )
 
+    async def _areset_branch_conversation(self) -> None:
+        """A running server keeps one chat, so the chat of the server this branch
+        talks to is reset (``POST /v3/reset``); with no server, the branch's next
+        call starts one, with a new chat. A server started outside any context
+        serves every branch without its own, and they share its one chat."""
+        await super()._areset_branch_conversation()
+        client = self._http_client
+        if client is not None and self.is_connected:
+            response = await client.post("/v3/reset")
+            response.raise_for_status()
+
     # =========================================================================
     # Async context manager
     # =========================================================================
@@ -293,9 +311,12 @@ class RovoDevServeInferencer(StreamingInferencerBase):
         await self._http_client.post("/v3/set_chat_message", json={"message": prompt})
 
         # Stream SSE response
-        async with self._http_client.stream("GET", "/v3/stream_chat") as response:
+        async with (
+            self._http_client.stream("GET", "/v3/stream_chat") as response,
+            closing_lines(response) as lines,
+        ):
             event_type = ""
-            async for line in response.aiter_lines():
+            async for line in lines:
                 line = line.strip()
                 if not line:
                     event_type = ""

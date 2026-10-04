@@ -1,21 +1,30 @@
 import asyncio
 import contextlib
 import enum
+import hashlib
+import inspect
 import logging
 import os
 import sys
+import threading
+import time
 import traceback
+import types
 import uuid
+import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextvars import ContextVar
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
+from types import MappingProxyType
 from typing import (
     Any,
     AsyncIterator,
     Callable,
     ClassVar,
     Dict,
+    FrozenSet,
     Iterable,
     Iterator,
     List,
@@ -26,6 +35,8 @@ from typing import (
     Union,
 )
 
+import attrs as attrs_mod
+
 # M2: explicit RunContext carrier + the compat bridge (additive; inert until M3+
 # orchestrators read `_active_ctx`). `run_context` is **keyword-only** so it can
 # never land in `**_inference_args` (the kwarg-leak defense). The bridge mints a
@@ -33,10 +44,29 @@ from typing import (
 # `_active_ctx` ContextVar) so concurrent fan-out branches don't clobber.
 from agent_foundation.common.inferencers.run_context import (
     active_run_context,
+    aopen_invocation,
+    ctx_bound_gen,
     enter_run,
     exit_run,
+    frame_for,
+    host_pure_certified,
+    InferencerStateBase,
+    invocation_of,
+    InvocationContractError,
+    InvocationFrame,
+    LiveHandleStore,
+    NodeOutcomeState,
+    open_invocation,
+    read_outcome,
+    RenderedTaskContractState,
+    resolve_run,
+    RuntimeKey,
+    UncertifiedConcurrentUseError,
 )
-from attr import attrib, attrs
+from agent_foundation.common.inferencers.template_feed_scope import (
+    TEMPLATE_EXTRA_FEED_SCOPE_HANDLE,
+)
+from attr import attrib, attrs, Factory, fields, NOTHING
 from rich_python_utils.common_objects.debuggable import Debuggable
 from rich_python_utils.common_objects.workflow.common.resumable import Resumable
 from rich_python_utils.common_utils import dict_, iter__, resolve_environ
@@ -45,6 +75,8 @@ from rich_python_utils.common_utils.function_helper import (
     FallbackMode,
     OutputValidationExhaustedError,
 )
+from rich_python_utils.config_utils import import_target
+from rich_python_utils.config_utils._lazy_config_factory import LazyConfigFactory
 from rich_python_utils.path_utils import AllowedPath, PathAccess
 
 # Retry prompt mode constants
@@ -60,6 +92,35 @@ _current_fallback_state: ContextVar[dict | None] = ContextVar(
 _SIMPLE_RETRY_PROMPT = "You got interrupted. Can you retry the above task?"
 
 _logger = logging.getLogger(__name__)
+
+# Serializes the deferred workspace-logger un-defer: ``parallel_infer`` threads
+# share one instance, so the flag check and the logger install must be atomic.
+_WORKSPACE_LOGGER_LOCK = threading.RLock()
+
+# Per-call BTA fan-out (``InferencerBase.bta_inferencer``).
+MAX_BTA_FANOUT_DEPTH = 8
+BTA_INFERENCER_SLOT = "bta_inferencer"
+BTA_OWN_ROLE = "own"
+# Feed keys naming where the executing actor writes. A delegating inferencer's
+# contract omits them: the fan-out's executors each write to their own location.
+ACTOR_SCOPED_FEED_KEYS = ("output_path", "workspace_root", "workspace_outputs")
+# Per-call framework kwargs that govern the whole fan-out call, not each worker.
+_FANOUT_FRAMEWORK_ARGS = (
+    "on_retry_callback",
+    "total_timeout_seconds",
+    "attempt_timeout_seconds",
+    "fallback_mode",
+    "on_fallback_callback",
+    "retry_prompt_mode",
+)
+# Boundary processing reset on the fanned-out inferencer's copies: it runs once,
+# around the fan-out.
+_FANOUT_RESET_FIELDS = (
+    "input_preprocessor",
+    "response_post_processor",
+    "expected_extraction",
+    "state_graphs",
+)
 
 
 # v5 Phase 1 — Correlation instrumentation. Env-gated so production stays
@@ -108,6 +169,28 @@ def _is_bookkeeping_sidecar(name: str) -> bool:
     if name.endswith("_manifest.json"):
         return True
     return False
+
+
+def _move_into_archive(state_dir: str, target: str, keep: FrozenSet[str]) -> None:
+    """Move ``state_dir`` to ``target``; with ``keep``, only its other entries."""
+    import shutil
+
+    if not keep:
+        shutil.move(state_dir, target)
+        return
+    os.makedirs(target, exist_ok=True)
+    for entry in os.listdir(state_dir):
+        if entry not in keep:
+            shutil.move(os.path.join(state_dir, entry), target)
+
+
+def safe_slot(part: object) -> str:
+    """``part`` as one valid run-context slot: no path separator, never "."
+    or ".." (``RunContext.child`` rejects those, the workspace child
+    derivation any ".."), so a slot derived from a node id or tool name never
+    raises mid-call."""
+    safe = str(part).replace("/", "_").replace("\\", "_").strip()
+    return "child" if safe in ("", ".", "..") else safe.replace("..", "_")
 
 
 class MissingDependencyError(ImportError):
@@ -176,8 +259,270 @@ class _PrototypeCloneFactory:
     def __call__(self, *args, **kwargs):
         return self.prototype.deepcopy_with_fresh_id()
 
+    def resume_identity(self):
+        return self.prototype
+
     def __repr__(self):
         return f"_PrototypeCloneFactory({type(self.prototype).__name__})"
+
+
+class _FreshCloneFactory:
+    """Factory wrapping an inferencer prototype: each call returns
+    ``prototype.fresh_instance()``, an independent instance rebuilt from the
+    prototype's construction recipe (runtime bindings are never copied).
+
+    ``__call__`` accepts and ignores any args, like ``_PrototypeCloneFactory``.
+    """
+
+    __slots__ = ("prototype",)
+
+    def __init__(self, prototype):
+        self.prototype = prototype
+
+    def __call__(self, *_args, **_kwargs):
+        return self.prototype.fresh_instance()
+
+    def resume_identity(self):
+        return self.prototype
+
+    def __repr__(self):
+        return f"_FreshCloneFactory({type(self.prototype).__name__})"
+
+
+@attrs(frozen=True, slots=True)
+class ResolvedStage:
+    """A stage a call dispatches: ``owned`` when the call built it (a factory's
+    product, closed by the call), ``borrowed`` when it is a configured instance
+    (closed only by its definition's ``adisconnect``)."""
+
+    inferencer: Any = attrib()
+    ownership: str = attrib()
+
+    @property
+    def owned(self) -> bool:
+        return self.ownership == "owned"
+
+
+def resolve_stage(slot_value, *args, **kwargs) -> ResolvedStage:
+    """A callable that isn't an ``InferencerBase`` is a factory: its product is owned.
+    Anything else is borrowed."""
+    if callable(slot_value) and not isinstance(slot_value, InferencerBase):
+        return ResolvedStage(slot_value(*args, **kwargs), "owned")
+    return ResolvedStage(slot_value, "borrowed")
+
+
+class _LiveField:
+    """Recipe placeholder for a lazy factory field. The constructor receives Hydra's
+    interim ``functools.partial`` (holding eagerly built children), which the config
+    loader replaces after ``__init__``, so a rebuild reads the live field instead.
+    Copy, deepcopy and pickle all preserve the singleton."""
+
+    __slots__ = ()
+
+    def __reduce__(self):
+        return "_LIVE_FIELD"
+
+    def __repr__(self):
+        return "_LIVE_FIELD"
+
+
+_LIVE_FIELD = _LiveField()
+
+
+@lru_cache(maxsize=None)
+def _init_signature(cls: type) -> Optional[inspect.Signature]:
+    """``cls.__init__``'s signature, or ``None`` when it takes ``*args``/``**kwargs``."""
+    try:
+        signature = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return None
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    if any(p.kind in variadic for p in signature.parameters.values()):
+        return None
+    return signature
+
+
+def _init_param_names(cls: type) -> tuple:
+    signature = _init_signature(cls)
+    return tuple(signature.parameters)[1:] if signature is not None else ()
+
+
+@lru_cache(maxsize=None)
+def _lazy_init_params(cls: type) -> frozenset:
+    """Init-parameter names of lazy factory fields (the config loader's opt-in rule)."""
+    return frozenset(
+        a.alias
+        for a in fields(cls)
+        if a.name.endswith("_factory") or a.metadata.get("lazy_config_factory", False)
+    )
+
+
+@lru_cache(maxsize=None)
+def _non_config_init_params(cls: type) -> frozenset:
+    """Init-parameter names of ``NON_CONFIG_ATTR_NAMES`` fields (identity, parent links)."""
+    return frozenset(
+        a.alias for a in fields(cls) if a.name in cls.NON_CONFIG_ATTR_NAMES
+    )
+
+
+def _field_defaults(cls: type, names: Iterable[str]) -> Dict[str, Any]:
+    """``{init_param: class default}`` for the named attrs fields of ``cls`` that
+    have a default; factories are called (``takes_self`` factories are skipped)."""
+    wanted = set(names)
+    defaults = {}
+    for a in fields(cls):
+        if a.name not in wanted or not a.init or a.default is NOTHING:
+            continue
+        if not isinstance(a.default, Factory):
+            defaults[a.alias] = a.default
+        elif not a.default.takes_self:
+            defaults[a.alias] = a.default.factory()
+    return defaults
+
+
+def _snapshot(value: Any) -> Any:
+    """Copy exact containers recursively; keep every other value by reference."""
+    kind = type(value)
+    if kind is dict:
+        return {k: _snapshot(v) for k, v in value.items()}
+    if kind in (list, tuple, set):
+        return kind(_snapshot(v) for v in value)
+    return value
+
+
+def _capture_init_recipe(
+    cls: type, args: tuple, kwargs: dict
+) -> Optional[Dict[str, Any]]:
+    """``{init_param: snapshot}`` for the arguments explicitly passed to ``cls(...)``,
+    or ``None`` when they cannot be bound to ``cls.__init__`` by name."""
+    signature = _init_signature(cls)
+    if signature is None:
+        return None
+    try:
+        bound = signature.bind(None, *args, **kwargs)
+    except TypeError:
+        return None
+    lazy = _lazy_init_params(cls)
+    return {
+        name: _LIVE_FIELD if name in lazy else _snapshot(value)
+        for name, value in list(bound.arguments.items())[1:]
+    }
+
+
+class _InstanceRebuilder:
+    """One ``fresh_instance`` pass. Memoizes rebuilt inferencers so shared children
+    stay shared in the copy, and rejects an inferencer reachable from its own recipe."""
+
+    def __init__(self) -> None:
+        self._memo: Dict[int, Any] = {}
+        self._in_progress: Set[int] = set()
+
+    def build(self, inf: "InferencerBase", overrides: Dict[str, Any]) -> Any:
+        key = id(inf)
+        if key in self._memo:
+            return self._memo[key]
+        if key in self._in_progress:
+            raise ValueError(
+                f"cycle: {type(inf).__name__} is reachable from its own construction "
+                "recipe; cannot fresh_instance"
+            )
+        recipe = inf.__dict__.get("_init_recipe")
+        if recipe is None:
+            raise TypeError(
+                f"{type(inf).__name__} was not constructed through a bindable "
+                "__init__; cannot fresh_instance"
+            )
+        unknown = sorted(set(overrides) - set(_init_param_names(type(inf))))
+        if unknown:
+            raise TypeError(
+                f"{type(inf).__name__}.fresh_instance got unknown overrides "
+                f"{unknown}; overrides must be __init__ parameters"
+            )
+        self._in_progress.add(key)
+        try:
+            kwargs = self._rebuild_kwargs(inf, recipe, overrides)
+            fresh = type(inf)(**kwargs, **overrides)
+        finally:
+            self._in_progress.discard(key)
+        self._memo[key] = fresh
+        return fresh
+
+    def _rebuild_kwargs(
+        self, inf: "InferencerBase", recipe: Dict[str, Any], overrides: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        cls = type(inf)
+        skip = _non_config_init_params(cls) | overrides.keys()
+        field_names = {a.alias: a.name for a in fields(cls)}
+        kwargs = {}
+        for name, value in recipe.items():
+            if name in skip:
+                continue
+            if value is _LIVE_FIELD:
+                value = getattr(inf, field_names.get(name, name))
+            kwargs[name] = self.rebuild_value(value)
+        return kwargs
+
+    def rebuild_value(self, value: Any) -> Any:
+        if isinstance(value, InferencerBase):
+            return self.build(value, {})
+        if type(value) in (_PrototypeCloneFactory, _FreshCloneFactory):
+            return type(value)(self.build(value.prototype, {}))
+        if isinstance(value, LazyConfigFactory):
+            return value.fresh()
+        if isinstance(value, partial):
+            return partial(
+                self.rebuild_value(value.func),
+                *self.rebuild_value(value.args),
+                **self.rebuild_value(value.keywords),
+            )
+        if inspect.ismethod(value) and isinstance(value.__self__, InferencerBase):
+            return types.MethodType(value.__func__, self.build(value.__self__, {}))
+        kind = type(value)
+        if kind is dict:
+            return {k: self.rebuild_value(v) for k, v in value.items()}
+        if kind in (list, tuple, set):
+            return kind(self.rebuild_value(v) for v in value)
+        return value
+
+
+@lru_cache(maxsize=None)
+def _merged_invocation_keywords(cls: type) -> Mapping[str, Any]:
+    merged: dict = {}
+    for klass in reversed(cls.__mro__):
+        merged.update(vars(klass).get("_INVOCATION_KEYWORDS", {}))
+    return MappingProxyType(merged)
+
+
+@attrs_mod.frozen
+class RoleTransition:
+    """The template-layer attributes one ``switch_role`` call sets, handed from
+    ``TemplatedInferencerBase.switch_role`` to the base layer's audit trail."""
+
+    changes: Mapping[str, Any] = attrs_mod.field(
+        factory=dict, converter=lambda value: MappingProxyType(dict(value))
+    )
+
+
+# Set on a Tier-3 branch that reads only its own handles, never the instance
+# backing (``InferencerBase._tier3_detach_from_backing``).
+_TIER3_OWN_HANDLES_ONLY = "own_handles_only"
+
+
+class _BackingHandleView:
+    """Adapts an instance's legacy ``_<name>_backing`` attrs to the ``LiveHandles``
+    ``get``/``set`` API so a leaf teardown treats the no-context backing uniformly
+    with the connection-scoped branches (see ``_iter_live_handle_sets``)."""
+
+    __slots__ = ("_owner",)
+
+    def __init__(self, owner: Any) -> None:
+        self._owner = owner
+
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._owner.__dict__.get(f"_{name}_backing", default)
+
+    def set(self, name: str, value: Any) -> None:
+        self._owner.__dict__[f"_{name}_backing"] = value
 
 
 @attrs
@@ -296,6 +641,88 @@ class InferencerBase(Debuggable, Resumable, ABC):
     Disabled by default (``None``). Overridable verdict parser:
     ``_parse_guardrail_verdict``."""
 
+    bta_inferencer: Optional[Any] = attrib(
+        default=None,
+        kw_only=True,
+        metadata={"lazy_config_factory": True, "inferencer_template": True},
+    )
+    """Per-call fan-out template: run each call through a fresh
+    ``BreakdownThenAggregateInferencer`` instead of this inferencer's own backend.
+
+    Either one BTA template (a config factory, clone factory, callable or
+    instance), applied to every call, or, on a templated inferencer,
+    ``{role: template or None}``, keyed by the active ``switch_role`` role
+    (``"own"`` when no switch is in effect); an unmapped or ``None`` role runs
+    unfanned. The template itself is never run, bound or walked. Each call
+    materializes a fresh BTA as this inferencer's ``bta_inferencer`` child, whose
+    workers are fresh copies of this inferencer that receive their sub-query as
+    the final prompt, and whose blank breakdown/aggregator slots are copies of
+    this inferencer re-roled with the BTA's slot defaults. The preprocessor,
+    render, post-processor, ``expected_extraction``, state graphs and output
+    promotion of this inferencer run exactly once, around the fan-out.
+    ``None`` (default) disables fan-out."""
+
+    # Read via vars(type(owner)), so never inherited; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED: ClassVar[bool] = True
+
+    # Fields left out of a resume identity (``run_context.resume_identity``), with
+    # every ``Debuggable`` field and every secret: where the instance runs and
+    # writes, runtime sinks, the save / resume policy itself, retry and timeout
+    # scheduling, and failure fallbacks. Subclasses add theirs.
+    _RESUME_IDENTITY_EXCLUDE: ClassVar[FrozenSet[str]] = frozenset(
+        {
+            "workspace",
+            "source_path",
+            "target_path",
+            "additional_allowed_paths",
+            "output_manifest_index",
+            "graph_reporter",
+            "state_factory",
+            "state_graphs",
+            "enable_result_save",
+            "resume_with_saved_results",
+            "checkpoint_mode",
+            "max_retry",
+            "min_retry_wait",
+            "max_retry_wait",
+            "total_timeout_seconds",
+            "attempt_timeout_seconds",
+            "fallback_inferencer",
+            "fallback_mode",
+            "default_return_or_raise",
+            "surfaceable_exceptions",
+            "guardrail_empty_fail_fast_n",
+            "promote_exhausted_update",
+        }
+    )
+    # False on classes that can't host a fan-out, e.g. entrypoints that bypass the
+    # base inference seam.
+    _SUPPORTS_BTA_FANOUT: ClassVar[bool] = True
+    # True on classes that record their active role, so a role mapping can select.
+    _SUPPORTS_BTA_ROLE_MAPPING: ClassVar[bool] = False
+    # Per-call kwargs dropped before the fan-out's workers, and kwargs that continue
+    # one backend session (independent workers cannot share a session).
+    _FANOUT_DROPPED_ARGS: ClassVar[tuple] = ()
+    _FANOUT_SINGLE_CALL_ARGS: ClassVar[tuple] = ()
+
+    promote_exhausted_update: bool = attrib(default=True)
+    """Publish the best ``UPDATE``-rejected output when the retry budget runs out,
+    instead of discarding it.
+
+    The judge contract (``recovery/judge.jinja2``) defines ``UPDATE`` as "real,
+    on-topic work is present but it is incomplete … **We preserve it** and
+    revise/complete it in place", and ``PASS`` as content that "need not be
+    complete, deep, perfectly formatted". So ``PASS`` and ``UPDATE`` differ in
+    degree, not in kind — ``UPDATE`` never means *incorrect*. Yet once attempts
+    were exhausted the node raised and ``_finalize_output`` never ran, making a
+    terminal ``UPDATE`` indistinguishable from producing nothing.
+
+    ``RETRY`` exhaustion stays terminal: the judge defines it as "fundamentally
+    unusable: empty, wildly off-topic, or narration-only", i.e. explicitly
+    nothing to preserve. Only an ``UPDATE`` body is ever promoted, and a
+    ``DegradedOutput`` record naming the judge's outstanding asks is logged so
+    the artifact is never silently passed off as a clean pass."""
+
     guardrail_empty_fail_fast_n: int = attrib(default=2)
     """v4 Phase 3.2 — fail-fast threshold for identical empty / very-short
     outputs.
@@ -313,17 +740,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
     fingerprints in a row = deterministic failure pattern; further retries
     have produced ~25 minutes of wasted wall-clock per flow in production.
 
-    The trigger is per-inferencer-instance, tracked on the private attr
-    ``_guardrail_recent_empty_fingerprints`` (list of last N hashes).
-    Reset on the next non-empty / non-rejected output."""
-
-    _guardrail_recent_empty_fingerprints: list = attrib(
-        factory=list, init=False, repr=False
-    )
-    """Sliding window of the last N rejected-output fingerprints. Bounded
-    at ``guardrail_empty_fail_fast_n`` entries; reset to [] whenever a
-    rejected output's fingerprint differs OR the output isn't empty-shaped
-    (legitimate retry pattern). See ``_check_guardrail_fail_fast``."""
+    The trigger is per call: the window spans every attempt of one call
+    and lives in that call's fallback state
+    (``_current_fallback_state["guardrail_empty_fingerprints"]``), so a
+    previous call on the same instance never counts. Reset on the next
+    substantive or accepted output."""
 
     # State graph support — optional list of StateGraphTracker instances
     state_graphs: list = attrib(default=None)
@@ -551,17 +972,34 @@ class InferencerBase(Debuggable, Resumable, ABC):
     # The backing storage uses name mangling (`_InferencerBase__workspace`)
     # so subclasses can't accidentally shadow it with their own `_workspace`
     # attrib.
+    # A workflow that re-roots itself for one invocation (PTI's resume workspace
+    # under a host ctx, an LWI iteration) records the workspace here instead of
+    # writing its backing; ``_workspace`` returns it while that invocation runs.
+    _CALL_WORKSPACE = RuntimeKey("InferencerBase.call_workspace")
+
     @property
     def _workspace(self):
+        from agent_foundation.common.inferencers.run_context import active_run_context
+
+        frame = frame_for(self)
+        if frame is not None and frame.has(InferencerBase._CALL_WORKSPACE):
+            return frame.get(InferencerBase._CALL_WORKSPACE)
+        return self._workspace_under(active_run_context())
+
+    def _set_call_workspace(self, workspace) -> None:
+        """Re-root this instance for the rest of the current invocation without
+        touching its backing, children or loggers: a workspace-derived logger
+        already follows ``_workspace`` per write (``_log_path_override``)."""
+        invocation_of(self).put(InferencerBase._CALL_WORKSPACE, workspace)
+
+    def _workspace_under(self, ctx):
+        """The workspace this instance resolves when ``ctx`` is its active context."""
         # M7 §2.12 option-b: prefer a per-call workspace published into the
-        # active context's handles (``workspace_override``) when present — so a
+        # context's handles (``workspace_override``) when present — so a
         # single shared instance can serve concurrent branches with distinct
         # workspaces (the run-state is in the context, not on ``self``). Falls
         # back to the instance backing — **byte-identical** when no override is
         # set (no active context, or the orchestrator didn't publish one).
-        from agent_foundation.common.inferencers.run_context import active_run_context
-
-        ctx = active_run_context()
         if ctx is not None:
             override = ctx.handles.get("workspace_override", None)
             if override is not None:
@@ -633,37 +1071,44 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     def _read_child_workspace(self, child_inf, slot):
         """M7: resolve a child's effective workspace for orchestrator-side reads —
-        the published ctx ``workspace_override`` for ``slot`` when a context is
-        active, else the child's instance ``_workspace``. Lets an orchestrator
-        stop mutating ``child._workspace`` under a context (write-purity) while its
-        own reads still resolve. Byte-identical without a context."""
+        what the child itself resolves under ``ctx.child(slot)``: the published
+        ``workspace_override`` for ``slot``, else its instance backing, else that
+        child context's workspace. Never the bare ``child_inf._workspace``, which
+        resolves against THIS node's context and so returns this node's own
+        published workspace when it has one. Lets an orchestrator stop mutating
+        ``child._workspace`` under a context (write-purity) while its own reads
+        still resolve. Byte-identical without a context."""
         ctx = active_run_context()
-        if ctx is not None:
-            override = ctx.child(slot).handles.get("workspace_override", None)
-            if override is not None:
-                return override
-        return getattr(child_inf, "_workspace", None)
+        if ctx is None:
+            return getattr(child_inf, "_workspace", None)
+        child_ctx = ctx.child(slot)
+        if isinstance(child_inf, InferencerBase):
+            return child_inf._workspace_under(child_ctx)
+        override = child_ctx.handles.get("workspace_override", None)
+        return (
+            override if override is not None else getattr(child_inf, "_workspace", None)
+        )
 
-    def _bind_rebuilt_child_ws(self, child_inf, slot: str, child_ws) -> None:
-        """Durably bind a rebuilt, NON-SHARED WorkGraph child's workspace.
+    def _bind_rebuilt_child_ws(self, child_inf, slot: str, child_ws, *, owned) -> None:
+        """Bind a dispatched child's workspace at ``slot``.
 
         Publishes the workspace into the child's run-context (tier-1, ephemeral —
-        serves fresh-path ctx readers) AND sets the durable instance backing
-        (tier-2) so the binding survives a resume, where the active run-context is
-        not guaranteed to be the dispatched child ctx across the child's recovery
-        gate (see ``_workspace`` getter tiers). Safe ONLY for non-shared nodes —
-        per-subtask workers and the single aggregator — each dispatched exactly
-        once and never serving concurrent branches, so the durable set is
-        race-free and does NOT violate the shared-instance workspace write-purity
-        invariant that keeps reviewer/fixer reuse concurrency-safe. Byte-identical
-        to the prior legacy (no-ctx) path; the only change is that the durable set
-        is no longer gated behind the absence of a run-context.
+        serves fresh-path ctx readers). An ``owned`` child (this call built it) also
+        gets the durable instance backing (tier-2), so the binding survives a
+        resume, where the active run-context is not guaranteed to be the dispatched
+        child ctx across the child's recovery gate (see ``_workspace`` getter
+        tiers): the object is the run, so the write races nothing. A borrowed child
+        is a shared definition: under a host ctx it gets the publication only; with
+        no ctx or under a legacy root it keeps the setter, as before.
         """
         if child_ws is None:
             return
         child_ws.ensure_dirs()
         self._publish_workspace_to_ctx(self._rc_child(slot), child_ws)
-        if isinstance(child_inf, InferencerBase):
+        if not isinstance(child_inf, InferencerBase):
+            return
+        ctx = active_run_context()
+        if owned or ctx is None or ctx.legacy_mint:
             child_inf._workspace = child_ws
 
     # Subclasses may override this tuple to declare instance attributes that
@@ -884,13 +1329,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
         *,
         workspace=None,
         reset_session=True,
+        _role_changes: Optional[RoleTransition] = None,
     ):
         """Transition this inferencer to a new semantic role.
 
         Centralises the workspace-swap + session-reset pattern that orchestrators
         (MFDual, PTI, ...) previously performed inline. The base layer handles
         workspace assignment and session reset; TemplatedInferencerBase extends
-        with template attrs.
+        with template attrs, which it hands over as ``_role_changes``.
+
+        Under a host ctx nothing is written onto self: the workspace is published
+        to the active (role) ctx, the session reset goes to this branch's slot,
+        and the audit entry goes to the node's bounded ``provenance``. With no ctx
+        or under a legacy root, the workspace setter and the ``_role_history``
+        audit trail apply, as before.
 
         Part 2 (two-axis model): the deliverable flags (output_is_deliverable /
         is_deliverable_boundary) are RETIRED — role transitions carry only
@@ -898,32 +1350,57 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         Args:
             new_role: human-readable role name (e.g. 'fixer_inferencer').
-            workspace: if not None, assigned via the _workspace property
+            workspace: if not None, the role's workspace: published to the role
+                ctx under a host ctx, else assigned via the _workspace property
                 setter (triggers _configure_for_workspace cascade).
             reset_session: if True, calls self.reset_session() (when available).
         """
         import time
 
+        ctx = active_run_context()
+        host = ctx is not None and not ctx.legacy_mint
         # 1. Workspace assignment FIRST — triggers cascade
         if workspace is not None:
-            self._workspace = workspace
+            if host:
+                self._publish_workspace_to_ctx(ctx, workspace)
+            else:
+                self._workspace = workspace
         # 2. Session reset
         if reset_session and hasattr(self, "reset_session"):
             self.reset_session()
-        # 3. Audit trail (_role_history, lazy-init)
+        # 3. Audit trail
+        changes = {
+            **({"workspace": str(workspace.root)} if workspace else {}),
+            **(dict(_role_changes.changes) if _role_changes is not None else {}),
+        }
+        if host:
+            self._record_role_provenance(ctx, new_role, changes)
+            return
         history = getattr(self, "_role_history", None)
         if history is None:
             history = []
             object.__setattr__(self, "_role_history", history)
-        changes = {
-            **({"workspace": str(workspace.root)} if workspace else {}),
-        }
-        # Merge template-layer changes stashed by TemplatedInferencerBase.switch_role
-        pending = getattr(self, "_pending_role_changes", None)
-        if pending:
-            changes.update(pending)
-            object.__setattr__(self, "_pending_role_changes", None)
         history.append({"to_role": new_role, "at": time.time(), "changes": changes})
+
+    def _record_role_provenance(self, ctx, new_role: str, changes: dict) -> None:
+        """Append a host role switch to the node's provenance, keeping the last
+        ``_ROLE_PROVENANCE_LIMIT`` entries. Only the changed attribute names are
+        recorded (the values live in the node's typed ``RoleState``), so the entry
+        is always JSON-serializable."""
+        import time
+
+        node = ctx.node(creator=(type(self).__qualname__, ctx.path))
+        node.provenance.append(
+            {
+                "event": "switch_role",
+                "to_role": new_role,
+                "at": time.time(),
+                "changed": sorted(changes),
+            }
+        )
+        del node.provenance[: -self._ROLE_PROVENANCE_LIMIT]
+
+    _ROLE_PROVENANCE_LIMIT: ClassVar[int] = 64
 
     # Subclasses may override this class attribute to declare which attrs
     # they manage workspace assignment for themselves (e.g., PTI's runtime
@@ -1031,15 +1508,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         ``_propagate_cascading_attributes`` runs so the value reaches
         grandchildren.
         """
-        for spec in self._CASCADING_ATTRIBUTES:
-            if isinstance(spec, str):
-                name = spec
-                should_propagate = lambda _p, c: c is None
-            else:
-                name, should_propagate = spec
-            parent_val = getattr(self, name, None)
-            if parent_val is None:
-                continue  # parent unset — nothing to cascade for this attr
+        for name, parent_val, should_propagate in self._cascading_values():
 
             def _on_instance(
                 child,
@@ -1049,16 +1518,40 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 _cond=should_propagate,
                 _pv=parent_val,
             ):
-                if not isinstance(child, InferencerBase):
-                    return  # duck-typed callables don't participate
-                if _cond(_pv, getattr(child, _name, None)):
-                    setattr(child, _name, _pv)
-                    child._propagate_cascading_attributes()  # reach grandchildren
+                self._cascade_one(child, _name, _pv, _cond)
 
             def _on_partial(partial, field_name, key):
                 return None  # factory children inherit at instantiation, not here
 
             self._for_each_child_inferencer(_on_instance, _on_partial)
+
+    def _cascading_values(self) -> Iterator[tuple]:
+        """Yield ``(name, parent_value, should_propagate)`` for each
+        ``_CASCADING_ATTRIBUTES`` entry this inferencer has set (non-``None``)."""
+        for spec in self._CASCADING_ATTRIBUTES:
+            if isinstance(spec, str):
+                name = spec
+                should_propagate = lambda _p, c: c is None
+            else:
+                name, should_propagate = spec
+            parent_val = getattr(self, name, None)
+            if parent_val is not None:
+                yield name, parent_val, should_propagate
+
+    @staticmethod
+    def _cascade_one(child, name: str, parent_val: Any, should_propagate) -> None:
+        if not isinstance(child, InferencerBase):
+            return  # duck-typed callables don't participate
+        if should_propagate(parent_val, getattr(child, name, None)):
+            setattr(child, name, parent_val)
+            child._propagate_cascading_attributes()  # reach grandchildren
+
+    def _cascade_attributes_into(self, child) -> None:
+        """Cascade this inferencer's ``_CASCADING_ATTRIBUTES`` into ``child`` (and its
+        descendants) with the same explicit-value-wins rule, for a child the field
+        walker does not reach (e.g. one built per call)."""
+        for name, parent_val, should_propagate in self._cascading_values():
+            self._cascade_one(child, name, parent_val, should_propagate)
 
     def enable_debug_mode(self):
         """Enable debug mode and cascade it to child inferencers.
@@ -1100,8 +1593,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if isinstance(logger_val, str) and logger_val == "auto":
             self._normalize_loggers()
         elif getattr(self, "_logger_awaiting_workspace", False):
-            self._logger_awaiting_workspace = False
-            self._add_workspace_logger(workspace)
+            self._undefer_workspace_logger(workspace)
         elif isinstance(logger_val, dict):
             self._redirect_loggers_to_workspace(workspace)
 
@@ -1144,6 +1636,40 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if changed:
             self.logger = new_loggers
 
+    # The construction recipe is a record, not a live child: fresh-id regeneration
+    # reaches the children through their fields.
+    _FRESH_ID_SKIP_TRAVERSE = Debuggable._FRESH_ID_SKIP_TRAVERSE | {"_init_recipe"}
+
+    def __new__(cls, *args, **kwargs):
+        # object.__new__ rejects forwarded constructor args. copy/deepcopy/pickle
+        # call __new__ bare and then restore __dict__, carrying the source's recipe.
+        inst = super().__new__(cls)
+        inst.__dict__["_init_recipe"] = _capture_init_recipe(cls, args, kwargs)
+        return inst
+
+    def fresh_instance(self, **overrides: Any) -> "InferencerBase":
+        """Return a new, unbound instance rebuilt from this instance's construction recipe.
+
+        The recipe records constructor intent only (the arguments passed to
+        ``cls(...)``), so nothing set after construction is carried: workspace and
+        logger bindings, cache folders, sessions, cascaded attrs, or any other
+        setattr. Nested inferencers, clone factories, lazy factories, partials and
+        inferencer-bound methods are rebuilt recursively (children shared in the
+        source stay shared in the copy), including inside plain ``dict`` /
+        ``list`` / ``tuple`` / ``set`` values; every other value is passed by
+        reference, container subclasses such as ``OrderedDict`` or named tuples
+        included.
+        Identity and parent links (``NON_CONFIG_ATTR_NAMES``) are dropped.
+        ``overrides`` replace recipe entries by ``__init__`` parameter name.
+
+        Raises:
+            TypeError: no recipe (``__init__`` takes ``*args``/``**kwargs`` or the
+                arguments could not be bound), or an override that is not an
+                ``__init__`` parameter.
+            ValueError: an inferencer is reachable from its own recipe.
+        """
+        return _InstanceRebuilder().build(self, overrides)
+
     def __attrs_post_init__(self):
         # Leaf-only guardrail: the lightweight output-guardrail judge drives leaf
         # RETRY/UPDATE recovery (StreamingInferencerBase). An orchestrator uses the
@@ -1159,6 +1685,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 f"not on orchestrators ({type(self).__name__}). Attach the guardrail "
                 f"to the leaf inferencer(s) whose output should be judged."
             )
+        self._validate_bta_inferencer_spec()
 
         if self.logger is None:
             self.logger = "auto"
@@ -1306,6 +1833,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
     def _for_each_child_inferencer(self, on_instance, on_partial):
         """Walk attrs fields and invoke callbacks for child inferencers.
 
+        Fields whose metadata sets ``inferencer_template`` hold templates for
+        per-call instances, not live children, and are skipped.
+
         Finds child inferencers in five value patterns:
         1. Direct InferencerBase attr
         2. functools.partial (e.g., worker factory)
@@ -1328,6 +1858,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
         attr_name = TEMPLATE_EXTRA_FEED_ATTR
 
         for field in attr.fields(type(self)):
+            if field.metadata.get("inferencer_template", False):
+                continue
             try:
                 value = getattr(self, field.name)
             except AttributeError:
@@ -1591,13 +2123,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
             attempt_dir = os.path.join(ws.root, ".attempts", str(attempt))
             moved = False
-            for state_dir in (ws.outputs_dir, ws.checkpoints_dir):
+            for state_dir, keep in (
+                (ws.outputs_dir, frozenset()),
+                (ws.checkpoints_dir, self._retry_archive_keeps()),
+            ):
                 if os.path.isdir(state_dir):
                     os.makedirs(attempt_dir, exist_ok=True)
-                    shutil.move(
-                        state_dir,
-                        os.path.join(attempt_dir, os.path.basename(state_dir)),
-                    )
+                    target = os.path.join(attempt_dir, os.path.basename(state_dir))
+                    _move_into_archive(state_dir, target, keep)
                     moved = True
             art = ws.artifacts_dir
             if os.path.isdir(art):
@@ -1614,6 +2147,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 ws.ensure_dirs()  # recreate the emptied outputs/ + checkpoints/
         except Exception:  # noqa: BLE001 — archival must never block a retry
             _logger.debug("U3c archive-and-clean skipped", exc_info=True)
+
+    def _retry_archive_keeps(self) -> FrozenSet[str]:
+        """Entries of ``checkpoints/`` a retry's archive leaves in place: state that
+        belongs to the whole call, not to the failed attempt (none by default)."""
+        return frozenset()
 
     @abstractmethod
     def _infer(
@@ -1677,10 +2215,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
         workspace (an unused placeholder slot).
 
         Mutates only instance-local logger state — never ``self._workspace`` — so
-        it does not reintroduce the cross-branch instance mutation M7 removed; the
-        un-defer body is synchronous (no ``await``) so concurrent gathered
-        branches cannot create duplicate loggers, and per-branch write routing is
-        handled by :meth:`_log_path_override`.
+        it does not reintroduce the cross-branch instance mutation M7 removed.
+        :meth:`_undefer_workspace_logger` re-checks the flag under a lock and
+        replaces (never mutates) the logger dicts, so concurrent ``parallel_infer``
+        threads and gathered branches neither create duplicate loggers nor break
+        a concurrent ``log`` iterating ``self.logger``; per-branch write routing
+        is handled by :meth:`_log_path_override`.
         """
         from agent_foundation.common.inferencers.run_context import active_run_context
 
@@ -1710,8 +2250,16 @@ class InferencerBase(Debuggable, Resumable, ABC):
             getattr(ws, "root", "?"),
             getattr(ctx, "path", "?"),
         )
-        self._logger_awaiting_workspace = False
-        self._add_workspace_logger(ws)
+        self._undefer_workspace_logger(ws)
+
+    def _undefer_workspace_logger(self, workspace) -> None:
+        """Create the deferred workspace logger exactly once, even when
+        ``parallel_infer`` threads race to un-defer it."""
+        with _WORKSPACE_LOGGER_LOCK:
+            if not getattr(self, "_logger_awaiting_workspace", False):
+                return
+            self._logger_awaiting_workspace = False
+            self._add_workspace_logger(workspace)
 
     def _tag_ws_log_relpath(self, name, file_path, workspace):
         """Record a workspace-derived logger's path *relative to the workspace
@@ -1724,9 +2272,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
         follow the inferencer to whatever workspace is effective without
         hardcoding a filename or mutating the (possibly shared) logger.
         """
-        if not hasattr(self, "_ws_log_relpaths"):
-            self._ws_log_relpaths = {}
-        self._ws_log_relpaths[name] = os.path.relpath(file_path, workspace.root)
+        self._ws_log_relpaths = {
+            **(getattr(self, "_ws_log_relpaths", None) or {}),
+            name: os.path.relpath(file_path, workspace.root),
+        }
 
     def _add_workspace_logger(self, workspace):
         """Create a JsonLogger at workspace.logs_dir and add it to self.logger."""
@@ -1745,11 +2294,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
             LoggerConfig(pass_item_key_as="parts_key_path_root"),
         )
         if isinstance(self.logger, dict):
-            # Post-normalize (deferred → upgrade): add directly + register config.
-            self.logger["_workspace"] = json_entry[0]
-            if not hasattr(self, "_resolved_logger_configs"):
-                self._resolved_logger_configs = {}
-            self._resolved_logger_configs["_workspace"] = json_entry[1]
+            # Post-normalize (deferred → upgrade): replace the dicts rather than
+            # mutate them, so a concurrent ``log`` iterating the old dict is safe.
+            self.logger = {**self.logger, "_workspace": json_entry[0]}
+            self._resolved_logger_configs = {
+                **(getattr(self, "_resolved_logger_configs", None) or {}),
+                "_workspace": json_entry[1],
+            }
         else:
             # Pre-normalize (logger == "auto", e.g. constructed with a workspace):
             # hand _normalize_loggers a dict so the "_workspace" name and inline
@@ -1809,7 +2360,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
         return inference_input
 
     def _finalize_output(self, response: Any) -> Any:
-        """Finalize outputs after inference: write the <Response> summary, emit manifest.
+        """Finalize outputs after inference. Orchestrators override this to promote
+        their canonical child; the base behaviour is ``_finalize_leaf_output``."""
+        return self._finalize_leaf_output(response)
+
+    def _finalize_leaf_output(self, response: Any) -> Any:
+        """Finalize a leaf's outputs: write the <Response> summary, emit manifest.
 
         Part 2 (two-axis model): ``outputs/`` IS the deliverable set — there is no
         move to ``final_deliverables/`` (retired). Everything the agent wrote to
@@ -1862,22 +2418,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         return response
 
-    _output_finalized: bool = False
-
-    def _complete_inference(self, response: Any = None, *, force: bool = False) -> Any:
-        """Centralized output-finalization hook.
-
-        Calls ``_finalize_output(response)``.
-        Idempotent — safe to call multiple times; first call acts,
-        subsequent are no-ops.
-        """
-        if self._output_finalized and not force:
-            return response
-        if response is not None:
-            response = self._finalize_output(response)
-        self._output_finalized = True
-        return response
-
     # -- Orchestrator symlink helpers ------------------------------------
 
     @staticmethod
@@ -1903,7 +2443,34 @@ class InferencerBase(Debuggable, Resumable, ABC):
             else:
                 _shutil.copy2(src, dst)
 
-    def _symlink_child_output(self, child_workspace, child_output_name=None) -> None:
+    @staticmethod
+    def _replace_with_symlink(src: str, dst: str) -> None:
+        """Atomically point the file *dst* at *src*, replacing any existing entry.
+
+        The link (or copy, where symlinks are unsupported) is built at a
+        temporary sibling of *dst* and ``os.replace``d onto it, so readers
+        never observe a missing or half-written file.
+        """
+        import shutil as _shutil
+
+        dst_dir = os.path.dirname(dst) or "."
+        os.makedirs(dst_dir, exist_ok=True)
+        tmp = os.path.join(
+            dst_dir, f".{os.path.basename(dst)}.{uuid.uuid4().hex[:8]}.tmp"
+        )
+        try:
+            try:
+                os.symlink(os.path.abspath(src), tmp)
+            except (OSError, NotImplementedError):
+                _shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+
+    def _symlink_child_output(
+        self, child_workspace, child_output_name=None, *, replace_canonical=False
+    ) -> None:
         """Symlink a canonical child's output and deliverables as own.
 
         Used by orchestrator ``_finalize_output`` overrides to surface
@@ -1916,6 +2483,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         When ``child_output_name`` is ``None``, assumes the child uses
         the same filename as the orchestrator (``self.output_path``).
+
+        An existing own output is kept unless ``replace_canonical`` is true,
+        in which case it is atomically replaced by the child's.
 
         For sidecars: promotes each non-bookkeeping entry in the child's
         ``outputs/`` into the orchestrator's own ``outputs/`` (skip-if-exists).
@@ -1947,7 +2517,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
         )
         if src and os.path.isfile(src):
             own_output = ws.output_path(own_name)
-            self._symlink_or_copy(src, own_output)
+            if replace_canonical:
+                self._replace_with_symlink(src, own_output)
+            else:
+                self._symlink_or_copy(src, own_output)
 
         # Part 2: the final_deliverables/ symlink loop is RETIRED — deliverables now
         # live directly in outputs/ (deliverables_dir collapses to outputs_dir), so
@@ -1992,7 +2565,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         self._symlink_child_output(child_workspace, child_output_name)
 
-    def _promote_child_checkpoints(self, child: "InferencerBase") -> None:
+    def _promote_child_checkpoints(
+        self, child: "InferencerBase", slot: str, *, parent_ws
+    ) -> None:
         """Publish a child's ``checkpoint_scope="parent"`` extractions up into
         this parent's ``checkpoints/<child>/``.
 
@@ -2005,6 +2580,10 @@ class InferencerBase(Debuggable, Resumable, ABC):
         ``checkpoints/<child>/<persist_to>``. The ``<child>`` segment is the
         child workspace's own directory name, so the promoted file lands beside
         that node's other checkpoints (e.g. its ``__graph_expansion__`` record).
+        ``slot`` is the child's run-context slot, the one its call ran under; the
+        child's workspace is read through it (:meth:`_read_child_workspace`).
+        ``parent_ws`` is the workspace of this parent's current call (BTA passes
+        its call record's), never re-resolved from whichever ctx is active.
 
         Atomic tmp->rename so a resumer never observes a half-written file;
         best-effort (a failed copy is logged, never gates), mirroring
@@ -2014,9 +2593,8 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         import shutil
 
-        ws = self._workspace
-        child_ws = getattr(child, "_workspace", None)
-        if ws is None or child_ws is None:
+        child_ws = self._read_child_workspace(child, slot)
+        if parent_ws is None or child_ws is None:
             return
         child_name = os.path.basename(os.path.normpath(child_ws.root))
         if not child_name:
@@ -2036,7 +2614,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             src = child_ws.output_path(dest)
             if not os.path.isfile(src):
                 continue
-            target = ws.checkpoint_path(os.path.join(child_name, dest))
+            target = parent_ws.checkpoint_path(os.path.join(child_name, dest))
             try:
                 os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
                 tmp = f"{target}.tmp"
@@ -2368,6 +2946,18 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
     # -- Inference pipeline -------------------------------------------------
 
+    def _prepare_prompt(self, inference_input: Any, extra_feed: Optional[dict]) -> Any:
+        """Preprocess, then render (opt-in: only when template_manager is set).
+
+        ``extra_feed`` is forwarded only when given, so ``_render_prompt``
+        overrides that don't declare it keep working.
+        """
+        if self.input_preprocessor is not None:
+            inference_input = self.input_preprocessor(inference_input)
+        if extra_feed is not None:
+            return self._render_prompt(inference_input, extra_feed=extra_feed)
+        return self._render_prompt(inference_input)
+
     def _infer_single(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
     ):
@@ -2376,16 +2966,27 @@ class InferencerBase(Debuggable, Resumable, ABC):
         # `extra_feed` is consumed by _render_prompt; `render_only` short-circuits
         # the LLM call. Both are KEYWORD-ONLY by convention here (orchestrators
         # pass them by name). Extracting them prevents leakage to _infer() which
-        # would TypeError on unrecognized kwargs.
-        _extra_feed = _inference_args.pop("extra_feed", None)
-        _render_only = _inference_args.pop("render_only", False)
-        return self.__infer_single_impl(
-            inference_input,
-            inference_config,
-            _extra_feed=_extra_feed,
-            _render_only=_render_only,
-            **_inference_args,
-        )
+        # would TypeError on unrecognized kwargs. `prepared_input` marks an input
+        # that is already the final prompt (no preprocessing, no rendering).
+        with open_invocation(self, "infer") as frame:
+            _extra_feed = _inference_args.pop("extra_feed", None)
+            _render_only = _inference_args.pop("render_only", False)
+            _prepared_input = _inference_args.pop("prepared_input", False)
+            self._pop_invocation_keywords(frame, _inference_args)
+            self._init_call_state(inference_input)
+            runs_provider = self._runs_provider(_render_only)
+            if runs_provider:
+                _inference_args = self._prepare_call(_inference_args)
+            result = self.__infer_single_impl(
+                inference_input,
+                inference_config,
+                _extra_feed=_extra_feed,
+                _render_only=_render_only,
+                _prepared_input=_prepared_input,
+                **_inference_args,
+            )
+            frame.result = self._conclude_call(result) if runs_provider else result
+        return frame.result
 
     def __infer_single_impl(
         self,
@@ -2394,6 +2995,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         *,
         _extra_feed: Optional[dict] = None,
         _render_only: bool = False,
+        _prepared_input: bool = False,
         **_inference_args,
     ):
         """
@@ -2428,22 +3030,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
-        self._last_inference_input = inference_input
 
-        if self.input_preprocessor is not None:
-            inference_input = self.input_preprocessor(inference_input)
-
-        # Template rendering (opt-in: only when template_manager is set).
-        # Round-7 invariant: conditional kwarg pass to avoid TypeError on
-        # subclass overrides that don't declare extra_feed (e.g.
-        # ConversationalInferencer._render_prompt). When _extra_feed is
-        # None, this call is byte-identical to the legacy form.
-        if _extra_feed is not None:
-            inference_input = self._render_prompt(
-                inference_input, extra_feed=_extra_feed
-            )
-        else:
-            inference_input = self._render_prompt(inference_input)
+        # Round-7 invariant (inside _prepare_prompt): conditional kwarg pass to
+        # avoid TypeError on subclass overrides that don't declare extra_feed
+        # (e.g. ConversationalInferencer._render_prompt).
+        if not _prepared_input:
+            inference_input = self._prepare_prompt(inference_input, _extra_feed)
 
         # v5 Fix #1 — capture the POST-render prompt as a closure-local so
         # Fix #4 (recovery) can re-issue the rendered prompt and the
@@ -2459,21 +3051,24 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if _render_only:
             return inference_input
 
+        # Before the resume hook: a fanned-out call never runs this backend, so a
+        # stale backend-level cache must not replay it (resume is the fan-out's).
+        if self._should_fan_out():
+            return self._infer_via_fanout(
+                inference_input,
+                inference_config,
+                {**_inference_args, **self.get_inference_args_from_state_graphs()},
+            )
+
         # Resume hook: check for cached result from a previous session.
         # Placed AFTER preprocessing/rendering so prompt hash matches cache.
         resume_result = self._try_resume_from_cache(
             inference_input, inference_config, **_inference_args
         )
         if resume_result is not None:
-            # Run the same post-processing tail as the normal path
-            resume_result = self._finalize_output(resume_result)
-            if self.state_graphs:
-                self.update_state_graphs(resume_result)
-            if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(
-                    self._normalize_for_post_processor(resume_result)
-                )
-            return resume_result
+            return self._complete_response(
+                resume_result, finalize=self._finalize_output
+            )
 
         inference_args = self.default_inference_args.copy()
         if _inference_args:
@@ -2709,6 +3304,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     # an outer wrapper must re-raise — NOT re-run the whole subtree
                     # (that multiplied one bad leaf into a whole-propose re-run).
                     OutputValidationExhaustedError,
+                    InvocationContractError,
                 ),
             )
         except TimeoutError:
@@ -2717,37 +3313,43 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 "TotalTimeout",
             )
             raise
+        except OutputValidationExhaustedError as exhausted:
+            # Sync mirror of the async branch — see there for rationale.
+            inference_response = self._accept_exhausted_update(
+                exhausted, _fallback_state
+            )
         finally:
             _current_fallback_state.reset(token)
 
-        # v5 Phase 1.1 — pair the InferenceResponse parts file with this
-        # call's InferenceInput via the shared call_id name-hint.
-        self.log_debug(
-            inference_response,
-            "InferenceResponse",
-            is_artifact=True,
-            **_corr,
+        return self._finish_inference_call(
+            inference_response, _corr, finalize=self._finalize_output
         )
 
-        # Output finalization (promote deliverables, write summary)
-        inference_response = self._finalize_output(inference_response)
-
-        # Update state graphs from response
+    def _complete_response(self, response: Any, *, finalize: Callable) -> Any:
+        """Shared call epilogue: finalize outputs, update state graphs, post-process."""
+        response = finalize(response)
         if self.state_graphs:
-            self.update_state_graphs(inference_response)
-
+            self.update_state_graphs(response)
         if self.response_post_processor is not None:
-            post_input = self._normalize_for_post_processor(inference_response)
-            processed_response = self.response_post_processor(post_input)
-            self.log_debug(
-                processed_response,
-                "PostProcessedResponse",
-                is_artifact=True,
-                **_corr,
+            return self.response_post_processor(
+                self._normalize_for_post_processor(response)
             )
-            return processed_response
+        return response
 
-        return inference_response
+    def _finish_inference_call(
+        self, response: Any, corr: dict, *, finalize: Callable
+    ) -> Any:
+        """``_complete_response`` bracketed by the ``InferenceResponse`` /
+        ``PostProcessedResponse`` artifact logs of a normal (non-resumed) call.
+
+        ``corr`` pairs both artifacts with this call's ``InferenceInput``
+        through the shared call_id name-hint.
+        """
+        self.log_debug(response, "InferenceResponse", is_artifact=True, **corr)
+        completed = self._complete_response(response, finalize=finalize)
+        if self.response_post_processor is not None:
+            self.log_debug(completed, "PostProcessedResponse", is_artifact=True, **corr)
+        return completed
 
     def _normalize_for_post_processor(self, response: Any) -> str:
         """Extract text from a structured response for post-processing.
@@ -2766,6 +3368,390 @@ class InferencerBase(Debuggable, Resumable, ABC):
             f"response_post_processor expects str or an object with a str .output attribute, "
             f"got {type(response).__name__}. Add a .output property or handle this type explicitly."
         )
+
+    # -- Per-call BTA fan-out (bta_inferencer) -------------------------------
+
+    def _validate_bta_inferencer_spec(self) -> None:
+        """Reject a ``bta_inferencer`` value this class cannot honour."""
+        spec = self.bta_inferencer
+        if spec is None:
+            return
+        cls_name = type(self).__name__
+        if not self._SUPPORTS_BTA_FANOUT:
+            raise TypeError(
+                f"{cls_name} does not support bta_inferencer; leave it None"
+            )
+        if isinstance(spec, Mapping):
+            if not self._SUPPORTS_BTA_ROLE_MAPPING:
+                raise TypeError(
+                    f"{cls_name}.bta_inferencer is a role mapping, but {cls_name} "
+                    "records no roles; give a single BTA template"
+                )
+            entries = [(f"bta_inferencer[{role!r}]", t) for role, t in spec.items()]
+        else:
+            entries = [("bta_inferencer", spec)]
+        for label, template in entries:
+            if template is None or callable(template):
+                continue
+            if not isinstance(template, InferencerBase):
+                raise TypeError(
+                    f"{cls_name}.{label} must be a BTA template (config factory, "
+                    f"callable or inferencer) or None, got "
+                    f"{type(template).__name__}: {template!r}"
+                )
+
+    def _active_role_name(self) -> Optional[str]:
+        """The ``switch_role`` role this inferencer's render uses, or ``None`` for
+        its own configured role."""
+        return None
+
+    def _select_bta_template(self) -> Any:
+        """The ``bta_inferencer`` template for the active role (``None``: unfanned)."""
+        spec = self.bta_inferencer
+        if not isinstance(spec, Mapping):
+            return spec
+        return spec.get(self._active_role_name() or BTA_OWN_ROLE)
+
+    @property
+    def _delegates_execution(self) -> bool:
+        """True when this call runs through a per-call BTA instead of the backend."""
+        return self._SUPPORTS_BTA_FANOUT and self._select_bta_template() is not None
+
+    def _should_fan_out(self) -> bool:
+        """Whether this call fans out. Logs ``BtaFanOutBypassed`` when a role
+        mapping leaves the active role unmapped."""
+        spec = self.bta_inferencer
+        if spec is None:
+            return False
+        if self._select_bta_template() is not None:
+            return True
+        self.log_info(
+            {
+                "reason": "role_not_mapped",
+                "role": self._active_role_name() or BTA_OWN_ROLE,
+                "mapped_roles": sorted(
+                    str(role) for role, t in spec.items() if t is not None
+                ),
+            },
+            "BtaFanOutBypassed",
+        )
+        return False
+
+    def _infer_via_fanout(self, contract, inference_config, inference_args) -> Any:
+        text, corr = self._run_fanout(contract, inference_config, inference_args)
+        return self._finish_inference_call(
+            text, corr, finalize=self._finalize_leaf_output
+        )
+
+    async def _ainfer_via_fanout(
+        self, contract, inference_config, inference_args
+    ) -> Any:
+        text, corr = await self._arun_fanout(contract, inference_config, inference_args)
+        return self._finish_inference_call(
+            text, corr, finalize=self._finalize_leaf_output
+        )
+
+    def _run_fanout(self, contract, inference_config, inference_args) -> tuple:
+        """Run ``contract`` through a fresh per-call BTA; returns ``(text, corr)``.
+        This call's ledger closes the per-call BTA when the call ends."""
+        call_id = uuid.uuid4().hex[:8]
+        corr = _call_correlation_kwargs(call_id)
+        self.log_info(contract, "InferenceInput", is_artifact=True, **corr)
+        call_args, worker_args = self._split_fanout_args(inference_args)
+        fanout, bta_ws, child_rc = self._prepare_fanout(worker_args, call_id, contract)
+        started = time.monotonic()
+        response = fanout.infer(
+            contract, inference_config, run_context=child_rc, **call_args
+        )
+        text = self._conclude_fanout(
+            fanout, bta_ws, child_rc, response, call_id, started
+        )
+        return text, corr
+
+    async def _arun_fanout(self, contract, inference_config, inference_args) -> tuple:
+        """Async ``_run_fanout``."""
+        call_id = uuid.uuid4().hex[:8]
+        corr = _call_correlation_kwargs(call_id)
+        self.log_info(contract, "InferenceInput", is_artifact=True, **corr)
+        call_args, worker_args = self._split_fanout_args(inference_args)
+        fanout, bta_ws, child_rc = self._prepare_fanout(worker_args, call_id, contract)
+        started = time.monotonic()
+        response = await fanout.ainfer(
+            contract, inference_config, run_context=child_rc, **call_args
+        )
+        text = self._conclude_fanout(
+            fanout, bta_ws, child_rc, response, call_id, started
+        )
+        return text, corr
+
+    def _prepare_fanout(self, worker_args: dict, call_id: str, contract) -> tuple:
+        """Validate, build and bind this call's BTA before any model call; returns
+        ``(fanout, bta_workspace, child_run_context)``."""
+        self._validate_bta_inferencer_spec()
+        proto = self._fanout_prototype()
+        self._validate_fanout(proto)
+        fanout = self._materialize_fanout(proto, worker_args)
+        # Every InferencerBase stage of the fanout is a per-call copy (inventory
+        # D1), so closing it when this call ends closes what the call built.
+        invocation_of(self).ledger.register(fanout, BTA_INFERENCER_SLOT)
+        self._validate_fanout_aggregator(fanout)
+        seeded = self._seed_aggregator_feed(fanout)
+        self._cascade_attributes_into(fanout)
+        bta_ws = self._workspace.child(BTA_INFERENCER_SLOT)
+        child_rc = self._rc_child(BTA_INFERENCER_SLOT, workspace=bta_ws)
+        self._bind_rebuilt_child_ws(fanout, BTA_INFERENCER_SLOT, bta_ws, owned=True)
+        if child_rc is not None:
+            # Feed overrides published above the fan-out are already rendered into
+            # the contract; the barrier keeps them from reaching its nodes again.
+            child_rc.handles.set(TEMPLATE_EXTRA_FEED_SCOPE_HANDLE, True)
+        text = str(contract)
+        self.log_info(
+            {
+                "call_id": call_id,
+                "depth": self._fanout_depth(),
+                "role": self._active_role_name() or BTA_OWN_ROLE,
+                "template_type": type(proto).__name__,
+                "bta_ws": str(getattr(bta_ws, "root", bta_ws)),
+                "worker_template_overridden": proto.worker_inferencers is not None,
+                **self._fanout_slot_sources(proto),
+                "seeded_feed_keys": seeded,
+                "worker_arg_keys": sorted(worker_args),
+                "contract_chars": len(text),
+                "contract_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            },
+            "BtaFanOut",
+            **_call_correlation_kwargs(call_id),
+        )
+        return fanout, bta_ws, child_rc
+
+    def _conclude_fanout(
+        self, fanout, bta_ws, child_rc, response, call_id, started
+    ) -> str:
+        # Promote before finalize: finalize keeps an existing canonical output.
+        self._symlink_child_output(
+            bta_ws, child_output_name=fanout.output_path, replace_canonical=True
+        )
+        text = fanout.response_text(response)
+        summary = self._summary_at(fanout, child_rc)
+        self.log_info(
+            {
+                "call_id": call_id,
+                "n_subtasks": (0 if summary is None else summary.worker_count),
+                "aggregated_chars": len(text),
+                "elapsed_s": round(time.monotonic() - started, 3),
+            },
+            "BtaFanOutComplete",
+            **_call_correlation_kwargs(call_id),
+        )
+        return text
+
+    def _fanout_prototype(self) -> Any:
+        """The selected template unwrapped to a BTA prototype (called when it is
+        a config factory or other callable)."""
+        template = self._select_bta_template()
+        if isinstance(template, (_PrototypeCloneFactory, _FreshCloneFactory)):
+            return template.prototype
+        if isinstance(template, InferencerBase):
+            return template
+        return template()
+
+    def _validate_fanout(self, proto) -> None:
+        """Reject a fan-out that cannot run correctly for this call."""
+        from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
+            BreakdownThenAggregateInferencer,
+        )
+
+        cls_name = type(self).__name__
+        if not isinstance(proto, BreakdownThenAggregateInferencer):
+            raise TypeError(
+                f"{cls_name}.bta_inferencer must build a "
+                f"BreakdownThenAggregateInferencer, got {type(proto).__name__}"
+            )
+        expected = proto.expected_parent_types
+        classes = tuple(
+            t if isinstance(t, type) else import_target(t) for t in expected
+        )
+        if classes and not isinstance(self, classes):
+            raise TypeError(
+                f"{cls_name} is not one of its bta_inferencer template's "
+                f"expected_parent_types {list(expected)}"
+            )
+        if self._workspace is None or os.path.isabs(self.output_path or ""):
+            raise ValueError(
+                f"{cls_name} fan-out needs a workspace and a workspace-relative "
+                f"output_path (got output_path={self.output_path!r})"
+            )
+        self._validate_fanout_slots(proto)
+        depth = self._fanout_depth()
+        if depth >= MAX_BTA_FANOUT_DEPTH:
+            raise RuntimeError(
+                f"{cls_name} bta_inferencer fan-out depth {depth} reached "
+                f"MAX_BTA_FANOUT_DEPTH={MAX_BTA_FANOUT_DEPTH}"
+            )
+
+    def _validate_fanout_slots(self, proto) -> None:
+        cls_name = type(self).__name__
+        if not proto.inject_upstream_artifacts_to_aggregator:
+            raise ValueError(
+                f"{cls_name}.bta_inferencer sets inject_upstream_artifacts_to_aggregator"
+                "=False: the aggregator input would replace the contract"
+            )
+        blank = self._fanout_blank_slots(proto)
+        if blank and not self.supports_prompt_rendering:
+            raise ValueError(
+                f"{cls_name}.bta_inferencer leaves {list(blank)} blank, but {cls_name} "
+                "cannot render prompts to fill them; configure them explicitly"
+            )
+
+    def _validate_fanout_aggregator(self, fanout) -> None:
+        aggregator = fanout.aggregator_inferencer
+        if (
+            aggregator is not None
+            and not getattr(aggregator, "supports_prompt_rendering", False)
+            and fanout.aggregator_prompt_builder is None
+        ):
+            raise ValueError(
+                f"{type(self).__name__}.bta_inferencer aggregator "
+                f"{type(aggregator).__name__} cannot render the worker outputs and "
+                "has no aggregator_prompt_builder"
+            )
+
+    @staticmethod
+    def _fanout_blank_slots(proto) -> tuple:
+        """The ``proto`` slots a re-roled copy of the fanned-out inferencer fills."""
+        blank = []
+        if proto.breakdown_inferencer is None and not proto.predefined_sub_queries:
+            blank.append("breakdown_inferencer")
+        if proto.aggregator_inferencer is None and not proto.disable_aggregator:
+            blank.append("aggregator_inferencer")
+        return tuple(blank)
+
+    def _fanout_slot_sources(self, proto) -> Dict[str, str]:
+        blank = self._fanout_blank_slots(proto)
+        if proto.predefined_sub_queries:
+            breakdown = "predefined"
+        else:
+            breakdown = "p_clone" if "breakdown_inferencer" in blank else "explicit"
+        if proto.disable_aggregator:
+            aggregator = "disabled"
+        else:
+            aggregator = "p_clone" if "aggregator_inferencer" in blank else "explicit"
+        return {"breakdown_source": breakdown, "aggregator_source": aggregator}
+
+    def _materialize_fanout(self, proto, worker_args: dict) -> Any:
+        """This call's BTA: ``proto`` rebuilt with fresh copies of this inferencer
+        as its workers and in its blank slots, and its aggregator resolved."""
+        if proto.worker_inferencers is not None:
+            warnings.warn(
+                f"{type(self).__name__}.bta_inferencer template sets "
+                "worker_inferencers; fan-out workers are always copies of the "
+                "fanned-out inferencer, so it is ignored",
+                UserWarning,
+                stacklevel=3,
+            )
+        worker = self.fresh_instance(**self._p_derived_overrides())
+        fanout = proto.fresh_instance(
+            worker_inferencers=_FreshCloneFactory(worker),
+            worker_inference_args={
+                **proto.worker_inference_args,
+                **worker_args,
+                "prepared_input": True,
+            },
+            workspace=None,
+            **self._fanout_slot_overrides(proto),
+        )
+        # Resolved before seeding, into the fanout's own slot: a config factory
+        # applies its feed over the feed its aggregator declares, and the fanout's
+        # call then borrows the instance validated and seeded here.
+        fanout.aggregator_inferencer = resolve_stage(
+            fanout.aggregator_inferencer
+        ).inferencer
+        return fanout
+
+    def _p_derived_overrides(self) -> Dict[str, Any]:
+        """``fresh_instance`` overrides for every copy of this inferencer inside its
+        fan-out: no fan-out of its own, no boundary processing, and the values
+        parents push after construction (absent from the recipe)."""
+        overrides = _field_defaults(type(self), _FANOUT_RESET_FIELDS)
+        overrides.update({name: val for name, val, _ in self._cascading_values()})
+        overrides.update(
+            template_manager=getattr(self, "template_manager", None),
+            bta_inferencer=None,
+            workspace=None,
+        )
+        params = set(_init_param_names(type(self)))
+        return {k: v for k, v in overrides.items() if k in params}
+
+    def _fanout_slot_overrides(self, proto) -> Dict[str, Any]:
+        overrides = {
+            slot: self.fresh_instance(
+                **{
+                    **self._p_derived_overrides(),
+                    **self._fanout_role_overrides(proto, slot),
+                }
+            )
+            for slot in self._fanout_blank_slots(proto)
+        }
+        if proto.disable_aggregator:
+            overrides["aggregator_inferencer"] = None
+        return overrides
+
+    def _fanout_role_overrides(self, proto, slot: str) -> Dict[str, Any]:
+        """``fresh_instance`` overrides re-roling this inferencer into ``proto``'s
+        ``slot``; only inferencers that render prompts can fill a slot."""
+        raise TypeError(
+            f"{type(self).__name__} cannot render prompts, so it cannot fill the "
+            f"blank {slot} of its bta_inferencer"
+        )
+
+    def _seed_aggregator_feed(self, fanout) -> List[str]:
+        """Seed the fan-out aggregator's feed with this inferencer's instance feed;
+        the aggregator's own keys and the BTA-owned keys win. The aggregator
+        produces this inferencer's response, whose format is selected by instance
+        feed flags. Returns the seeded keys."""
+        target = getattr(fanout.aggregator_inferencer, TEMPLATE_EXTRA_FEED_ATTR, None)
+        own = getattr(self, TEMPLATE_EXTRA_FEED_ATTR, None)
+        if not isinstance(target, dict) or not isinstance(own, dict):
+            return []
+        seeded = []
+        for key, value in own.items():
+            if key in fanout.OWNED_FEED_KEYS or key in target:
+                continue
+            target[key] = value
+            seeded.append(key)
+        return seeded
+
+    def _split_fanout_args(self, inference_args: dict) -> tuple:
+        """Split per-call kwargs into the fan-out call's framework kwargs and the
+        kwargs every worker call receives."""
+        rest = dict(inference_args)
+        call_args = {k: rest.pop(k) for k in _FANOUT_FRAMEWORK_ARGS if k in rest}
+        return call_args, self._fanout_inference_args(rest)
+
+    def _fanout_inference_args(self, args: dict) -> dict:
+        """Project per-call kwargs onto independent workers: drop
+        ``_FANOUT_DROPPED_ARGS`` and reject a truthy ``_FANOUT_SINGLE_CALL_ARGS``."""
+        for key in self._FANOUT_DROPPED_ARGS:
+            args.pop(key, None)
+        continuing = []
+        for key in self._FANOUT_SINGLE_CALL_ARGS:
+            if args.pop(key, None):
+                continuing.append(key)
+        if continuing:
+            raise ValueError(
+                f"{type(self).__name__} got {continuing} on a fanned-out call, but "
+                "its workers are independent instances; map this role to None in "
+                "bta_inferencer to run it unfanned"
+            )
+        return args
+
+    @staticmethod
+    def _fanout_depth() -> int:
+        """Number of enclosing ``bta_inferencer`` fan-outs on the active path."""
+        ctx = active_run_context()
+        if ctx is None:
+            return 0
+        return ctx.path.split("/").count(BTA_INFERENCER_SLOT)
 
     # -- State graph integration -------------------------------------------
 
@@ -2836,6 +3822,53 @@ class InferencerBase(Debuggable, Resumable, ABC):
             return ws.output_path(path)
         return path
 
+    @staticmethod
+    def _task_contract_state_at(
+        child: Any, child_ctx: Any
+    ) -> Optional[RenderedTaskContractState]:
+        """The task contract ``child`` published for its call at ``child_ctx``.
+
+        With a ctx (host or legacy), only the typed outcome channel: the child's
+        ``NodeOutcomeState.task_contract`` at that exact path (``None`` if absent),
+        so a parent never reads another call's value. Only in true no-ctx does it
+        fall back to the child's documented getter.
+        """
+        if child_ctx is None:
+            getter = getattr(child, "_proposer_task_instructions", None)
+            text = getter() if callable(getter) else None
+            if not isinstance(text, str) or not text:
+                return None
+            return RenderedTaskContractState.of(text, role=None, source_path="")
+        outcome = read_outcome(child_ctx)
+        return None if outcome is None else outcome.task_contract
+
+    @staticmethod
+    def _summary_at(child: Any, child_ctx: Any) -> Optional[InferencerStateBase]:
+        """The run summary ``child`` published for its call at ``child_ctx``: the
+        typed outcome under a ctx, the child's ``last_call_summary`` only in true
+        no-ctx (a per-call child, so its last-call getter can't be stale)."""
+        if child_ctx is None:
+            return getattr(child, "last_call_summary", None)
+        outcome = read_outcome(child_ctx)
+        return None if outcome is None else outcome.summary
+
+    @staticmethod
+    def _final_output_at(child: Any, child_ctx: Any) -> Optional[str]:
+        """The final output ``child`` published for its call at ``child_ctx`` (a
+        leaf whose stream differs from it): the typed outcome under a ctx, the
+        child's ``get_final_output()`` only in true no-ctx."""
+        if child_ctx is None:
+            getter = getattr(child, "get_final_output", None)
+            return getter() if callable(getter) else None
+        outcome = read_outcome(child_ctx)
+        return None if outcome is None else outcome.final_output
+
+    @staticmethod
+    def _task_contract_at(child: Any, child_ctx: Any) -> str:
+        """The text of :meth:`_task_contract_state_at` (``""`` if absent)."""
+        contract = InferencerBase._task_contract_state_at(child, child_ctx)
+        return "" if contract is None else contract.text
+
     def _proposer_task_instructions(self) -> str:
         """The task contract an AUTHOR beneath this node actually rendered.
 
@@ -2875,7 +3908,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             yield from iter__(response, atom_types=self.response_types)
 
-    def _rc_child(self, slot: str, *, workspace=None):
+    def _rc_child(self, slot: str, *subslots: str, workspace=None):
         """M3 helper: derive the child RunContext for ``slot`` from the active ctx.
 
         Returns ``active_run_context().child(slot)`` when a context is active
@@ -2889,18 +3922,20 @@ class InferencerBase(Debuggable, Resumable, ABC):
         on-disk workspace VERBATIM instead of path-mirroring the (possibly
         namespaced) slot — so a worker dispatched under ctx node ``plan_bta.worker_0``
         can root its whole subtree under the intended ``worker_0`` workspace dir.
+
+        ``subslots`` (optional): further components chained below ``slot``
+        (``ctx.child(slot).child(sub)…``); ``workspace`` applies to the deepest.
         """
         from agent_foundation.common.inferencers.run_context import active_run_context
 
         ctx = active_run_context()
         if ctx is None:
             return None
-        # Sanitize to a valid single-component slot (child() rejects separators);
-        # robustness so a node-id-derived slot can never raise mid-call.
-        safe = str(slot).replace("/", "_").replace("\\", "_").strip() or "child"
-        if safe in (".", ".."):
-            safe = "child"
-        return ctx.child(safe, workspace=workspace)
+        parts = (slot, *subslots)
+        for depth, part in enumerate(parts):
+            deepest = depth == len(parts) - 1
+            ctx = ctx.child(safe_slot(part), workspace=workspace if deepest else None)
+        return ctx
 
     def _check_cancelled(self, ctx=None) -> None:
         """§2.1/P-#6: raise ``CancelledError`` if the (given or active) context's
@@ -2929,7 +3964,12 @@ class InferencerBase(Debuggable, Resumable, ABC):
             raise asyncio.CancelledError("run_context cancellation_token is set")
 
     def _init_call_state(self, inference_input):
-        """M4: populate ``ctx.node.call`` once per call via ``state_factory``.
+        """M4: populate ``ctx.node.call`` via ``state_factory``.
+
+        Runs once per invocation, inside its frame (seam step 5): after the path
+        claim, so a rejected call initializes nothing, and per ``parallel_infer``
+        or lazy-iterator item. The node's call state is populated only when unset,
+        so ``state_factory`` sees the first input a node receives.
 
         No-op (byte-identical) when ``state_factory`` is unset OR no RunContext is
         active. The state object (typed ``InferencerStateBase`` or plain dict)
@@ -2937,14 +3977,167 @@ class InferencerBase(Debuggable, Resumable, ABC):
         """
         if self.state_factory is None:
             return
-        from agent_foundation.common.inferencers.run_context import active_run_context
-
         ctx = active_run_context()
         if ctx is None:
             return
         node = ctx.node(creator=(type(self).__qualname__, ctx.path))
         if node.call is None:
             node.call = self.state_factory(inference_input)
+
+    # Per-call values a caller may hand this inferencer as call keywords (plan v8
+    # §5.9, B18): name -> RuntimeKey, merged along the MRO. Each public entry pops
+    # the declared names from its call kwargs into its invocation frame before
+    # anything else; ``_effective`` reads them back, falling back to the instance.
+    _INVOCATION_KEYWORDS: ClassVar[Mapping[str, Any]] = MappingProxyType({})
+
+    @classmethod
+    def _invocation_keywords(cls) -> Mapping[str, Any]:
+        return _merged_invocation_keywords(cls)
+
+    def _pop_invocation_keywords(self, frame, kwargs: dict) -> None:
+        for name, key in self._invocation_keywords().items():
+            if name in kwargs:
+                frame.put(key, kwargs.pop(name))
+
+    def _effective(self, name: str) -> Any:
+        """The per-call value of ``name`` handed to this invocation as a keyword
+        (also when passed as ``None``), else the configured instance value."""
+        key = self._invocation_keywords().get(name)
+        frame = frame_for(self)
+        if key is not None and frame is not None and frame.has(key):
+            return frame.get(key)
+        return getattr(self, name, None)
+
+    def _runs_provider(self, render_only: bool) -> bool:
+        """Whether this invocation runs the provider, so the provider hooks
+        bracket it: a render-only call and a call delegated to a per-call BTA
+        (``_delegates_execution``) never reach the backend."""
+        return not render_only and not self._delegates_execution
+
+    # ------------------------------------------------------------------
+    # Tier-3 live handles: connection-scoped, path-keyed, never serialized.
+    # ------------------------------------------------------------------
+
+    def _get_live_handle_store(self):
+        """M6/§2.0 Note B: the CONNECTION-scoped live-handle store — owned by THIS
+        instance (the connection holder), so it persists across turns (V7
+        continuity) independently of the per-turn RunContext tree. Branches are
+        keyed by ``ctx.live_branch_key`` = ``(handle scope, ctx.path)``: concurrent
+        branches of one run are isolated by path (V8), and independent host roots,
+        all at ``"/"``, by scope (B32). Created lazily; never serialized.
+        """
+        store = self.__dict__.get("_live_handle_store")
+        if store is None:
+            store = LiveHandleStore()
+            self.__dict__["_live_handle_store"] = store
+        return store
+
+    def _tier3_get(self, name: str, default: Any = None) -> Any:
+        """M6 Tier-3 read: the per-branch handle from THIS instance's connection-
+        scoped store at the active ctx's branch key (V8 isolation + V7 continuity);
+        else the instance backing — which holds a legacy/no-ctx connection or one
+        established at setup BEFORE any context (a shared base, NOT another branch's
+        handle, since branch writes never touch the backing), unless the branch was
+        detached from it (``_tier3_detach_from_backing``). Byte-identical with no
+        active context.
+        """
+        ctx = active_run_context()
+        if ctx is not None:
+            branch = self._get_live_handle_store().peek(ctx.live_branch_key)
+            if branch is not None:
+                val = branch.get(name, None)
+                if val is not None:
+                    return val
+                if branch.get(_TIER3_OWN_HANDLES_ONLY):
+                    return default
+        return self.__dict__.get(f"_{name}_backing", default)
+
+    def _tier3_own_handles(self) -> Any:
+        """The active branch's own Tier-3 handle set (``get``/``set``), never the
+        backing its reads fall back to: its entry in this instance's connection
+        store under a context, the instance backing with none."""
+        ctx = active_run_context()
+        if ctx is None:
+            return _BackingHandleView(self)
+        return self._get_live_handle_store().get_or_create(ctx.live_branch_key)
+
+    def _tier3_detach_from_backing(self) -> None:
+        """Make the active branch read only its own Tier-3 handles from now on.
+
+        The backing holds a connection opened outside any context (an ``aconnect()``
+        at setup), which every branch without one of its own reuses; a detached
+        branch opens its own instead, and the others keep sharing it. No-op with no
+        context, whose own handles are the backing.
+        """
+        if active_run_context() is not None:
+            self._tier3_own_handles().set(_TIER3_OWN_HANDLES_ONLY, True)
+
+    def _tier3_set(self, name: str, value: Any) -> None:
+        """M6 Tier-3 write: under a context, write ONLY the branch's handle in this
+        instance's connection-scoped store (at the ctx's branch key) — NOT the instance
+        backing — so a branch never pollutes the shared base that other branches'
+        COLD reads fall back to (the V8 cold-read isolation fix). With no context,
+        write the instance backing (legacy, byte-identical)."""
+        ctx = active_run_context()
+        if ctx is not None:
+            self._get_live_handle_store().get_or_create(ctx.live_branch_key).set(
+                name, value
+            )
+        else:
+            self.__dict__[f"_{name}_backing"] = value
+
+    def _iter_live_handle_sets(self):
+        """M6 teardown: yield a ``.get(name)``/``.set(name, value)`` view over EVERY
+        live-handle set this instance holds — each connection-scoped branch, of every
+        handle scope (keyed by the ctx it was established under during ``_ainfer``)
+        AND the legacy no-context backing.
+
+        A leaf ``adisconnect`` runs at a lifecycle boundary (``__aexit__`` / host
+        cleanup) where ``active_run_context()`` is ``None`` (verified), so reading
+        only the active branch — as the per-call Tier-3 property shims do — would
+        strand every branch a context established during ``_ainfer`` (the V7/V8
+        handle leak: SDK clients / subprocesses never reclaimed). Draining by stored
+        path instead of by active context is the only teardown that reaches them."""
+        store = self.__dict__.get("_live_handle_store")
+        if store is not None:
+            # snapshot: the leaf clears entries as it tears each down
+            yield from list(store._by_path.values())
+        yield _BackingHandleView(self)
+
+    def _prepare_call(self, inference_args: dict) -> dict:
+        """Provider pre-hook (seam step 6), inside the invocation frame after
+        ``_init_call_state``: returns the keyword arguments the pipeline runs with.
+
+        CLI leaves resolve their session policy here, so a claim-rejected call
+        never touches session state. Runs only when the call runs the provider
+        (``_runs_provider``). Identity by default.
+        """
+        return inference_args
+
+    def _conclude_call(self, result: Any) -> Any:
+        """Provider post-hook (seam step 8) of the sync entries, inside the
+        invocation frame after the pipeline returns: returns the call's final
+        result.
+
+        Raising here fails the call, so no outcome is published. Runs only when
+        the call runs the provider (``_runs_provider``). Identity by default.
+        """
+        return result
+
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Async twin of :meth:`_conclude_call`, run by the async entries; it
+        defaults to the sync hook. Leaves whose async post-call code awaits, or
+        reads results only the async transport produces, override it."""
+        return self._conclude_call(result)
+
+    def _outcome_for(self, frame: InvocationFrame) -> Optional[NodeOutcomeState]:
+        """The typed outcome this invocation publishes at its node when it closes
+        successfully; the single publish point (``None`` publishes nothing).
+
+        Classes contribute through ``frame`` components during the call; nobody
+        publishes mid-call.
+        """
+        return None
 
     # ------------------------------------------------------------------
     # Graph visualization (Part F / GT#13): uniform graph_reporter propagation.
@@ -3096,38 +4289,24 @@ class InferencerBase(Debuggable, Resumable, ABC):
         Raises:
             Exception: If inference fails after all retry attempts
         """
-        # M2 bridge: capture the keyword-only carrier + install the per-task
-        # ContextVar (legacy-mint a root when None -> byte-identical). Inert until
-        # M3+ orchestrators read `_active_ctx`.
-        _rc_token = enter_run(
+        # M2 bridge: resolve the keyword-only carrier (legacy-mint a root when
+        # None -> byte-identical) and install it for the dispatch.
+        ctx = resolve_run(
             run_context, default_workspace=getattr(self, "_workspace", None)
         )
-        # The iterator-input / no-merger path returns a LAZY iterator (see
-        # _infer_dispatch); the context must stay alive until it is exhausted so
-        # each lazily-produced item runs under the same ctx (not detached). Every
-        # other path returns eagerly -> exit immediately (byte-identical).
-        _is_lazy = (
-            isinstance(inference_input, Iterator) and self.post_response_merger is None
-        )
+        _rc_token = enter_run(ctx)
         try:
             self._seed_graph_reporter_into_runtime()
-            self._init_call_state(inference_input)
             result = self._infer_dispatch(
                 inference_input, inference_config, **_inference_args
             )
-        except BaseException:
+        finally:
             exit_run(_rc_token)
-            raise
-        if _is_lazy:
-
-            def _ctx_scoped_iter(_inner=result, _tok=_rc_token):
-                try:
-                    yield from _inner
-                finally:
-                    exit_run(_tok)
-
-            return _ctx_scoped_iter()
-        exit_run(_rc_token)
+        # The iterator-input / no-merger path returns a LAZY iterator (see
+        # _infer_dispatch): each item runs under this call's ctx, bound per
+        # ``next()`` only, so the consumer keeps its own context between items.
+        if isinstance(inference_input, Iterator) and self.post_response_merger is None:
+            return ctx_bound_gen(ctx, result)
         return result
 
     def _infer_dispatch(
@@ -3218,8 +4397,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             use_threading: True (default) uses ThreadPool — no pickling required.
                 False uses multiprocessing.Pool — requires picklable inferencer
                 (no lambdas in input_preprocessor, response_post_processor, etc.).
-            debug: True runs sequentially in a single process for debugging
-                (passed through to parallel_process_by_pool's debug param).
+            debug: True runs every input sequentially in the calling thread.
             **_inference_args: Additional keyword arguments merged with
                 default_inference_args and passed to _infer_single().
 
@@ -3312,17 +4490,39 @@ class InferencerBase(Debuggable, Resumable, ABC):
             "ParallelInfer",
         )
 
+        num_p = 1 if debug else num_workers
+        self._refuse_overlapping_items(_parent_ctx, num_p, "parallel_infer")
         results = parallel_process_by_pool(
-            num_p=num_workers,
+            num_p=num_p,
             data_iter=_data_iter,
             target=mp_target,
             pool_object=pool_class,
-            merge_output=True,
-            mergers=["list"],
-            debug=debug,
         )
+        # One result tuple when num_p == 1, else one per worker over contiguous
+        # input chunks, in worker order.
+        chunks = [results] if num_p == 1 else results
+        return [result for chunk in chunks for result in chunk]
 
-        return results
+    def _refuse_overlapping_items(
+        self, parent_ctx, concurrency: int, entry: str
+    ) -> None:
+        """Under a host ctx, more than one item at a time runs overlapping
+        invocations of this one object, which only a host-pure certified class
+        supports: refused before any item runs, not by whichever item the
+        single-flight guard catches."""
+        if (
+            concurrency <= 1
+            or parent_ctx is None
+            or parent_ctx.legacy_mint
+            or host_pure_certified(type(self))
+        ):
+            return
+        raise UncertifiedConcurrentUseError(
+            f"{entry} would run up to {concurrency} overlapping host invocations of "
+            f"one {type(self).__name__}, which is not host-pure certified. Run the "
+            f"items on separate instances (for example fresh_instance() copies) or "
+            f"one at a time."
+        )
 
     def __call__(self, inference_input: Any, inference_config: Any = None, **kwargs):
         """
@@ -3440,10 +4640,22 @@ class InferencerBase(Debuggable, Resumable, ABC):
         except Exception:
             return None
 
+    @staticmethod
+    def _guardrail_empty_window() -> list:
+        """The current call's empty-fingerprint window.
+
+        Mutated in place so copied contexts of one call share it; a direct
+        validator call outside any retry loop gets a throwaway window.
+        """
+        fs = _current_fallback_state.get(None)
+        if fs is None:
+            return []
+        return fs.setdefault("guardrail_empty_fingerprints", [])
+
     def _check_guardrail_fail_fast(self, response) -> bool:
         """Return True iff the inferencer should ABORT retries immediately.
 
-        Updates the sliding-window fingerprint tracker as a side effect:
+        Updates the current call's fingerprint window as a side effect:
           - Substantive output (None fingerprint) → reset window, no fail-fast.
           - Repeat of same fingerprint → window grows; trip when reaching N.
           - Different fingerprint → reset window to just this one (legitimate
@@ -3455,21 +4667,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
         n = self.guardrail_empty_fail_fast_n
         if n <= 0:
             return False
+        window = self._guardrail_empty_window()
         fingerprint = self._empty_shaped_fingerprint(response)
         if fingerprint is None:
             # Substantive output — clear the window. (Whether the judge later
             # rejects it for a non-empty reason is independent: that's a
             # legitimate retry, not a hopeless loop.)
-            if self._guardrail_recent_empty_fingerprints:
-                self._guardrail_recent_empty_fingerprints = []
+            window.clear()
             return False
-        # Empty-shaped output.
-        window = self._guardrail_recent_empty_fingerprints
-        if window and window[-1] == fingerprint:
-            window.append(fingerprint)
-        else:
-            self._guardrail_recent_empty_fingerprints = [fingerprint]
-            window = self._guardrail_recent_empty_fingerprints
+        if window and window[-1] != fingerprint:
+            window.clear()
+        window.append(fingerprint)
         if len(window) >= n:
             _logger.warning(
                 "[%s] HOPELESS-OUTPUT FAIL-FAST: %d consecutive identical "
@@ -3516,9 +4724,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             return True
         try:
-            prompt = self._render_guardrail_prompt(response)
+            prompt = self._judge_input(judge, self._render_guardrail_prompt(response))
             guardrail_ctx = self._prepare_guardrail_judge(judge)
-            verdict_raw = await judge.ainfer(prompt, run_context=guardrail_ctx)
+            verdict_raw = await judge.ainfer(
+                prompt, run_context=guardrail_ctx, prepared_input=True
+            )
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 # v4 Phase 3.3 — diagnostic audit for the judge over-rejection
@@ -3572,6 +4782,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     _fs["guardrail_reason"] = self._extract_guardrail_reason(
                         verdict_raw
                     )
+                    # Keep the newest UPDATE body so `promote_exhausted_update`
+                    # can publish it if the retry budget runs out. Only UPDATE:
+                    # a RETRY verdict means "nothing to preserve" by definition.
+                    if verdict == "update":
+                        _fs["last_update_output"] = response
                 _k = _fs.get("guardrail_reject_attempt", 0) if _fs else 0
                 if _cid and _is_verbose_correlation():
                     # Default-arg capture pinning current values; avoids
@@ -3595,8 +4810,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
             else:
                 # Accepted — clear the empty-shape tracker so a later genuine
                 # failure can start fresh.
-                if self._guardrail_recent_empty_fingerprints:
-                    self._guardrail_recent_empty_fingerprints = []
+                self._guardrail_empty_window().clear()
             return verdict
         except HopelessOutputError:
             raise
@@ -3622,9 +4836,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
             )
             return True
         try:
-            prompt = self._render_guardrail_prompt(response)
+            prompt = self._judge_input(judge, self._render_guardrail_prompt(response))
             guardrail_ctx = self._prepare_guardrail_judge(judge)
-            verdict_raw = judge.infer(prompt, run_context=guardrail_ctx)
+            verdict_raw = judge.infer(
+                prompt, run_context=guardrail_ctx, prepared_input=True
+            )
             verdict = self._parse_guardrail_verdict(verdict_raw)
             if verdict is not True:
                 # v4 Phase 3.3 — diagnostic audit for the judge over-rejection
@@ -3671,6 +4887,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     _fs["guardrail_reason"] = self._extract_guardrail_reason(
                         verdict_raw
                     )
+                    # Keep the newest UPDATE body so `promote_exhausted_update`
+                    # can publish it if the retry budget runs out. Only UPDATE:
+                    # a RETRY verdict means "nothing to preserve" by definition.
+                    if verdict == "update":
+                        _fs["last_update_output"] = response
                 _k = _fs.get("guardrail_reject_attempt", 0) if _fs else 0
                 if _cid and _is_verbose_correlation():
                     self.log_debug(
@@ -3689,8 +4910,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                         f"consecutive identical empty/banner-shaped outputs."
                     )
             else:
-                if self._guardrail_recent_empty_fingerprints:
-                    self._guardrail_recent_empty_fingerprints = []
+                self._guardrail_empty_window().clear()
             return verdict
         except HopelessOutputError:
             raise
@@ -3713,9 +4933,11 @@ class InferencerBase(Debuggable, Resumable, ABC):
            inherited a planning template (via cascade), its own ``_render_prompt``
            would wrap the judge prompt a SECOND time ("You are tasked with
            creating artifacts: [You are a quality judge…]") — so the judge does
-           planning instead of judging. We neutralize the judge's template_manager
-           (once; idempotent) so it executes the pre-rendered prompt verbatim,
-           mirroring how recovery prompts are pre-rendered and fed back raw.
+           planning instead of judging. The judge is therefore called with
+           ``prepared_input=True`` and executes the pre-rendered prompt verbatim
+           (``_judge_input`` applies its ``input_preprocessor`` first), mirroring
+           how recovery prompts are pre-rendered and fed back raw. The judge's
+           definition is never modified (B22).
 
         2. **Context collision + workspace scatter.** Running the judge with no
            run-context made it claim the CALLER's context node (CollisionError →
@@ -3726,9 +4948,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
            its node, workspace, cache, and logs all resolve consistently under
            ``children/guardrail/`` and never collide with the caller.
         """
-        # (1) Pre-rendered prompt → never let the judge re-template it.
-        if getattr(judge, "template_manager", None) is not None:
-            judge.template_manager = None
         # (2) Own run-context child + published guardrail workspace (M7).
         guardrail_ctx = self._rc_child("guardrail")
         if self._workspace is not None:
@@ -3737,6 +4956,13 @@ class InferencerBase(Debuggable, Resumable, ABC):
             if guardrail_ctx is None:
                 judge._workspace = guardrail_ws  # legacy (no active context)
         return guardrail_ctx
+
+    @staticmethod
+    def _judge_input(judge, prompt):
+        """The judge's input: the pre-rendered prompt, through the judge's own
+        ``input_preprocessor`` when it has one (``prepared_input=True`` skips it)."""
+        preprocessor = getattr(judge, "input_preprocessor", None)
+        return prompt if preprocessor is None else preprocessor(prompt)
 
     def _render_guardrail_prompt(self, response) -> str:
         """Render the judge prompt (``recovery/judge``) with input + output.
@@ -3755,19 +4981,14 @@ class InferencerBase(Debuggable, Resumable, ABC):
         v5 Fix #1 — source the agent's input from the per-call
         ``_fallback_state`` ContextVar (key ``rendered_input``: the
         POST-render prompt captured at the single render seam in both
-        ``__(a)infer_single_impl``). Falls back to the legacy
-        ``_last_inference_input`` instance attribute when no fallback
-        state is active (direct callers / legacy paths). The final
+        ``__(a)infer_single_impl``). With no fallback state active (a
+        direct call outside an inference) the input is empty. The final
         text is routed through the overridable ``_guardrail_input_text``
         shaper hook (default: identity — full rendered prompt).
         """
         output_text = self._guardrail_output_text(response)
         _fs = _current_fallback_state.get(None)
-        _source = (
-            ((_fs or {}).get("rendered_input"))
-            or getattr(self, "_last_inference_input", "")
-            or ""
-        )
+        _source = (_fs or {}).get("rendered_input") or ""
         input_text = self._guardrail_input_text(str(_source))
         tm = getattr(self, "template_manager", None)
         if tm is not None:
@@ -3999,6 +5220,45 @@ class InferencerBase(Debuggable, Resumable, ABC):
         )
         return True
 
+    def _accept_exhausted_update(self, error, fallback_state) -> Any:
+        """Return the best ``UPDATE`` body when the retry budget is spent.
+
+        Re-raises *error* unless every condition holds: the behaviour is enabled,
+        the terminal verdict was ``update`` (never ``retry`` — that one means
+        "nothing to preserve"), and an UPDATE body was actually captured. The
+        verdict rides on ``error.args[1]``; see ``OutputValidationExhaustedError``.
+
+        Returning normally hands the body back to the caller's success path, so
+        ``_finalize_output`` publishes it exactly as it would a ``PASS`` — which
+        is the point: ``UPDATE`` differs from ``PASS`` in degree, not in kind.
+        """
+        if not self.promote_exhausted_update:
+            raise error
+        verdict = error.args[1] if len(error.args) > 1 else None
+        if verdict != "update":
+            raise error
+        body = (fallback_state or {}).get("last_update_output")
+        if body is None:
+            raise error
+
+        self.log_warning(
+            {
+                "event": "DEGRADED_OUTPUT",
+                "message": (
+                    "Guardrail retries exhausted with a terminal UPDATE verdict "
+                    "— publishing the last substantive output instead of "
+                    "discarding it. Content is real but INCOMPLETE; the judge's "
+                    "outstanding asks were never addressed."
+                ),
+                "outstanding": (fallback_state or {}).get("guardrail_reason"),
+                "reject_attempts": (fallback_state or {}).get(
+                    "guardrail_reject_attempt"
+                ),
+            },
+            "DegradedOutput",
+        )
+        return body
+
     def _extract_guardrail_reason(self, verdict_raw) -> Optional[str]:
         """Extract the judge's concrete <reason> from a rejection verdict, for a guided
         UPDATE fix (rendered into ``recovery/update.jinja2``'s ``{{ reason }}`` slot).
@@ -4023,15 +5283,27 @@ class InferencerBase(Debuggable, Resumable, ABC):
     ):
         # ── Phase 1 (leaf-owned template rendering): extract per-call render
         # parameters from _inference_args. See _infer_single for design notes.
-        _extra_feed = _inference_args.pop("extra_feed", None)
-        _render_only = _inference_args.pop("render_only", False)
-        return await self.__ainfer_single_impl(
-            inference_input,
-            inference_config,
-            _extra_feed=_extra_feed,
-            _render_only=_render_only,
-            **_inference_args,
-        )
+        async with aopen_invocation(self, "ainfer") as frame:
+            _extra_feed = _inference_args.pop("extra_feed", None)
+            _render_only = _inference_args.pop("render_only", False)
+            _prepared_input = _inference_args.pop("prepared_input", False)
+            self._pop_invocation_keywords(frame, _inference_args)
+            self._init_call_state(inference_input)
+            runs_provider = self._runs_provider(_render_only)
+            if runs_provider:
+                _inference_args = self._prepare_call(_inference_args)
+            result = await self.__ainfer_single_impl(
+                inference_input,
+                inference_config,
+                _extra_feed=_extra_feed,
+                _render_only=_render_only,
+                _prepared_input=_prepared_input,
+                **_inference_args,
+            )
+            frame.result = (
+                await self._aconclude_call(result) if runs_provider else result
+            )
+        return frame.result
 
     async def __ainfer_single_impl(
         self,
@@ -4040,6 +5312,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
         *,
         _extra_feed: Optional[dict] = None,
         _render_only: bool = False,
+        _prepared_input: bool = False,
         **_inference_args,
     ):
         """Async process a single inference input with preprocessing, inference, and post-processing.
@@ -4071,19 +5344,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         # Capture original input BEFORE preprocessing for retry_with_original mode
         original_input = inference_input
-        self._last_inference_input = inference_input
 
-        if self.input_preprocessor is not None:
-            inference_input = self.input_preprocessor(inference_input)
-
-        # Template rendering (opt-in: only when template_manager is set).
-        # Round-7 invariant: conditional kwarg pass — see _infer_single.
-        if _extra_feed is not None:
-            inference_input = self._render_prompt(
-                inference_input, extra_feed=_extra_feed
-            )
-        else:
-            inference_input = self._render_prompt(inference_input)
+        if not _prepared_input:
+            inference_input = self._prepare_prompt(inference_input, _extra_feed)
 
         # v5 Fix #1 — capture POST-render prompt as closure-local; see
         # sync sibling above for rationale. Published via _fallback_state
@@ -4095,21 +5358,23 @@ class InferencerBase(Debuggable, Resumable, ABC):
         if _render_only:
             return inference_input
 
+        # Before the resume hook: see _infer_single.
+        if self._should_fan_out():
+            return await self._ainfer_via_fanout(
+                inference_input,
+                inference_config,
+                {**_inference_args, **self.get_inference_args_from_state_graphs()},
+            )
+
         # Resume hook (async): check for cached result from a previous session.
         # Uses _atry (async) so streaming override can await self._ainfer().
         resume_result = await self._atry_resume_from_cache(
             inference_input, inference_config, **_inference_args
         )
         if resume_result is not None:
-            # Run the same post-processing tail as the normal path
-            resume_result = self._finalize_output(resume_result)
-            if self.state_graphs:
-                self.update_state_graphs(resume_result)
-            if self.response_post_processor is not None:
-                resume_result = self.response_post_processor(
-                    self._normalize_for_post_processor(resume_result)
-                )
-            return resume_result
+            return self._complete_response(
+                resume_result, finalize=self._finalize_output
+            )
 
         inference_args = self.default_inference_args.copy()
         if _inference_args:
@@ -4342,6 +5607,7 @@ class InferencerBase(Debuggable, Resumable, ABC):
                     # one leaf's spent guardrail multiplied into a full
                     # propose/MultiFlow-fan-out re-run at every nesting level.
                     OutputValidationExhaustedError,
+                    InvocationContractError,
                 ),
                 total_timeout=effective_total_timeout,
                 attempt_timeout=effective_attempt_timeout,
@@ -4362,37 +5628,18 @@ class InferencerBase(Debuggable, Resumable, ABC):
                 "TotalTimeout",
             )
             raise
+        except OutputValidationExhaustedError as exhausted:
+            # Falls through to the normal success path below (log + finalize),
+            # so a terminal UPDATE publishes like a PASS. Re-raises for RETRY.
+            inference_response = self._accept_exhausted_update(
+                exhausted, _fallback_state
+            )
         finally:
             _current_fallback_state.reset(token)
 
-        # v5 Phase 1.1 — pair the InferenceResponse parts file with this
-        # call's InferenceInput via the shared call_id name-hint.
-        self.log_debug(
-            inference_response,
-            "InferenceResponse",
-            is_artifact=True,
-            **_corr,
+        return self._finish_inference_call(
+            inference_response, _corr, finalize=self._finalize_output
         )
-
-        # Output finalization (promote deliverables, write summary)
-        inference_response = self._finalize_output(inference_response)
-
-        # Update state graphs from response
-        if self.state_graphs:
-            self.update_state_graphs(inference_response)
-
-        if self.response_post_processor is not None:
-            post_input = self._normalize_for_post_processor(inference_response)
-            processed_response = self.response_post_processor(post_input)
-            self.log_debug(
-                processed_response,
-                "PostProcessedResponse",
-                is_artifact=True,
-                **_corr,
-            )
-            return processed_response
-
-        return inference_response
 
     async def _ainfer_iterator(
         self, inference_input: Any, inference_config: Any = None, **_inference_args
@@ -4452,7 +5699,6 @@ class InferencerBase(Debuggable, Resumable, ABC):
         )
         try:
             self._seed_graph_reporter_into_runtime()
-            self._init_call_state(inference_input)
             return await self._ainfer_dispatch(
                 inference_input, inference_config, **_inference_args
             )
@@ -4570,6 +5816,9 @@ class InferencerBase(Debuggable, Resumable, ABC):
 
         if max_concurrency is None:
             max_concurrency = min(num_inputs, 32)
+        self._refuse_overlapping_items(
+            _parent_ctx, min(max_concurrency, num_inputs), "aparallel_infer"
+        )
 
         self.log_debug(
             f"{num_inputs} inputs, max_concurrency={max_concurrency}",
@@ -4624,6 +5873,17 @@ class InferencerBase(Debuggable, Resumable, ABC):
         Default implementation does nothing.
         """
         pass
+
+    async def areset_conversation(self, *, run_context=None) -> None:
+        """Start a fresh vendor conversation on one run-context branch.
+
+        After it returns, this inferencer's next call on the branch of
+        ``run_context`` (resolved like a public entry's: the given context, else
+        the active one, else a legacy root) starts a new vendor conversation that
+        carries none of the vendor's history. Other branches keep theirs, and no
+        argument is added to a later vendor request. This base keeps no
+        conversation, so there is nothing to reset.
+        """
 
     async def __aenter__(self):
         """Async context manager entry. Calls aconnect()."""

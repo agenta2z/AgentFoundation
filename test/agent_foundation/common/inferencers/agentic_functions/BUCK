@@ -53,6 +53,7 @@ python_unittest(
     network_access = network_access_utils.none(),
     typing = False,
     deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
         ":helpers",
         "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
     ],

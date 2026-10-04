@@ -175,6 +175,18 @@ def validate_inferencer_kwargs(cls: type, kwargs: Mapping[str, Any]) -> None:
         )
 
 
+def _runs_one_host_call_at_a_time(inferencer: Any, run_context: Any) -> bool:
+    from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+    from agent_foundation.common.inferencers.run_context import host_pure_certified
+
+    return (
+        run_context is not None
+        and not run_context.legacy_mint
+        and isinstance(inferencer, InferencerBase)
+        and not host_pure_certified(type(inferencer))
+    )
+
+
 def _import_symbol(dotted: str) -> Any:
     import importlib
 
@@ -194,9 +206,15 @@ class InferencerProvider:
 
     Nothing is constructed at decoration/import: ``__init__`` only stores the
     spec. The first ``get`` builds the inferencer under a double-checked lock and
-    caches it (a prebuilt instance is returned as-is and never mutated, so it is
-    safe to share). A non-cacheable spec (``fresh_per_call``, a callable factory,
-    or callable ``overrides``) is rebuilt on every ``get``.
+    caches it (a prebuilt instance or a zero-arg factory's result is shared). A
+    non-cacheable spec (``fresh_per_call`` or callable ``overrides``) is rebuilt
+    on every ``get``.
+
+    ``for_call`` is what a call runs on: calls of one agentic function can overlap
+    (concurrent fan-out workers each judging their own task), and under a host run
+    context an inferencer whose class is not host-pure certified runs one
+    invocation at a time (``UncertifiedConcurrentUseError``), so such a call gets
+    a ``fresh_instance()`` of the shared inferencer.
     """
 
     def __init__(
@@ -223,6 +241,25 @@ class InferencerProvider:
         builder, cacheable = self._builder(feed)
         if not cacheable:
             return builder()
+        return self._shared(builder)
+
+    def for_call(self, feed: Mapping[str, Any], run_context: Any) -> Any:
+        """The inferencer one call at ``run_context`` runs on (see the class
+        docstring)."""
+        builder, cacheable = self._builder(feed)
+        if not cacheable:
+            return builder()
+        shared = self._shared(builder)
+        if not _runs_one_host_call_at_a_time(shared, run_context):
+            return shared
+        try:
+            return shared.fresh_instance()
+        except TypeError:
+            # No construction recipe to copy from: the guard keeps refusing an
+            # overlapping call on the shared instance.
+            return shared
+
+    def _shared(self, builder: Callable[[], Any]) -> Any:
         if not self._has_cached:
             with self._lock:
                 if not self._has_cached:

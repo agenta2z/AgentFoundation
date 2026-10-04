@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from .bindings import RuntimeBindings
-from .handles import LiveHandles, LiveHandleStore
+from .handles import LEGACY_HANDLE_SCOPE, LiveHandles, LiveHandleStore
 from .store import CreatorKey, NodeRunState, RunStateStore
 
 
@@ -125,11 +125,27 @@ class RunContext:
         """The Tier-1 :class:`NodeRunState` for this path (get-or-create + guard)."""
         return self._store.node(self.path, creator)
 
+    @property
+    def store(self) -> RunStateStore:
+        """The Tier-1 store shared by every context of this run."""
+        return self._store
+
     # -- Tier-3 handles -----------------------------------------------------
     @property
     def handles(self) -> LiveHandles:
         """Connection-scoped live handles for this branch (get-or-create, idempotent)."""
         return self._handle_store.get_or_create(self.path)
+
+    @property
+    def handle_scope(self) -> str:
+        """The scope a leaf's connections for this run are keyed under: this root's
+        handle store, or the one shared legacy scope for a legacy-minted root."""
+        return LEGACY_HANDLE_SCOPE if self.legacy_mint else self._handle_store.scope_id
+
+    @property
+    def live_branch_key(self) -> tuple[str, str]:
+        """``(handle_scope, path)``: this branch's key in a leaf's connection store."""
+        return (self.handle_scope, self.path)
 
     def __repr__(self) -> str:
         return f"RunContext(path={self.path!r})"

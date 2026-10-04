@@ -19,6 +19,7 @@ from agent_foundation.common.inferencers.inferencer_workspace import (
     indexed_child_name,
     InferencerWorkspace,
 )
+from agent_foundation.common.inferencers.run_context import open_invocation
 from attr import attrib, attrs
 
 
@@ -28,6 +29,13 @@ class _MockInferencer(InferencerBase):
 
     def _infer(self, inference_input, inference_config=None, **kwargs):
         return self._response
+
+
+def _build_spec(bta, sub_queries):
+    """``_build_subgraph_spec`` runs inside an attempt of its owner's invocation."""
+    with open_invocation(bta):
+        bta._open_attempt("q", use_async=False)
+        return bta._build_subgraph_spec(sub_queries)
 
 
 class TestWorkerNodeResume(unittest.TestCase):
@@ -69,7 +77,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta()
         sub_queries = ["q1", "q2", "q3"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         self.assertEqual(len(worker_nodes), 3)
@@ -84,7 +92,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta()
         sub_queries = ["q1", "q2"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for node in worker_nodes:
@@ -98,7 +106,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta(num_queries=2)
         sub_queries = ["q1", "q2"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for i, node in enumerate(worker_nodes):
@@ -116,7 +124,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta()
         sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         agg_nodes = [n for n in spec.nodes if "aggregator" in n.name]
         self.assertEqual(len(agg_nodes), 1)
@@ -129,7 +137,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta()
         sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         for node in worker_nodes:
@@ -143,7 +151,7 @@ class TestWorkerNodeResume(unittest.TestCase):
         bta = self._make_bta()
         sub_queries = ["q1"]
 
-        spec = bta._build_subgraph_spec(sub_queries)
+        spec = _build_spec(bta, sub_queries)
         node = [n for n in spec.nodes if "worker" in n.name][0]
 
         loaded, result = node.load_result()

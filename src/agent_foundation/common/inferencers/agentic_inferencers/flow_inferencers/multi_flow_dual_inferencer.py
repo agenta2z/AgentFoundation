@@ -172,6 +172,10 @@ class MultiFlowDualInferencer(DualInferencer):
     )
 
     # ─── MultiFlow-specific config (forwarded into the auto-constructed MultiFlow) ───
+    # Certification is never inherited, so MFDual declares its own; the purity
+    # ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     flow_configs: List[dict] = attrib(factory=list)
     visible_flows: _VisibilitySpec = attrib(default="all")
 

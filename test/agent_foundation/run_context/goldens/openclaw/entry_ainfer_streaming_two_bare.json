@@ -1,0 +1,103 @@
+{
+  "calls": [
+    {
+      "active_session_id_after": "main",
+      "base_single_calls": [],
+      "call_kwargs": {},
+      "entry": "ainfer_streaming",
+      "initialized_sessions_after": [
+        "main"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": false,
+          "session_id": "main"
+        }
+      ],
+      "output": [
+        "answer 2 to: ",
+        "first question"
+      ],
+      "prompt": "first question",
+      "streaming_entry_kwargs": [
+        {}
+      ],
+      "transport": [
+        {
+          "method": "transcript_probe",
+          "result": "NEW",
+          "session_id": "main"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID1>",
+            "timeout": 600
+          },
+          "prompt": "Session initialization. Respond with exactly one word: Ready.",
+          "session_id": "main"
+        },
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID2>",
+            "timeout": 600
+          },
+          "prompt": "first question",
+          "session_id": "main"
+        }
+      ]
+    },
+    {
+      "active_session_id_after": "main",
+      "base_single_calls": [],
+      "call_kwargs": {},
+      "entry": "ainfer_streaming",
+      "initialized_sessions_after": [
+        "main"
+      ],
+      "maybe_initialize_session": [
+        {
+          "initialized_after": true,
+          "initialized_before": true,
+          "session_id": "main"
+        }
+      ],
+      "output": [
+        "answer 3 to: s",
+        "econd question"
+      ],
+      "prompt": "second question",
+      "streaming_entry_kwargs": [
+        {}
+      ],
+      "transport": [
+        {
+          "active_run_context": {
+            "legacy_mint": true,
+            "path": "/"
+          },
+          "method": "agent",
+          "params": {
+            "deliver": false,
+            "idempotencyKey": "<UUID3>",
+            "timeout": 600
+          },
+          "prompt": "second question",
+          "session_id": "main"
+        }
+      ]
+    }
+  ]
+}

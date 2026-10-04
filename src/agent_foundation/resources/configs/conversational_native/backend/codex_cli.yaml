@@ -1,0 +1,8 @@
+# Codex through `codex exec` (one process per turn). Codex has no per-turn
+# context hook, so per-turn state rides a labelled envelope before the user
+# message; session instructions go in developer_instructions.
+kind: codex_cli
+model: ""
+permission_mode: bypassPermissions
+l2_envelope_allowed: true
+environment: inherit

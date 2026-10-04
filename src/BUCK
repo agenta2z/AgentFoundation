@@ -28,6 +28,7 @@ python_library(
     deps = [
         "fbsource//third-party/pypi/aiohttp:aiohttp",
         "fbsource//third-party/pypi/anthropic:anthropic",
+        "fbsource//third-party/pypi/anyio:anyio",
         "fbsource//third-party/pypi/attrs:attrs",
         "fbsource//third-party/pypi/beautifulsoup4:beautifulsoup4",
         "fbsource//third-party/pypi/boto3:boto3",
@@ -43,16 +44,17 @@ python_library(
         "fbsource//third-party/pypi/httpx:httpx",
         "fbsource//third-party/pypi/hydra-core:hydra-core",
         "fbsource//third-party/pypi/jinja2:jinja2",
+        # Native orchestrator: per-session validation of AF tool-call arguments.
+        "fbsource//third-party/pypi/jsonschema:jsonschema",
         # OmegaConf + hydra-core: ``rich_python_utils.config_utils.instantiate``
         # uses Hydra's ``_target_`` resolution to build the topology graph from
         # YAML; OmegaConf is the underlying config object. Both are required
         # for any caller that runs a topology via the task or derived-tool
         # executor.
         "fbsource//third-party/pypi/lancedb:lancedb",
+        "fbsource//third-party/pypi/mcp:mcp",
         "fbsource//third-party/pypi/omegaconf:omegaconf",
-        # openai-codex-sdk (lazy-imported by CodexSdkInferencer).
         "fbsource//third-party/pypi/openai:openai",
-        "fbsource//third-party/pypi/openai-codex-sdk:openai-codex-sdk",
         # NOTE: `lancedb` removed (2026-05-26). Optional knowledge-store backend
         # (used only by ``agent_foundation/knowledge/retrieval/stores/pieces/
         # lancedb_store.py``, which lazily ``import lancedb`` inside
@@ -68,6 +70,8 @@ python_library(
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/requests:requests",
         "fbsource//third-party/pypi/rich:rich",
+        "fbsource//third-party/pypi/starlette:starlette",
+        "fbsource//third-party/pypi/uvicorn:uvicorn",
         "fbsource//third-party/pypi/websockets:websockets",
         "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
         "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
@@ -83,6 +87,10 @@ python_library(
         "//crypto/cat/py:corp_crypto_auth_token_util",
         "//devai/devmate_sdk/python:devmate_python_sdk",
         "//gen_ai/metagen/pymetagen/lib:metagen",
+        # The native Metamate backend (conversational_native/session/metamate/BUCK)
+        # is sub-packaged too but deliberately NOT attached here: it depends on
+        # //msl/metamate/sdk, which this library must not carry. Hosts that run
+        # `kind: metamate` depend on that target directly.
         # The MetaMate inferencer sources (external/metamate/BUCK) are sub-packaged
         # — their own BUCK + base_module (so metamate/types.py doesn't shadow the
         # stdlib) — so the glob above stops at that BUCK-package boundary and would

@@ -1,0 +1,48 @@
+load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+load("@fbcode_macros//build_defs:python_pytest.bzl", "python_pytest")
+load("@fbsource//tools/build_defs/testinfra:network_access_utils.bzl", "network_access_utils")
+
+oncall("ml_oncall")
+
+python_library(
+    name = "golden",
+    srcs = ["_golden.py"],
+)
+
+python_library(
+    name = "leaf_fixtures",
+    srcs = ["_leaf_fixtures.py"],
+    deps = [
+        "fbsource//third-party/pypi/claude-agent-sdk:claude-agent-sdk",
+        "fbsource//third-party/pypi/httpx:httpx",
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)
+
+python_pytest(
+    name = "run_context",
+    srcs = glob(
+        ["*.py"],
+        exclude = [
+            "_golden.py",
+            "_leaf_fixtures.py",
+        ],
+    ),
+    network_access = network_access_utils.none(),
+    resources = glob(["goldens/**"]),
+    typing = False,
+    deps = [
+        "fbsource//third-party/pypi/attrs:attrs",
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/pytest-asyncio:pytest-asyncio",  # @manual
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        ":golden",
+        ":leaf_fixtures",
+        "//_tony_dev/CoreProjects/AgentFoundation/examples/agent_foundation/common/inferencers:runcontext_examples",  # @manual
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//_tony_dev/CoreProjects/RichPythonUtils/src:rich_python_utils",
+        "//later:lib",
+    ],
+)

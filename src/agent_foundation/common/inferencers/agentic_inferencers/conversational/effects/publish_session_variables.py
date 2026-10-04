@@ -13,12 +13,12 @@ variable-group; the loop replays them in order.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-        ConversationalInferencer,
-    )
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.handler_protocol import (
+    effect_target,
+    EffectTarget,
+)
 
 
 @dataclass
@@ -31,5 +31,7 @@ class PublishSessionVariablesEffect:
     # breaking the ``<tool_type>__<var>`` alias convention.
     tool_type: Any = None
 
-    async def apply(self, inferencer: ConversationalInferencer) -> None:
-        inferencer.set_session_variables(self.variables, tool_type=self.tool_type)
+    async def apply(self, inferencer: EffectTarget) -> None:
+        effect_target(inferencer).set_session_variables(
+            self.variables, tool_type=self.tool_type
+        )

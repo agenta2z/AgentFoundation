@@ -70,13 +70,52 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
+import attrs as attrs_mod
 from agent_foundation.common.inferencers.inferencer_base import (
+    _field_defaults,
+    _init_param_names,
+    ACTOR_SCOPED_FEED_KEYS,
     InferencerBase,
+    RoleTransition,
     TEMPLATE_EXTRA_FEED_ATTR,
 )
+from agent_foundation.common.inferencers.run_context import (
+    active_run_context,
+    frame_for,
+    InvocationFrame,
+    NodeOutcomeState,
+    publish_result,
+    RenderedTaskContractState,
+    ROLE_STATE_ATTRS,
+    RoleState,
+    RuntimeKey,
+)
+from agent_foundation.common.inferencers.template_feed_scope import (  # noqa: F401
+    publish_propagated,
+    resolve_ctx_feed_override,
+    resolve_propagated,
+    TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE,
+    TEMPLATE_PROPAGATED_FEED_HANDLE,
+    TEMPLATE_PROPAGATED_MODES_HANDLE,
+)
 from attr import attrib, attrs
+from rich_python_utils.config_utils import collect_slot_defaults
+
+
+@attrs_mod.frozen
+class _EffectiveRole:
+    """The template attributes one render uses: the active ``RoleState``'s value
+    where it sets one, else the definition's."""
+
+    template_key: Any
+    template_root_space: Any
+    template_extra_feed: Any
+    template_variables: Any
+    template_version: Any
+    template_master_version: Any
+    modes: Any
 
 
 def _deep_merge_into(target: dict, source: dict) -> None:
@@ -93,60 +132,9 @@ def _deep_merge_into(target: dict, source: dict) -> None:
             target[k] = v
 
 
-# ---------------------------------------------------------------------------
-# Per-call template-feed override (Tier-3 handle, ctx-scoped, walk-up read)
-# ---------------------------------------------------------------------------
-#
-# An ORCHESTRATOR (e.g. MultiFlowInferencer) needs to pass per-flow / per-call
-# data into a SHARED child leaf's wrapper template (``{{ upstream_artifacts }}``)
-# WITHOUT mutating the child's instance ``template_extra_feed`` — because under
-# shared-instance reuse (one child reused across N flows / one orchestrator
-# across N concurrent RunContexts) an instance write clobbers concurrent calls
-# (the Decision-5 / state-separation hazard). The seam mirrors the proven
-# ``_publish_workspace_to_ctx`` → ctx-handle-read pattern: the orchestrator
-# publishes a per-call feed dict into a RunContext handle (under a key the leaf
-# never collides with), and the leaf merges it at render time.
-#
-# Resolution is a WALK-UP of the active ctx's ancestor paths (the same mechanism
-# MFI's ``_resolve_attempt_state`` uses): the override is published at the
-# orchestrator's own node or a child node, and the leaf — which renders under
-# its OWN (descendant) ctx — finds it by walking up. This keeps the publish
-# robust without the orchestrator reconstructing the leaf's exact child path
-# (e.g. LWI's ``step_{i}`` slot, which the dynamic-input builder cannot know).
-TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE: str = "__template_extra_feed_override__"
-
-
 def _resolve_ctx_feed_override() -> Optional[dict]:
-    """Return the per-call ``template_extra_feed`` override dict published into the
-    active RunContext's handle tree (walking UP ancestor paths), else ``None``.
-
-    Byte-identical with no active ctx / no published override (returns ``None`` →
-    the feed is built exactly as before). Handles are path-keyed and NOT inherited
-    by child contexts (``handles.py``), so a leaf rendering at ``/flow_0/step_1``
-    must walk up to find an override published at ``/flow_0`` (or the root).
-    """
-    from agent_foundation.common.inferencers.run_context import active_run_context
-
-    ctx = active_run_context()
-    if ctx is None:
-        return None
-    store = ctx._handle_store
-    # Enumerate ancestor paths from the active path up to the root, e.g.
-    # "/flow_0/step_1" -> ["/flow_0/step_1", "/flow_0", "/"].
-    segments = [s for s in ctx.path.split("/") if s]
-    seen: set = set()
-    for i in range(len(segments), -1, -1):
-        path = "/" + "/".join(segments[:i])
-        if path in seen:
-            continue
-        seen.add(path)
-        handles = store.peek(path)
-        if handles is None:
-            continue
-        override = handles.get(TEMPLATE_EXTRA_FEED_OVERRIDE_HANDLE, None)
-        if isinstance(override, dict) and override:
-            return override
-    return None
+    """The active RunContext's per-call feed override (see ``template_feed_scope``)."""
+    return resolve_ctx_feed_override()
 
 
 @attrs(slots=False)
@@ -163,6 +151,8 @@ class TemplatedInferencerBase(InferencerBase):
     functionality, not template-specific. Both leaves AND orchestrators
     benefit from inherited file-writing without having templates.
     """
+
+    _HOST_PURE_CERTIFIED = True
 
     # === Template-based prompt rendering (opt-in) ===
     # When template_manager is set, inference_input is treated as the raw
@@ -206,8 +196,16 @@ class TemplatedInferencerBase(InferencerBase):
     # ``<OriginalTaskInstructions>`` shows what the author was really told instead of
     # a per-leaf re-render bound to the consumer's own context (see
     # ``DualInferencer._representative_proposer``). ``init=False``: runtime state,
-    # never a constructor arg, never serialized.
+    # never a constructor arg, never serialized. The bare compat projection of
+    # ``_RENDERED_CONTRACT``: written outside host mode only.
     _last_rendered_task_instructions: str = attrib(default="", init=False)
+
+    # The task contract this leaf rendered in its current invocation; published as
+    # its node's ``NodeOutcomeState.task_contract`` when the invocation succeeds.
+    _RENDERED_CONTRACT = RuntimeKey(
+        "TemplatedInferencerBase.rendered_contract",
+        compat={"_last_rendered_task_instructions": "text"},
+    )
 
     # ------------------------------------------------------------------
     # Template feed construction
@@ -251,17 +249,19 @@ class TemplatedInferencerBase(InferencerBase):
                     f"Caller must remove these keys before passing extra_feed."
                 )
         feed: dict = {}
+        role = self._effective_role_state()
+        modes = self._effective_modes(role)
 
         # Build effective specs: user template_variables + per-enabled-mode
         # entries, unified into a single load_variables call. Multi-dot keys
         # (e.g., "instructions.modes.deep_mode") are handled natively by the
         # enhanced load_variables (which splits on ALL dots, not just the first).
-        effective_specs: dict = dict(self.template_variables or {})
+        effective_specs: dict = dict(role.template_variables or {})
 
         # enable_<name> flags are set unconditionally so {%- if enable_X %}
         # can short-circuit even when False. Mode content is loaded only for
         # enabled modes via load_variables.
-        for mode_name, enabled in (self.modes or {}).items():
+        for mode_name, enabled in modes.items():
             feed[f"enable_{mode_name}"] = bool(enabled)
             if enabled:
                 effective_specs.setdefault(f"instructions.modes.{mode_name}", None)
@@ -275,9 +275,9 @@ class TemplatedInferencerBase(InferencerBase):
             try:
                 resolved = rendering_manager.load_variables(
                     variable_specs=effective_specs,
-                    root_space=self.template_root_space or "",
-                    default_version=self.template_version or "",
-                    master_version=self.template_master_version,
+                    root_space=role.template_root_space or "",
+                    default_version=role.template_version or "",
+                    master_version=role.template_master_version,
                 )
             except FileNotFoundError as e:
                 import logging
@@ -287,25 +287,13 @@ class TemplatedInferencerBase(InferencerBase):
                 )
                 resolved = {}
             _deep_merge_into(feed, resolved)
-        elif self.template_variables:
-            for var_name, value in (self.template_variables or {}).items():
+        elif role.template_variables:
+            for var_name, value in (role.template_variables or {}).items():
                 feed[var_name] = value if value else ""
 
-        feed.update(self.template_extra_feed)
-        # Per-call ctx-scoped override (published by an orchestrator into a
-        # RunContext handle; resolved by walking up the active ctx tree). Sits
-        # ABOVE the instance ``template_extra_feed`` (so an orchestrator can pass
-        # per-flow/per-call data — e.g. ``upstream_artifacts`` — without mutating
-        # the shared child instance) and BELOW the explicit per-call ``extra_feed``
-        # kwarg (a direct caller still wins). Byte-identical when no override is
-        # published (``_resolve_ctx_feed_override`` returns None).
-        _ctx_override = _resolve_ctx_feed_override()
-        if _ctx_override:
-            feed.update(_ctx_override)
-        if extra_feed:
-            feed.update(extra_feed)
-        if self.template_root_space:
-            feed["__template_space__"] = self.template_root_space
+        self._layer_extra_feed(feed, role, extra_feed)
+        if role.template_root_space:
+            feed["__template_space__"] = role.template_root_space
 
         if inference_input:
             feed["input"] = inference_input
@@ -327,6 +315,9 @@ class TemplatedInferencerBase(InferencerBase):
         if ws is not None and hasattr(ws, "root") and feed["has_local_access"]:
             feed["workspace_root"] = str(ws.root)
             feed["workspace_outputs"] = os.path.join(str(ws.root), "outputs")
+        if self._delegates_execution:
+            for key in ACTOR_SCOPED_FEED_KEYS:
+                feed.pop(key, None)
         return feed
 
     # ------------------------------------------------------------------
@@ -466,12 +457,13 @@ class TemplatedInferencerBase(InferencerBase):
                 # variant, and doubles as the version selector), then the generic
                 # default. Mirrors how the tool config itself pins a variant
                 # (``template_variables.task_instructions: research_propose``).
-                _declared = (self.template_variables or {}).get(VAR_TASK_INSTRUCTIONS)
+                role = self._effective_role_state()
+                _declared = (role.template_variables or {}).get(VAR_TASK_INSTRUCTIONS)
                 for _selector in (_declared, eff_master, None):
                     _loaded = tm.load_variables(
                         variable_specs={VAR_TASK_INSTRUCTIONS: _selector},
                         root_space=eff_root or "",
-                        default_version=self.template_version or "",
+                        default_version=role.template_version or "",
                         master_version=eff_master,
                     )
                     raw = (_loaded or {}).get(VAR_TASK_INSTRUCTIONS)
@@ -491,47 +483,152 @@ class TemplatedInferencerBase(InferencerBase):
             # against the CONSUMER's feed downstream — exactly the leak this prevents.
             if not rendered or "{{" in rendered or "{%" in rendered:
                 return
-            self._last_rendered_task_instructions = rendered
+            self._record_rendered_contract(rendered)
         except Exception as exc:  # best-effort snapshot; never break the render
             self.log_debug(
                 f"task_instructions snapshot skipped: {type(exc).__name__}: {exc}",
                 "TaskInstructionsSnapshot",
             )
 
+    def _record_rendered_contract(self, text: str) -> None:
+        """Publish the contract this render produced (``publish_result``): into
+        this leaf's invocation, its compat getter outside host mode. A render
+        outside the leaf's invocation (a preview on another object, a direct hook
+        call) records nothing under a host ctx and writes the getter otherwise."""
+        frame = frame_for(self)
+        ctx = frame.ctx if frame is not None else active_run_context()
+        publish_result(
+            self,
+            self._RENDERED_CONTRACT,
+            RenderedTaskContractState.of(
+                text,
+                role=self._active_role_name(),
+                source_path=ctx.path if ctx is not None else "",
+            ),
+        )
+
+    def _outcome_for(self, frame: InvocationFrame) -> Optional[NodeOutcomeState]:
+        """A templated leaf publishes the task contract it rendered in this call."""
+        contract = frame.get(self._RENDERED_CONTRACT)
+        return None if contract is None else NodeOutcomeState(task_contract=contract)
+
     def _proposer_task_instructions(self) -> str:
         """A templated leaf IS an author: report the contract it rendered itself."""
         return self._last_rendered_task_instructions or ""
 
-    def _effective_role(self):
-        """M7: (template_key, template_root_space, template_master_version) —
-        from the active context's RoleState when set, else the instance fields.
-        Byte-identical without a context (returns the instance values)."""
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-            RoleState,
+    def _active_role_state(self):
+        """The ``RoleState`` a context-scoped ``switch_role`` recorded for this
+        inferencer at the active context node, or ``None``."""
+        ctx = active_run_context()
+        if ctx is None:
+            return None
+        state = ctx.node(creator=(type(self).__qualname__, ctx.path)).role_state
+        return state if isinstance(state, RoleState) else None
+
+    def _effective_role_state(self) -> _EffectiveRole:
+        """M7/B16: every template attribute a render uses — the active context's
+        ``RoleState`` value where it sets one, else the instance field. This is the
+        full overlay a no-ctx ``switch_role`` applies by writing the fields, so a
+        role under a context renders exactly like the same role without one.
+        Byte-identical without a context (the instance values)."""
+        state = self._active_role_state()
+        return _EffectiveRole(
+            **{
+                name: (
+                    getattr(state, name)
+                    if state is not None and getattr(state, name) is not None
+                    else getattr(self, name)
+                )
+                for name in ROLE_STATE_ATTRS
+            }
         )
 
-        key = self.template_key
-        root = self.template_root_space
-        master = self.template_master_version
-        ctx = active_run_context()
-        if ctx is not None:
-            call = ctx.node(creator=(type(self).__qualname__, ctx.path)).call
-            if isinstance(call, RoleState):
-                if call.template_key is not None:
-                    key = call.template_key
-                if call.template_root_space is not None:
-                    root = call.template_root_space
-                if call.template_version is not None:
-                    master = call.template_version
-        return key, root, master
+    @staticmethod
+    def _layer_extra_feed(
+        feed: dict, role: _EffectiveRole, extra_feed: Optional[dict]
+    ) -> None:
+        """Layer the literal feed overrides onto ``feed``, lowest first."""
+        feed.update(role.template_extra_feed or {})
+        # A templated ancestor's own feed (B17), published for its descendants:
+        # over this inferencer's own feed, as the legacy instance push merged it.
+        propagated = resolve_propagated(TEMPLATE_PROPAGATED_FEED_HANDLE)
+        if propagated:
+            feed.update(propagated)
+        # Per-call ctx-scoped override (published by an orchestrator into a
+        # RunContext handle; resolved by walking up the active ctx tree). Sits
+        # ABOVE the instance ``template_extra_feed`` (so an orchestrator can pass
+        # per-flow/per-call data — e.g. ``upstream_artifacts`` — without mutating
+        # the shared child instance) and BELOW the explicit per-call ``extra_feed``
+        # kwarg (a direct caller still wins). Byte-identical when no override is
+        # published (``_resolve_ctx_feed_override`` returns None).
+        ctx_override = _resolve_ctx_feed_override()
+        if ctx_override:
+            feed.update(ctx_override)
+        if extra_feed:
+            feed.update(extra_feed)
+
+    def _effective_modes(self, role: Optional[_EffectiveRole] = None) -> dict:
+        """The modes one render uses (B17): the role's or the definition's, under
+        the modes a templated ancestor published for its descendants."""
+        if role is None:
+            role = self._effective_role_state()
+        propagated = resolve_propagated(TEMPLATE_PROPAGATED_MODES_HANDLE)
+        return {**(role.modes or {}), **(propagated or {})}
+
+    def _effective_role(self):
+        """M7: (template_key, template_root_space, template_master_version) of the
+        effective role (``_effective_role_state``)."""
+        role = self._effective_role_state()
+        return role.template_key, role.template_root_space, role.template_master_version
+
+    def _active_role_name(self) -> Optional[str]:
+        state = self._active_role_state()
+        if state is not None:
+            return state.new_role
+        return getattr(self, "_applied_role", None)
+
+    def _fanout_role_overrides(self, proto, slot: str) -> Dict[str, Any]:
+        """``fresh_instance`` overrides re-roling this inferencer into ``proto``'s
+        ``slot``: its own template selectors reset, its effective root space, an
+        empty feed, then ``proto``'s slot bundle on top (``modes`` merged)."""
+        cls = type(proto)
+        node: Dict[str, Any] = {}
+        bundle = collect_slot_defaults(cls).get(slot)
+        if bundle is not None:
+            parent_node = {
+                "_target_": f"{cls.__module__}.{cls.__qualname__}",
+                **(proto.__dict__.get("_init_recipe") or {}),
+            }
+            bundle.apply_to(node, parent_node=parent_node)
+        overrides = _field_defaults(type(self), self._ROLE_SELECTOR_ATTRS)
+        role = self._effective_role_state()
+        overrides["template_root_space"] = role.template_root_space
+        overrides["template_extra_feed"] = {}
+        overrides.update(node)
+        overrides["modes"] = {**self._effective_modes(role), **node.get("modes", {})}
+        overrides.update(
+            _field_defaults(type(self), proto.SELF_SLOT_DROPS.get(slot, ()))
+        )
+        if not overrides["template_root_space"]:
+            raise ValueError(
+                f"{type(self).__name__} has no template_root_space to render the "
+                f"blank {slot} of its bta_inferencer in; configure the slot explicitly"
+            )
+        params = set(_init_param_names(type(self)))
+        return {k: v for k, v in overrides.items() if k in params}
 
     def _propagate_to_children(self):
-        """Push ``template_extra_feed`` and ``modes`` to child inferencers.
+        """Hand ``template_extra_feed`` and ``modes`` down to child inferencers.
 
         Parent's keys take precedence (update semantics) — runtime context
-        set by the orchestrator overrides yaml defaults on children. Each
-        ``InferencerBase`` does this 1 layer; recursive inference naturally
+        set by the orchestrator overrides yaml defaults on children.
+
+        Under a ctx (B17), they are published at this inferencer's own node for
+        its descendants, which read them at render time (``_build_template_feed``,
+        ``_effective_modes``); no child instance or factory is rewritten, so a
+        shared child never accumulates another parent's feed. With no ctx they are
+        pushed into the child instances (and factory keywords), a setup-time API:
+        each ``InferencerBase`` does this 1 layer, and recursive inference
         propagates through the full hierarchy.
 
         ``template_version`` and ``template_master_version`` are deliberately
@@ -544,6 +641,17 @@ class TemplatedInferencerBase(InferencerBase):
         generic walker) to discover child instances, partials, and duck-typed
         callables across attrs/dict/list fields.
         """
+        ctx = active_run_context()
+        if ctx is not None:
+            if self._has_child_inferencers():
+                role = self._effective_role_state()
+                publish_propagated(
+                    ctx, TEMPLATE_PROPAGATED_FEED_HANDLE, role.template_extra_feed or {}
+                )
+                publish_propagated(
+                    ctx, TEMPLATE_PROPAGATED_MODES_HANDLE, role.modes or {}
+                )
+            return
         # Propagate template_extra_feed (the original behavior).
         if self.template_extra_feed:
             self._propagate_dict_attr_to_children(
@@ -555,6 +663,14 @@ class TemplatedInferencerBase(InferencerBase):
         # descendant inferencer (no per-child YAML edits required).
         if self.modes:
             self._propagate_dict_attr_to_children(self.modes, "modes")
+
+    def _has_child_inferencers(self) -> bool:
+        found = []
+        self._for_each_child_inferencer(
+            lambda child, field_name, key: found.append(child),
+            lambda p, field_name, key: found.append(p),
+        )
+        return bool(found)
 
     def _propagate_dict_attr_to_children(self, source: dict, attr_name: str):
         """Helper: merge ``source`` into each child's ``attr_name`` dict.
@@ -590,6 +706,16 @@ class TemplatedInferencerBase(InferencerBase):
         "modes",
     )
 
+    _SUPPORTS_BTA_ROLE_MAPPING = True
+
+    # The attributes that select this inferencer's own task template.
+    _ROLE_SELECTOR_ATTRS = (
+        "template_key",
+        "template_version",
+        "template_master_version",
+        "template_variables",
+    )
+
     def switch_role(
         self,
         new_role,
@@ -607,14 +733,16 @@ class TemplatedInferencerBase(InferencerBase):
         layer's workspace + session reset, so the new template state is in
         place when the inferencer next renders.
 
-        Template attrs that are not None are set on self and stashed in
-        ``_pending_role_changes`` so the base layer's audit trail merges them.
+        Template attrs that are not None are handed to the base layer's audit
+        trail as a ``RoleTransition``. Under a context they are recorded into the
+        node's typed ``RoleState`` (the render reads them through
+        ``_effective_role_state``); without one they are set on self, and a switch
+        that sets any of them also records ``new_role`` as ``_applied_role``: the
+        role the instance fields carry.
 
         All remaining ``**base_kwargs`` are forwarded to
         ``InferencerBase.switch_role()`` (workspace, deliverable flags, etc.).
         """
-        from agent_foundation.common.inferencers.run_context import active_run_context
-
         _ctx_active = active_run_context() is not None
         changes = {}
         for attr, val in {
@@ -636,27 +764,23 @@ class TemplatedInferencerBase(InferencerBase):
                     setattr(self, attr, val)
                 changes[attr] = val
         if changes:
-            object.__setattr__(self, "_pending_role_changes", changes)
+            if not _ctx_active:
+                object.__setattr__(self, "_applied_role", new_role)
             # Record the role change into the active context node (no-op without one).
             self._record_role_state(new_role, changes)
-        super().switch_role(new_role, **base_kwargs)
-
-    def _record_role_state(self, new_role, changes):
-        """M7: mirror a role switch into ``ctx.node.call`` as a ``RoleState``."""
-        from agent_foundation.common.inferencers.run_context import (
-            active_run_context,
-            RoleState,
+        super().switch_role(
+            new_role, _role_changes=RoleTransition(changes), **base_kwargs
         )
 
+    def _record_role_state(self, new_role, changes):
+        """M7: mirror a role switch into ``ctx.node.role_state`` as a ``RoleState``,
+        one typed field per attribute it sets."""
         ctx = active_run_context()
         if ctx is None:
             return
         node = ctx.node(creator=(type(self).__qualname__, ctx.path))
-        node.call = RoleState(
+        node.role_state = RoleState(
             new_role=new_role,
-            template_key=changes.get("template_key"),
-            template_root_space=changes.get("template_root_space"),
-            template_version=changes.get("template_version"),
-            modes=changes.get("modes"),
             changes=dict(changes),
+            **{name: changes.get(name) for name in ROLE_STATE_ATTRS},
         )

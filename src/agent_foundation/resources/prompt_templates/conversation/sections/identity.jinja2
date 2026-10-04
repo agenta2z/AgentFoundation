@@ -1,0 +1,4 @@
+{% if employee is defined %}{% if identity_phrasing == "deployment_role" %}In this deployment you act as **{{ employee.name }}** (role {{ employee.role }}).{% else %}You are **{{ employee.name }}**, serving as **{{ employee.role }}**.{% endif %}
+
+{{ employee.mindset }}
+{% endif %}

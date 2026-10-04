@@ -1,0 +1,5 @@
+{# Paused SOP — active reminder for a temporary ad-hoc diversion #}
+{% if paused_sop is defined and paused_sop %}
+## Paused SOP
+You temporarily paused **{{ paused_sop }}** for an ad-hoc request. When that request is handled, proactively remind the user at a natural break and offer to resume with {{ sop_resume_command | default("`/resume_sop`") }} — do not nag every turn, and do not resume without the user's go-ahead.
+{% endif %}

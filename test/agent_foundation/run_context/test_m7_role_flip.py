@@ -1,5 +1,5 @@
 """M7 read-flip: under a context, switch_role does NOT mutate self; the role flows
-through ctx.node.call and the render pipeline reads it via _effective_role()."""
+through ctx.node.role_state and the render pipeline reads it via _effective_role()."""
 
 from agent_foundation.common.inferencers.run_context import (
     enter_run,
@@ -28,9 +28,10 @@ def test_switch_role_under_context_does_not_mutate_self():
         # Separation: the instance definition is NOT mutated under a context...
         assert t.template_key == "default"
         # ...the role flows through the context node instead.
-        call = root._store.node("/").call
-        assert isinstance(call, RoleState)
-        assert call.template_key == "review"
+        state = root._store.node("/").role_state
+        assert isinstance(state, RoleState)
+        assert state.template_key == "review"
+        assert root._store.node("/").call is None
         # ...and the render pipeline resolves the EFFECTIVE role from the context.
         eff_key, _root, _master = t._effective_role()
         assert eff_key == "review"

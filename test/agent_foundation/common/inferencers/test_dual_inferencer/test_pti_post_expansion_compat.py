@@ -25,6 +25,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 def _make_mock_inferencer(response_text="mock response", id_="mock"):
@@ -77,7 +78,8 @@ class TestPTIPostExpansionCompat(unittest.IsolatedAsyncioTestCase):
         """PTI runs plan → implement without errors."""
         pti = self._make_pti()
 
-        result = await pti._ainfer("Build a simple calculator")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("Build a simple calculator")
 
         # PTI should return a PlanThenImplementResponse
         self.assertIsInstance(result, PlanThenImplementResponse)
@@ -86,7 +88,8 @@ class TestPTIPostExpansionCompat(unittest.IsolatedAsyncioTestCase):
         """PTI response has the expected fields after expansion changes."""
         pti = self._make_pti()
 
-        result = await pti._ainfer("Build a simple calculator")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("Build a simple calculator")
 
         self.assertIsInstance(result, PlanThenImplementResponse)
         # Should have plan_response populated
@@ -96,7 +99,8 @@ class TestPTIPostExpansionCompat(unittest.IsolatedAsyncioTestCase):
         """State dict flows correctly through PTI steps."""
         pti = self._make_pti()
 
-        result = await pti._ainfer("Build a simple calculator")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("Build a simple calculator")
 
         self.assertIsInstance(result, PlanThenImplementResponse)
         # The plan_response should be populated
@@ -131,7 +135,8 @@ class TestPTICheckpointExpansionFields(unittest.IsolatedAsyncioTestCase):
         """PTI's _save_loop_checkpoint and _try_load_checkpoint work with expansion-aware base."""
         pti = self._make_pti()
 
-        result = await pti._ainfer("Build a calculator")
+        async with aopen_invocation(pti):
+            result = await pti._ainfer("Build a calculator")
 
         self.assertIsInstance(result, PlanThenImplementResponse)
         # Verify checkpoint files were created and are valid JSON (no crash from expansion fields)

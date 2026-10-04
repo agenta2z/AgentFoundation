@@ -97,6 +97,8 @@ def main() -> int:
     # Log inferencer-topology env-var snapshot up front for monitoring.
     for var in (
         "RESEARCH_PROPOSE__FLOW_INFERENCERS",
+        "RESEARCH_PROPOSE__FLOW_BTA_INFERENCERS",
+        "RESEARCH_PROPOSE__FLOW_FOLLOWUP_BTA_INFERENCERS",
         "RESEARCH_PROPOSE__MAIN_INFERENCER",
         "TASK__MAIN_INFERENCER",
         "TASK__FLOW_INFERENCERS",

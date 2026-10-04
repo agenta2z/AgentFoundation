@@ -104,6 +104,25 @@ class SOPStateInvariantTest(unittest.TestCase):
         st = SOPState(completed_phases=["0a", SimpleNamespace(phase="0b"), "1"])
         self.assertEqual(st.completed_phase_ids(), ["0a", "0b", "1"])
 
+    def test_outline_marks_completed_phases_however_they_are_stored(self):
+        phases = [SimpleNamespace(id=i, name=f"Step {i}") for i in "01234"]
+        st = SOPState(
+            current_phase="3",
+            completed_phases=["0", SimpleNamespace(phase="1"), {"phase": "2"}],
+            sop=SimpleNamespace(phases=phases),
+        )
+        self.assertEqual(st.completed_phase_ids(), ["0", "1", "2"])
+        self.assertEqual(
+            st.sop_outline.splitlines(),
+            [
+                "0 Step 0 ✓ (done)",
+                "1 Step 1 ✓ (done)",
+                "2 Step 2 ✓ (done)",
+                "3 Step 3 ▶ (current)",
+                "4 Step 4",
+            ],
+        )
+
 
 class FixBForwardOnlyTest(_CITestBase):
     def test_round_trip_keeps_sets(self):

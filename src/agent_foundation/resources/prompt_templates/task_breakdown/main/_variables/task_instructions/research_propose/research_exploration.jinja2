@@ -1,0 +1,17 @@
+You are decomposing a **research/exploration** task — your job is to split it into focused exploration subtasks. Each subtask runs as a separate, independent exploration request that sees ONLY its own subtask: never the original request, this decomposition, or the other subtasks.
+
+Every subtask MUST therefore be **self-contained**:
+- **Restate what the explorer needs** — every fact, name, path, identifier and constraint from the request that bears on the subtask, in the subtask's own words. Do NOT write pointers such as "see §3", "per the plan above", "as described in the request" or "read the full plan from <path>": the explorer cannot follow them.
+- **Put everything in `description`, `scope` and `todos`** — do not rely on any other field reaching the explorer:
+  - `description`: the question to answer and why it matters, plus the concrete evidence targets (code paths, symbols, docs, data, metrics) to examine.
+  - `scope`: what is in scope and what is explicitly out of scope, so explorers do not duplicate each other.
+  - `todos`: concrete investigation steps, ending with the stop condition — the evidence that is enough to answer the question.
+{% if max_worker_query_chars %}
+- **Stay within budget** — each subtask's `description`, `scope` and `todos` together must stay under {{ max_worker_query_chars }} characters; a subtask over that budget fails the whole run. Narrow the subtask instead of compressing away the facts it needs.
+{% else %}
+- **Stay focused** — narrow a subtask's question instead of packing several questions into one.
+{% endif %}
+
+Explorers only gather and analyze evidence:
+- Do NOT assign output-format, file-writing, or final-answer duties to any subtask. Tell each explorer what to report back (findings with their evidence, open questions), not how the final response should look.
+- The aggregation step receives the original request together with every explorer's findings, and produces the response the original request asks for, in its required format. Use `aggregation_guidance` to say how the findings fit together.

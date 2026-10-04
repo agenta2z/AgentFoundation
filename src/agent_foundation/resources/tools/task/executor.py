@@ -400,12 +400,18 @@ def _apply_resume(path_str: str, *, copy_workspace: bool, in_place: bool) -> Pat
     return src
 
 
+_MODEL_KEYS = frozenset({"model_name", "_model_name"})
+
+
 def _walk_replace_model(cfg: Any, new_value: str) -> int:
-    """Recursively walk plain dict/list cfg; replace every `model_name` leaf. Returns count."""
+    """Recursively walk plain dict/list cfg; replace every `model_name` leaf and
+    every `_model_name` cascade (instantiate injects the nearest one into each
+    descendant that sets no `model_name`; a subtree may declare its own).
+    `model_tier` nodes keep their tier. Returns count."""
     count = 0
     if isinstance(cfg, dict):
         for k, v in list(cfg.items()):
-            if k == "model_name" and not isinstance(v, (dict, list)):
+            if k in _MODEL_KEYS and not isinstance(v, (dict, list)):
                 cfg[k] = new_value
                 count += 1
             else:
@@ -473,11 +479,18 @@ _MFDUAL_TARGETS = {
 }
 
 
+# Subtrees ``--no-aggregate`` leaves alone: ``_params`` is data that is never
+# instantiated, and a ``bta_inferencer`` fan-out template keeps its aggregator
+# because that aggregator produces the fanned-out leaf's own response.
+_NO_AGGREGATE_SKIP_KEYS = frozenset({"_params", "bta_inferencer"})
+
+
 def _disable_aggregation(cfg: Any) -> int:
     """--no-aggregate: set ``disable_aggregator=True`` on every BTA node and
     ``multi_flow_disable_aggregator=True`` on every MFDual node, so workers run
     but their outputs are returned as a list (no synthesis). Operates on the
     plain dict cfg (pre-instantiate), same as ``_collapse_dual``. Returns count.
+    Subtrees under ``_NO_AGGREGATE_SKIP_KEYS`` are not visited.
 
     Note: ``_factory_:`` markers are rewritten to ``_target_:`` by ``load_config``
     before this walk runs, so ``_factory_: MultiFlowDual`` worker entries are
@@ -492,8 +505,9 @@ def _disable_aggregation(cfg: Any) -> int:
         elif tgt in _MFDUAL_TARGETS:
             cfg["multi_flow_disable_aggregator"] = True
             count += 1
-        for v in cfg.values():
-            count += _disable_aggregation(v)
+        for k, v in cfg.items():
+            if k not in _NO_AGGREGATE_SKIP_KEYS:
+                count += _disable_aggregation(v)
     elif isinstance(cfg, list):
         for v in cfg:
             count += _disable_aggregation(v)
@@ -560,6 +574,21 @@ def _error(msg: str):
 _TASK_TOOL_NAMES = {"task", "task-plan", "task-execute", "task-full", "task-confirm"}
 
 
+def _answerable_interactive(session_context: dict) -> Any:
+    """The caller's interactive transport if a question asked through it gets an
+    answer, else ``None``.
+
+    In the main async chat, ``session_context["interactive"]`` is present but its
+    receive queue is torn down after the dispatching turn, so a question would
+    wait forever. Only a caller that guarantees a registered receive queue
+    (``session_context["router_interactive_safe"]``: the dev-slash path, a
+    dispatcher background task with its own queue, a CLI terminal) gets asked.
+    """
+    if not session_context.get("router_interactive_safe"):
+        return None
+    return session_context.get("interactive")
+
+
 async def _run_conversational_router(
     *,
     config_path: Any,  # path to disabled.yaml (the Conversational config)
@@ -575,12 +604,8 @@ async def _run_conversational_router(
     router can read their results), runs the agentic loop, and returns the router's
     final message.
 
-    Interactive-hang safety: in the main async chat, ``session_context["interactive"]``
-    is present but its receive queue is torn down after the dispatching turn — so a
-    clarifying-question round-trip would block forever. We therefore only enable
-    interactive when the caller explicitly guarantees a registered receive queue
-    via ``session_context["router_interactive_safe"]`` (e.g. the dev-slash `/task`
-    path or a CLI terminal). Otherwise the router runs autonomously (yolo).
+    The router asks clarifying questions only through an answerable interactive
+    transport (``_answerable_interactive``); otherwise it runs autonomously (yolo).
     """
     from agent_foundation.common.inferencers.agentic_inferencers.conversational.protocols import (
         ToolExecutionResult,
@@ -597,7 +622,7 @@ async def _run_conversational_router(
     # can read results and synthesize. Mirrors sop/cli.py.
     _ci_host.force_tools_synchronous(registry)
 
-    interactive = sc.get("interactive") if sc.get("router_interactive_safe") else None
+    interactive = _answerable_interactive(sc)
 
     # Depth-guarded dispatcher: increment task_depth on nested `task` calls and,
     # at the cap, coerce a nested router (`disabled`/`conversation`/unset) to
@@ -1003,13 +1028,16 @@ async def _run_topology(
     # async-native checkpoint_plan_review which uses asend_response/aget_input —
     # natively compatible with WebSocketInteractive. The single_choice
     # (Approve/Modify/Reject) mode renders via the existing SingleChoiceWidget —
-    # no custom widget tagging needed.
-    if (
-        mode == "confirm"
-        and hasattr(inferencer, "interactive")
-        and interactive is not None
-    ):
-        inferencer.interactive = interactive
+    # no custom widget tagging needed. Without an interactive PTI approves the plan.
+    if mode == "confirm":
+        interactive = _answerable_interactive(sc)
+        if interactive is None:
+            _logger.warning(
+                "[task] --confirm: no interactive transport can answer the plan "
+                "review; the plan is approved without one"
+            )
+        elif hasattr(inferencer, "interactive"):
+            inferencer.interactive = interactive
 
     # Stage 9 — Run with cancellation propagation.
     # §9.4 host: mint the root RunContext (workspace-rooted) and thread it so the
@@ -1246,6 +1274,17 @@ async def execute(arguments: dict, session_context: dict):
         return _error(
             "Multiple mode flags provided; use only one of --plan/--execute/--full/--confirm."
         )
+    # --no-planning / --no-implementation (e.g. understand_codebase's --docs-only
+    # / --investigation-only) are the --execute / --plan runs.
+    skipped = [f for f in ("no_planning", "no_implementation") if arguments.get(f)]
+    if len(skipped) > 1:
+        return _error("--no-planning with --no-implementation leaves nothing to run.")
+    if skipped:
+        skip_mode = "execute" if skipped[0] == "no_planning" else "plan"
+        if mode not in ("full", skip_mode):
+            flag = skipped[0].replace("_", "-")
+            return _error(f"--{flag} conflicts with --{mode}.")
+        mode = skip_mode
 
     # Stage 2 — Resolve --agent-config
     try:

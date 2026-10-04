@@ -25,6 +25,15 @@ INJECTED dependencies so it runs inside OpenTeam's single process:
   ``${CODEBASE_ROOT}`` resolution.
 * ``add_task_ref`` / ``update_task_ref_status`` — optional async callables for
   the conversation-history chip markers (best-effort; default no-op).
+* ``track_task`` — optional ``(key, task)`` callable handed every task the
+  queue runner starts, so the host can cancel and await the hub's jobs with
+  the session (delete, shutdown). The queued jobs live on after the call that
+  queued them returns; the hub never starts one once its queue is closed.
+
+Job queue lifecycle: a cancelled job closes the queue — the jobs queued after
+it do not start. ``aclose()`` closes it explicitly (cancelling and awaiting the
+running jobs, whose subprocess trees are killed); ``join()`` waits for the
+queue to run dry, and cancelling that wait closes it.
 
 This module imports NO ``fastapi``/``starlette`` and NO ``rankevolve``.
 """
@@ -107,6 +116,7 @@ Persist = Callable[[], Awaitable[None]]
 ExecTask = Callable[[dict[str, Any], str], Awaitable[ToolExecutionResult]]
 AddTaskRef = Callable[..., Awaitable[None]]
 UpdateTaskRefStatus = Callable[[str, str], Awaitable[bool]]
+TrackTask = Callable[[str, "asyncio.Task[None]"], None]
 
 
 class HubController:
@@ -133,6 +143,7 @@ class HubController:
         add_task_ref: AddTaskRef | None = None,
         update_task_ref_status: UpdateTaskRefStatus | None = None,
         running_task_handles: dict[str, Any] | None = None,
+        track_task: TrackTask | None = None,
     ) -> None:
         self._session_id: str = session_id
         self._session_dir: Path = Path(session_dir)
@@ -149,10 +160,15 @@ class HubController:
             update_task_ref_status
         )
         # Per-task asyncio.Task handle registry for cancellation. The host may
-        # share its own dict; default to a private one.
+        # share its own dict; default to a private one. Cancelling a handle
+        # closes the queue.
         self._running_task_handles: dict[str, Any] = (
             running_task_handles if running_task_handles is not None else {}
         )
+        self._track_task: TrackTask | None = track_task
+        # Queue-runner tasks still running (``_start_queue_runner``).
+        self._queue_runners: set[asyncio.Task[None]] = set()
+        self._queue_closed: bool = False
         # Per-(session, mid) locks for the implementations sidecar.
         self._hub_impl_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # Registry of post-completion handlers for queued tasks. Maps a stable
@@ -1696,12 +1712,93 @@ class HubController:
             pass
 
         # Try to start the next task if a slot is available.
-        asyncio.create_task(self._try_start_next_task())
+        self._start_queue_runner()
 
         return task_id
 
+    def _start_queue_runner(self) -> None:
+        """Run ``_try_start_next_task`` as a task the hub keeps (and hands to
+        ``track_task``), unless the queue is closed."""
+        if self._queue_closed:
+            return
+        try:
+            runner = asyncio.get_running_loop().create_task(self._try_start_next_task())
+        except RuntimeError:
+            logger.debug("Task queue: no event loop available to start a runner")
+            return
+        self._queue_runners.add(runner)
+        runner.add_done_callback(self._queue_runners.discard)
+        if self._track_task is not None:
+            try:
+                self._track_task(f"hub-queue-{uuid.uuid4().hex[:8]}", runner)
+            except Exception as e:
+                logger.warning("track_task failed: %s", e)
+
+    async def aclose(self) -> None:
+        """Close the job queue: no queued job starts from now on, and the jobs
+        running are cancelled (their subprocess trees killed) and awaited."""
+        self._queue_closed = True
+        current = asyncio.current_task()
+        runners = [t for t in self._queue_runners if t is not current and not t.done()]
+        for runner in runners:
+            runner.cancel()
+        if runners:
+            await asyncio.gather(*runners, return_exceptions=True)
+
+    async def join(self) -> None:
+        """Wait until the jobs this controller's queue started, and the ones
+        they chain, have ended. Cancelling the wait closes the queue
+        (``aclose``)."""
+        try:
+            while self._queue_runners:
+                await asyncio.wait(set(self._queue_runners))
+        except asyncio.CancelledError:
+            await self.aclose()
+            raise
+
+    async def _record_cancelled_task(
+        self, task_id: str, next_entry: dict[str, Any]
+    ) -> None:
+        """Mark a cancelled queue task as errored, persist, and fire its
+        completion handler (shielded: the caller is being cancelled)."""
+        wc = self._wc
+        entry_now = wc.get_entry(task_id)
+        if entry_now is not None and entry_now.get("status") not in (
+            "completed",
+            "error",
+        ):
+            wc.mark_error(task_id, error="cancelled by user")
+        try:
+            await asyncio.shield(self._persist())
+        except (asyncio.CancelledError, Exception):
+            pass
+        # Fire the completion handler on cancel.
+        cancel_handler_key = (
+            (next_entry.get("on_complete_handler") or "")
+            if isinstance(next_entry, dict)
+            else ""
+        )
+        if not cancel_handler_key:
+            return
+        cancel_handler_key = _normalize_template_version(cancel_handler_key)
+        cancel_handler = self._completion_handlers.get(cancel_handler_key)
+        if cancel_handler is None:
+            return
+        try:
+            fresh = wc.get_entry(task_id) or next_entry
+            await asyncio.shield(cancel_handler(fresh))
+        except (asyncio.CancelledError, Exception) as hook_err:
+            logger.warning(
+                "cancel-time completion handler %r failed for %s: %s",
+                cancel_handler_key,
+                task_id,
+                hook_err,
+            )
+
     async def _try_start_next_task(self) -> None:
         """Start the next queued task if a slot is available. Non-recursive."""
+        if self._queue_closed:
+            return
         wc = self._wc
         next_entry = wc.get_next_runnable()
         if next_entry is None:
@@ -1714,7 +1811,6 @@ class HubController:
         logger.info("Task queue: starting %s (tool=%s)", task_id, tool_name)
         # Pass workspace=None so any existing workspace value is preserved.
         wc.mark_running(task_id, workspace=None)
-        await self._persist()
 
         # Register the queue task in the per-task handle map so cancellation
         # can reach it.
@@ -1726,9 +1822,10 @@ class HubController:
             self._running_task_handles[task_id] = current_handle
 
         # Outer try/finally guarantees the handle is dropped and the queue is
-        # chained even on CancelledError.
+        # chained unless the job was cancelled.
         try:
             try:
+                await self._persist()
                 if tool_name in ("task", "understand_codebase"):
                     if self._exec_task is None:
                         # The /task (DualInferencerBridge/PTI) path lives in
@@ -1766,38 +1863,12 @@ class HubController:
                     )
                 logger.info("Task queue: completed %s", task_id)
             except asyncio.CancelledError:
-                # User cancellation. CancelledError is a BaseException so the
-                # broad except below would NOT catch it — handle explicitly.
-                entry_now = wc.get_entry(task_id)
-                if entry_now is not None and entry_now.get("status") not in (
-                    "completed",
-                    "error",
-                ):
-                    wc.mark_error(task_id, error="cancelled by user")
-                try:
-                    await asyncio.shield(self._persist())
-                except (asyncio.CancelledError, Exception):
-                    pass
-                # Fire the completion handler on cancel.
-                cancel_handler_key = (
-                    (next_entry.get("on_complete_handler") or "")
-                    if isinstance(next_entry, dict)
-                    else ""
-                )
-                if cancel_handler_key:
-                    cancel_handler_key = _normalize_template_version(cancel_handler_key)
-                    cancel_handler = self._completion_handlers.get(cancel_handler_key)
-                    if cancel_handler is not None:
-                        try:
-                            fresh = wc.get_entry(task_id) or next_entry
-                            await asyncio.shield(cancel_handler(fresh))
-                        except (asyncio.CancelledError, Exception) as hook_err:
-                            logger.warning(
-                                "cancel-time completion handler %r failed for %s: %s",
-                                cancel_handler_key,
-                                task_id,
-                                hook_err,
-                            )
+                # CancelledError is a BaseException so the broad except below
+                # would NOT catch it — handle explicitly. A cancel stops the
+                # hub's work (session delete, shutdown, ``aclose``): close the
+                # queue so nothing queued behind this job starts.
+                self._queue_closed = True
+                await self._record_cancelled_task(task_id, next_entry)
                 raise
             except Exception as e:
                 wc.mark_error(task_id, error=str(e)[:200])
@@ -1860,14 +1931,8 @@ class HubController:
         finally:
             # Drop the queue-task handle from the registry — even on cancel.
             self._running_task_handles.pop(task_id, None)
-            # Chain the next queued task — even on cancel.
-            try:
-                asyncio.create_task(self._try_start_next_task())
-            except RuntimeError:
-                logger.debug(
-                    "Task queue: no event loop available to chain after %s",
-                    task_id,
-                )
+            # Chain the next queued task (a no-op once the queue is closed).
+            self._start_queue_runner()
 
     # ------------------------------------------------------------------
     # Implementations sidecar + grouper metadata

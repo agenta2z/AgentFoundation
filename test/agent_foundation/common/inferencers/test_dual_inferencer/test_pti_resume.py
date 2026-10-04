@@ -21,6 +21,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
+from agent_foundation.common.inferencers.run_context import open_invocation
 
 
 def _make_mock_inferencer(response_text="mock response", id_="mock"):
@@ -238,13 +239,14 @@ class TestPTISynthesizeCheckpoint(unittest.TestCase):
             f.write("test request")
 
         pti = self._make_pti()
-        pti._current_base_workspace = self.tmpdir
-        pti._current_iteration_workspace = self.tmpdir
-        ckpt = pti._synthesize_checkpoint_from_workspace()
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti._current_iteration_workspace = self.tmpdir
+            ckpt = pti._synthesize_checkpoint_from_workspace()
 
-        self.assertIsNotNone(ckpt)
-        self.assertEqual(ckpt["next_step_index"], 0)  # plan step
-        self.assertEqual(ckpt["state"]["iteration"], 1)
+            self.assertIsNotNone(ckpt)
+            self.assertEqual(ckpt["next_step_index"], 0)  # plan step
+            self.assertEqual(ckpt["state"]["iteration"], 1)
 
     def test_synthesize_implementation_phase(self):
         """Plan done → synthesized checkpoint at step 2 (implement)."""
@@ -259,14 +261,15 @@ class TestPTISynthesizeCheckpoint(unittest.TestCase):
             f.write("{}")
 
         pti = self._make_pti()
-        pti._current_base_workspace = self.tmpdir
-        pti._current_iteration_workspace = self.tmpdir
-        ckpt = pti._synthesize_checkpoint_from_workspace()
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti._current_iteration_workspace = self.tmpdir
+            ckpt = pti._synthesize_checkpoint_from_workspace()
 
-        self.assertIsNotNone(ckpt)
-        self.assertEqual(ckpt["next_step_index"], 2)  # implement step
-        self.assertEqual(ckpt["state"]["plan_text"], "plan content")
-        self.assertTrue(ckpt["state"]["plan_approved"])
+            self.assertIsNotNone(ckpt)
+            self.assertEqual(ckpt["next_step_index"], 2)  # implement step
+            self.assertEqual(ckpt["state"]["plan_text"], "plan content")
+            self.assertTrue(ckpt["state"]["plan_approved"])
 
     def test_synthesize_creates_sentinel_file(self):
         """Synthesized checkpoint creates a sentinel result file for _arun validation."""
@@ -275,22 +278,23 @@ class TestPTISynthesizeCheckpoint(unittest.TestCase):
             f.write("test request")
 
         pti = self._make_pti()
-        pti._current_base_workspace = self.tmpdir
-        pti._current_iteration_workspace = self.tmpdir
-        ckpt = pti._synthesize_checkpoint_from_workspace()
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti._current_iteration_workspace = self.tmpdir
+            ckpt = pti._synthesize_checkpoint_from_workspace()
 
-        self.assertIsNotNone(ckpt)
-        # result_id must NOT be None — it must point to a real sentinel file
-        sentinel_id = ckpt["result_id"]
-        self.assertIsNotNone(sentinel_id)
-        self.assertEqual(sentinel_id, "__synth_sentinel__")
+            self.assertIsNotNone(ckpt)
+            # result_id must NOT be None — it must point to a real sentinel file
+            sentinel_id = ckpt["result_id"]
+            self.assertIsNotNone(sentinel_id)
+            self.assertEqual(sentinel_id, "__synth_sentinel__")
 
-        # The sentinel file must actually exist on disk
-        sentinel_path = pti._resolve_result_path(sentinel_id)
-        self.assertTrue(
-            os.path.exists(sentinel_path),
-            f"Sentinel file not found at {sentinel_path}",
-        )
+            # The sentinel file must actually exist on disk
+            sentinel_path = pti._resolve_result_path(sentinel_id)
+            self.assertTrue(
+                os.path.exists(sentinel_path),
+                f"Sentinel file not found at {sentinel_path}",
+            )
 
     def test_synthesize_complete_returns_none(self):
         """Complete workspace → None (no checkpoint needed)."""
@@ -313,11 +317,12 @@ class TestPTISynthesizeCheckpoint(unittest.TestCase):
             json.dump({"should_continue": False, "summary": "done"}, f)
 
         pti = self._make_pti()
-        pti._current_base_workspace = self.tmpdir
-        pti._current_iteration_workspace = self.tmpdir
-        ckpt = pti._synthesize_checkpoint_from_workspace()
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti._current_iteration_workspace = self.tmpdir
+            ckpt = pti._synthesize_checkpoint_from_workspace()
 
-        self.assertIsNone(ckpt)
+            self.assertIsNone(ckpt)
 
 
 class TestPhaseToStepIndex(unittest.TestCase):
@@ -451,11 +456,12 @@ class TestPTIGetResultPath(unittest.TestCase):
             planner_inferencer=planner,
             executor_inferencer=executor,
         )
-        pti._current_base_workspace = "/tmp/workspace"
-        path = pti._get_result_path("plan")
-        self.assertEqual(
-            _normpath(path), "/tmp/workspace/checkpoints/pti/step_plan.json"
-        )
+        with open_invocation(pti):
+            pti._current_base_workspace = "/tmp/workspace"
+            path = pti._get_result_path("plan")
+            self.assertEqual(
+                _normpath(path), "/tmp/workspace/checkpoints/pti/step_plan.json"
+            )
 
     def test_without_base_workspace(self):
         planner = _make_mock_inferencer("plan", "planner")
@@ -464,9 +470,10 @@ class TestPTIGetResultPath(unittest.TestCase):
             planner_inferencer=planner,
             executor_inferencer=executor,
         )
-        pti._current_base_workspace = None
-        path = pti._get_result_path("plan")
-        self.assertEqual(path, "")
+        with open_invocation(pti):
+            pti._current_base_workspace = None
+            path = pti._get_result_path("plan")
+            self.assertEqual(path, "")
 
     def test_stable_across_iteration_changes(self):
         """_get_result_path uses _current_base_workspace, NOT _current_iteration_workspace.
@@ -480,22 +487,25 @@ class TestPTIGetResultPath(unittest.TestCase):
             planner_inferencer=planner,
             executor_inferencer=executor,
         )
-        pti._current_base_workspace = "/tmp/base"
+        with open_invocation(pti):
+            pti._current_base_workspace = "/tmp/base"
 
-        # Simulate iteration 1
-        pti._current_iteration_workspace = "/tmp/base"
-        path1 = pti._get_result_path("__wf_checkpoint__")
+            # Simulate iteration 1
+            pti._current_iteration_workspace = "/tmp/base"
+            path1 = pti._get_result_path("__wf_checkpoint__")
 
-        # Simulate iteration 2 (closure changes _current_iteration_workspace)
-        pti._current_iteration_workspace = "/tmp/base/followup_iterations/iteration_2"
-        path2 = pti._get_result_path("__wf_checkpoint__")
+            # Simulate iteration 2 (closure changes _current_iteration_workspace)
+            pti._current_iteration_workspace = (
+                "/tmp/base/followup_iterations/iteration_2"
+            )
+            path2 = pti._get_result_path("__wf_checkpoint__")
 
-        # Both should resolve to the SAME path under _current_base_workspace
-        self.assertEqual(path1, path2)
-        self.assertEqual(
-            _normpath(path1),
-            "/tmp/base/checkpoints/pti/step___wf_checkpoint__.json",
-        )
+            # Both should resolve to the SAME path under _current_base_workspace
+            self.assertEqual(path1, path2)
+            self.assertEqual(
+                _normpath(path1),
+                "/tmp/base/checkpoints/pti/step___wf_checkpoint__.json",
+            )
 
 
 class TestPTIParseAnalysis(unittest.TestCase):

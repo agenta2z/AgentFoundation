@@ -4,12 +4,17 @@ the instance ``_session_id`` as the legacy/no-ctx fallback. A branch write never
 pollutes the instance backing, so sibling cold reads can't see another branch's
 session (the V8 cold-read fix — see test_m6_cold_read_isolation)."""
 
+import copy
+import pickle
+
 from agent_foundation.common.inferencers.run_context import (
     enter_run,
     exit_run,
     RunContext,
 )
+from agent_foundation.common.inferencers.run_context.bridge import mint_root
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    _SessionSlot,
     StreamingInferencerBase,
 )
 from attr import attrs
@@ -86,3 +91,83 @@ def test_per_branch_session_isolation():
             assert s.active_session_id == expected
         finally:
             exit_run(tok)
+
+
+def _under(ctx, fn):
+    tok = enter_run(ctx)
+    try:
+        return fn()
+    finally:
+        exit_run(tok)
+
+
+def _reset(s):
+    s.active_session_id = None
+
+
+def test_host_reset_does_not_fall_back_to_instance_backing():
+    """B6(a): a host reset leaves the branch with NO session — the getter must not
+    resurrect the shared instance backing it was cleared to escape."""
+    s = _Stream()
+    s._session_id = "shared-base"
+    worker = RunContext.root(workspace=None).child("worker_0")
+    _under(worker, lambda: _reset(s))
+    assert _under(worker, lambda: s.active_session_id) is None
+    assert s._session_id == "shared-base"  # the shared backing is untouched
+
+
+def test_host_reset_is_branch_local():
+    s = _Stream()
+    s._session_id = "shared-base"
+    root = RunContext.root(workspace=None)
+    _under(root.child("worker_0"), lambda: _reset(s))
+    assert _under(root.child("worker_1"), lambda: s.active_session_id) == "shared-base"
+    assert s.active_session_id == "shared-base"  # no-ctx read prefers the backing
+
+
+def test_host_write_after_reset_replaces_the_tombstone():
+    s = _Stream()
+    s._session_id = "shared-base"
+    worker = RunContext.root(workspace=None).child("worker_0")
+    _under(worker, lambda: _reset(s))
+
+    def _set_new():
+        s.active_session_id = "fresh"
+
+    _under(worker, _set_new)
+    assert _under(worker, lambda: s.active_session_id) == "fresh"
+
+
+def test_no_ctx_read_ignores_reset_branches():
+    """A reset branch holds no session, so it neither surfaces as one nor makes a
+    single live branch ambiguous for the between-calls public read."""
+    s = _Stream()
+    root = RunContext.root(workspace=None)
+    _under(root.child("worker_0"), lambda: _reset(s))
+    assert s.active_session_id is None
+
+    def _set_live():
+        s.active_session_id = "live"
+
+    _under(root.child("worker_1"), _set_live)
+    assert s.active_session_id == "live"
+
+
+def test_legacy_mint_reset_still_clears_the_backing():
+    s = _Stream()
+    s._session_id = "old"
+    _under(mint_root(), lambda: _reset(s))
+    assert s._session_id is None
+    assert s.active_session_id is None
+
+
+def test_reset_marker_survives_copy_and_pickle():
+    s = _Stream()
+    s._session_id = "shared-base"
+    worker = RunContext.root(workspace=None).child("worker_0")
+    _under(worker, lambda: _reset(s))
+    store = s.__dict__["_live_handle_store"]
+    for clone in (copy.deepcopy(store), pickle.loads(pickle.dumps(store))):
+        assert clone.peek(worker.live_branch_key).get("live_session_id") is (
+            _SessionSlot.RESET
+        )

@@ -49,6 +49,12 @@ if __name__ == "__main__":
 
 from typing import Any, AsyncIterator
 
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    RunContext,
+)
+from agent_foundation.common.inferencers.run_context.bridge import mint_root
 # ---------------------------------------------------------------------------
 # Property 12: Cache Marker Stripping Preserves Content
 # Property 13: CONTINUE Mode Newline Truncation
@@ -146,31 +152,49 @@ class TestContinueModeNewlineTruncation(unittest.TestCase):
     **Validates: Requirements 19.4**
     """
 
+    # Built by joining non-blank lines rather than generating free text and
+    # filtering for "\n": the filter rejected the large majority of draws, which
+    # under ASAN tripped HealthCheck.too_slow ("generated 0 valid inputs after
+    # 1.47s"). Constructing valid inputs removes the rejection entirely.
     @given(
-        content=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("L", "N", "P", "Z"), whitelist_characters="\n "
+        content=st.lists(
+            st.text(
+                alphabet=st.characters(whitelist_categories=("L", "N", "P")),
+                min_size=1,
+                max_size=40,
             ),
-            min_size=3,
-            max_size=200,
-        ).filter(lambda s: "\n" in s and s.strip())
+            min_size=2,
+            max_size=8,
+        ).map("\n".join)
     )
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(
+        max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_continue_truncates_to_last_newline(self, content: str):
-        """CONTINUE mode truncates to last newline boundary."""
+        """CONTINUE truncates to the last newline; REFERENCE does not.
+
+        ``FallbackInferMode`` aliases ``CONTINUE = "update"`` and
+        ``REFERENCE = "retry"``, so these are the truncating and non-truncating
+        members respectively — the pair is what makes the comparison meaningful.
+        Asserts exact values rather than only a length relation.
+        """
         inf = MockStreamingInferencer()
-        result = inf._sanitize_partial(content, FallbackInferMode.CONTINUE)
-        if result is not None:
-            # The result should not end with a partial line — it should be
-            # a subset of the content up to some newline boundary.
-            # Verify the result is a prefix of the content (after stripping)
-            # by checking it doesn't contain content that only appears after
-            # the last newline in the original.
-            pass  # The key property is that result is not None when content has newlines
-            # and that the sanitized result is shorter than or equal to the original
-            original_ref = inf._sanitize_partial(content, FallbackInferMode.REFERENCE)
-            if original_ref:
-                self.assertTrue(len(result) <= len(original_ref))
+
+        continued = inf._sanitize_partial(content, FallbackInferMode.CONTINUE)
+        reference = inf._sanitize_partial(content, FallbackInferMode.REFERENCE)
+
+        # REFERENCE (= RETRY): passes the text through stripped, no truncation.
+        self.assertEqual(reference, content.strip() or None)
+
+        # CONTINUE (= UPDATE): drops everything after the last newline, so the
+        # model is never handed a half-written final line. Mirrors the guard in
+        # `_sanitize_partial`, which only truncates when `rfind("\n") > 0`.
+        nl = content.rfind("\n")
+        expected = (content[:nl] if nl > 0 else content).strip() or None
+        self.assertEqual(continued, expected)
+
+        if continued is not None and reference is not None:
+            self.assertLessEqual(len(continued), len(reference))
 
     def test_no_newline_may_return_content_or_none(self):
         """Content without newlines: CONTINUE mode may return content as-is or None."""
@@ -439,6 +463,97 @@ class TestPreRetryResetsSession(unittest.IsolatedAsyncioTestCase):
         inf._session_id = "abc123"
         self.assertEqual(inf.active_session_id, "abc123")
         await inf._pre_retry(attempt=0, exception=ConnectionError("transient"))
+        self.assertIsNone(inf.active_session_id)
+
+
+# =============================================================================
+# B4: a failed session resume clears the session through ``active_session_id``,
+# so under a host ctx only the branch is reset and the shared backing survives.
+# =============================================================================
+
+
+@attrs
+class _DeadSessionStreaming(MockStreamingInferencer):
+    """Every session resume fails; each plain restart records the session it saw."""
+
+    restart_sessions = attrib(factory=list)
+
+    async def _ainfer(self, inference_input, inference_config=None, **kwargs):
+        if "session_id" in kwargs:
+            raise ConnectionError(f"session {kwargs['session_id']} is gone")
+        self.restart_sessions.append(self.active_session_id)
+        return "restarted"
+
+
+def _read_under(ctx, inf):
+    tok = enter_run(ctx)
+    try:
+        return inf.active_session_id
+    finally:
+        exit_run(tok)
+
+
+class TestFailedResumeClearsThroughActiveSessionId(unittest.IsolatedAsyncioTestCase):
+    async def _recover(self, inf, ctx=None):
+        tok = enter_run(ctx) if ctx is not None else None
+        try:
+            return await inf._ainfer_recovery(
+                "prompt",
+                last_exception=RuntimeError("failed"),
+                last_partial_output=None,
+            )
+        finally:
+            if tok is not None:
+                exit_run(tok)
+
+    async def test_host_dead_branch_session_is_reset_and_backing_kept(self):
+        inf = _DeadSessionStreaming()
+        inf._session_id = "shared-base"
+        root = RunContext.root(workspace=None)
+        worker = root.child("worker_0")
+        tok = enter_run(worker)
+        try:
+            inf.active_session_id = "dead"
+        finally:
+            exit_run(tok)
+
+        self.assertEqual(await self._recover(inf, worker), "restarted")
+
+        self.assertEqual(inf.restart_sessions, [None])
+        self.assertIsNone(_read_under(worker, inf))
+        self.assertEqual(inf._session_id, "shared-base")
+        self.assertEqual(_read_under(root.child("worker_1"), inf), "shared-base")
+
+    async def test_host_session_inherited_from_backing_resets_only_the_branch(self):
+        inf = _DeadSessionStreaming()
+        inf._session_id = "shared-base"
+        root = RunContext.root(workspace=None)
+        worker = root.child("worker_0")
+
+        await self._recover(inf, worker)
+
+        self.assertEqual(inf.restart_sessions, [None])
+        self.assertIsNone(_read_under(worker, inf))
+        self.assertEqual(inf._session_id, "shared-base")
+        self.assertEqual(_read_under(root.child("worker_1"), inf), "shared-base")
+
+    async def test_legacy_mint_failed_resume_still_clears_the_backing(self):
+        inf = _DeadSessionStreaming()
+        inf._session_id = "old"
+
+        await self._recover(inf, mint_root())
+
+        self.assertEqual(inf.restart_sessions, [None])
+        self.assertIsNone(inf._session_id)
+
+    async def test_no_ctx_failed_resume_still_clears_the_backing(self):
+        inf = _DeadSessionStreaming()
+        inf._session_id = "old"
+
+        await self._recover(inf)
+
+        self.assertEqual(inf.restart_sessions, [None])
+        self.assertIsNone(inf._session_id)
         self.assertIsNone(inf.active_session_id)
 
 

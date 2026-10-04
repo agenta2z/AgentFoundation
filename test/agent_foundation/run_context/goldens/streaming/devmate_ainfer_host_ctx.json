@@ -1,0 +1,162 @@
+{
+  "body": {
+    "calls": [
+      {
+        "active_session_id": "<UUID1>",
+        "active_session_id_under_ctx": "<UUID1>",
+        "cli": [
+          {
+            "TMPDIR": "/tmp/devmate-<UID>",
+            "argv": [
+              "-p",
+              "--agent-harness",
+              "native",
+              "--auto-run-mode",
+              "autoRunAll",
+              "-m",
+              "claude-opus-4.7-long",
+              "host question"
+            ],
+            "cwd": "<TMP>/repo",
+            "stdin": ""
+          }
+        ],
+        "consecutive_error_count": 0,
+        "construct_command": [
+          {
+            "active_ctx": {
+              "legacy_mint": false,
+              "path": "/devmate"
+            },
+            "dump_output": true,
+            "input": {
+              "prompt": "host question"
+            },
+            "kwargs": {
+              "dump_output": false,
+              "resume": false,
+              "session_id": null
+            }
+          }
+        ],
+        "dump_output_after": true,
+        "observed": [
+          "Running non-interactively (dm -p)\n",
+          "Powered by dm-core\n",
+          "❯ host question\n",
+          "\n",
+          "● ANSWER(host question)\n",
+          "  continuation line\n",
+          "\n",
+          "Logs available at: <TMP>/repo/.dm/<UUID1>.log\n",
+          "Resume with: dm --resume <UUID1>\n"
+        ],
+        "output": {
+          "error": null,
+          "output": "ANSWER(host question)\ncontinuation line",
+          "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ host question\n\n● ANSWER(host question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+          "return_code": 0,
+          "session_id": "<UUID1>",
+          "stderr": "",
+          "success": true,
+          "trajectory_url": null,
+          "type": "TerminalInferencerResponse"
+        },
+        "raised": null
+      },
+      {
+        "active_session_id": "<UUID1>",
+        "active_session_id_under_ctx": "<UUID1>",
+        "cli": [
+          {
+            "TMPDIR": "/tmp/devmate-<UID>",
+            "argv": [
+              "-p",
+              "--agent-harness",
+              "native",
+              "--auto-run-mode",
+              "autoRunAll",
+              "-m",
+              "claude-opus-4.7-long",
+              "--resume",
+              "<UUID1>",
+              "bare follow-up"
+            ],
+            "cwd": "<TMP>/repo",
+            "stdin": ""
+          }
+        ],
+        "consecutive_error_count": 0,
+        "construct_command": [
+          {
+            "active_ctx": null,
+            "dump_output": true,
+            "input": {
+              "prompt": "bare follow-up"
+            },
+            "kwargs": {
+              "dump_output": false,
+              "resume": true,
+              "session_id": "<UUID1>"
+            }
+          }
+        ],
+        "dump_output_after": true,
+        "observed": [
+          "Running non-interactively (dm -p)\n",
+          "Powered by dm-core\n",
+          "❯ bare follow-up\n",
+          "\n",
+          "● ANSWER(bare follow-up)\n",
+          "  continuation line\n",
+          "\n",
+          "Logs available at: <TMP>/repo/.dm/<UUID1>.log\n",
+          "Resume with: dm --resume <UUID1>\n"
+        ],
+        "output": {
+          "error": null,
+          "output": "ANSWER(bare follow-up)\ncontinuation line",
+          "raw_output": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ bare follow-up\n\n● ANSWER(bare follow-up)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>",
+          "return_code": 0,
+          "session_id": "<UUID1>",
+          "stderr": "",
+          "success": true,
+          "trajectory_url": null,
+          "type": "TerminalInferencerResponse"
+        },
+        "raised": null
+      }
+    ],
+    "host_ctx": {
+      "legacy_mint": false,
+      "path": "/devmate"
+    }
+  },
+  "session_logs": {
+    "host/children/devmate/logs/session/RecordingDevmateCli.jsonl": [
+      "InferenceInput",
+      "InferenceArgs",
+      "InferenceInput",
+      "InferenceArgs"
+    ]
+  },
+  "tree": {
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_8cdbd3b5.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ host question\n\n● ANSWER(host question)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cache/_RecordingDevmate/RecordingDevmateCli_<TS>/stream_<RAND>_e0d90441.txt": "Running non-interactively (dm -p)\nPowered by dm-core\n❯ bare follow-up\n\n● ANSWER(bare follow-up)\n  continuation line\n\nLogs available at: <TMP>/repo/.dm/<UUID1>.log\nResume with: dm --resume <UUID1>\n\n--- STREAM COMPLETED SUCCESSFULLY ---\n",
+    "cli/fake_dm.py": "<present>",
+    "host/children/devmate/logs/session/RecordingDevmateCli.jsonl": "<present>",
+    "host/children/devmate/logs/session/RecordingDevmateCli.jsonl.parts/InferenceArgs/<TS>_resume_<PART>.json": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    },
+    "host/children/devmate/logs/session/RecordingDevmateCli.jsonl.parts/InferenceArgs/<TS>_session_id_<PART>.txt": "<present>",
+    "host/children/devmate/logs/session/RecordingDevmateCli.jsonl.parts/InferenceInput/<TS>.txt": {
+      "<multi>": [
+        "<present>",
+        "<present>"
+      ]
+    }
+  }
+}

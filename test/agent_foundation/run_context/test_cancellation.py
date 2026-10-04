@@ -17,10 +17,16 @@ class _Leaf(InferencerBase):
         return x
 
 
+# One item at a time: a host ``aparallel_infer`` on an uncertified class refuses
+# overlapping items (the P6 single-flight guard).
+
+
 def test_no_token_is_noop():
     leaf = _Leaf()
     root = RunContext.root(workspace=None)
-    out = asyncio.run(leaf.aparallel_infer(["a", "b"], run_context=root))
+    out = asyncio.run(
+        leaf.aparallel_infer(["a", "b"], max_concurrency=1, run_context=root)
+    )
     assert out == ["a", "b"]
 
 
@@ -31,7 +37,9 @@ def test_set_token_halts_fanout():
         workspace=None, runtime=RuntimeBindings(cancellation_token=token)
     )
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(leaf.aparallel_infer(["a", "b", "c"], run_context=root))
+        asyncio.run(
+            leaf.aparallel_infer(["a", "b", "c"], max_concurrency=1, run_context=root)
+        )
 
 
 def test_check_cancelled_supports_event_and_callable():

@@ -45,6 +45,12 @@ from agent_foundation.common.inferencers.inferencer_base import (
     _is_bookkeeping_sidecar,
     InferencerBase,
 )
+from agent_foundation.common.inferencers.run_context import (
+    invocation_of,
+    NodeOutcomeState,
+    RenderedTaskContractState,
+    RuntimeKey,
+)
 from agent_foundation.common.inferencers.template_defaults import (
     FOLLOWUP_TEMPLATE_DEFAULTS,
     REVIEW_TEMPLATE_DEFAULTS,
@@ -404,6 +410,10 @@ class DualInferencer(LinearWorkflowInferencer):
     # compat-properties; these add the rest of the Dual-local runtime surface.
     _RUN_SCRATCH_PREFIX = "_dual_run::"
 
+    # Run fields live in the ctx node and the iteration record and checkpoint
+    # policy in the frame; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     def _run_get(self, name: str, default=None):
         """Read a per-run transient field. Under a real (non-legacy) ctx return the
         per-run value cached in ``ctx.node().scratch`` (concurrency-isolated); else the
@@ -490,6 +500,18 @@ class DualInferencer(LinearWorkflowInferencer):
             ctx.node().scratch[self._RUN_SCRATCH_PREFIX + "step_configs"] = value
             return
         self.__dict__["step_configs_backing"] = value
+
+    # The review step's iteration record, completed by the fix step and checked by
+    # the finalize safety net of the same run.
+    _LAST_ITERATION_RECORD = RuntimeKey("DualInferencer.last_iteration_record")
+
+    @property
+    def _last_iteration_record(self):
+        return invocation_of(self).get(self._LAST_ITERATION_RECORD)
+
+    @_last_iteration_record.setter
+    def _last_iteration_record(self, value):
+        invocation_of(self).put(self._LAST_ITERATION_RECORD, value)
 
     # ------------------------------------------------------------------
     # Part 3 "write once, link" (default ON).
@@ -650,7 +672,7 @@ class DualInferencer(LinearWorkflowInferencer):
         child_ws = self._run_get("_last_output_child_ws", None)
         propose_ws = getattr(self, "_propose_child_ws", None)
         state = getattr(self, "_state", None) or {}
-        last_iter = getattr(self, "_last_iteration_record", None)
+        last_iter = self._last_iteration_record
         if (
             child_ws is not None
             and propose_ws is not None
@@ -772,7 +794,8 @@ class DualInferencer(LinearWorkflowInferencer):
         return ""
 
     def _proposer_task_instructions(self) -> str:
-        """Contract rendered by this Dual's author, for a parent orchestrator.
+        """Contract rendered by this Dual's author, for a parent orchestrator in
+        true no-ctx (under a ctx a parent reads this node's published outcome).
 
         Prefers the value captured at propose-completion: by the time a parent asks,
         the winning flow may have re-rendered in the fixer role and overwritten its
@@ -782,8 +805,22 @@ class DualInferencer(LinearWorkflowInferencer):
         stored = self._prior_task_instructions()
         if stored:
             return stored
-        getter = getattr(self.base_inferencer, "_proposer_task_instructions", None)
-        return (getter() or "") if callable(getter) else ""
+        return InferencerBase._task_contract_at(self.base_inferencer, None)
+
+    def _outcome_for(self, frame) -> Optional[NodeOutcomeState]:
+        """A Dual publishes its proposer's contract: the one captured at
+        propose-completion (it may come from a resumed checkpoint), else the one
+        the propose child published."""
+        if frame.ctx is None:
+            return None
+        propose_ctx = frame.ctx.child("propose")
+        contract = self._task_contract_state_at(self.base_inferencer, propose_ctx)
+        stored = self._prior_task_instructions()
+        if stored and (contract is None or contract.text != stored):
+            contract = RenderedTaskContractState.of(
+                stored, role=None, source_path=propose_ctx.path
+            )
+        return None if contract is None else NodeOutcomeState(task_contract=contract)
 
     def _resolve_prior_proposer_output_path(self) -> Optional[str]:
         """Resolve the on-disk file path of the active proposer's prior output.
@@ -1010,7 +1047,6 @@ class DualInferencer(LinearWorkflowInferencer):
             # (Commit 3 audit), with an instance backing under legacy/no-ctx.
             # NOT in self._state (not picklable); re-derived each call.
             self._run_set("_current_attempt", attempt)
-            self._current_config = config
 
             self._run_set("_current_inference_config", inference_config)
             self._run_set("_current_extra_inference_args", _inference_args)
@@ -1072,18 +1108,22 @@ class DualInferencer(LinearWorkflowInferencer):
             # Configure checkpoint if enabled
             if config.max_iterations <= 0:
                 # Propose-only mode: no resume needed (single step)
-                self.enable_result_save = False
-                self.resume_with_saved_results = False
+                self._set_call_policy(
+                    enable_result_save=False, resume_with_saved_results=False
+                )
             elif self.enable_checkpoint and (
                 self._workspace is not None or self.checkpoint_dir
             ):
-                self.enable_result_save = StepResultSaveOptions.Always
-                self.resume_with_saved_results = True
+                self._set_call_policy(
+                    enable_result_save=StepResultSaveOptions.Always,
+                    resume_with_saved_results=True,
+                )
             elif self._result_root_override is not None:
                 pass  # Parent already configured via _setup_child_workflows
             else:
-                self.enable_result_save = False
-                self.resume_with_saved_results = False
+                self._set_call_policy(
+                    enable_result_save=False, resume_with_saved_results=False
+                )
 
             # Build steps from step_configs and run
             self._steps = self._build_steps()
@@ -1358,10 +1398,11 @@ class DualInferencer(LinearWorkflowInferencer):
             str(_eff_propose_ws.root) if _eff_propose_ws is not None else None
         )
         await self._emit_stage_status("propose", "running")
+        _propose_rc = self._rc_child("propose")
         _raw_base = str(
             await self.base_inferencer.ainfer(
                 initial_prompt,
-                run_context=self._rc_child("propose"),
+                run_context=_propose_rc,
                 **self._run_get("_current_extra_inference_args", {}),
             )
         )
@@ -1435,9 +1476,9 @@ class DualInferencer(LinearWorkflowInferencer):
         # step, which would overwrite that leaf's own snapshot. Kept in ``state``
         # (checkpointed) so it survives a cross-process resume. First non-empty wins.
         if not state.get("prior_task_instructions"):
-            _getter = getattr(self.base_inferencer, "_proposer_task_instructions", None)
-            if callable(_getter):
-                state["prior_task_instructions"] = _getter() or ""
+            state["prior_task_instructions"] = self._task_contract_at(
+                self.base_inferencer, _propose_rc
+            )
         await self._emit_stage_status(
             "propose", "completed", output_path=_propose_output_path
         )
@@ -2063,7 +2104,7 @@ class DualInferencer(LinearWorkflowInferencer):
                 },
                 "FixStepSkipped",
             )
-            iteration_record = getattr(self, "_last_iteration_record", None)
+            iteration_record = self._last_iteration_record
             if iteration_record is not None:
                 state["attempt_record"]["iterations"].append(iteration_record)
             state["attempt_record"]["consensus_reached"] = True
@@ -2157,7 +2198,7 @@ class DualInferencer(LinearWorkflowInferencer):
             else None
         )
 
-        iteration_record = getattr(self, "_last_iteration_record", None)
+        iteration_record = self._last_iteration_record
         if iteration_record is not None:
             iteration_record.counter_feedback = parsed_counter
             state["attempt_record"]["iterations"].append(iteration_record)

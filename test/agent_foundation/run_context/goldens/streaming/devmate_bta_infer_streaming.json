@@ -1,0 +1,34 @@
+{
+  "body": {
+    "active_session_id": null,
+    "cli": [],
+    "consecutive_error_count": 0,
+    "construct_command": [],
+    "dump_output_after": true,
+    "fanout": [
+      {
+        "active_ctx": {
+          "legacy_mint": true,
+          "path": "/"
+        },
+        "args": {
+          "filter_session_info": true,
+          "output_stream": null,
+          "stream_callback": null
+        },
+        "contract": "fanout question",
+        "inference_config": null,
+        "path": "_run_fanout"
+      }
+    ],
+    "observed": [],
+    "output": [
+      "FANOUT(fanout question)"
+    ],
+    "raised": null
+  },
+  "session_logs": {},
+  "tree": {
+    "cli/fake_dm.py": "<present>"
+  }
+}

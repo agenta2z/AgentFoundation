@@ -228,6 +228,7 @@ def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_
     from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
         BreakdownThenAggregateInferencer,
     )
+    from agent_foundation.common.inferencers.run_context import open_invocation
 
     breakdown = _make_minimal_inferencer()
     aggregator = _make_minimal_inferencer()
@@ -254,7 +255,9 @@ def test_bta_skips_attr_workspace_for_aggregator_inferencer_but_runtime_assigns_
 
     # Simulate runtime graph wiring. This should assign the canonical runtime
     # workspace under children/aggregator/.
-    _ = bta._build_subgraph_spec(["subtask 0"], _original_query="top-level query")
+    with open_invocation(bta):
+        bta._open_attempt("top-level query", use_async=False)
+        _ = bta._build_subgraph_spec(["subtask 0"], _original_query="top-level query")
 
     assert aggregator._workspace is not None, (
         "Runtime graph wiring should assign aggregator._workspace."

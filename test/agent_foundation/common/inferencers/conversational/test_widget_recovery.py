@@ -107,6 +107,31 @@ class WidgetRecoveryLoopTest(unittest.TestCase):
         # (4) The one-shot recovery flag was consumed (no re-fire on iteration 2).
         self.assertIsNone(getattr(ci, "_pending_widget_result", None))
 
+    def test_answer_mailboxes_are_cleared_without_bundled_actions(self):
+        # A confirmation answer carries parameter overrides / turn variables
+        # for bundled actions. With none bundled they must not stay set: the
+        # next widget's effect would raise HandlerResultMergeConflict.
+        ci, base = self._ci([_FINAL_TEXT, _FINAL_TEXT])
+        for _ in range(2):
+            ci._pending_widget_result = {
+                "tools": [
+                    ConversationTool(
+                        tool_type=ConversationToolType.CONFIRMATION,
+                        prompt="Proceed?",
+                    )
+                ],
+                "action_tools": [],
+                "raw_value": {
+                    "choice": "yes",
+                    "param_overrides": {"x": 1},
+                    "variables": {"v": "2"},
+                },
+            }
+            asyncio.run(ci.run_agentic_loop(""))
+            self.assertIsNone(ci._next_action_tool_overrides)
+            self.assertIsNone(ci._next_turn_variables)
+        self.assertEqual(base._idx, 2)
+
     def test_none_answer_leaves_widget_pending(self):
         # A missing/unusable persisted answer must NOT re-infer and must NOT
         # continue — the turn ends with the widget still pending (mirrors the

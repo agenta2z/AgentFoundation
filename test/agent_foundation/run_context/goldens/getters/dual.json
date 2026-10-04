@@ -1,0 +1,97 @@
+{
+  "catalog": {
+    "_proposer_task_instructions": {
+      "BreakdownThenAggregateInferencer": [
+        "_worker_task_instructions"
+      ],
+      "DualInferencer": [
+        "_state['prior_task_instructions'] (node.call | _pending_state_backing)",
+        "base_inferencer._proposer_task_instructions()"
+      ],
+      "InferencerBase": [],
+      "MultiFlowInferencer": [
+        "MultiFlowState.winner_idx",
+        "_last_winner_idx_backing",
+        "flow_configs[*].initial_inferencer._proposer_task_instructions()"
+      ],
+      "TemplatedInferencerBase": [
+        "_last_rendered_task_instructions"
+      ]
+    }
+  },
+  "steps": {
+    "bare1": {
+      "fields": {
+        "_pending_state_backing.prior_task_instructions": null,
+        "_pending_state_backing_is_set": false,
+        "base._last_rendered_task_instructions": "Contract<plan> for task-a"
+      },
+      "getters": {
+        "_prior_task_instructions": "",
+        "_proposer_task_instructions": "Contract<plan> for task-a"
+      },
+      "result": {
+        "str": "base([plan|initial] task-a)",
+        "type": "DualInferencerResponse"
+      }
+    },
+    "bare2": {
+      "fields": {
+        "_pending_state_backing.prior_task_instructions": null,
+        "_pending_state_backing_is_set": false,
+        "base._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters": {
+        "_prior_task_instructions": "",
+        "_proposer_task_instructions": "Contract<plan> for task-b"
+      },
+      "result": {
+        "str": "base([plan|initial] task-b)",
+        "type": "DualInferencerResponse"
+      }
+    },
+    "bare3_fail": {
+      "fields": {
+        "_pending_state_backing.prior_task_instructions": null,
+        "_pending_state_backing_is_set": false,
+        "base._last_rendered_task_instructions": "Contract<plan> for boom"
+      },
+      "getters": {
+        "_prior_task_instructions": "",
+        "_proposer_task_instructions": "Contract<plan> for boom"
+      },
+      "result": {
+        "error": "RuntimeError"
+      }
+    },
+    "host": {
+      "fields_after": {
+        "_pending_state_backing.prior_task_instructions": null,
+        "_pending_state_backing_is_set": false,
+        "base._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "fields_before": {
+        "_pending_state_backing.prior_task_instructions": null,
+        "_pending_state_backing_is_set": false,
+        "base._last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters_after": {
+        "_prior_task_instructions": "",
+        "_proposer_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters_reentered": {
+        "_prior_task_instructions": "Contract<plan> for task-h",
+        "_proposer_task_instructions": "Contract<plan> for task-h"
+      },
+      "result": {
+        "str": "base([plan|initial] task-h)",
+        "type": "DualInferencerResponse"
+      },
+      "store_paths": [
+        "/",
+        "/propose"
+      ],
+      "touched": []
+    }
+  }
+}

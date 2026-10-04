@@ -38,6 +38,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     PlanThenImplementInferencer,
     PlanThenImplementResponse,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,8 @@ class TestCodeReviewE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("write add(a, b)")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("write add(a, b)")
         self.assertIsInstance(result, DualInferencerResponse)
         self.assertTrue(result.consensus_achieved)
         # 2 review iterations
@@ -133,7 +135,8 @@ class TestResearchThenImplementE2E(unittest.IsolatedAsyncioTestCase):
                 planner_outputs_plan_to_file=False,  # inline plan in executor input
             )
 
-            result = await pti._ainfer("Choose an HTTP lib")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("Choose an HTTP lib")
 
         self.assertIsInstance(result, PlanThenImplementResponse)
         # Executor must have seen the plan content in its input

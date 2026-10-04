@@ -121,6 +121,9 @@ class AgenticResult:
     last_template_config: dict[str, Any] = field(
         default_factory=dict
     )  # for UI rendering
+    # Native orchestrator metadata (backend, hashed session id, injection
+    # routes, usage); empty for the text-protocol orchestrator.
+    native_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

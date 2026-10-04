@@ -12,14 +12,9 @@ import os
 
 import pytest
 
-_EXAMPLES_DIR = os.path.abspath(
+_EXAMPLES_DIR = os.path.normpath(
     os.path.join(
-        os.path.dirname(
-            __import__(
-                "agent_foundation.common.inferencers.inferencer_base", fromlist=["x"]
-            ).__file__
-        ),
-        "..",
+        os.path.dirname(os.path.abspath(__file__)),
         "..",
         "..",
         "..",

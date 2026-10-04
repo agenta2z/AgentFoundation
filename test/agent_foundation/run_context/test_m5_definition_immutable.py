@@ -1,63 +1,96 @@
-"""M5 §2.4: under a RunContext, MFI does NOT mutate the definition (flow_configs /
-predefined_sub_queries); the runtime inputs flow through ctx.node.call instead."""
+"""MFI never mutates its definition (flow_configs / predefined_sub_queries) to
+propagate the runtime input (M5 §2.4; B20, P9): each attempt derives the flow inputs
+(``_BtaAttempt.effective_sub_queries``), in every mode, and the flows' followup
+builders read their own entry."""
 
-import asyncio
 import copy
 
+import pytest
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.multi_flow_inferencer import (
     MultiFlowInferencer,
 )
+from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
 from agent_foundation.common.inferencers.run_context import (
     enter_run,
     exit_run,
+    open_invocation,
     RunContext,
 )
+from attr import attrib, attrs
 
 
-def _mfi():
+def _mfi(**kwargs):
     return MultiFlowInferencer(
         flow_configs=[{"input": "PLACEHOLDER_A"}, {"input": "PLACEHOLDER_B"}],
         propagate_runtime_input=True,
         disable_aggregator=True,
+        **kwargs,
     )
 
 
-def test_definition_unmutated_under_context():
+@pytest.mark.parametrize("with_ctx", (False, True))
+def test_an_attempt_derives_the_flow_inputs_and_the_definition_stays(with_ctx):
     mfi = _mfi()
-    before_flow_configs = copy.deepcopy(mfi.flow_configs)
-    before_psq = copy.deepcopy(mfi.predefined_sub_queries)
-
-    root = RunContext.root(workspace=None)
-    tok = enter_run(root)
+    before = (
+        copy.deepcopy(mfi.flow_configs),
+        copy.deepcopy(mfi.predefined_sub_queries),
+    )
+    token = enter_run(RunContext.root(workspace=None)) if with_ctx else None
     try:
-        mfi._apply_runtime_input_propagation("RUNTIME_INPUT")
-        # §2.4 invariant: the DEFINITION is provably unmutated under a context.
-        assert mfi.flow_configs == before_flow_configs
-        assert mfi.predefined_sub_queries == before_psq
-        # ...and the runtime inputs flow through the context node instead.
-        node = root._store.node("/")
-        assert node.call["predefined_sub_queries"] == ["RUNTIME_INPUT", "RUNTIME_INPUT"]
+        with open_invocation(mfi):
+            attempt = mfi._open_attempt("RUNTIME_INPUT", use_async=True)
+            assert attempt.effective_sub_queries == ["RUNTIME_INPUT", "RUNTIME_INPUT"]
+            assert mfi._get_effective_predefined_sub_queries() == [
+                "RUNTIME_INPUT",
+                "RUNTIME_INPUT",
+            ]
+            assert mfi._flow_input(1, mfi.flow_configs[1]) == "RUNTIME_INPUT"
     finally:
-        exit_run(tok)
+        if token is not None:
+            exit_run(token)
+    assert (mfi.flow_configs, mfi.predefined_sub_queries) == before
 
 
-def test_effective_accessor_reads_from_context():
-    """BTA's read-through accessor sources the runtime sub-queries from the ctx."""
-    mfi = _mfi()
-    root = RunContext.root(workspace=None)
-    tok = enter_run(root)
-    try:
-        mfi._apply_runtime_input_propagation("RUNTIME_INPUT")
-        effective = mfi._get_effective_predefined_sub_queries()
-        assert effective == ["RUNTIME_INPUT", "RUNTIME_INPUT"]
-    finally:
-        exit_run(tok)
+def test_without_propagation_the_configured_inputs_run():
+    mfi = MultiFlowInferencer(
+        flow_configs=[{"input": "A"}, {"input": "B"}], disable_aggregator=True
+    )
+    with open_invocation(mfi):
+        mfi._open_attempt("RUNTIME_INPUT", use_async=True)
+        assert mfi._get_effective_predefined_sub_queries() == ["A", "B"]
+        assert mfi._flow_input(0, mfi.flow_configs[0]) == "A"
 
 
-def test_legacy_path_without_context_still_mutates_byte_identical():
-    """No context -> the legacy behavior is preserved exactly (back-compat)."""
-    mfi = _mfi()
-    # No active run context.
-    mfi._apply_runtime_input_propagation("RUNTIME_INPUT")
-    assert [c["input"] for c in mfi.flow_configs] == ["RUNTIME_INPUT", "RUNTIME_INPUT"]
-    assert mfi.predefined_sub_queries == ["RUNTIME_INPUT", "RUNTIME_INPUT"]
+@attrs
+class _Recorder(InferencerBase):
+    seen: list = attrib(factory=list, kw_only=True)
+
+    def _infer(self, inference_input, inference_config=None, **kwargs):
+        self.seen.append(str(inference_input))
+        return "out"
+
+
+def test_every_step_of_every_flow_gets_the_runtime_input(tmp_path):
+    """A followup step that receives the injected upstream artifacts gets the
+    flow's runtime input; it got the placeholder under any ctx before (E12)."""
+    steps = [_Recorder() for _ in range(4)]
+    flows = [
+        {
+            "initial_inferencer": steps[2 * i],
+            "followup_inferencer": steps[2 * i + 1],
+            "end_condition": lambda state, out: state["dynamic_step_count"] >= 2,
+            "max_dynamic_steps": 2,
+        }
+        for i in range(2)
+    ]
+    mfi = MultiFlowInferencer(
+        flow_configs=flows,
+        propagate_runtime_input=True,
+        inject_upstream_artifacts=True,
+        disable_aggregator=True,
+    )
+    root = RunContext.root(workspace=InferencerWorkspace(root=str(tmp_path)))
+    mfi.infer("RUNTIME TASK", run_context=root)
+    assert [step.seen for step in steps] == [["RUNTIME TASK"]] * 4
+    assert [cfg["input"] for cfg in mfi.flow_configs] == ["", ""]

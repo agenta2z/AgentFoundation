@@ -16,10 +16,22 @@ shared Literal type aliases for ``--effort`` and ``--permission-mode``.
 import logging
 import os
 import re
+import shutil
 import sys
 from typing import Literal, Optional
 
 _logger: logging.Logger = logging.getLogger(__name__)
+
+# The Claude Code executable looked up on ``PATH`` when no path is configured.
+CLAUDE_BINARY = "claude"
+
+
+def find_claude_binary(explicit: Optional[str] = None) -> Optional[str]:
+    """The ``claude`` executable to run: ``explicit`` when set, else the one
+    on ``PATH``; ``None`` when neither (callers then use the bare name, or let
+    the Agent SDK find its own)."""
+    return explicit or shutil.which(CLAUDE_BINARY)
+
 
 # Reasoning-effort levels accepted by ``claude --effort <level>`` (CLI
 # v2.1.119+). Higher levels allocate more thinking budget to the model
@@ -175,3 +187,43 @@ def resolve_model_tag(model_tag: str) -> str:
     result = _DOT_VERSION_RE.sub(r"\1-\2", result)
 
     return result
+
+
+def build_permission_effort_kwargs(
+    permission_mode: Optional[str],
+    effort: Optional[str],
+    disable_osx_sandbox: bool,
+) -> tuple[dict[str, object], dict[str, Optional[str]]]:
+    """Split ``permission_mode`` and ``effort`` into SDK typed fields and ``extra_args``.
+
+    The installed claude-agent-sdk's typed ``permission_mode`` and
+    ``effort`` Literals are narrower than the CLI's accepted set
+    (no ``auto`` / ``dontAsk`` for permission, no ``xhigh`` for effort).
+    For type cleanliness and forward compatibility, values inside the
+    SDK's native Literal go through the typed field; the wider CLI-only
+    values go through ``extra_args`` so the SDK subprocess transport
+    still forwards them to the CLI as ``--permission-mode`` / ``--effort``.
+
+    Returns:
+        ``(sdk_kwargs, extra_args)`` — ``sdk_kwargs`` is splatted into
+        ``ClaudeAgentOptions(...)``; ``extra_args`` is passed as the
+        ``extra_args`` field. Either may be empty.
+    """
+    sdk_kwargs: dict[str, object] = {}
+    extra_args: dict[str, Optional[str]] = {}
+    if permission_mode is not None:
+        if permission_mode in SDK_NATIVE_PERMISSION_MODES:
+            sdk_kwargs["permission_mode"] = permission_mode
+        else:
+            extra_args["permission-mode"] = permission_mode
+    if effort is not None:
+        if effort in SDK_NATIVE_EFFORT_LEVELS:
+            sdk_kwargs["effort"] = effort
+        else:
+            extra_args["effort"] = effort
+    # macOS-sandbox toggle: the SDK has no typed field for this Meta
+    # launcher option, so route it through extra_args. A ``None`` value
+    # emits a value-less boolean flag (``--dangerously-disable-osx-sandbox``).
+    if disable_osx_sandbox:
+        extra_args[DANGEROUSLY_DISABLE_OSX_SANDBOX] = None
+    return sdk_kwargs, extra_args

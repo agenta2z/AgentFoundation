@@ -41,13 +41,19 @@ CHILD_CALL_METHODS = frozenset(
 # `ctx.child(slot)`, so the lifecycle-call lint (N-S3/S4) checks them.
 #   - reset_session / switch_role: run during _ainfer (active ctx present) → the
 #     slot binding via `_with_child_ctx(slot)` targets the child's OWN handle.
+#   - areset_conversation: resolves its branch like a public entry (given ctx, else
+#     the active one, else a legacy root), so a call on a child must pass the child's
+#     `run_context=` (or run under `_with_child_ctx(slot)`); a bare call resets the
+#     child's conversation on the CALLER's branch, not the one the child runs on.
 #   - `aconnect`/`adisconnect` are DELIBERATELY EXCLUDED: they run at lifecycle
 #     boundaries (`__aenter__`/`__aexit__`/host cleanup) where NO context is active,
 #     so a call-site `run_context=`/slot-binding would no-op. Their correctness is a
 #     LEAF concern (drain every connection-scoped branch at teardown, see
 #     StreamingInferencerBase._iter_live_handle_sets), NOT a call-site one — flagging
 #     the (correct) bare `child.adisconnect()` calls would only add false-positives.
-LIFECYCLE_CALL_METHODS = frozenset({"reset_session", "switch_role"})
+LIFECYCLE_CALL_METHODS = frozenset(
+    {"reset_session", "switch_role", "areset_conversation"}
+)
 
 
 class CallSite(NamedTuple):

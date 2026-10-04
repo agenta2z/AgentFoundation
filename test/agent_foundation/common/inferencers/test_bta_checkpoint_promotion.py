@@ -9,8 +9,9 @@ worker fan-out (via the ``subgraph_registry`` factories) and the aggregator's
 guidance. These deterministic tests are the authoritative gate:
 
 * (T1) Promoter contract (``InferencerBase._promote_child_checkpoints``): a child
-  declaring ``checkpoint_scope="parent"`` is copied up atomically; a
-  non-declaring child is not; missing source / missing workspace are no-ops.
+  declaring ``checkpoint_scope="parent"`` is copied up atomically into the
+  parent workspace the caller passes; a non-declaring child is not; missing
+  source / missing workspace are no-ops.
 * (T2) Resume rebuild: the ``subgraph_registry`` factory rebuilds the worker
   fan-out purely from the promoted file — no ``breakdown_result.json``, no
   ``_cached_sub_queries``.
@@ -19,6 +20,7 @@ guidance. These deterministic tests are the authoritative gate:
   (the generic WorkGraph reconstruction path drops it — nothing reads it).
 """
 
+import contextlib
 import filecmp
 import json
 import os
@@ -26,11 +28,20 @@ import shutil
 import tempfile
 import unittest
 
+from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers import (
+    breakdown_then_aggregate_inferencer as bta_module,
+)
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.breakdown_then_aggregate_inferencer import (
     BreakdownThenAggregateInferencer,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
 from agent_foundation.common.inferencers.inferencer_workspace import InferencerWorkspace
+from agent_foundation.common.inferencers.run_context import (
+    enter_run,
+    exit_run,
+    open_invocation,
+    RunContext,
+)
 from attr import attrib, attrs
 
 
@@ -57,6 +68,14 @@ _FENCE = {
     ],
     "aggregation_guidance": "MERGE BY THEME",
 }
+
+
+@contextlib.contextmanager
+def _in_attempt(bta):
+    """BTA's private hooks run inside an attempt of their owner's invocation."""
+    with open_invocation(bta):
+        bta._open_attempt("decompose this", use_async=False)
+        yield
 
 
 def _json_breakdown_response(descriptions):
@@ -110,7 +129,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
                 }
             ]
         )
-        self.parent._promote_child_checkpoints(child)
+        self.parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=self.parent_ws
+        )
 
         promoted = self._promoted_path()
         self.assertTrue(os.path.isfile(promoted), "declaring child must be promoted")
@@ -125,6 +146,23 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
             "promoted file must be byte-identical to the child's output",
         )
 
+    def test_under_context_promotes_from_the_child_slot(self):
+        # A fan-out BTA's own node carries the workspace its host published; the
+        # child's getter evaluated under that node would name the BTA's workspace.
+        child, _ = self._make_child(
+            [{"persist_to": "decomposed_subtasks.json", "checkpoint_scope": "parent"}]
+        )
+        ctx = RunContext.root().child("bta_inferencer")
+        ctx.handles.set("workspace_override", self.parent_ws)
+        tok = enter_run(ctx)
+        try:
+            self.parent._promote_child_checkpoints(
+                child, "breakdown", parent_ws=self.parent_ws
+            )
+        finally:
+            exit_run(tok)
+        self.assertTrue(os.path.isfile(self._promoted_path()))
+
     def test_non_declaring_child_not_promoted(self):
         # Same entry WITHOUT checkpoint_scope — the register still wrote the file,
         # but nothing opts it into parent-scope promotion.
@@ -137,7 +175,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
                 }
             ]
         )
-        self.parent._promote_child_checkpoints(child)
+        self.parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=self.parent_ws
+        )
         self.assertFalse(
             os.path.exists(self._promoted_path()),
             "child without checkpoint_scope='parent' must NOT be promoted",
@@ -147,7 +187,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
         child, _ = self._make_child(
             [{"persist_to": "decomposed_subtasks.json", "checkpoint_scope": "parent"}]
         )
-        self.parent._promote_child_checkpoints(child)
+        self.parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=self.parent_ws
+        )
         self.assertTrue(os.path.isfile(self._promoted_path()))
         self.assertFalse(
             os.path.exists(self._promoted_path() + ".tmp"),
@@ -162,7 +204,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
             [{"persist_to": "decomposed_subtasks.json", "checkpoint_scope": "parent"}],
             write_output=False,
         )
-        self.parent._promote_child_checkpoints(child)
+        self.parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=self.parent_ws
+        )
         self.assertFalse(os.path.exists(self._promoted_path()))
 
     def test_no_parent_workspace_is_noop(self):
@@ -170,7 +214,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
             [{"persist_to": "decomposed_subtasks.json", "checkpoint_scope": "parent"}]
         )
         parent = _MockInferencer()  # no _workspace bound
-        parent._promote_child_checkpoints(child)  # must not raise
+        parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=None
+        )  # must not raise
         self.assertFalse(os.path.exists(self._promoted_path()))
 
     def test_path_traversal_persist_to_is_rejected(self):
@@ -178,7 +224,9 @@ class PromoteChildCheckpointsTest(unittest.TestCase):
         child, _ = self._make_child(
             [{"persist_to": "../escape.json", "checkpoint_scope": "parent"}]
         )
-        self.parent._promote_child_checkpoints(child)
+        self.parent._promote_child_checkpoints(
+            child, "breakdown", parent_ws=self.parent_ws
+        )
         self.assertFalse(
             os.path.exists(os.path.join(self.tmpdir, "escape.json")),
             "'..' in persist_to must be rejected, not followed",
@@ -222,14 +270,15 @@ class ResumeRebuildFromPromotedFileTest(unittest.TestCase):
     def test_factory_rebuilds_fanout_from_promoted_file(self):
         bta, ws = self._make_bta()
         self._write_promoted(ws)
-        # No hand-rolled resume file exists, and the loader memo is cold — this is
-        # a fresh resume process rebuilding from disk alone.
+        # No hand-rolled resume file exists — this is a fresh resume process
+        # rebuilding from disk alone.
         self.assertFalse(
             os.path.exists(os.path.join(self.tmpdir, "breakdown_result.json"))
         )
-        self.assertIsNone(bta._promoted_breakdown_cache)
 
-        spec = bta.subgraph_registry["bta_workers"]("expansion-id")
+        with _in_attempt(bta):
+            graph = bta_module._bta_graph(bta, bta._bta_attempt())
+            spec = graph.subgraph_registry["bta_workers"]("expansion-id")
 
         worker_nodes = [n for n in spec.nodes if "worker" in n.name]
         self.assertEqual(len(worker_nodes), len(_FENCE["subtasks"]))
@@ -237,24 +286,36 @@ class ResumeRebuildFromPromotedFileTest(unittest.TestCase):
     def test_loader_returns_queries_and_guidance(self):
         bta, ws = self._make_bta()
         self._write_promoted(ws)
-        sub_queries, guidance = bta._load_promoted_breakdown()
+        with _in_attempt(bta):
+            sub_queries, guidance = bta._load_promoted_breakdown()
         self.assertEqual(len(sub_queries), len(_FENCE["subtasks"]))
         self.assertEqual(guidance, "MERGE BY THEME")
 
     def test_absent_promoted_file_returns_none_pair(self):
         bta, _ = self._make_bta()  # nothing written to checkpoints/
-        self.assertEqual(bta._load_promoted_breakdown(), (None, None))
+        with _in_attempt(bta):
+            self.assertEqual(bta._load_promoted_breakdown(), (None, None))
 
     def test_loader_is_memoized_single_read(self):
         bta, ws = self._make_bta()
         path = self._write_promoted(ws)
-        first = bta._load_promoted_breakdown()
-        # Remove the file: a genuine second read would now miss. The memo must
-        # serve the identical parsed tuple, proving a single read+parse.
-        os.remove(path)
-        second = bta._load_promoted_breakdown()
+        with _in_attempt(bta):
+            first = bta._load_promoted_breakdown()
+            # Remove the file: a genuine second read would now miss. The memo must
+            # serve the identical parsed tuple, proving a single read+parse.
+            os.remove(path)
+            second = bta._load_promoted_breakdown()
         self.assertIs(first, second)
         self.assertEqual(len(second[0]), len(_FENCE["subtasks"]))
+
+    def test_the_memo_does_not_outlive_its_attempt(self):
+        bta, ws = self._make_bta()
+        path = self._write_promoted(ws)
+        with _in_attempt(bta):
+            self.assertIsNotNone(bta._load_promoted_breakdown()[0])
+        os.remove(path)
+        with _in_attempt(bta):
+            self.assertEqual(bta._load_promoted_breakdown(), (None, None))
 
     def test_unparseable_promoted_file_degrades_to_none(self):
         bta, ws = self._make_bta()
@@ -264,7 +325,8 @@ class ResumeRebuildFromPromotedFileTest(unittest.TestCase):
             f.write("{ not valid json !!!")
         # Graceful degradation (the corrupted-checkpoint contract): behave as
         # "no checkpoint" so Step 0 runs a fresh breakdown instead of erroring.
-        self.assertEqual(bta._load_promoted_breakdown(), (None, None))
+        with _in_attempt(bta):
+            self.assertEqual(bta._load_promoted_breakdown(), (None, None))
 
 
 class SeedLeftNoneTest(unittest.TestCase):
@@ -298,8 +360,9 @@ class SeedLeftNoneTest(unittest.TestCase):
 
     def test_emitted_expansion_has_no_seed(self):
         bta = self._make_bta()
-        fn = bta._make_breakdown_fn("decompose this", None)
-        result = fn()  # sync path (use_async defaults False)
+        with _in_attempt(bta):
+            # sync path: the attempt's use_async is False
+            result = bta._make_breakdown_fn("decompose this", None)()
         self.assertIsNone(result.seed)
         self.assertIsNone(result.reconstruct_from_seed)
         # Sanity: the fresh path still produced a real fan-out subgraph.
@@ -340,7 +403,8 @@ class NoBreakdownResultJsonTest(unittest.TestCase):
             bta.name = "t6_bta"
             # Run the breakdown emit path — exactly where the retired
             # _save_breakdown_checkpoint used to write breakdown_result.json.
-            bta._make_breakdown_fn("decompose this", None)()
+            with _in_attempt(bta):
+                bta._make_breakdown_fn("decompose this", None)()
 
             offenders = [
                 os.path.join(root, "breakdown_result.json")

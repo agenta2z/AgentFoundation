@@ -130,6 +130,75 @@ class TestCommandRegistry(unittest.TestCase):
             )
 
 
+class _OrderBase:
+    @command("alpha")
+    async def _cmd_alpha(self) -> str:
+        return "base alpha"
+
+    @command("beta", aliases=("b",))
+    async def _cmd_beta(self) -> str:
+        return "base beta"
+
+    @command("gamma")
+    async def _cmd_gamma(self) -> str:
+        return "base gamma"
+
+
+class _OrderDerived(_OrderBase):
+    @command("delta")
+    async def _cmd_delta(self) -> str:
+        return "derived delta"
+
+    @command("beta", description="derived", aliases=("b",))
+    async def _cmd_beta(self) -> str:
+        return "derived beta"
+
+    @command("gamma", description="shadow")
+    async def _cmd_gamma_shadow(self) -> str:
+        return "derived gamma"
+
+
+def _listed(registry: CommandRegistry) -> list[str]:
+    return [
+        line.split("`")[1].lstrip("/")
+        for line in registry.render_for_prompt().splitlines()
+    ]
+
+
+class CommandOrderTest(unittest.TestCase):
+    def test_classic_prompt_lists_commands_in_declaration_order(self) -> None:
+        self.assertEqual(
+            _listed(_make_ci()._commands),
+            [
+                "help",
+                "status",
+                "clear",
+                "sop <args>",
+                "pause_sop",
+                "exit_sop",
+                "resume_sop <args>",
+                "model <model_name>",
+                "root <path>",
+                "target <path>",
+            ],
+        )
+
+    def test_override_and_shadow_keep_the_base_position(self) -> None:
+        registry = CommandRegistry(_OrderDerived())
+        self.assertEqual(_listed(registry), ["alpha", "beta", "gamma", "delta"])
+        descriptions = {m.name: m.description for m in registry.list_commands()}
+        self.assertEqual(descriptions["beta"], "derived")
+        self.assertEqual(descriptions["gamma"], "shadow")
+        loop = asyncio.new_event_loop()
+        try:
+            beta = loop.run_until_complete(registry.dispatch("/b"))
+            gamma = loop.run_until_complete(registry.dispatch("/gamma"))
+        finally:
+            loop.close()
+        self.assertEqual(beta, "derived beta")
+        self.assertEqual(gamma, "derived gamma")
+
+
 class TestCommandDispatchInLoop(unittest.TestCase):
     def test_command_bypasses_llm(self):
         ci = _make_ci()

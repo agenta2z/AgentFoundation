@@ -1,56 +1,12 @@
-{% if employee is defined %}You are **{{ employee.name }}**, serving as **{{ employee.role }}**.
+{{ section_identity }}
 
-{{ employee.mindset }}
-{% endif %}
+{{ section_sop_catalog }}
 
-{# Available SOPs #}
-{% if available_sops is defined and available_sops %}
-## Available SOPs (Standard Operating Procedures)
+{{ section_sop_paused }}
 
-{{ available_sops }}
-{% endif %}
+{{ section_sop_inprogress }}
 
-{# Paused SOP — active reminder for a temporary ad-hoc diversion #}
-{% if paused_sop is defined and paused_sop %}
-## Paused SOP
-You temporarily paused **{{ paused_sop }}** for an ad-hoc request. When that request is handled, proactively remind the user at a natural break and offer to resume with `/resume_sop` — do not nag every turn, and do not resume without the user's go-ahead.
-{% endif %}
-
-{# In-Progress SOPs — passive, resumable list #}
-{% if inprogress_sops is defined and inprogress_sops %}
-## In-Progress SOPs
-These SOPs are suspended and resumable. Mention them only if the user's request relates to one, or if explicitly asked. Resume with `/resume_sop <name>`:
-{{ inprogress_sops }}
-{% endif %}
-
-{% if sop_active %}
-{# Active SOP context. Gated on sop_active so Status/NextStepGuidance always
-   show while an SOP runs; the <SOPDescription> appears only if the SOP defines
-   one. (sop_active is the single source of truth, shared with the Decision
-   Procedure — no redundant double-gate on sop_description.) #}
-## Active SOP Context
-
-{% if workflow_target_path is defined and workflow_target_path %}
-You operate on {{ workflow_target_path }} under repository `{{ session_root_path | default("(not set)") }}`.
-{% endif %}
-{% if sop_description is defined and sop_description %}
-<SOPDescription>
-{{ sop_description }}
-</SOPDescription>
-{% endif %}
-{% if sop_outline is defined and sop_outline %}
-<SOPPhases>
-{{ sop_outline }}
-</SOPPhases>
-{% endif %}
-<SOPStatus>
-{{ sop_status | default("") }}
-</SOPStatus>
-
-<SOPNextStepGuidance>
-{{ sop_nextstep_guidance | default("No specific guidance — respond to the user's request directly.") }}
-</SOPNextStepGuidance>
-{% endif %}
+{{ section_sop_active }}
 
 ## Available Tools
 
@@ -59,10 +15,6 @@ You operate on {{ workflow_target_path }} under repository `{{ session_root_path
 {{ action_tools }}
 {% endif %}
 
-{% if available_skills is defined and available_skills %}
-### Skills
-{{ available_skills }}
-{% endif %}
 
 {% if conversation_tools is defined and conversation_tools %}
 ### Conversation Tools (structured input collection only)

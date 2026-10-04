@@ -1,9 +1,10 @@
 """ConversationalFlowNodeAdapter — thin adapter for flow inferencer slots.
 
-Lets a ConversationalInferencer act as a child node in BTA/PTI/LWI by
-inheriting InferencerBase and overriding _ainfer() to delegate to
-run_agentic_loop(). The flow-level template rendering happens upstream
-in _ainfer_single(), so inference_input arrives already rendered.
+Lets a conversational host (``host_protocol.ConversationalHost`` with the
+``SupportsFlowNode`` capability, e.g. ConversationalInferencer) act as a child
+node in BTA/PTI/LWI by inheriting InferencerBase and overriding _ainfer() to
+delegate to run_agentic_loop(). The flow-level template rendering happens
+upstream in _ainfer_single(), so inference_input arrives already rendered.
 
 Use in SINGLE-THREADED slots only (BTA breakdown/aggregator, PTI
 planner/executor/analyzer, LWI sequential steps). Do NOT use inside
@@ -18,17 +19,19 @@ import json
 import logging
 import os
 import tempfile
+from types import MappingProxyType
 from typing import Any, Callable, ClassVar, Optional
 
-import attr
 from agent_foundation.common.inferencers.agentic_inferencers.conversational.context import (
     AgenticDynamicContext,
     AgenticResult,
 )
-from agent_foundation.common.inferencers.agentic_inferencers.conversational.conversational_inferencer import (
-    ConversationalInferencer,
+from agent_foundation.common.inferencers.agentic_inferencers.conversational.host_protocol import (
+    ConversationalHost,
+    SupportsFlowNode,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import RuntimeKey
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
@@ -54,6 +57,32 @@ def _default_empty_predicate(x: Any) -> bool:
     return False
 
 
+def _require_flow_node_host(_instance: Any, _attribute: Any, value: Any) -> None:
+    """Accept any ``ConversationalHost`` that can run as a flow node. A host
+    that declares it cannot (``supports_flow_node = False``, e.g. the native
+    orchestrator, whose vendor agent owns the transcript this adapter
+    checkpoints) is rejected at configuration time with the reason, not deep
+    inside a flow run."""
+    name = type(value).__name__
+    if getattr(value, "supports_flow_node", None) is False:
+        raise TypeError(
+            f"{name} cannot be used as a flow node: its conversation "
+            "is owned by a vendor agent session, which flow checkpoints and resets "
+            "do not cover. Use the text-protocol ConversationalInferencer here."
+        )
+    if not isinstance(value, ConversationalHost):
+        raise TypeError(
+            f"{name} cannot be used as a flow node: it does not implement "
+            "host_protocol.ConversationalHost."
+        )
+    if not (value.supports_flow_node and isinstance(value, SupportsFlowNode)):
+        raise TypeError(
+            f"{name} cannot be used as a flow node: it does not provide "
+            "host_protocol.SupportsFlowNode (supports_flow_node and a settable "
+            "dynamic_context)."
+        )
+
+
 def zero_list_is_empty(x: Any) -> bool:
     """Predicate for breakdown-style use cases where output_extractor
     returns a parsed list. Treats None, empty string, and empty list
@@ -69,7 +98,7 @@ def zero_list_is_empty(x: Any) -> bool:
 
 @attrs(slots=False, kw_only=True)
 class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
-    """Flow-side adapter that lets a ConversationalInferencer act as a node.
+    """Flow-side adapter that lets a conversational host act as a node.
 
     Inherits TemplatedInferencerBase so it plugs into BTA/PTI/LWI as a standard
     leaf-like child inferencer with full template-rendering support — the flow
@@ -86,7 +115,8 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
     a parallel worker — that would cause N concurrent user dialogs.
 
     Attributes:
-        conversational_inferencer: The wrapped ConversationalInferencer.
+        conversational_inferencer: The wrapped conversational host
+            (``ConversationalHost`` + ``SupportsFlowNode``).
         output_extractor: Callable(AgenticResult) -> Any. Default extracts
             .text. Override to pull completed_actions or custom projections.
             For BTA breakdown, can wrap _parse_json_subtasks and return
@@ -117,8 +147,8 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
     # a retry after reset_for_flow_invocation() wipes the user's conversation.
     max_retry: int = attrib(default=0)
 
-    conversational_inferencer: ConversationalInferencer = attrib(
-        validator=attr.validators.instance_of(ConversationalInferencer)
+    conversational_inferencer: ConversationalHost = attrib(
+        validator=_require_flow_node_host
     )
     output_extractor: Callable[[AgenticResult], Any] = attrib(
         default=_default_output_extractor
@@ -128,6 +158,11 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
     empty_predicate: Callable[[Any], bool] = attrib(default=_default_empty_predicate)
     reset_between_invocations: bool = attrib(default=True)
     interactive: Optional[InteractiveBase] = attrib(default=None)
+    # A flow hands this call's interactive handler as the ``interactive=`` call
+    # keyword (``_effective("interactive")``); the configured field is the fallback.
+    _INVOCATION_KEYWORDS = MappingProxyType(
+        {"interactive": RuntimeKey("ConversationalFlowNodeAdapter.interactive")}
+    )
 
     # --- Checkpoint / resume ---
     checkpoint_dir: Optional[str] = attrib(default=None)
@@ -280,9 +315,8 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
         """
         rendered_task = str(inference_input)
 
-        # Resolve interactive: kwargs wins, then self.interactive
-        # Use get (not pop) so kwargs propagates intact to fallback
-        interactive = kwargs.get("interactive") or self.interactive
+        # Resolve interactive: the per-call keyword wins, then self.interactive
+        interactive = self._effective("interactive") or self.interactive
 
         # --- Resume from checkpoint if available ---
         session_dir = self._session_dir()
@@ -320,12 +354,12 @@ class ConversationalFlowNodeAdapter(TemplatedInferencerBase):
                     loaded_messages = checkpoint.get("messages", [])
 
                     # Populate inferencer state from checkpoint
-                    self.conversational_inferencer._messages = loaded_messages
+                    self.conversational_inferencer.set_messages(loaded_messages)
 
                     # Load dynamic context
                     dyn_ctx = self._load_dynamic_context(session_dir)
                     if dyn_ctx is not None:
-                        self.conversational_inferencer._dynamic_context = dyn_ctx
+                        self.conversational_inferencer.dynamic_context = dyn_ctx
 
                     # Compute resume content: last user-role message
                     for msg in reversed(loaded_messages):

@@ -1,0 +1,96 @@
+{
+  "catalog": {
+    "_proposer_task_instructions": {
+      "BreakdownThenAggregateInferencer": [
+        "_worker_task_instructions"
+      ],
+      "DualInferencer": [
+        "_state['prior_task_instructions'] (node.call | _pending_state_backing)",
+        "base_inferencer._proposer_task_instructions()"
+      ],
+      "InferencerBase": [],
+      "MultiFlowInferencer": [
+        "MultiFlowState.winner_idx",
+        "_last_winner_idx_backing",
+        "flow_configs[*].initial_inferencer._proposer_task_instructions()"
+      ],
+      "TemplatedInferencerBase": [
+        "_last_rendered_task_instructions"
+      ]
+    }
+  },
+  "steps": {
+    "bare1": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_rendered_task_instructions": "Contract<plan> for task-a"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for task-a"
+      },
+      "result": "t([plan|initial] task-a)"
+    },
+    "bare2": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_rendered_task_instructions": "Contract<plan> for task-b"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for task-b"
+      },
+      "result": "t([plan|initial] task-b)"
+    },
+    "bare3_fail": {
+      "ctx_seen": [
+        {
+          "legacy_mint": true,
+          "path": "/"
+        }
+      ],
+      "fields": {
+        "_last_rendered_task_instructions": "Contract<plan> for boom-c"
+      },
+      "getters": {
+        "_proposer_task_instructions": "Contract<plan> for boom-c"
+      },
+      "result": {
+        "error": "RuntimeError"
+      }
+    },
+    "host": {
+      "ctx_seen": [
+        {
+          "legacy_mint": false,
+          "path": "/"
+        }
+      ],
+      "fields_after": {
+        "_last_rendered_task_instructions": "Contract<plan> for boom-c"
+      },
+      "fields_before": {
+        "_last_rendered_task_instructions": "Contract<plan> for boom-c"
+      },
+      "getters_after": {
+        "_proposer_task_instructions": "Contract<plan> for boom-c"
+      },
+      "getters_reentered": {
+        "_proposer_task_instructions": "Contract<plan> for boom-c"
+      },
+      "result": "t([plan|initial] task-h)",
+      "store_paths": [
+        "/"
+      ],
+      "touched": []
+    }
+  }
+}

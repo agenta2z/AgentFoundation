@@ -31,3 +31,31 @@ python_unittest(
         "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
     ],
 )
+
+# ``# @autodeps-skip``: see ``test_metamate_timeout_scopes``. The SDK thrift types
+# are imported inside a test (they exist only under buck), so autodeps cannot see
+# that edge either.
+python_unittest(
+    # @autodeps-skip
+    name = "test_metamate_conversation_summary",
+    srcs = ["test_metamate_conversation_summary.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+        "//msl/metamate/if:sdk-python-types",
+    ],
+)
+
+python_unittest(
+    # @autodeps-skip — see ``test_metamate_timeout_scopes``.
+    name = "test_metamate_tool_call_budget",
+    srcs = ["test_metamate_tool_call_budget.py"],
+    network_access = network_access_utils.none(),
+    typing = False,
+    deps = [
+        "//_tony_dev/CoreProjects/AgentFoundation/src:agent_foundation",
+        "//_tony_dev/CoreProjects/AgentFoundation/src/agent_foundation/common/inferencers/agentic_inferencers/external/metamate:metamate_lib",
+    ],
+)

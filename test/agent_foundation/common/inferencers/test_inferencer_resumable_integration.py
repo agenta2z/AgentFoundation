@@ -61,7 +61,10 @@ class ControllableStreamingInferencer(StreamingInferencerBase):
     async def _ainfer(self, inference_input, inference_config=None, **kwargs):
         self._ainfer_calls.append(inference_input)
         content_parts = []
-        async for chunk in self.ainfer_streaming(
+        # The private pipeline, as the base ``_ainfer`` consumes it: ``_ainfer``
+        # runs inside this call's invocation, and a public streaming entry here
+        # would open a second invocation at the same path.
+        async for chunk in self._ainfer_streaming_pipeline(
             inference_input, inference_config, **kwargs
         ):
             content_parts.append(chunk)

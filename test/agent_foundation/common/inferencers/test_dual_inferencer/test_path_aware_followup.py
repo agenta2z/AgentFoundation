@@ -33,6 +33,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.common import (
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.dual_inferencer import (
     DualInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 # =====================================================================
@@ -658,7 +659,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        result = await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            result = await dual._ainfer("test request")
         self.assertIsInstance(result, DualInferencerResponse)
 
         # The fixer must have been invoked exactly once.
@@ -701,7 +703,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            await dual._ainfer("test request")
         self.assertEqual(len(captured), 1)
         # Fallback wording should appear; no `cp ` line.
         self.assertNotIn("cp ", captured[0])
@@ -736,7 +739,8 @@ class TestPathAwareE2E(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        await dual._ainfer("test request")
+        async with aopen_invocation(dual):
+            await dual._ainfer("test request")
         self.assertGreaterEqual(len(captured_reviewer_inputs), 1)
         # Reviewer should also see the path (via review template path-aware block).
         self.assertIn(prior_file, captured_reviewer_inputs[0])

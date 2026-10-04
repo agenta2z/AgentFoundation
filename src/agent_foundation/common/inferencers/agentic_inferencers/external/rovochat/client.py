@@ -300,6 +300,10 @@ class RovoChatClient:
                 "Install it with: pip install httpx"
             ) from e
 
+        from agent_foundation.common.inferencers.agentic_inferencers.external._httpx_streams import (
+            closing_lines,
+        )
+
         url = self._message_stream_url(conversation_id)
         headers = self._build_headers()
         body = self._build_message_body(
@@ -337,10 +341,11 @@ class RovoChatClient:
                         )
 
                     # Stream NDJSON lines
-                    async for line in response.aiter_lines():
-                        event = parse_ndjson_line(line)
-                        if event is not None:
-                            yield event
+                    async with closing_lines(response) as lines:
+                        async for line in lines:
+                            event = parse_ndjson_line(line)
+                            if event is not None:
+                                yield event
 
         except RovoChatAuthError:
             raise

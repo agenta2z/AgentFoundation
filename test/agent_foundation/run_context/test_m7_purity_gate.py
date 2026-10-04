@@ -43,23 +43,12 @@ class _Leaf(InferencerBase):
         return x
 
 
-# --- §2.12 option-(a): switch_role's deliberate instance-backed carve-outs --------
-# Each entry is workspace-derived state reconfigured by the _workspace setter cascade
-# (§2.12), or the audit trail / session reset. NOTHING ELSE may mutate.
-# Part 2: the deliverable flags (output_is_deliverable / is_deliverable_boundary) are
-# RETIRED — switch_role no longer accepts or mutates them.
-_ROLE_CARVEOUTS = frozenset(
-    {
-        "_role_history",  # audit trail (deliberate, never read for dispatch)
-        "_InferencerBase__workspace",  # §2.12 option-(a): workspace backing (getter is ctx-aware)
-        "logger",  # workspace-DERIVED (reconfigured by the setter cascade)
-        "_logger_awaiting_workspace",  # workspace-DERIVED
-        "_resolved_logger_configs",  # workspace-DERIVED
-        "_ws_log_relpaths",  # workspace-DERIVED: static {logger: relpath} tag (always "logs/session.jsonl")
-        "_pending_role_changes",  # transient template-layer stash, cleared in-method
-        "_session_id",  # reset_session (Tier-3-aware; legacy backing)
-    }
-)
+# --- switch_role writes nothing onto self under a host ctx (plan v8 §5.9) ---------
+# The workspace is published to the role ctx, the session reset goes to the
+# branch's slot, the template attrs to the node's RoleState and the audit entry to
+# the node's provenance. With no ctx, the instance-backed workspace / audit trail
+# apply as before. Part 2: the deliverable flags (output_is_deliverable /
+# is_deliverable_boundary) are RETIRED — switch_role no longer accepts them.
 
 # --- D6: MultiFlow dispatch-state deliberately stays on the instance --------------
 _DISPATCH_CARVEOUTS = frozenset(
@@ -87,44 +76,42 @@ _MFDUAL_DISPATCH_CARVEOUTS = frozenset(
 
 def _delta_keys(holder):
     d = holder[0]
-    return set(d.added) | set(d.changed)
+    return set(d.added) | set(d.changed) | set(d.removed)
 
 
-def test_switch_role_self_mutation_is_confined_to_documented_carveouts():
-    """Under a context, switch_role mutates ONLY the §2.12 option-(a) carve-outs —
-    no orphan per-run field leaks onto self."""
+def test_switch_role_under_a_host_ctx_writes_nothing_onto_self():
+    """Under a host ctx, switch_role publishes the workspace to the role ctx and
+    records its audit entry in the node's provenance; self is untouched."""
     leaf = _Leaf()
+    role_ws = InferencerWorkspace(root="/tmp/pg/review")
     root = RunContext.root(workspace=InferencerWorkspace(root="/tmp/pg"))
     tok = enter_run(root)
     try:
         with purity_snapshot(leaf) as h:
-            leaf.switch_role(
-                "reviewer",
-                workspace=InferencerWorkspace(root="/tmp/pg/review"),
-            )
+            leaf.switch_role("reviewer", workspace=role_ws)
+        assert leaf._workspace is role_ws
     finally:
         exit_run(tok)
-    leaked = _delta_keys(h) - _ROLE_CARVEOUTS
-    assert not leaked, (
-        f"switch_role leaked non-carveout per-run fields: {sorted(leaked)}"
+    assert _delta_keys(h) == set()
+    (entry,) = root.store.peek("/").provenance
+    assert (entry["event"], entry["to_role"], entry["changed"]) == (
+        "switch_role",
+        "reviewer",
+        ["workspace"],
     )
 
 
-def test_switch_role_without_workspace_touches_only_audit():
-    """The minimal carve-out: with no workspace, ONLY the audit trail changes.
-
-    Part 2: the deliverable flags were retired, so a no-workspace role switch
-    mutates nothing but ``_role_history``.
-    """
+def test_switch_role_without_a_ctx_keeps_the_instance_audit_trail():
+    """With no ctx, the workspace setter and the ``_role_history`` audit apply."""
     leaf = _Leaf()
-    root = RunContext.root(workspace=None)
-    tok = enter_run(root)
-    try:
-        with purity_snapshot(leaf) as h:
-            leaf.switch_role("reviewer")
-    finally:
-        exit_run(tok)
-    assert _delta_keys(h) == {"_role_history"}
+    role_ws = InferencerWorkspace(root="/tmp/pg/review")
+    leaf.switch_role("reviewer", workspace=role_ws)
+    assert leaf._workspace is role_ws
+    (entry,) = leaf._role_history
+    assert (entry["to_role"], entry["changes"]) == (
+        "reviewer",
+        {"workspace": "/tmp/pg/review"},
+    )
 
 
 def test_multiflow_dispatch_state_is_confined_to_d6_carveouts():
@@ -257,7 +244,6 @@ def test_gate_actually_catches_an_unexpected_orphan_field():
             leaf.__dict__["_some_new_orphan_counter"] = 7  # simulate a missed field
     finally:
         exit_run(tok)
-    leaked = _delta_keys(h) - _ROLE_CARVEOUTS
-    assert leaked == {
+    assert _delta_keys(h) == {
         "_some_new_orphan_counter"
     }  # gate sees it -> would fail a real run

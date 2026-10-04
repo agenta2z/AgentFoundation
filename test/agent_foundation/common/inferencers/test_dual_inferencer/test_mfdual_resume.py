@@ -55,7 +55,7 @@ class Tier1_BackwardCompatibilityTest(unittest.TestCase):
         source = inspect.getsource(LinearWorkflowInferencer._load_final_result)
         self.assertIn("final_result.json", source)
         # Verify it uses workspace path (not hardcoded)
-        self.assertIn("self._workspace", source)
+        self.assertIn("self._checkpoint_workspace()", source)
 
     def test_part_b_does_not_break_bta_workgraph_resume(self):
         """BTA's resume_with_saved_results still finds worker_X/ checkpoints."""

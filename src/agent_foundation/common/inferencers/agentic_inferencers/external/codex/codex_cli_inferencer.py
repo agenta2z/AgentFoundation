@@ -32,6 +32,10 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from agent_foundation.common.inferencers.streaming_inferencer_base import EmptyLineMode
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+    TerminalStreamResult,
+)
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
+    session_id_of,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
@@ -64,7 +68,13 @@ def _env_flag_enabled(name: str) -> bool:
     return val is not None and val.strip().lower() in _TRUTHY_ENV_VALUES
 
 
-from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+from agent_foundation.common.inferencers.run_context import (
+    bridge_entrypoint,
+    frame_for,
+    invocation_of,
+    publish_result,
+    RuntimeKey,
+)
 
 
 @attrs
@@ -83,7 +93,15 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
     cwd handling are inherited unchanged from the base chain.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     has_local_access: bool = attrib(default=True)
+
+    # What the async JSON stream reports (``thread.started`` session id,
+    # ``turn.completed`` usage), read by the async post-hook of the same invocation.
+    _STREAM_RESULT = RuntimeKey("CodexCliInferencer.stream_result")
 
     # Streaming / timeout knobs (override base defaults; mirror Claude Code CLI).
     idle_timeout_seconds: int = attrib(default=1800)
@@ -456,8 +474,9 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         Overrides the base stdout-line streaming to parse Codex's JSONL events:
         ``agent_message`` items are yielded as text; the ``thread.started`` id
-        and ``turn.completed`` usage are captured into ``_last_stream_result``
-        so ``ainfer()`` can recover the session id and metadata. Every other
+        and ``turn.completed`` usage are recorded in the invocation
+        (``_STREAM_RESULT``) so ``ainfer()`` can recover the session id and
+        metadata. Every other
         event yields an empty activity sentinel so the dual idle timer extends
         to ``tool_use_idle_timeout`` while Codex is thinking / running tools.
         """
@@ -467,14 +486,19 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         if use_stdin:
             kwargs["use_stdin"] = True
 
-        self._last_stream_result = None  # reset before each call
+        stream_result: Dict[str, Any] = {}
+        frame = frame_for(self)
+        if frame is not None:
+            frame.put(self._STREAM_RESULT, stream_result)
 
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
 
         # 16 MB line limit: a single ``--json`` event (e.g. a large file_change
-        # patch) can far exceed asyncio's default 64 KB readline cap.
-        process = await asyncio.create_subprocess_shell(
+        # patch) can far exceed asyncio's default 64 KB readline cap. Own
+        # process group: the shell, codex and everything codex spawns are
+        # killed as a whole (``_kill_process_group``).
+        process = await self._create_subprocess_shell(
             full_command,
             stdin=asyncio.subprocess.PIPE if use_stdin else None,
             stdout=asyncio.subprocess.PIPE,
@@ -507,6 +531,7 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         stdin_task = asyncio.create_task(_send_stdin())
         stderr_task = asyncio.create_task(_drain_stderr())
 
+        stdout_ended = False
         try:
             async for line_bytes in process.stdout:
                 line = line_bytes.decode("utf-8", errors="replace").strip()
@@ -524,16 +549,8 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
                 if etype == "thread.started":
                     thread_id = event.get("thread_id")
                     if thread_id:
-                        if not isinstance(self._last_stream_result, dict):
-                            self._last_stream_result = {}
-                        self._last_stream_result["session_id"] = thread_id
-                        # Record the id on the instance backing (NOT via the
-                        # active_session_id property) so it is readable after a
-                        # streaming-only call AND cleared by reset_session(). A
-                        # context-scoped property write would land in the per-branch
-                        # connection store, which reset_session() does not touch —
-                        # leaking a stale session into the next "new" conversation.
-                        self._session_id = thread_id
+                        stream_result["session_id"] = thread_id
+                        self.active_session_id = thread_id
                     yield ""
                 elif etype == "item.completed":
                     item = event.get("item") or {}
@@ -546,15 +563,21 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
                 elif etype == "turn.completed":
                     usage = event.get("usage")
                     if usage is not None:
-                        if not isinstance(self._last_stream_result, dict):
-                            self._last_stream_result = {}
-                        self._last_stream_result["usage"] = usage
+                        stream_result["usage"] = usage
                     yield ""
                 else:
                     # turn.started, item.started/updated, etc.
                     yield ""
+            stdout_ended = True
 
         finally:
+            # Leaving before stdout's end (cancellation, idle timeout, the
+            # consumer closing the stream) leaves codex running: kill its
+            # process group BEFORE awaiting stdin/stderr, which otherwise wait
+            # for codex to finish on its own while it keeps working.
+            if not stdout_ended:
+                self._kill_process_group(process.pid)
+                self._force_close_pipes(process)
             try:
                 await stdin_task
             except Exception:
@@ -563,21 +586,26 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
                 stderr_bytes = await stderr_task
             except Exception:
                 stderr_bytes = b""
-            self._last_streaming_stderr = stderr_bytes.decode("utf-8", errors="replace")
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+            # Only stderr is captured here; stdout and the return code keep the
+            # result's defaults, as before (inventory §23 F1.2).
+            publish_result(
+                self, self._TERMINAL_RESULT, TerminalStreamResult(stderr=stderr_text)
+            )
             if process.returncode is None:
                 try:
                     process.kill()
-                except (ProcessLookupError, OSError):
+                except OSError:
                     pass
             await process.wait()
+            # Children codex left behind (MCP servers, background shells).
+            self._end_process_group(process.pid)
             if process.returncode != 0:
                 logger.warning(
                     "[%s] codex streaming subprocess exited with code %s. stderr: %s",
                     self.__class__.__name__,
                     process.returncode,
-                    self._last_streaming_stderr[:500]
-                    if self._last_streaming_stderr
-                    else "(empty)",
+                    stderr_text[:500] if stderr_text else "(empty)",
                 )
 
     # === Sync one-shot ===
@@ -601,12 +629,9 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         full_command = self._build_full_command(command)
 
         try:
-            result = subprocess.run(
+            result = self._run_subprocess(
                 full_command,
-                shell=True,
                 input=prompt,
-                capture_output=True,
-                text=True,
                 cwd=self._resolve_subprocess_cwd(),
                 timeout=timeout,
             )
@@ -621,13 +646,10 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
         return TerminalInferencerResponse.from_dict(result_dict)
 
-    # === Session-aware public overrides ===
+    # === Session policy: the invocation seam's provider hooks ===
 
-    @bridge_entrypoint
-    async def ainfer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
-    ) -> Any:
-        """Async inference with session management (read-before / write-after)."""
+    def _apply_session_policy(self, kwargs: Dict[str, Any]) -> None:
+        """Resolve ``new_session`` / ``session_id`` / ``resume`` into kwargs."""
         new_session = kwargs.pop("new_session", False)
         if new_session:
             self.active_session_id = None
@@ -644,61 +666,53 @@ class CodexCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        # Route through _ainfer_single for retry/preprocessing/timeout.
-        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
+    def _prepare_call(self, inference_args: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the session policy inside the invocation (read-before), so a
+        claim-rejected call leaves the session untouched."""
+        self._apply_session_policy(inference_args)
+        return inference_args
 
-        # Recover the session id from the result, then the streamed metadata.
-        result_session_id = getattr(result, "session_id", None)
-        if result_session_id is None and isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        if result_session_id is None and isinstance(
-            getattr(self, "_last_stream_result", None), dict
-        ):
-            result_session_id = self._last_stream_result.get("session_id")
+    def _conclude_call(self, result: Any) -> Any:
+        """Adopt the session id the sync call's result reports (write-after)."""
+        self._adopt_result_session(session_id_of(result), "Sync")
+        return result
+
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Recover the session id from the async call's result, then the streamed
+        metadata, which only the async streaming transport records."""
+        result_session_id = session_id_of(result)
+        stream_result = invocation_of(self).get(self._STREAM_RESULT)
+        if result_session_id is None and isinstance(stream_result, dict):
+            result_session_id = stream_result.get("session_id")
             if (
                 result_session_id
                 and isinstance(result, TerminalInferencerResponse)
                 and not result.session_id
             ):
                 result.session_id = result_session_id
+        self._adopt_result_session(result_session_id, "Async")
+        return result
+
+    def _adopt_result_session(self, result_session_id: Optional[str], tag: str) -> None:
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
             self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Async"
+                f"Updated active session to: {result_session_id[:8]}...", tag
             )
 
-        return result
+    # === Public entries: thin adapters over the invocation seam ===
+
+    @bridge_entrypoint
+    async def ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Async inference with session management; the policy runs inside the
+        invocation (``_prepare_call`` / ``_aconclude_call``)."""
+        return await self._ainfer_single(inference_input, inference_config, **kwargs)
 
     @bridge_entrypoint
     def infer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
         """Sync inference with session management (mirrors ``ainfer``)."""
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
-
-        result = self._infer_single(inference_input, inference_config, **kwargs)
-
-        result_session_id = getattr(result, "session_id", None)
-        if result_session_id is None and isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        if result_session_id and result_session_id != self.active_session_id:
-            self.active_session_id = result_session_id
-            self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Sync"
-            )
-
-        return result
+        return self._infer_single(inference_input, inference_config, **kwargs)

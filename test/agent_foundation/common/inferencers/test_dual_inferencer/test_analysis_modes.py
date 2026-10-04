@@ -29,6 +29,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.pl
     VALID_ANALYSIS_MODES,
 )
 from agent_foundation.common.inferencers.inferencer_base import InferencerBase
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 
 
 @attrs
@@ -816,7 +817,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_with_cross_ref",
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
 
             # Verify key template variables were passed
             self.assertEqual(captured_config.get("result_type"), "benchmarks")
@@ -860,7 +862,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="all_rounds",
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
             analyzer._ainfer.assert_not_called()
 
     async def test_analysis_mode_last_only_templates_dir_provided(self):
@@ -916,7 +919,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_templates_dir=templates_dir,
             )
 
-            await pti._ainfer("ignored")
+            async with aopen_invocation(pti):
+                await pti._ainfer("ignored")
 
             # The analysis_request should come from our custom template
             analysis_req = captured_config.get("analysis_request", "")
@@ -967,7 +971,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_with_cross_ref",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             # Core assertions: planner and executor NEVER called
             planner._ainfer.assert_not_called()
@@ -1010,7 +1015,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="all_rounds",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             planner._ainfer.assert_not_called()
             executor._ainfer.assert_not_called()
@@ -1045,7 +1051,8 @@ class AnalysisModeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 analysis_mode="last_round_only",
             )
 
-            result = await pti._ainfer("ignored input")
+            async with aopen_invocation(pti):
+                result = await pti._ainfer("ignored input")
 
             planner._ainfer.assert_not_called()
             executor._ainfer.assert_not_called()

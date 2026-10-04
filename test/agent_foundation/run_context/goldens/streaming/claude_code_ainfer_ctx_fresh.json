@@ -1,0 +1,72 @@
+{
+  "calls": [
+    {
+      "active_session_id": "<UUID1>",
+      "active_session_id_under_ctx": "<UUID1>",
+      "cli": [
+        {
+          "argv": [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "max",
+            "--dangerously-skip-permissions"
+          ],
+          "cwd": "<TMP>/ws",
+          "stdin": "turn 1"
+        }
+      ],
+      "construct_command": [
+        {
+          "active_ctx": {
+            "legacy_mint": false,
+            "path": "/leaf"
+          },
+          "kwargs": {
+            "include_partial_messages": true,
+            "output_format": "stream-json",
+            "resume": false,
+            "session_id": null,
+            "use_stdin": true,
+            "verbose": true
+          }
+        }
+      ],
+      "get_streaming_result": {
+        "error": null,
+        "output": "",
+        "raw_output": "",
+        "return_code": 0,
+        "session_id": null,
+        "stderr": "",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "live_store": {
+        "<HEX1> /leaf": {
+          "live_session_id": "<UUID1>"
+        }
+      },
+      "output": {
+        "error": null,
+        "output": "reply to 'turn 1'",
+        "raw_output": "reply to 'turn 1'",
+        "return_code": 0,
+        "session_id": "<UUID1>",
+        "stderr": "claude stderr noise",
+        "success": true,
+        "type": "TerminalInferencerResponse"
+      },
+      "session_backing": null
+    }
+  ],
+  "host_ctx": {
+    "legacy_mint": false,
+    "path": "/leaf"
+  }
+}

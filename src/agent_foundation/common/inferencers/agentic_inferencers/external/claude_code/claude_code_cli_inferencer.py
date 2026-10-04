@@ -17,6 +17,10 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.claude_cod
 from agent_foundation.common.inferencers.streaming_inferencer_base import EmptyLineMode
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_base import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+    TerminalStreamResult,
+)
+from agent_foundation.common.inferencers.terminal_inferencers.terminal_inferencer_response import (
+    session_id_of,
 )
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     LargeInputMode,
@@ -28,7 +32,14 @@ from attr import attrib, attrs
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+from agent_foundation.common.inferencers.run_context import (
+    bridge_entrypoint,
+    frame_for,
+    invocation_of,
+    publish_result,
+    read_result,
+    RuntimeKey,
+)
 
 
 @attrs
@@ -94,9 +105,26 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
             already-sandboxed process — macOS forbids nesting seatbelt
             sandboxes, so otherwise ``claude`` exits 71 with no output.
             SECURITY: removes OS-level confinement of the agent's file access.
+        concurrency_pool: Name of the pool of simultaneous ``claude``
+            subprocesses (per event loop) this inferencer's calls take a slot
+            from, for the process's whole lifetime (default ``"default"``,
+            shared by every inferencer that does not name another). A call
+            never waits for slots of another pool.
+        concurrency_pool_cap: The pool's number of slots. ``None`` (default)
+            takes the default cap (``CLAUDE_CODE_MAX_CONCURRENCY``, else 4);
+            ``<= 0`` leaves the pool uncapped. The first call in a pool on an
+            event loop sets its cap.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     has_local_access: bool = attrib(default=True)
+
+    # The async stream's final ``result`` event (session id, cost, usage), read by
+    # the async post-hook of the same invocation.
+    _STREAM_RESULT = RuntimeKey("ClaudeCodeCliInferencer.stream_result")
 
     # Claude Code CLI-specific attributes
     idle_timeout_seconds: int = attrib(default=1800)
@@ -126,6 +154,9 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     # process (macOS forbids nesting seatbelt sandboxes → exit 71). See
     # ``common.resolve_disable_osx_sandbox`` for the security note.
     disable_osx_sandbox: Optional[bool] = attrib(default=None)
+    # Pool of claude subprocess slots (see ``_concurrency_semaphore``).
+    concurrency_pool: str = attrib(default="default")
+    concurrency_pool_cap: Optional[int] = attrib(default=None)
 
     # Known Node.js Claude Code CLI paths to try as fallback
     _NODE_CLAUDE_PATHS: List[str] = [
@@ -152,11 +183,15 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     # number of *simultaneous* claude subprocesses keeps each one's startup
     # inside the window. Empirically: unbounded ≈ 88% empty; cap 4 ≈ 8%; cap 2
     # ≈ 0% (14-core box). The residual at higher caps is recovered by the
-    # retry-on-stdin-race in ``_ainfer_streaming``. Tune via the
+    # retry-on-stdin-race in ``_ainfer_streaming``. Tune the default cap via the
     # ``CLAUDE_CODE_MAX_CONCURRENCY`` env var (<= 0 disables the cap).
+    #
+    # A slot is held for a process's whole lifetime, so a caller that must not
+    # wait behind long runs (an interactive chat leaf) names its own
+    # ``concurrency_pool``; each pool's cap adds to the simultaneous total.
     _DEFAULT_MAX_CONCURRENCY: int = 4
-    # Per-event-loop semaphores (WeakKeyDictionary so a finished loop's entry is
-    # GC'd — the sync bridge spins up throwaway loops).
+    # Per-event-loop {pool name: (cap, semaphore)} (WeakKeyDictionary so a
+    # finished loop's entry is GC'd — the sync bridge spins up throwaway loops).
     _concurrency_semaphores: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
     @classmethod
@@ -174,18 +209,28 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 )
         return cls._DEFAULT_MAX_CONCURRENCY
 
-    @classmethod
-    def _concurrency_semaphore(cls) -> "Optional[asyncio.Semaphore]":
-        """The per-running-loop ``Semaphore`` capping concurrent claude
-        subprocesses (``None`` if the cap is disabled)."""
-        limit = cls._resolve_max_concurrency()
+    def _concurrency_semaphore(self) -> "Optional[asyncio.Semaphore]":
+        """The running loop's ``Semaphore`` of this inferencer's pool, capping
+        its concurrent claude subprocesses (``None`` if the pool is uncapped).
+        The pool's first user on a loop sets its cap."""
+        limit = self.concurrency_pool_cap
+        if limit is None:
+            limit = self._resolve_max_concurrency()
         if limit <= 0:
             return None
-        loop = asyncio.get_running_loop()
-        sem = cls._concurrency_semaphores.get(loop)
-        if sem is None:
-            sem = asyncio.Semaphore(limit)
-            cls._concurrency_semaphores[loop] = sem
+        pools = self._concurrency_semaphores.setdefault(asyncio.get_running_loop(), {})
+        entry = pools.get(self.concurrency_pool)
+        if entry is None:
+            entry = pools[self.concurrency_pool] = (limit, asyncio.Semaphore(limit))
+        cap, sem = entry
+        if cap != limit:
+            logger.warning(
+                "[%s] concurrency pool %r already has %d slots; ignoring cap %d",
+                self.__class__.__name__,
+                self.concurrency_pool,
+                cap,
+                limit,
+            )
         return sem
 
     def __attrs_post_init__(self) -> None:
@@ -453,16 +498,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         if json_data is not None:
             result["output"] = json_data.get("result", "")
-            result["session_id"] = json_data.get("session_id")
-            result["success"] = (
-                not json_data.get("is_error", False) and return_code == 0
-            )
-            result["total_cost_usd"] = json_data.get("total_cost_usd")
-            result["usage"] = json_data.get("usage")
-            result["model_usage"] = json_data.get("modelUsage")
-            result["num_turns"] = json_data.get("num_turns")
-            result["duration_ms"] = json_data.get("duration_ms")
-            result["result_type"] = json_data.get("subtype")
+            self._apply_result_event(result, json_data, return_code)
         else:
             # Fallback: raw text when JSON parsing fails
             result["output"] = stdout.strip() if stdout else ""
@@ -472,13 +508,73 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 "ParseFallback",
             )
 
+        return self._with_error(result, stderr, return_code)
+
+    def _parse_streamed_output(
+        self, text: str, streamed: TerminalStreamResult
+    ) -> Dict[str, Any]:
+        """A streamed call's reply is the streamed text, verbatim; its outcome
+        (session id, error flag, cost, usage) is the stream's ``result`` event —
+        never JSON found in the reply, which may contain any.
+
+        Unless the streamed text does not end with the ``result`` event's final
+        message: when a message's stream breaks off, Claude Code sends the message
+        again as one non-streamed ``assistant`` event, which carries no text
+        deltas, so the streamed text ends in the abandoned attempt. The reply is
+        then the final message alone."""
+        reply = text.strip()
+        event = read_result(self, self._STREAM_RESULT)
+        final = event.get("result") if isinstance(event, dict) else None
+        if (
+            isinstance(final, str)
+            and final.strip()
+            and not reply.endswith(final.strip())
+        ):
+            logger.warning(
+                "[%s] the streamed text (%d chars) does not end with the final "
+                "message (%d chars); replying with the final message",
+                self.__class__.__name__,
+                len(reply),
+                len(final.strip()),
+            )
+            reply = final.strip()
+        result: Dict[str, Any] = {
+            "output": reply,
+            "raw_output": reply,
+            "stderr": streamed.stderr.strip() if streamed.stderr else "",
+            "return_code": streamed.return_code,
+        }
+        if isinstance(event, dict):
+            self._apply_result_event(result, event, streamed.return_code)
+        else:
+            result["success"] = streamed.return_code == 0
+        return self._with_error(result, streamed.stderr, streamed.return_code)
+
+    @staticmethod
+    def _apply_result_event(
+        result: Dict[str, Any], event: Dict[str, Any], return_code: int
+    ) -> None:
+        """Copy the outcome fields of a ``result`` object (what
+        ``--output-format json`` prints) into ``result``."""
+        result["session_id"] = event.get("session_id")
+        result["success"] = not event.get("is_error", False) and return_code == 0
+        result["total_cost_usd"] = event.get("total_cost_usd")
+        result["usage"] = event.get("usage")
+        result["model_usage"] = event.get("modelUsage")
+        result["num_turns"] = event.get("num_turns")
+        result["duration_ms"] = event.get("duration_ms")
+        result["result_type"] = event.get("subtype")
+
+    @staticmethod
+    def _with_error(
+        result: Dict[str, Any], stderr: str, return_code: int
+    ) -> Dict[str, Any]:
         if not result.get("success") and "error" not in result:
             result["error"] = (
                 stderr.strip()
                 if stderr and stderr.strip()
                 else result.get("output", f"Command failed with code {return_code}")
             )
-
         return result
 
     # === Helper Methods ===
@@ -545,7 +641,8 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
     # _ainfer_streaming() (subprocess line-by-line), which provides:
     #   - Real-time cache writes (each line flushed to disk immediately)
     #   - Per-line idle timeout (via ainfer_streaming())
-    #   - Structured result via parse_output() on accumulated text
+    #   - Structured result via _parse_streamed_output(): the accumulated text
+    #     as the reply, the stream's ``result`` event as the outcome
     #
     # This is the same pattern used by DevmateCliInferencer.
     #
@@ -565,8 +662,9 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         streaming instead of buffered text output.
 
         Each ``assistant`` event with ``content[].text`` is yielded as a chunk.
-        The final ``result`` event is captured into ``_last_stream_result`` so
-        that ``ainfer()`` can extract session_id, cost, and usage metadata.
+        The final ``result`` event is recorded in the invocation
+        (``_STREAM_RESULT``) so that ``ainfer()`` can extract session_id, cost,
+        and usage metadata.
 
         Args:
             prompt: The prompt string.
@@ -588,7 +686,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         if use_stdin:
             kwargs["use_stdin"] = True
 
-        self._last_stream_result = None  # reset before each call
+        self._record_stream_result(None)
 
         command = self.construct_command({"prompt": prompt}, **kwargs)
         full_command = self._build_full_command(command)
@@ -626,13 +724,17 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         # semaphore so the retry chain re-runs the call (vs returning empty).
         _produced_text = False
         _stdin_race = False
+        _stdout_ended = False
         try:
             # Bump StreamReader line limit from the asyncio default (64KB) to
             # 16MB. Claude's stream-json events with tool_use input can carry
             # the entire generated document on a single line, easily exceeding
             # 64KB and triggering "Separator is not found, and chunk exceed
             # the limit" on readline.
-            process = await asyncio.create_subprocess_shell(
+            #
+            # Own process group: the shell, claude and everything claude spawns
+            # are killed as a whole (``_kill_process_group``).
+            process = await self._create_subprocess_shell(
                 full_command,
                 stdin=asyncio.subprocess.PIPE if use_stdin else None,
                 stdout=asyncio.subprocess.PIPE,
@@ -698,13 +800,21 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
                     # Capture result event for session_id / cost / usage metadata
                     elif event_type == "result":
-                        self._last_stream_result = event
+                        self._record_stream_result(event)
                         yield ""  # also a sign of activity
                     else:
                         # system, rate_limit_event, assistant (non-stream), etc.
                         yield ""
+                _stdout_ended = True
 
             finally:
+                # Leaving before stdout's end (cancellation, idle timeout, the
+                # consumer closing the stream) leaves claude running: kill its
+                # process group BEFORE awaiting stdin/stderr, which otherwise
+                # wait for claude to finish on its own while it keeps working.
+                if not _stdout_ended:
+                    self._kill_process_group(process.pid)
+                    self._force_close_pipes(process)
                 try:
                     await stdin_task
                 except Exception:
@@ -713,8 +823,13 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                     stderr_bytes = await stderr_task
                 except Exception:
                     stderr_bytes = b""
-                self._last_streaming_stderr = stderr_bytes.decode(
-                    "utf-8", errors="replace"
+                stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+                # Only stderr is captured here; stdout and the return code keep
+                # the result's defaults, as before (inventory §23 F1.2).
+                publish_result(
+                    self,
+                    self._TERMINAL_RESULT,
+                    TerminalStreamResult(stderr=stderr_text),
                 )
                 # If cleanup ran due to timeout/cancellation, the subprocess may
                 # still be alive — terminate it so process.wait() doesn't block
@@ -722,23 +837,23 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 if process.returncode is None:
                     try:
                         process.kill()
-                    except (ProcessLookupError, OSError):
+                    except OSError:
                         pass
                 await process.wait()
+                # Children claude left behind (MCP servers, background shells).
+                self._end_process_group(process.pid)
                 if process.returncode != 0:
                     logger.warning(
                         "[%s] streaming subprocess exited with code %s. stderr: %s",
                         self.__class__.__name__,
                         process.returncode,
-                        self._last_streaming_stderr[:500]
-                        if self._last_streaming_stderr
-                        else "(empty)",
+                        stderr_text[:500] if stderr_text else "(empty)",
                     )
                 # Detect claude's stdin-startup abort: no assistant text AND
                 # stderr shows the launcher gave up on stdin. Transient under
                 # concurrency (claude started too slowly to read stdin within
                 # its 3s grace) — flag for a retry once the semaphore is freed.
-                _err = self._last_streaming_stderr or ""
+                _err = stderr_text
                 if (
                     use_stdin
                     and not _produced_text
@@ -784,9 +899,10 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         """Sync execution with JSON output format.
 
         Passes the prompt via stdin (same ARG_MAX mitigation as _ainfer).
-        Guarded by ``subprocess.run(timeout=...)`` to prevent indefinite
-        hangs. Timeout defaults to ``max(idle_timeout_seconds, 1800)``;
-        callers can override via ``subprocess_timeout_seconds`` kwarg.
+        Guarded by a timeout (``_run_subprocess``, which ends claude's whole
+        process tree) to prevent indefinite hangs. Timeout defaults to
+        ``max(idle_timeout_seconds, 1800)``; callers can override via
+        ``subprocess_timeout_seconds`` kwarg.
 
         Args:
             inference_input: Input for inference.
@@ -811,12 +927,9 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         full_command = self._build_full_command(command)
 
         try:
-            result = subprocess.run(
+            result = self._run_subprocess(
                 full_command,
-                shell=True,
                 input=prompt,
-                capture_output=True,
-                text=True,
                 cwd=self._resolve_subprocess_cwd(),
                 timeout=timeout,
             )
@@ -830,29 +943,10 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         result_dict = self.parse_output(result.stdout, result.stderr, result.returncode)
         return TerminalInferencerResponse.from_dict(result_dict)
 
-    # === Override: ainfer() — Session-Aware ===
+    # === Session policy: the invocation seam's provider hooks ===
 
-    @bridge_entrypoint
-    async def ainfer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
-    ) -> Any:
-        """Async inference with session management.
-
-        Routes through _ainfer_single() to preserve:
-        - Retry logic (max_retry, execute_with_retry)
-        - Input preprocessing (input_preprocessor)
-        - Response postprocessing (response_post_processor)
-        - Total timeout (total_timeout_seconds)
-
-        Args:
-            inference_input: Input for inference.
-            inference_config: Optional configuration.
-            **kwargs: Additional arguments.
-
-        Returns:
-            Inference result.
-        """
-        # Handle new_session flag
+    def _apply_session_policy(self, kwargs: Dict[str, Any]) -> None:
+        """Resolve ``new_session`` / ``session_id`` / ``resume`` into kwargs."""
         new_session = kwargs.pop("new_session", False)
         if new_session:
             self.active_session_id = None
@@ -874,31 +968,74 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        # Route through _ainfer_single for retry/preprocessing/timeout
-        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
+    def _prepare_call(self, inference_args: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the session policy inside the invocation, so a claim-rejected
+        call leaves the session untouched."""
+        self._apply_session_policy(inference_args)
+        return inference_args
 
-        # Update active session from result (try TerminalInferencerResponse,
-        # then dict, then fall back to _last_stream_result from streaming)
-        result_session_id = getattr(result, "session_id", None)
-        if result_session_id is None and isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        if result_session_id is None and hasattr(self, "_last_stream_result"):
-            stream_result = self._last_stream_result
+    def _conclude_call(self, result: Any) -> Any:
+        """Adopt the session id the sync call's result reports."""
+        self._adopt_result_session(session_id_of(result), "Sync")
+        return result
+
+    def _record_stream_result(self, event: Optional[dict]) -> None:
+        """Record the stream's final ``result`` event for this invocation's
+        post-hook; a stream run outside an invocation has no post-hook."""
+        frame = frame_for(self)
+        if frame is not None:
+            frame.put(self._STREAM_RESULT, event)
+
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Adopt the session id the async call's result reports, else the one of
+        the stream's final ``result`` event, which only the async streaming
+        transport records; the response is enriched with it."""
+        result_session_id = session_id_of(result)
+        if result_session_id is None:
+            stream_result = invocation_of(self).get(self._STREAM_RESULT)
             if isinstance(stream_result, dict):
                 result_session_id = stream_result.get("session_id")
                 # Also enrich the result object with stream metadata
                 if isinstance(result, TerminalInferencerResponse):
                     if result_session_id and not result.session_id:
                         result.session_id = result_session_id
+        self._adopt_result_session(result_session_id, "Async")
+        return result
+
+    def _adopt_result_session(self, result_session_id: Optional[str], tag: str) -> None:
         if result_session_id and result_session_id != self.active_session_id:
             self.active_session_id = result_session_id
             self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Async"
+                f"Updated active session to: {result_session_id[:8]}...", tag
             )
 
-        return result
+    # === Public entries: thin adapters over the invocation seam ===
 
-    # === Override: infer() — Sync Session-Aware ===
+    @bridge_entrypoint
+    async def ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Async inference with session management.
+
+        Routes through _ainfer_single() to preserve:
+        - Retry logic (max_retry, execute_with_retry)
+        - Input preprocessing (input_preprocessor)
+        - Response postprocessing (response_post_processor)
+        - Total timeout (total_timeout_seconds)
+
+        The session policy runs inside the invocation (``_prepare_call`` /
+        ``_aconclude_call``); ``@bridge_entrypoint`` keeps a bare call unminted.
+
+        Args:
+            inference_input: Input for inference.
+            inference_config: Optional configuration.
+            **kwargs: Additional arguments (``new_session``, ``session_id``,
+                ``resume``, ...).
+
+        Returns:
+            Inference result.
+        """
+        return await self._ainfer_single(inference_input, inference_config, **kwargs)
 
     @bridge_entrypoint
     def infer(
@@ -908,7 +1045,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
 
         Mirrors ainfer() for the sync path. Required because the inherited
         resume_session() and new_session() call self.infer() without
-        resume=True, so we must inject session context here.
+        resume=True, so the session policy must apply here too.
 
         Routes through _infer_single() to preserve retry/preprocessing.
 
@@ -920,38 +1057,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         Returns:
             Inference result.
         """
-        # Handle new_session flag
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-
-        # Determine session context
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
-
-        # Route through _infer_single (preserves retry/preprocessing)
-        result = self._infer_single(inference_input, inference_config, **kwargs)
-
-        # Update active session from result
-        result_session_id = getattr(result, "session_id", None)
-        if result_session_id is None and isinstance(result, dict):
-            result_session_id = result.get("session_id")
-        if result_session_id and result_session_id != self.active_session_id:
-            self.active_session_id = result_session_id
-            self.log_debug(
-                f"Updated active session to: {result_session_id[:8]}...", "Sync"
-            )
-
-        return result
+        return self._infer_single(inference_input, inference_config, **kwargs)
 
     # === Override: _yield_filter() — Empty-line suppression + callbacks ===
 
@@ -987,12 +1093,13 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
                 output_stream.flush()
             yield line
 
-    # === Override: infer_streaming() — Sync Streaming ===
+    # === Override: _infer_streaming_pipeline() — Native Sync Streaming ===
 
-    def infer_streaming(
+    def _infer_streaming_pipeline(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Iterator[str]:
-        """Sync streaming with same limitations as ainfer_streaming().
+        """Native sync streaming transport under the base ``infer_streaming``
+        template, with the same limitations as ``ainfer_streaming()``.
 
         Args:
             inference_input: Input for inference.
@@ -1008,18 +1115,7 @@ class ClaudeCodeCliInferencer(TerminalSessionTemplatedInferencerBase):
         )
         output_stream: Optional[TextIO] = kwargs.pop("output_stream", None)
 
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
+        self._apply_session_policy(kwargs)
 
         # v5 Fix #3 — gate on the resolved cache folder so ctx-dispatched
         # leaves (workspace published via ctx.handles["workspace_override"])

@@ -35,6 +35,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.li
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
 )
+from agent_foundation.common.inferencers.run_context import aopen_invocation
 from test.agent_foundation.common.inferencers._helpers.mock_inferencer import (
     MockInferencer,
 )
@@ -103,7 +104,8 @@ class TestAdapterAsPTIPlanner(unittest.IsolatedAsyncioTestCase):
                 workspace=tmpdir,
                 planner_outputs_plan_to_file=False,
             )
-            await pti._ainfer("task")
+            async with aopen_invocation(pti):
+                await pti._ainfer("task")
 
         # Adapter was invoked (run_agentic_loop called)
         adapter.conversational_inferencer.run_agentic_loop.assert_called_once()
@@ -198,7 +200,8 @@ class TestAdapterInLWIStep(unittest.IsolatedAsyncioTestCase):
                 },
                 workspace=tmpdir,
             )
-            result = await lwi._ainfer("input")
+            async with aopen_invocation(lwi):
+                result = await lwi._ainfer("input")
 
         # Adapter was invoked exactly once as middle step
         adapter.conversational_inferencer.run_agentic_loop.assert_called_once()

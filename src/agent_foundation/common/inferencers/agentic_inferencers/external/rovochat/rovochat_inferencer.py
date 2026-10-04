@@ -59,6 +59,7 @@ Usage::
 import asyncio
 import logging
 import uuid as uuid_mod
+from contextlib import aclosing
 from typing import Any, AsyncIterator, Optional
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.rovochat.auth import (
@@ -90,6 +91,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types 
     SDKInferencerResponse,
 )
 from agent_foundation.common.inferencers.streaming_inferencer_base import (
+    LiveHandleField,
     StreamingInferencerBase,
 )
 from agent_foundation.common.inferencers.templated_inferencer_base import (
@@ -172,6 +174,15 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         idle_timeout_seconds: Max idle time between chunks.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    _FANOUT_SINGLE_CALL_ARGS = StreamingInferencerBase._FANOUT_SINGLE_CALL_ARGS + (
+        "conversation_id",
+        "return_sdk_response",
+    )
+
     # === Connection Configuration ===
     # Defaults fall back to ROVOCHAT_BASE_URL / ROVOCHAT_CLOUD_ID env vars,
     # then to JIRA_URL (stripping any /browse path).
@@ -202,8 +213,9 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     idle_timeout_seconds: int = attrib(default=DEFAULT_IDLE_TIMEOUT)
 
     # === Internal State ===
-    _conversation_id: Optional[str] = attrib(default=None, init=False, repr=False)
-    _last_token_count: int = attrib(default=0, init=False, repr=False)
+    # The conversation a resumed call continues: session-scoped like
+    # ``active_session_id`` (this branch's slot under a host ctx).
+    _conversation_id = LiveHandleField("conversation_id", "_conversation_id")
 
     def __attrs_post_init__(self) -> None:
         super().__attrs_post_init__()
@@ -227,6 +239,12 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             f"total_timeout={self.total_timeout_seconds}s",
             "Config",
         )
+
+    async def _areset_branch_conversation(self) -> None:
+        """``_ainfer`` resumes the branch's ``_conversation_id``, not its session
+        id, so forget both: the branch's next call creates a new conversation."""
+        await super()._areset_branch_conversation()
+        self._conversation_id = None
 
     def _warn_if_model_id_set(self) -> None:
         """Log a one-time warning if ``model_id`` is set on this inferencer.
@@ -359,6 +377,7 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         Yields:
             Text deltas as they arrive from RovoChat.
         """
+        stats = self._stream_stats()
         client = self._create_client()
 
         conv_id: Optional[str] = kwargs.get("conversation_id")
@@ -401,46 +420,49 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             """
             nonlocal accumulated_text
 
-            async for event in client.send_message_stream(
+            events = client.send_message_stream(
                 conversation_id=conv_id,  # pyre-ignore[6]
                 text=message,
                 agent_named_id=call_agent_named_id,
                 agent_id=call_agent_id,
-            ):
-                # ``RECONNECT_SUPPORTED`` is an informational handshake event sent
-                # by the server at the start of every stream to advertise that
-                # reconnect/resume is supported. It is NOT an error — silently
-                # ignore it. (Previously we incorrectly surfaced it as response
-                # text and then raised on the same string, causing every stream
-                # to fail spuriously.)
-                if event.event_type.upper() == "RECONNECT_SUPPORTED":
-                    continue
+            )
+            async with aclosing(events):
+                async for event in events:
+                    # ``RECONNECT_SUPPORTED`` is an informational handshake event sent
+                    # by the server at the start of every stream to advertise that
+                    # reconnect/resume is supported. It is NOT an error — silently
+                    # ignore it. (Previously we incorrectly surfaced it as response
+                    # text and then raised on the same string, causing every stream
+                    # to fail spuriously.)
+                    if event.event_type.upper() == "RECONNECT_SUPPORTED":
+                        continue
 
-                text = extract_text_from_event(event)
-                if text:
-                    if accumulated_text and text.startswith(accumulated_text):
-                        # Accumulated mode: text grows monotonically
-                        delta = text[len(accumulated_text) :]
-                    else:
-                        # Incremental mode: each event is a new chunk
-                        delta = text
+                    text = extract_text_from_event(event)
+                    if text:
+                        if accumulated_text and text.startswith(accumulated_text):
+                            # Accumulated mode: text grows monotonically
+                            delta = text[len(accumulated_text) :]
+                        else:
+                            # Incremental mode: each event is a new chunk
+                            delta = text
 
-                    if delta:
-                        yield delta
-                        accumulated_text += delta
+                        if delta:
+                            yield delta
+                            accumulated_text += delta
 
-                if is_terminal_event(event):
-                    self.log_info(
-                        f"Terminal event: type={event.event_type} "
-                        f"({len(accumulated_text)} chars accumulated)",
-                        "StreamComplete",
-                    )
-                    break
+                    if is_terminal_event(event):
+                        self.log_info(
+                            f"Terminal event: type={event.event_type} "
+                            f"({len(accumulated_text)} chars accumulated)",
+                            "StreamComplete",
+                        )
+                        break
 
         # Initial message exchange
-        async for delta in _stream_response(prompt):
-            yield delta
-            self._last_token_count += len(delta)
+        async with aclosing(_stream_response(prompt)) as deltas:
+            async for delta in deltas:
+                yield delta
+                stats.tokens += len(delta)
 
         # Auto-continuation loop
         while (
@@ -454,13 +476,14 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 "AutoContinue",
             )
 
-            async for delta in _stream_response(AUTO_CONTINUE_REPLY):
-                yield delta
-                self._last_token_count += len(delta)
+            async with aclosing(_stream_response(AUTO_CONTINUE_REPLY)) as deltas:
+                async for delta in deltas:
+                    yield delta
+                    stats.tokens += len(delta)
 
         # Save conversation ID for session management
         self._conversation_id = conv_id
-        self._session_id = conv_id
+        self.active_session_id = conv_id
 
     # === Overrides ===
 
@@ -508,7 +531,7 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             kwargs["conversation_id"] = None
             logger.debug("Starting fresh conversation (no previous session)")
 
-        self._last_token_count = 0
+        stats = self._reset_stream_stats()
         response_text = await super()._ainfer(
             inference_input, inference_config, **kwargs
         )
@@ -516,8 +539,8 @@ class RovoChatInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         if return_sdk_response:
             return SDKInferencerResponse(
                 content=response_text,
-                session_id=self._session_id,
-                tokens_received=self._last_token_count,
+                session_id=self.active_session_id,
+                tokens_received=stats.tokens,
             )
         return response_text
 

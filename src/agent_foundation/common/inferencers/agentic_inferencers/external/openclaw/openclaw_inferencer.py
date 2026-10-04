@@ -45,7 +45,8 @@ import json
 import logging
 import shlex
 import uuid
-from typing import Any, AsyncIterator, Optional, Union
+from contextlib import aclosing
+from typing import Any, AsyncIterator, Iterator, Optional, Union
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.openclaw.common import (
     DEFAULT_DOCKER_CONTAINER,
@@ -72,6 +73,7 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
     StreamingInferencerBase,
 )
 from attr import attrib, attrs
+from rich_python_utils.common_utils.function_helper import FallbackMode
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,13 @@ class OpenClawInferencer(StreamingInferencerBase):
             ``{original_prompt}`` as placeholder.
         auto_resume: If ``True``, reuse ``active_session_id`` across calls.
     """
+
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    # Fan-out workers would all resolve the one configured ``session_id``.
+    _SUPPORTS_BTA_FANOUT = False
 
     # ── Mode ──────────────────────────────────────────────────────────────────
     mode: Union[OpenClawMode, str] = attrib(default=OpenClawMode.PodGateway)
@@ -195,11 +204,6 @@ class OpenClawInferencer(StreamingInferencerBase):
     Has no effect in CLI mode (no persistent session store).
     """
 
-    # Track whether the session has been initialized this process lifetime.
-    # Set to True after initialize_session() completes successfully so that
-    # subsequent calls skip the warm-up turn even without a pod filesystem check.
-    _session_initialized: bool = attrib(default=False, init=False)
-
     def __attrs_post_init__(self) -> None:
         """Normalize mode enum and auto-discover gateway auth token for PodGateway."""
         # Normalize string aliases to enum for backwards compatibility
@@ -244,7 +248,44 @@ class OpenClawInferencer(StreamingInferencerBase):
                     "Set auth_token manually if needed.",
                     e,
                 )
+        self._pin_base_retry_settings()
         super().__attrs_post_init__()
+
+    def _pin_base_retry_settings(self) -> None:
+        """Pin the base retry loop to one attempt with no fallback.
+
+        OpenClaw retries rate limits and timeouts itself in
+        :meth:`_ainfer_with_retry`, so a base retry or fallback would multiply
+        those attempts. Non-default settings are logged and overridden.
+        """
+        ignored = []
+        if self.max_retry != 1:
+            ignored.append(f"max_retry={self.max_retry}")
+        if self.fallback_mode not in (
+            FallbackMode.ON_FIRST_FAILURE,
+            FallbackMode.NEVER,
+        ):
+            ignored.append(f"fallback_mode={self.fallback_mode}")
+        if self.fallback_inferencer is not None:
+            ignored.append("fallback_inferencer")
+        if ignored:
+            logger.warning(
+                "OpenClaw owns its retries; base setting ignored: %s",
+                ", ".join(ignored),
+            )
+        self.max_retry = 1
+        self.fallback_mode = FallbackMode.NEVER
+        self.fallback_inferencer = None
+
+    @staticmethod
+    def _drop_per_call_fallback_mode(kwargs: dict[str, Any]) -> None:
+        """Remove a per-call ``fallback_mode``, which would add a base retry."""
+        fallback_mode = kwargs.pop("fallback_mode", FallbackMode.NEVER)
+        if fallback_mode != FallbackMode.NEVER:
+            logger.warning(
+                "OpenClaw owns its retries; base setting ignored: fallback_mode=%s",
+                fallback_mode,
+            )
 
     # =========================================================================
     # Classmethod constructors
@@ -962,8 +1003,9 @@ class OpenClawInferencer(StreamingInferencerBase):
         session_id = kwargs.get("session_id", self.active_session_id or self.session_id)
 
         if self.mode in (OpenClawMode.PodGateway, OpenClawMode.LocalGateway):
-            async for chunk in self._stream_gateway(prompt, session_id):
-                yield chunk
+            async with aclosing(self._stream_gateway(prompt, session_id)) as chunks:
+                async for chunk in chunks:
+                    yield chunk
         else:
             # CLI mode: blocking call, yield full response as one chunk
             result = self._infer_cli(prompt, session_id)
@@ -985,6 +1027,11 @@ class OpenClawInferencer(StreamingInferencerBase):
     ) -> Any:
         """Async inference with session management and auto-retry.
 
+        Runs one base single-call attempt (:meth:`_ainfer_single`): its
+        :meth:`_prepare_call` resolves the session inside the invocation, and its
+        :meth:`_ainfer` initializes the session and retries rate limits and
+        timeouts.
+
         Args:
             inference_input: Prompt or structured input.
             inference_config: Ignored.
@@ -997,36 +1044,49 @@ class OpenClawInferencer(StreamingInferencerBase):
         """
         from agent_foundation.common.inferencers.run_context import enter_run, exit_run
 
+        self._validate_bta_inferencer_spec()
         _rc_token = enter_run(
             run_context, default_workspace=getattr(self, "_workspace", None)
         )
         try:
-            new_session = kwargs.pop("new_session", False)
-            if new_session:
-                self.active_session_id = None
-
-            session_id = (
-                kwargs.get(
-                    "session_id",
-                    self.active_session_id if self.auto_resume else self.session_id,
-                )
-                or self.session_id
+            self._drop_per_call_fallback_mode(kwargs)
+            return await self._ainfer_single(
+                inference_input, inference_config, **kwargs
             )
-
-            prompt = self._extract_prompt(inference_input)
-
-            # Auto-initialize new sessions when always_initialize_new_session=True
-            await self._maybe_initialize_session(session_id)
-
-            result = await self._ainfer_with_retry(prompt, session_id)
-
-            # Update active session
-            result_session = result.get("session_id") or session_id
-            self.active_session_id = result_session
-
-            return result.get("output", "")
         finally:
             exit_run(_rc_token)
+
+    def _prepare_call(self, inference_args: dict[str, Any]) -> dict[str, Any]:
+        """Resolve ``new_session`` / ``session_id`` inside the invocation, so a
+        claim-rejected call leaves the session untouched."""
+        new_session = inference_args.pop("new_session", False)
+        if new_session:
+            self.active_session_id = None
+
+        inference_args["session_id"] = (
+            inference_args.pop(
+                "session_id",
+                self.active_session_id if self.auto_resume else self.session_id,
+            )
+            or self.session_id
+        )
+        return inference_args
+
+    async def _areset_branch_conversation(self) -> None:
+        """A branch with no session falls back to the configured ``session_id``,
+        a gateway session that persists its conversation, so the branch is given
+        a session id of its own that the gateway has never seen (and, with
+        ``always_initialize_new_session``, warms up on first use)."""
+        await super()._areset_branch_conversation()
+        if not self.auto_resume:
+            logger.warning(
+                "[%s] auto_resume=False pins every call to session_id=%r; the "
+                "conversation reset cannot take effect.",
+                self.__class__.__name__,
+                self.session_id,
+            )
+            return
+        self.active_session_id = f"{self.session_id}-{uuid.uuid4().hex}"
 
     def infer(
         self,
@@ -1055,7 +1115,37 @@ class OpenClawInferencer(StreamingInferencerBase):
             )
         )
 
-    async def ainfer_streaming(  # type: ignore[override]
+    def ainfer_streaming(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Async streaming inference through the base template; see
+        ``_ainfer_streaming_pipeline``."""
+        self._validate_bta_inferencer_spec()
+        return super().ainfer_streaming(
+            inference_input, inference_config, run_context=run_context, **kwargs
+        )
+
+    def infer_streaming(
+        self,
+        inference_input: Any,
+        inference_config: Any = None,
+        *,
+        run_context=None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Sync streaming inference through the base template (the thread
+        bridge over ``_ainfer_streaming_pipeline``)."""
+        self._validate_bta_inferencer_spec()
+        return super().infer_streaming(
+            inference_input, inference_config, run_context=run_context, **kwargs
+        )
+
+    async def _ainfer_streaming_pipeline(
         self,
         inference_input: Any,
         inference_config: Any = None,
@@ -1094,9 +1184,10 @@ class OpenClawInferencer(StreamingInferencerBase):
         has_output = False
 
         if self.mode in (OpenClawMode.PodGateway, OpenClawMode.LocalGateway):
-            async for chunk in self._stream_gateway(prompt, session_id):
-                has_output = True
-                yield chunk
+            async with aclosing(self._stream_gateway(prompt, session_id)) as chunks:
+                async for chunk in chunks:
+                    has_output = True
+                    yield chunk
         else:
             result = self._infer_cli(prompt, session_id)
             output = result.get("output", "")
@@ -1174,19 +1265,28 @@ class OpenClawInferencer(StreamingInferencerBase):
             )
             return False  # safe default: don't warm up if check fails
 
+    def _session_ready(self, session_id: Optional[str]) -> bool:
+        """Whether ``session_id`` was initialized on this connection (B19): a
+        Tier-3 set of session ids, so a second session still gets its warm-up."""
+        return session_id in (self._tier3_get("initialized_sessions") or ())
+
+    def _mark_session_ready(self, session_id: Optional[str]) -> None:
+        ready = self._tier3_get("initialized_sessions") or frozenset()
+        self._tier3_set("initialized_sessions", ready | {session_id})
+
     async def _maybe_initialize_session(self, session_id: str) -> None:
         """Auto-initialize the session if ``always_initialize_new_session`` is set
         and the session is new (no transcript file on disk).
 
         Called automatically before the first inference call. Idempotent —
-        skips if already initialized this process lifetime (``_session_initialized``).
+        skips a session already initialized on this connection (``_session_ready``).
 
         Args:
             session_id: Session ID being used for inference.
         """
         if not self.always_initialize_new_session:
             return
-        if self._session_initialized:
+        if self._session_ready(session_id):
             return
         if self._is_new_session(session_id):
             logger.debug(
@@ -1199,7 +1299,7 @@ class OpenClawInferencer(StreamingInferencerBase):
                 "Session '%s' already has transcript on disk — skipping warm-up.",
                 session_id,
             )
-            self._session_initialized = True
+            self._mark_session_ready(session_id)
 
     async def initialize_session(
         self,
@@ -1234,12 +1334,13 @@ class OpenClawInferencer(StreamingInferencerBase):
         - You're running benchmarks and want a "warmed" agent baseline.
         - You want to pre-establish ``active_session_id`` for ``auto_resume``.
 
-        **Idempotent:** After the first successful call, subsequent calls are
-        skipped unless ``force=True``.  The flag is process-local only.
+        **Idempotent:** After the first successful call for a session id,
+        subsequent calls for it on this connection are skipped unless
+        ``force=True``.  Tracked in memory only.
 
         Args:
             session_id: Session ID to initialize.  Defaults to ``self.session_id``.
-            force: Re-run even if already initialized this process lifetime.
+            force: Re-run even if already initialized on this connection.
 
         Example::
 
@@ -1251,11 +1352,11 @@ class OpenClawInferencer(StreamingInferencerBase):
             # PodCLI has no persistent session store — nothing to initialize.
             return
 
-        if self._session_initialized and not force:
+        sid = session_id or self.session_id
+        if self._session_ready(sid) and not force:
             logger.debug("Session already initialized — skipping warm-up turn.")
             return
 
-        sid = session_id or self.session_id
         logger.debug(
             "Initializing OpenClaw session '%s' to write skillsSnapshot...", sid
         )
@@ -1277,7 +1378,7 @@ class OpenClawInferencer(StreamingInferencerBase):
                 sid,
                 response[:60],
             )
-            self._session_initialized = True
+            self._mark_session_ready(sid)
             self.active_session_id = sid
         except Exception as e:
             logger.warning(
@@ -1379,7 +1480,7 @@ class OpenClawInferencer(StreamingInferencerBase):
         inference_config: Any = None,
         **kwargs: Any,
     ) -> Any:
-        """Async inference — delegates to ``_ainfer_with_retry()``."""
+        """Async inference: session warm-up, then ``_ainfer_with_retry()``."""
         prompt = self._extract_prompt(inference_input)
         session_id = (
             kwargs.get(
@@ -1388,6 +1489,7 @@ class OpenClawInferencer(StreamingInferencerBase):
             )
             or self.session_id
         )
+        await self._maybe_initialize_session(session_id)
         result = await self._ainfer_with_retry(prompt, session_id)
         self.active_session_id = result.get("session_id") or session_id
         return result.get("output", "")

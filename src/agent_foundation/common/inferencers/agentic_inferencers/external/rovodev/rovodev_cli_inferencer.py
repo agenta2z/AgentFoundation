@@ -30,13 +30,12 @@ Usage::
     result = inf("What is 2+2?")
 """
 
-import contextvars
 import json
 import logging
 import os
 import shlex
-import subprocess
 import tempfile
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterator, List, Optional
 
@@ -53,25 +52,37 @@ from agent_foundation.common.inferencers.agentic_inferencers.external.rovodev.co
     RovoDevNotFoundError,
     strip_ansi_codes,
 )
-from agent_foundation.common.inferencers.run_context import bridge_entrypoint
+from agent_foundation.common.inferencers.run_context import (
+    bridge_entrypoint,
+    frame_for,
+    InvocationFrame,
+    NodeOutcomeState,
+    publish_result,
+    read_result,
+    RuntimeKey,
+)
 from agent_foundation.common.inferencers.terminal_inferencers.terminal_session_inferencer_base import (
     TerminalInferencerResponse,
     TerminalSessionTemplatedInferencerBase,
 )
-from attr import attrib, attrs
+from attr import attrib, attrs, evolve
 
 logger: logging.Logger = logging.getLogger(__name__)
-
-# Per-call output file path for async parallel safety
-_current_output_file: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "_current_output_file", default=None
-)
 
 # Schema auto-injected in non-legacy mode to capture clean LLM output as JSON.
 # This preserves XML tags that would otherwise be eaten by Rich TUI rendering.
 _NON_LEGACY_OUTPUT_SCHEMA = (
     '{"type":"object","properties":{"response":{"type":"string"}}}'
 )
+
+
+@attrs(frozen=True, slots=True)
+class RovoDevOutput:
+    """One call's clean output sources: the ``--output-file`` content (legacy) and
+    the filtered stdout whose trailing JSON holds the response (non-legacy)."""
+
+    clean: Optional[str] = attrib(default=None)
+    raw_stdout: str = attrib(default="")
 
 
 @attrs
@@ -109,6 +120,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         tool_use_idle_timeout_seconds: Idle timeout during tool use (default 2 hr).
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
     # --- Configuration ---
     has_local_access: bool = attrib(default=True)
     enable_legacy: bool = attrib(default=True)
@@ -133,6 +148,19 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
 
     # CLI stdout is noisy TUI output; --output-file has clean LLM text.
     streams_differ_from_final_output: bool = True
+
+    # The call's auto --output-file: a component of the call's invocation frame,
+    # so concurrent calls never see each other's file and nothing outlives the call.
+    _OUTPUT_FILE = RuntimeKey("RovoDevCliInferencer.output_file")
+
+    # The call's clean output sources live in its invocation, each attempt starting
+    # empty (B23); the two fields are their bare compat getters (get_final_output).
+    _CALL_OUTPUT = RuntimeKey(
+        "RovoDevCliInferencer.call_output",
+        compat={"_last_clean_output": "clean", "_last_raw_stdout": "raw_stdout"},
+    )
+    _last_clean_output: Optional[str] = attrib(default=None, init=False, repr=False)
+    _last_raw_stdout: str = attrib(default="", init=False, repr=False)
 
     # --- Timeouts ---
     idle_timeout_seconds: int = attrib(default=DEFAULT_IDLE_TIMEOUT)
@@ -462,9 +490,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 output = strip_ansi_codes(stdout).strip()
         else:
             # Legacy mode: try output file first, then ANSI-stripped stdout
-            effective_output_file = (
-                output_file_path or _current_output_file.get(None) or self.output_file
-            )
+            effective_output_file = output_file_path or self._call_output_file()
             if effective_output_file and Path(effective_output_file).exists():
                 try:
                     output = (
@@ -495,10 +521,15 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     def _infer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
-        """Override to handle temp output file lifecycle and clean env."""
+        """Override to handle temp output file lifecycle and clean env.
+
+        The result carries the clean output itself (``parse_output`` reads the
+        output file), so a sync call records no separate final output.
+        """
+        self._record_output(clean=None, raw_stdout="")
         # Generate per-call temp output file (legacy mode only)
         auto_output_file = None
-        if self.enable_legacy and not self.output_file and self.raw_output_to_file:
+        if self._uses_auto_output_file():
             auto_output_file = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
             kwargs["output_file"] = auto_output_file
 
@@ -506,11 +537,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         full_command = self._build_full_command(command)
         env = clean_env_for_subprocess()
 
-        result = subprocess.run(
+        result = self._run_subprocess(
             full_command,
-            shell=True,
-            capture_output=True,
-            text=True,
             cwd=self._resolve_subprocess_cwd(),
             env=env,
         )
@@ -554,6 +582,31 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     # Override: _yield_filter() — ANSI stripping for streaming
     # =========================================================================
 
+    def _uses_auto_output_file(self) -> bool:
+        """Whether a call captures its clean output in a temp ``--output-file``
+        (legacy, no configured ``output_file``)."""
+        return self.enable_legacy and not self.output_file and self.raw_output_to_file
+
+    def _call_output_file(self) -> Optional[str]:
+        """This call's auto ``--output-file``, else the configured ``output_file``
+        (also when no invocation is open, e.g. a direct hook call)."""
+        frame = frame_for(self)
+        call_file = frame.get(self._OUTPUT_FILE) if frame is not None else None
+        return call_file or self.output_file
+
+    def _call_output(self) -> RovoDevOutput:
+        """This invocation's output sources inside one, else (a bare getter after
+        the call) the compat fields."""
+        frame = frame_for(self)
+        if frame is not None:
+            return frame.get(self._CALL_OUTPUT) or RovoDevOutput()
+        return RovoDevOutput(
+            clean=self._last_clean_output, raw_stdout=self._last_raw_stdout
+        )
+
+    def _record_output(self, **changes: Any) -> None:
+        publish_result(self, self._CALL_OUTPUT, evolve(self._call_output(), **changes))
+
     async def _safe_process_cleanup(
         self, process: "asyncio.subprocess.Process", timeout: float = 5.0
     ) -> None:
@@ -564,12 +617,15 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         when the main ``acli`` process exits. We must wait for the file
         to appear with content before the process group is killed,
         otherwise the clean response is lost forever.
+
+        Only an exited ``acli`` gets here: a call left before its end
+        (cancellation, idle timeout) is ended at once (``_abort_process``).
         """
         import asyncio
         import time as _time
 
         if self.enable_legacy:
-            output_path = _current_output_file.get(None) or self.output_file
+            output_path = self._call_output_file()
             if output_path:
                 p = Path(output_path)
                 max_wait = min(self.idle_timeout_seconds or 120, 120)
@@ -579,7 +635,7 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                         try:
                             content = p.read_text(encoding="utf-8").strip()
                             if content:
-                                self._last_clean_output = content
+                                self._record_output(clean=content)
                                 logger.info(
                                     "[%s] output file ready after %.1fs (%d chars)",
                                     self.__class__.__name__,
@@ -602,26 +658,26 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     def _get_clean_output_for_cache(self) -> Optional[str]:
         """Read clean output from --output-file while it still exists.
 
-        Called from the base class ``ainfer_streaming()`` finally block —
+        Called from the base class ``_ainfer_streaming_pipeline()`` finally block —
         at this point the subclass finally hasn't run yet, so the
         ``--output-file`` still exists on disk.
 
         Single read, dual use: the returned content overwrites the stream
-        cache (base class), and is also stored in ``_last_clean_output``
-        for the response object (used by ``_ainfer()`` and
+        cache (base class), and is also recorded as the call's clean output
+        (``_CALL_OUTPUT``) for the response object (used by ``_ainfer()`` and
         ``get_final_output()``).  The subclass finally only needs to
         handle file cleanup — no second read required.
         """
         if not self.enable_legacy:
             return None
-        output_path = _current_output_file.get(None) or self.output_file
+        output_path = self._call_output_file()
         if output_path:
             p = Path(output_path)
             if p.exists():
                 try:
                     content = p.read_text(encoding="utf-8").strip()
                     if content:
-                        self._last_clean_output = content
+                        self._record_output(clean=content)
                         logger.debug(
                             "[%s] _get_clean_output_for_cache: read %d chars from %s",
                             self.__class__.__name__,
@@ -641,29 +697,31 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
     def get_final_output(self) -> Optional[str]:
         """Return clean LLM output from --output-file (legacy) or trailing JSON (non-legacy).
 
-        For legacy mode: reads from self._last_clean_output which is populated by
-        ainfer_streaming() BEFORE the temp output file is deleted. The contextvar
-        _current_output_file is cleared before get_final_output() is called, so
-        we use the pre-read instance variable instead.
-
-        For non-legacy mode: extracts from trailing JSON in accumulated stdout.
+        Inside an invocation this is the call's own output; after a bare call, the
+        last call's (the compat fields). Under a host ctx, a parent reads the
+        ``final_output`` of the call's published outcome instead
+        (``_final_output_at``).
 
         Returns:
             Clean final output string, or None if not available.
         """
+        return self._final_output_of(self._call_output())
+
+    def _final_output_of(self, output: RovoDevOutput) -> Optional[str]:
+        """Legacy: the ``--output-file`` content, read by the streaming pipeline
+        BEFORE the temp file is deleted. Non-legacy: the ``response`` of the
+        trailing JSON in the call's filtered stdout."""
         if self.enable_legacy:
-            # Use pre-read content stored before file deletion in ainfer_streaming()
-            content = getattr(self, "_last_clean_output", None)
+            content = output.clean
             if content:
                 logger.debug(
-                    "[%s] get_final_output: returning %d chars from _last_clean_output",
+                    "[%s] get_final_output: returning %d chars of clean output",
                     self.__class__.__name__,
                     len(content),
                 )
                 return content
         else:
-            # Non-legacy: extract clean output from trailing JSON in accumulated stdout
-            raw = getattr(self, "_last_raw_stdout", None)
+            raw = output.raw_stdout
             if raw:
                 try:
                     parsed = extract_json_from_output(raw)
@@ -682,6 +740,15 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                     )
         return None
 
+    def _outcome_for(self, frame: InvocationFrame) -> Optional[NodeOutcomeState]:
+        """The rendered task contract, plus the call's final output: its stream is
+        noisy TUI stdout (``streams_differ_from_final_output``)."""
+        outcome = super()._outcome_for(frame)
+        final = self._final_output_of(frame.get(self._CALL_OUTPUT) or RovoDevOutput())
+        if final is None:
+            return outcome
+        return evolve(outcome or NodeOutcomeState(), final_output=final)
+
     async def _yield_filter(
         self, chunks: AsyncIterator[str], **kwargs: Any
     ) -> AsyncIterator[str]:
@@ -691,8 +758,8 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         of chunks, matching the ``StreamingInferencerBase._yield_filter``
         signature.
 
-        Also accumulates raw (post-filter) stdout into ``_last_raw_stdout``
-        for non-legacy ``get_final_output()`` (trailing JSON extraction).
+        Non-legacy, it also records the filtered stdout as the call's
+        ``raw_stdout`` for ``get_final_output()`` (trailing JSON extraction).
 
         Note:
             stdout streaming from ``acli rovodev legacy`` may be noisy due to
@@ -706,28 +773,38 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         Yields:
             Cleaned text chunks with ANSI codes removed.
         """
-        self._last_raw_stdout = ""  # reset per-call
-        async for line in super()._yield_filter(chunks, **kwargs):
-            clean = strip_ansi_codes(line)
-            if clean.strip():
-                if not self.enable_legacy:
-                    # Accumulate for extract_json_from_output() in get_final_output()
-                    self._last_raw_stdout += clean
-                yield clean
+        accumulate = not self.enable_legacy
+        raw: list[str] = []
+        try:
+            async for line in super()._yield_filter(chunks, **kwargs):
+                clean = strip_ansi_codes(line)
+                if clean.strip():
+                    if accumulate:
+                        raw.append(clean)
+                    yield clean
+        finally:
+            if accumulate:
+                self._record_output(raw_stdout="".join(raw))
 
     # =========================================================================
     # Override: ainfer() / infer() — Session-aware inference
     # =========================================================================
 
-    async def ainfer_streaming(
+    async def _ainfer_streaming_pipeline(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> AsyncIterator[str]:
-        """Streaming inference with session management and clean output capture.
+        """Streaming pipeline with session management and clean output capture.
 
         Sets up the legacy --output-file temp path, delegates to the base class
         streaming pipeline, then reads the clean output from the file BEFORE
-        deleting it. This populates self._last_clean_output for get_final_output()
-        which is called by ConversationalInferencer after stream_token_batches().
+        deleting it. Each attempt starts from empty output sources (B23), so the
+        call's clean output (``get_final_output()``, and the ``final_output`` its
+        outcome publishes) is never a previous call's.
+
+        Every entry reaches this pipeline: ``ainfer()`` through ``_ainfer``,
+        and direct streaming through the base ``ainfer_streaming`` /
+        ``infer_streaming`` templates, which bind the run context and handle
+        fan-out delegation first.
 
         Args:
             inference_input: Input for inference (prompt string or dict).
@@ -737,78 +814,77 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         Yields:
             Text chunks as they arrive from the backend (noisy TUI stdout).
         """
+        self._record_output(clean=None, raw_stdout="")
         # Set up per-call temp output file (legacy mode only)
+        frame = frame_for(self)
         auto_output_file = None
-        if self.enable_legacy and not self.output_file and self.raw_output_to_file:
+        if self._uses_auto_output_file():
             auto_output_file = tempfile.mktemp(suffix=".md", prefix="rovodev_output_")
             kwargs["output_file"] = auto_output_file
-            _current_output_file.set(auto_output_file)
+            if frame is not None:
+                frame.put(self._OUTPUT_FILE, auto_output_file)
             logger.info(
                 "[%s] ainfer_streaming --output-file: %s",
                 self.__class__.__name__,
                 auto_output_file,
             )
 
-        # Handle session context
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
+        # Handle session context (direct streaming; on the ainfer() path
+        # _prepare_call already resolved it, and re-applying is idempotent)
+        self._apply_session_policy(kwargs)
 
         try:
             # Delegate to base class streaming pipeline
-            async for chunk in super().ainfer_streaming(
-                inference_input, inference_config, **kwargs
-            ):
-                yield chunk
+            async with aclosing(
+                super()._ainfer_streaming_pipeline(
+                    inference_input, inference_config, **kwargs
+                )
+            ) as chunks:
+                async for chunk in chunks:
+                    yield chunk
         finally:
-            # _last_clean_output is already set by _get_clean_output_for_cache()
-            # (called from the base class finally, which runs before this one).
-            # We only need to handle cleanup and a defensive fallback for when
-            # the cache path was disabled (no cache_file → base finally skipped
-            # the _get_clean_output_for_cache call).
+            # The clean output is usually recorded already, by
+            # _get_clean_output_for_cache() (called from the base class finally,
+            # which runs before this one) or _safe_process_cleanup(). We only need
+            # to handle cleanup and a defensive fallback for when neither read it
+            # (no cache_file → base finally skipped _get_clean_output_for_cache).
             if auto_output_file:
-                if not getattr(self, "_last_clean_output", None):
-                    try:
-                        p = Path(auto_output_file)
-                        if p.exists():
-                            content = p.read_text(encoding="utf-8").strip()
-                            self._last_clean_output = content if content else None
-                        else:
-                            self._last_clean_output = None
-                    except OSError:
-                        self._last_clean_output = None
+                if not self._call_output().clean:
+                    self._record_output(clean=self._read_output_file(auto_output_file))
                 try:
                     Path(auto_output_file).unlink(missing_ok=True)
                 except OSError:
                     pass
-                _current_output_file.set(None)
-            else:
-                self._last_clean_output = None
+                if frame is not None:
+                    frame.discard(self._OUTPUT_FILE)
+
+    @staticmethod
+    def _read_output_file(path: str) -> Optional[str]:
+        """The file's stripped content; ``None`` if missing, empty or unreadable."""
+        try:
+            content = Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return content or None
 
     async def _ainfer(
         self, inference_input: Any, inference_config: Any = None, **kwargs: Any
     ) -> Any:
         """Override to return TerminalInferencerResponse with clean output.
 
-        The base ``_ainfer()`` returns noisy TUI stdout as a plain string.
-        When ``_last_clean_output`` is available (populated by
-        ``ainfer_streaming``'s finally block from the ``--output-file``),
+        The temp ``--output-file`` is deleted before the base ``_ainfer()``
+        parses the output, so its result holds the ANSI-stripped TUI stdout.
+        When the call's clean output is available (recorded by
+        ``_ainfer_streaming_pipeline`` from that file),
         we wrap the result in a ``TerminalInferencerResponse`` so that
         the logged ``InferenceResponse`` at the base-class level has the
         correct clean ``output`` field — matching the stream cache content.
+        A configured ``output_file`` outlives the call, so the base result
+        already reads it.
         """
         raw = await super()._ainfer(inference_input, inference_config, **kwargs)
-        clean = getattr(self, "_last_clean_output", None)
-        if clean:
+        clean = (read_result(self, self._CALL_OUTPUT) or RovoDevOutput()).clean
+        if clean and self._uses_auto_output_file():
             return TerminalInferencerResponse(
                 output=clean,
                 raw_output=str(raw),
@@ -816,32 +892,10 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
             )
         return raw
 
-    @bridge_entrypoint
-    async def ainfer(
-        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
-    ) -> Any:
-        """Async inference with session management.
+    # === Session policy: the invocation seam's provider hooks ===
 
-        Injects ``session_id`` and ``resume`` into kwargs before calling the
-        base class, and updates ``active_session_id`` from the result.
-        Follows the same pattern as ``ClaudeCodeCliInferencer.ainfer()``.
-
-        Args:
-            inference_input: Input for inference (prompt string or dict).
-            inference_config: Optional configuration.
-            **kwargs: Additional arguments (new_session, session_id, resume).
-
-        Returns:
-            ``TerminalInferencerResponse`` with the inference result.
-        """
-        # Do NOT set auto_output_file here — ainfer_streaming() already handles
-        # creating and reading the temp --output-file, populating _last_clean_output.
-        # If we create a second auto_output_file here and inject it via kwargs,
-        # construct_command() uses THAT file, but ainfer_streaming() reads its OWN
-        # local auto_output_file (a different temp path) → file not found →
-        # _last_clean_output = None → get_final_output() returns empty string.
-
-        # Handle new_session flag
+    def _apply_session_policy(self, kwargs: dict[str, Any]) -> None:
+        """Resolve ``new_session`` / ``session_id`` / ``resume`` into kwargs."""
         new_session = kwargs.pop("new_session", False)
         if new_session:
             self.active_session_id = None
@@ -859,11 +913,36 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         kwargs["session_id"] = session_id
         kwargs["resume"] = is_resume and session_id is not None
 
-        # _ainfer_single → _ainfer → ainfer_streaming. Our _ainfer override
-        # returns a TerminalInferencerResponse (clean output + raw noisy)
-        # when _last_clean_output is available, so the base-class logging at
-        # InferencerBase.__ainfer_single_impl logs the correct clean output.
-        result = await self._ainfer_single(inference_input, inference_config, **kwargs)
+    def _prepare_call(self, inference_args: dict[str, Any]) -> dict[str, Any]:
+        """Inject ``session_id`` / ``resume`` inside the invocation, so a
+        claim-rejected call leaves the session untouched."""
+        # Do NOT set auto_output_file here — _ainfer_streaming_pipeline() already
+        # handles creating and reading the temp --output-file, recording the
+        # call's clean output. If we create a second auto_output_file here and
+        # inject it via kwargs, construct_command() uses THAT file, but the
+        # pipeline reads its OWN local auto_output_file (a different temp path) →
+        # file not found → no clean output → get_final_output() returns
+        # empty string.
+        self._apply_session_policy(inference_args)
+        return inference_args
+
+    def _conclude_call(self, result: Any) -> Any:
+        """After a successful sync call, capture the real session ID from the
+        sessions directory."""
+        if getattr(result, "success", False):
+            self._capture_latest_session("Sync")
+        return result
+
+    async def _aconclude_call(self, result: Any) -> Any:
+        """Wrap the async result as a ``TerminalInferencerResponse`` and capture
+        the real session ID from the sessions directory.
+
+        ``_ainfer_single`` → ``_ainfer`` → ``_ainfer_streaming_pipeline``. Our
+        ``_ainfer`` override returns a ``TerminalInferencerResponse`` (clean
+        output + raw noisy) when the call's clean output is available, so the
+        base-class logging at ``InferencerBase.__ainfer_single_impl`` logs the
+        correct clean output; anything else is wrapped here.
+        """
         if not isinstance(result, TerminalInferencerResponse):
             clean_output = self.get_final_output() or ""
             result = TerminalInferencerResponse(
@@ -872,19 +951,44 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
                 success=True,
             )
 
-        # Extract the real session ID from the sessions directory.
-        # After a successful run, the most recently modified session in
-        # ~/.rovodev/sessions/ is the one we just created/used.
+        # Note: temp output file cleanup is handled by _ainfer_streaming_pipeline()
+        # itself (it creates, reads, and deletes its own auto_output_file in its
+        # finally block).
+        self._capture_latest_session("Async")
+        return result
+
+    def _capture_latest_session(self, tag: str) -> None:
+        """Adopt the real session ID from the sessions directory: after a run,
+        the most recently modified session in ~/.rovodev/sessions/ is the one we
+        just created/used."""
         session_id_found = find_latest_session_id(workspace_path=self.effective_cwd)
         if session_id_found:
             self.active_session_id = session_id_found
-            self.log_debug(f"Captured session ID: {session_id_found}", "Async")
+            self.log_debug(f"Captured session ID: {session_id_found}", tag)
             ensure_session_metadata(session_id_found, workspace_path=self.effective_cwd)
 
-        # Note: temp output file cleanup is handled by ainfer_streaming() itself
-        # (it creates, reads, and deletes its own auto_output_file in its finally block).
+    # === Public entries: thin adapters over the invocation seam ===
 
-        return result
+    @bridge_entrypoint
+    async def ainfer(
+        self, inference_input: Any, inference_config: Any = None, **kwargs: Any
+    ) -> Any:
+        """Async inference with session management.
+
+        The session policy runs inside the invocation: ``_prepare_call`` injects
+        ``session_id`` and ``resume`` into kwargs, and ``_aconclude_call`` wraps
+        the result and updates ``active_session_id``. Follows the same pattern as
+        ``ClaudeCodeCliInferencer``.
+
+        Args:
+            inference_input: Input for inference (prompt string or dict).
+            inference_config: Optional configuration.
+            **kwargs: Additional arguments (new_session, session_id, resume).
+
+        Returns:
+            ``TerminalInferencerResponse`` with the inference result.
+        """
+        return await self._ainfer_single(inference_input, inference_config, **kwargs)
 
     @bridge_entrypoint
     def infer(
@@ -902,34 +1006,4 @@ class RovoDevCliInferencer(TerminalSessionTemplatedInferencerBase):
         Returns:
             ``TerminalInferencerResponse`` with the inference result.
         """
-        # Handle new_session flag
-        new_session = kwargs.pop("new_session", False)
-        if new_session:
-            self.active_session_id = None
-
-        # Determine session context
-        session_id = kwargs.get("session_id", self.active_session_id)
-        is_resume = kwargs.get("resume", True)
-
-        if session_id is None:
-            if self.auto_resume and self.active_session_id:
-                session_id = self.active_session_id
-            else:
-                is_resume = False
-
-        kwargs["session_id"] = session_id
-        kwargs["resume"] = is_resume and session_id is not None
-
-        # Route through _infer_single for retry/preprocessing/timeout
-        result = self._infer_single(inference_input, inference_config, **kwargs)
-
-        # Extract the real session ID from the sessions directory.
-        if getattr(result, "success", False):
-            session_id_found = find_latest_session_id(workspace_path=self.effective_cwd)
-            if session_id_found:
-                self.active_session_id = session_id_found
-                self.log_debug(f"Captured session ID: {session_id_found}", "Sync")
-                ensure_session_metadata(
-                    session_id_found, workspace_path=self.effective_cwd
-                )
-        return result
+        return self._infer_single(inference_input, inference_config, **kwargs)

@@ -306,6 +306,9 @@ class TestResumability(unittest.TestCase):
             breakdown_call_count[0] += 1
             return "1. W1\n2. W2\n3. W3"
 
+        # Closures have no resume identity of their own (P8): name the breakdown
+        # and the worker so the resume can verify it continues the same BTA.
+        counting_breakdown_fn.resume_identity = "breakdown W1-W3"
         breakdown = MockInferencer(response=counting_breakdown_fn)
 
         # --- First run: simulate crash on worker 3 ---
@@ -317,6 +320,7 @@ class TestResumability(unittest.TestCase):
 
             return MockInferencer(response=worker_fn)
 
+        crashing_factory.resume_identity = "result_<index> worker"
         bta = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
             worker_inferencers=crashing_factory,
@@ -354,6 +358,7 @@ class TestResumability(unittest.TestCase):
 
             return MockInferencer(response=worker_fn)
 
+        resuming_factory.resume_identity = "result_<index> worker"
         bta_resume = BreakdownThenAggregateInferencer(
             breakdown_inferencer=breakdown,
             worker_inferencers=resuming_factory,
@@ -602,20 +607,22 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
         - Batch approach: worker_2 starts at ~100ms when both finish
           (total time ≈ 200ms)
 
-        We verify via completion order: worker_0 finishes first, then
-        worker_2 starts and finishes before worker_1, proving the
-        sliding window released the slot immediately.
+        Asserted structurally, via start/completion ORDER rather than elapsed
+        wall-clock. Relative event ordering survives a uniform slowdown (ASAN,
+        a loaded host); an absolute duration bound does not — the total is
+        floored by the 150ms worker, so any ceiling near it is a latent flake.
         """
         import asyncio
-        import time
 
         queries = "1. Q1\n2. Q2\n3. Q3"
         breakdown = AsyncMockInferencer(response=queries)
 
+        start_order = []
         completion_order = []
 
         def factory(sub_query, index):
             async def _response(inp):
+                start_order.append(index)
                 if index == 0:
                     await asyncio.sleep(0.01)  # Fast: 10ms
                 elif index == 1:
@@ -635,30 +642,31 @@ class TestMaxConcurrency(unittest.IsolatedAsyncioTestCase):
             max_concurrency=2,
         )
 
-        start = time.monotonic()
-        result = await bta.ainfer("question")
-        elapsed = time.monotonic() - start
+        await bta.ainfer("question")
 
-        # Sliding window: worker_0 (10ms) and worker_1 (150ms) start together.
-        # worker_0 finishes at ~10ms, releasing the slot for worker_2 (50ms).
-        # worker_2 finishes at ~60ms, worker_1 finishes at ~150ms.
-        # Total ≈ 150ms. Batch would be ≈ 200ms (150ms + 50ms).
+        # Sliding window: worker_0 (10ms) and worker_1 (150ms) fill the two slots.
+        # worker_0 finishes at ~10ms and its slot is released immediately, so
+        # worker_2 (50ms) starts then and finishes at ~60ms — before worker_1.
 
-        # worker_0 should finish first, worker_2 second (started in worker_0's slot),
-        # worker_1 last (the slow one)
+        # Only two slots exist, so worker_2 must be the LAST to start. (0 and 1
+        # race for the two initial slots, so their relative order is not pinned.)
+        self.assertEqual(len(start_order), 3, f"all workers should run: {start_order}")
+        self.assertEqual(
+            start_order[2],
+            2,
+            f"worker_2 should start last, once a slot frees: {start_order}",
+        )
+        self.assertEqual({0, 1}, set(start_order[:2]), f"got {start_order}")
+
+        # The load-bearing assertion: worker_2 both starts after, and finishes
+        # before, the slow worker_1 — so it ran CONCURRENTLY with worker_1 in the
+        # slot worker_0 vacated. Batch-and-wait would hold worker_2 until both
+        # initial workers finished, yielding [0, 1, 2].
         self.assertEqual(
             completion_order,
             [0, 2, 1],
             f"Expected sliding-window completion order [0, 2, 1], got {completion_order}. "
             "If [0, 1, 2], the implementation is batched rather than sliding window.",
-        )
-
-        # Total time should be ~150ms (sliding window), not ~200ms (batched)
-        self.assertLess(
-            elapsed,
-            0.19,
-            f"Elapsed {elapsed:.3f}s suggests batching, not sliding window. "
-            "Sliding window should complete in ~150ms.",
         )
 
     async def test_max_concurrency_with_aggregator_no_deadlock(self):
@@ -878,7 +886,9 @@ class TestPredefinedSubQueries(unittest.TestCase):
     # ── Test F: checkpoint wins over predefined ────────────────────────────────
 
     def test_checkpoint_wins_over_predefined_sub_queries(self):
-        """Test F: a promoted breakdown checkpoint takes priority over predefined_sub_queries."""
+        """Test F: a promoted breakdown checkpoint takes priority over
+        predefined_sub_queries. A hand-written checkpoint has no resume manifest,
+        so the resume trusts it explicitly (``trust_legacy``, P8)."""
         breakdown = MockInferencer(response="1. LLM_Q1\n2. LLM_Q2")
         factory = self._make_worker_inferencers()
 
@@ -888,6 +898,7 @@ class TestPredefinedSubQueries(unittest.TestCase):
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
+            resume_identity_policy="trust_legacy",
             predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
         )
         ws = InferencerWorkspace(root=self.tmpdir)
@@ -1117,7 +1128,8 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("breakdown_inferencer", str(ctx.exception))
 
     async def test_ainfer_checkpoint_wins_over_predefined(self):
-        """A promoted breakdown checkpoint takes priority over predefined in async path."""
+        """A promoted breakdown checkpoint takes priority over predefined in async
+        path; hand-written, it is trusted explicitly (``trust_legacy``, P8)."""
         factory = self._make_async_worker_inferencers()
 
         bta = BreakdownThenAggregateInferencer(
@@ -1126,6 +1138,7 @@ class TestPredefinedSubQueriesAsync(unittest.IsolatedAsyncioTestCase):
             aggregator_inferencer=None,
             checkpoint_dir=self.tmpdir,
             resume_with_saved_results=True,
+            resume_identity_policy="trust_legacy",
             predefined_sub_queries=["PREDEFINED_Q1", "PREDEFINED_Q2"],
         )
         ws = InferencerWorkspace(root=self.tmpdir)

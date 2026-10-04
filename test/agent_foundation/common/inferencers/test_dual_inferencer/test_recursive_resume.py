@@ -19,6 +19,7 @@ from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.du
 from agent_foundation.common.inferencers.agentic_inferencers.flow_inferencers.plan_then_implement_inferencer import (
     PlanThenImplementInferencer,
 )
+from agent_foundation.common.inferencers.run_context import open_invocation
 from rich_python_utils.common_objects.workflow.common.step_result_save_options import (
     StepResultSaveOptions,
 )
@@ -106,19 +107,20 @@ class TestSetupChildWorkflows(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = self.tmpdir
-        pti.enable_result_save = StepResultSaveOptions.Always
-        pti.resume_with_saved_results = True
-        pti.checkpoint_mode = "jsonfy"
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti.enable_result_save = StepResultSaveOptions.Always
+            pti.resume_with_saved_results = True
+            pti.checkpoint_mode = "jsonfy"
 
-        state = {"iteration": 1}
-        pti._setup_child_workflows(state)
+            state = {"iteration": 1}
+            pti._setup_child_workflows(state)
 
-        self.assertIsNotNone(plan_dual._result_root_override)
-        self.assertIsNotNone(impl_dual._result_root_override)
-        # Child paths should be under <base>/checkpoints/pti/iter_1/<attr>
-        self.assertIn("iter_1", plan_dual._result_root_override)
-        self.assertIn("planner_inferencer", plan_dual._result_root_override)
+            self.assertIsNotNone(plan_dual._result_root_override)
+            self.assertIsNotNone(impl_dual._result_root_override)
+            # Child paths should be under <base>/checkpoints/pti/iter_1/<attr>
+            self.assertIn("iter_1", plan_dual._result_root_override)
+            self.assertIn("planner_inferencer", plan_dual._result_root_override)
 
     def test_propagates_checkpoint_settings(self):
         plan_dual = _make_dual_inferencer("planner")
@@ -127,17 +129,18 @@ class TestSetupChildWorkflows(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = self.tmpdir
-        pti.enable_result_save = StepResultSaveOptions.Always
-        pti.resume_with_saved_results = True
-        pti.checkpoint_mode = "jsonfy"
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti.enable_result_save = StepResultSaveOptions.Always
+            pti.resume_with_saved_results = True
+            pti.checkpoint_mode = "jsonfy"
 
-        state = {"iteration": 1}
-        pti._setup_child_workflows(state)
+            state = {"iteration": 1}
+            pti._setup_child_workflows(state)
 
-        self.assertEqual(plan_dual.enable_result_save, StepResultSaveOptions.Always)
-        self.assertTrue(plan_dual.resume_with_saved_results)
-        self.assertEqual(plan_dual.checkpoint_mode, "jsonfy")
+            self.assertEqual(plan_dual.enable_result_save, StepResultSaveOptions.Always)
+            self.assertTrue(plan_dual.resume_with_saved_results)
+            self.assertEqual(plan_dual.checkpoint_mode, "jsonfy")
 
     def test_child_paths_isolated_per_iteration(self):
         """Different iterations get different child directories."""
@@ -147,24 +150,25 @@ class TestSetupChildWorkflows(unittest.TestCase):
             planner_inferencer=plan_dual,
             executor_inferencer=impl_dual,
         )
-        pti._current_base_workspace = self.tmpdir
-        pti.enable_result_save = StepResultSaveOptions.Always
-        pti.resume_with_saved_results = True
-        pti.checkpoint_mode = "jsonfy"
+        with open_invocation(pti):
+            pti._current_base_workspace = self.tmpdir
+            pti.enable_result_save = StepResultSaveOptions.Always
+            pti.resume_with_saved_results = True
+            pti.checkpoint_mode = "jsonfy"
 
-        # Iteration 1
-        state1 = {"iteration": 1}
-        pti._setup_child_workflows(state1)
-        planner_dir_iter1 = plan_dual._result_root_override
+            # Iteration 1
+            state1 = {"iteration": 1}
+            pti._setup_child_workflows(state1)
+            planner_dir_iter1 = plan_dual._result_root_override
 
-        # Iteration 2
-        state2 = {"iteration": 2}
-        pti._setup_child_workflows(state2)
-        planner_dir_iter2 = plan_dual._result_root_override
+            # Iteration 2
+            state2 = {"iteration": 2}
+            pti._setup_child_workflows(state2)
+            planner_dir_iter2 = plan_dual._result_root_override
 
-        self.assertNotEqual(planner_dir_iter1, planner_dir_iter2)
-        self.assertIn("iter_1", planner_dir_iter1)
-        self.assertIn("iter_2", planner_dir_iter2)
+            self.assertNotEqual(planner_dir_iter1, planner_dir_iter2)
+            self.assertIn("iter_1", planner_dir_iter1)
+            self.assertIn("iter_2", planner_dir_iter2)
 
 
 class TestDualInferencerChildMode(unittest.TestCase):

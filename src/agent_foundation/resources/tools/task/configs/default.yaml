@@ -67,6 +67,8 @@ _params:
     - ${_params.main_inferencer}
     - ${_params.main_inferencer}
   num_flows: ${len:${_params.flow_inferencers}}   # DERIVED from list length so TASK__FLOW_INFERENCERS drives the count without mismatch
+  flow_bta_inferencers: [null]       # per-flow `bta_inferencer` fan-out for the planner's flow leaves, positional like flow_inferencers; [null] = off. Required by the imported breakdown-multiflow-plan.yaml (`${_params.flow_bta_inferencers}`), which documents enabling; its templates resolve here under `planner_inferencer._params`, e.g. TASK__FLOW_BTA_INFERENCERS='[null,"${planner_inferencer._params.metamate_fan_out_roles}"]'.
+  flow_followup_bta_inferencers: ${_params.flow_bta_inferencers}   # followup-turn twin; TASK__FLOW_FOLLOWUP_BTA_INFERENCERS=null keeps followup turns unfanned. Required by the imported breakdown-multiflow-plan.yaml.
   plan_max_breakdown: 3              # planner BTA: number of sub-planning subtasks
   exec_max_breakdown: 4              # executor BTA: number of execution subtasks
   flow_max_dynamic_steps: 3          # per-flow MFDual followup iterations cap

@@ -380,8 +380,8 @@ class TestSopCommandEntry(unittest.TestCase):
         _run(ci._commands.dispatch("/sop role_creation --fresh"))
         assert ci.sop_state is not None
         assert ci.sop_state.instance_id != first_id
-        # the previously exited instance remains suspended
-        assert len(ci._suspended_sops) == 1
+        # starting over discards the exited instance: it is no longer resumable
+        assert ci._suspended_sops == []
 
 
 class TestSuspendedSerialization(unittest.TestCase):

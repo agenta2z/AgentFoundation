@@ -234,6 +234,11 @@ def _tool_invocation_to_conversation_tool(data: dict[str, Any]) -> ConversationT
     )
 
 
+# Public name for orchestrators that receive conversation-tool calls as
+# structured arguments (e.g. native tool calls) rather than parsed text.
+tool_invocation_to_conversation_tool = _tool_invocation_to_conversation_tool
+
+
 def parse_conversation_response(response: str) -> ConversationResponse:
     """Parse an LLM response for conversation tool invocations.
 

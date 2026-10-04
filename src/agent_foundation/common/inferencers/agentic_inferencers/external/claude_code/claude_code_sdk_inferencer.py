@@ -10,10 +10,9 @@ import os
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
+    build_permission_effort_kwargs,
     EffortLevel,
     PermissionModeLiteral,
-    SDK_NATIVE_EFFORT_LEVELS,
-    SDK_NATIVE_PERMISSION_MODES,
 )
 from agent_foundation.common.inferencers.agentic_inferencers.external.sdk_types import (
     SDKInferencerResponse,
@@ -24,7 +23,7 @@ from agent_foundation.common.inferencers.streaming_inferencer_base import (
 from agent_foundation.common.inferencers.templated_inferencer_base import (
     TemplatedInferencerBase,
 )
-from attr import attrib, attrs
+from attr import attrib, attrs, validators
 
 logger = logging.getLogger(__name__)
 
@@ -102,12 +101,58 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         async for chunk in inferencer.ainfer_streaming("Explain this"):
             print(chunk, end="", flush=True)
 
+    Connection and Session Scope:
+        The live ``ClaudeSDKClient`` (with its disconnect function and event
+        loop) and ``active_session_id`` are Tier-3 live handles. Under a host
+        RunContext they are kept per branch, keyed by ``ctx.live_branch_key``
+        = ``(handle scope of the ctx's root, ctx.path)``; bare calls (no host
+        context) all share a single one. Calls on one branch reuse its connected
+        client and so continue one Claude session. A call on a branch with no
+        client — another path, or another root — connects a new client, which
+        starts a new Claude session unless the call passes ``session_id``.
+        Async calls leave their client connected until ``adisconnect()``,
+        which closes every branch's client, or ``areset_conversation()``, which
+        closes the branch's own; the sync bridge closes its client after each
+        call.
+
+        OpenStartup's ``ConversationService`` keeps one RunContext root per
+        session and runs each turn under ``child("turn_N")``, and
+        ``ConversationalInferencer`` calls its base under ``child("agent")``
+        every round. By default the rounds of one turn share one client and
+        one Claude session, every turn starts a new one, and earlier turns'
+        clients stay connected until ``adisconnect()``. With
+        ``fresh_vendor_session_per_round`` on (opt-in; default off), the
+        branch's conversation is reset before every round, so every round
+        connects a new client and starts a new Claude session.
+
+        ``NativeConversationalInferencer`` (``conversational_native``) does
+        not use this class: its ``claude_sdk`` backend drives its own
+        ``ClaudeSDKClient`` and keeps one vendor session across turns in its
+        durable session record. ``NativeBackendSpec.from_inferencer`` only
+        reads configuration fields from a ``ClaudeCodeSDK`` definition.
+
     Attributes:
         target_path: Working directory for Claude Code agent (inherited
             from ``InferencerBase``). Used as the subprocess cwd via
             ``effective_cwd`` (which falls back to ``workspace.root`` and
             then ``os.getcwd()`` when ``target_path`` is None).
         system_prompt: System prompt to configure agent behavior.
+        system_prompt_mode: How ``system_prompt`` relates to Claude Code's own
+            system prompt; read when the client connects.
+
+            - ``"legacy_empty"`` (default, the historical behavior): sent as
+              the whole system prompt even when empty, so an empty or ``None``
+              ``system_prompt`` becomes ``--system-prompt ""`` and leaves
+              Claude Code with no system prompt at all.
+            - ``"replace"``: a non-empty ``system_prompt`` replaces Claude
+              Code's system prompt; an empty, whitespace-only or ``None`` one
+              keeps Claude Code's own.
+            - ``"preset_append"``: keeps Claude Code's system prompt and
+              appends ``system_prompt`` (nothing when it is empty).
+
+            ``ConversationalInferencer`` sets ``system_prompt = ""`` before
+            every streaming round, so under it only ``"legacy_empty"`` removes
+            Claude Code's system prompt.
         idle_timeout_seconds: Per-chunk idle timeout in seconds (inherited,
             overridden to 1800). If no new text chunk arrives within this
             duration, the stream is considered stalled.
@@ -148,6 +193,14 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             confinement of the agent's file access.
     """
 
+    # Call results live in the invocation, session state behind the session
+    # policy and connections in Tier-3 handles; the purity ratchet verifies it.
+    _HOST_PURE_CERTIFIED = True
+
+    _FANOUT_SINGLE_CALL_ARGS = StreamingInferencerBase._FANOUT_SINGLE_CALL_ARGS + (
+        "return_sdk_response",
+    )
+
     # ClaudeCodeSdk launches the ``claude`` CLI as a subprocess with
     # Read / Write / Bash tools — it HAS local file access. Override
     # ``InferencerBase``'s False default (inferencer_base.py:117) so the
@@ -163,6 +216,10 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # idle_timeout_seconds overridden to 1800 (was timeout_seconds=1800 in old code)
     idle_timeout_seconds: int = attrib(default=1800)
     system_prompt: str = attrib(default="")
+    system_prompt_mode: str = attrib(
+        default="legacy_empty",
+        validator=validators.in_(("legacy_empty", "replace", "preset_append")),
+    )
     allowed_tools: List[str] = attrib(factory=lambda: ["Read", "Write", "Bash"])
     include_partial_messages: bool = attrib(default=True)
     prefer_subscription: bool = attrib(default=True)
@@ -189,7 +246,6 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
     # and mirrored into ``ctx.handles`` for per-branch (V8) isolation. Byte-identical
     # without an active context.
     _connect_lock: Any = attrib(default=None, init=False, repr=False)
-    _last_tool_use_count: int = attrib(default=0, init=False, repr=False)
 
     @property
     def _client(self):
@@ -252,6 +308,24 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
 
     # === Option-routing helper (also exercised by unit tests) ===
 
+    def _system_prompt_option(self) -> Any:
+        """The SDK's ``system_prompt`` for ``system_prompt_mode``.
+
+        The SDK transport sends a string as ``--system-prompt`` (``None`` as
+        ``""``), replacing Claude Code's own prompt; the ``claude_code`` preset
+        sends no ``--system-prompt``, plus ``--append-system-prompt`` when it
+        carries ``append``.
+        """
+        if self.system_prompt_mode == "legacy_empty":
+            return self.system_prompt
+        has_text = bool((self.system_prompt or "").strip())
+        if self.system_prompt_mode == "replace" and has_text:
+            return self.system_prompt
+        preset: Dict[str, Any] = {"type": "preset", "preset": "claude_code"}
+        if self.system_prompt_mode == "preset_append" and has_text:
+            preset["append"] = self.system_prompt
+        return preset
+
     def _build_permission_effort_kwargs(
         self,
     ) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
@@ -270,28 +344,9 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
             ``ClaudeAgentOptions(...)``; ``extra_args`` is passed as the
             ``extra_args`` field. Either may be empty.
         """
-        sdk_kwargs: Dict[str, Any] = {}
-        extra_args: Dict[str, Optional[str]] = {}
-        if self.permission_mode is not None:
-            if self.permission_mode in SDK_NATIVE_PERMISSION_MODES:
-                sdk_kwargs["permission_mode"] = self.permission_mode
-            else:
-                extra_args["permission-mode"] = self.permission_mode
-        if self.effort is not None:
-            if self.effort in SDK_NATIVE_EFFORT_LEVELS:
-                sdk_kwargs["effort"] = self.effort
-            else:
-                extra_args["effort"] = self.effort
-        # macOS-sandbox toggle: the SDK has no typed field for this Meta
-        # launcher option, so route it through extra_args. A ``None`` value
-        # emits a value-less boolean flag (``--dangerously-disable-osx-sandbox``).
-        if self.disable_osx_sandbox:
-            from agent_foundation.common.inferencers.agentic_inferencers.external.claude_code.common import (
-                DANGEROUSLY_DISABLE_OSX_SANDBOX,
-            )
-
-            extra_args[DANGEROUSLY_DISABLE_OSX_SANDBOX] = None
-        return sdk_kwargs, extra_args
+        return build_permission_effort_kwargs(
+            self.permission_mode, self.effort, bool(self.disable_osx_sandbox)
+        )
 
     # === Streaming Primitive ===
 
@@ -308,6 +363,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         Yields:
             Text chunks as they arrive from Claude.
         """
+        stats = self._stream_stats()
         try:
             from claude_agent_sdk.types import (
                 AssistantMessage,
@@ -343,9 +399,9 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                         if isinstance(block, TextBlock):
                             yield block.text
                         elif isinstance(block, ToolUseBlock):
-                            self._last_tool_use_count += 1
+                            stats.tool_uses += 1
                             self.log_info(
-                                f"Tool use #{self._last_tool_use_count}: {block.name}",
+                                f"Tool use #{stats.tool_uses}: {block.name}",
                                 "ToolUse",
                             )
                 case ResultMessage() as result_msg:
@@ -378,7 +434,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         Returns:
             Response text string, or SDKInferencerResponse if return_sdk_response=True.
         """
-        self._last_tool_use_count = 0
+        stats = self._reset_stream_stats()
         response_text = await super()._ainfer(
             inference_input, inference_config, **kwargs
         )
@@ -389,7 +445,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                 # active context's connection branch (Tier-3), not the bare backing
                 # (which a context-scoped write never touches).
                 session_id=self.active_session_id,
-                tool_uses=self._last_tool_use_count,
+                tool_uses=stats.tool_uses,
             )
         return response_text
 
@@ -401,7 +457,9 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         CRITICAL: asyncio.run() closes the event loop after completion.
         ClaudeSDKClient holds persistent loop-bound state (subprocess,
         anyio task groups, background tasks) that becomes invalid when
-        the loop closes. We MUST detect this and reconnect.
+        the loop closes. So each sync call closes the client it connected
+        inside its own loop, before the loop ends; a client left behind by
+        async use on a now-closed loop is detected and dropped.
 
         For multi-call usage, prefer the async interface:
             async with ClaudeCodeSdkInferencer(...) as inf:
@@ -442,9 +500,18 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
                         "or call adisconnect() and let the sync path reconnect."
                     )
 
-        return _run_async(
-            self._ainfer(inference_input, inference_config, **_inference_args)
-        )
+        async def _run_and_close():
+            try:
+                return await self._ainfer(
+                    inference_input, inference_config, **_inference_args
+                )
+            finally:
+                # The sync bridge runs on a throwaway event loop and the client is
+                # bound to it: close this call's client inside that loop, before it
+                # ends. The session id survives for the next call's resume.
+                await self._adisconnect_branch()
+
+        return _run_async(_run_and_close())
 
     # === Connection Lifecycle ===
 
@@ -478,7 +545,7 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         options = ClaudeAgentOptions(
             model=self.model_id or None,
             cwd=str(self.effective_cwd),
-            system_prompt=self.system_prompt,
+            system_prompt=self._system_prompt_option(),
             include_partial_messages=self.include_partial_messages,
             allowed_tools=self.allowed_tools,
             resume=session_id,
@@ -514,6 +581,30 @@ class ClaudeCodeSdkInferencer(StreamingInferencerBase, TemplatedInferencerBase):
         self.active_session_id = session_id  # §2.10: mirror into ctx.handles too
         self._connected_loop = loop
         logger.debug("Claude Code SDK connected (session_id=%s)", session_id)
+
+    async def _adisconnect_branch(self) -> None:
+        """Disconnect the active branch's client only: the one this call used.
+        Other branches' clients may be bound to other loops."""
+        fn = self._disconnect_fn
+        if fn:
+            await fn()
+        self._disconnect_fn = None
+        self._client = None
+        self._connected_loop = None
+
+    async def _areset_branch_conversation(self) -> None:
+        """A connected client continues one Claude session, so the branch's own
+        client is disconnected (not a sibling's, nor the client connected outside
+        any context that branches without one share) and the branch's next call
+        connects a new client, which starts a new session."""
+        handles = self._tier3_own_handles()
+        disconnect = handles.get("disconnect_fn")
+        for name in ("disconnect_fn", "client", "connected_loop"):
+            handles.set(name, None)
+        self._tier3_detach_from_backing()
+        await super()._areset_branch_conversation()
+        if disconnect:
+            await disconnect()
 
     async def adisconnect(self) -> None:
         """Disconnect from Claude Code SDK — EVERY connection-scoped branch (each
